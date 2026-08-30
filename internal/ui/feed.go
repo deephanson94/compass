@@ -16,7 +16,18 @@ type feed struct {
 	tailer *transcript.Tailer
 	seg    *journey.Segmenter
 	trail  journey.Trail
+
+	// events is the transcript itself, kept because the Lv3 reader renders it
+	// as a document. A very long session is held to the newest feedEventCap
+	// events: the reader is a conversation, not an archive.
+	events []transcript.Event
 }
+
+// feedEventCap bounds what one session's reader can hold. Twenty thousand
+// events is far more than any session a person reads through, and the events
+// themselves are already bounded (transcript clamps result text), so the ring
+// costs tens of megabytes at worst on the one session that hits it.
+const feedEventCap = 20000
 
 // feedStore keeps one feed per session. The deck's commands run off the render
 // loop and can overlap, so the store carries its own lock.
@@ -30,11 +41,13 @@ func newFeedStore() *feedStore {
 }
 
 // poll reads whatever the session has written since the last call and returns
-// its trail. The first call replays the whole transcript — a session's journey
-// starts at its first line, not at the moment compass looked at it.
-func (fs *feedStore) poll(id, path string) journey.Trail {
+// its trail and the events behind it — the graph for the right-hand column, the
+// document for the Lv3 reader. The first call replays the whole transcript — a
+// session's journey starts at its first line, not at the moment compass looked
+// at it.
+func (fs *feedStore) poll(id, path string) (journey.Trail, []transcript.Event) {
 	if fs == nil || id == "" || path == "" {
-		return journey.Trail{}
+		return journey.Trail{}, nil
 	}
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -47,13 +60,26 @@ func (fs *feedStore) poll(id, path string) journey.Trail {
 
 	events, err := f.tailer.Poll()
 	if err != nil || len(events) == 0 {
-		return f.trail // a file we cannot read keeps the trail we already drew
+		// A file we cannot read keeps the trail we already drew.
+		return f.trail, f.events
 	}
 	for _, ev := range events {
 		f.seg.Observe(ev)
 	}
 	f.trail = f.seg.Trail()
-	return f.trail
+	f.remember(events)
+	return f.trail, f.events
+}
+
+// remember appends the new events, dropping the oldest once the ring is full.
+// The trim copies into a fresh slice rather than sliding the old one: a
+// previous caller may still be rendering the events it was handed, and the
+// deck's commands run off the render loop.
+func (f *feed) remember(events []transcript.Event) {
+	f.events = append(f.events, events...)
+	if over := len(f.events) - feedEventCap; over > 0 {
+		f.events = append([]transcript.Event(nil), f.events[over:]...)
+	}
 }
 
 // retain drops the feeds of sessions that are no longer in the fleet.

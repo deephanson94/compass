@@ -19,6 +19,12 @@ const (
 	minDeckCols  = 62  // below this the second column is dropped, fleet only
 	deckWideCols = 110 // at or above this the mirror opens in the middle
 
+	// readerMinCols is the design floor for the Lv3 reader: a conversation
+	// narrower than this is unreadable, so when the fixed columns would push it
+	// below the floor the trail steps aside and the reader takes the room
+	// (M3 contract: fleet | reader flex (min 46) | trail 38).
+	readerMinCols = 46
+
 	// mirrorMinCols is the design floor for the mirror: a pane narrower than
 	// this shows nothing a person can read. Fleet + trail + two gutters cost 74
 	// columns, so the floor is met from 116 columns up; between deckWideCols and
@@ -74,6 +80,15 @@ var (
 	dimStyle   = lipgloss.NewStyle().Foreground(colDim)
 	ruleStyle  = lipgloss.NewStyle().Foreground(colDim).Faint(true)
 	titleStyle = lipgloss.NewStyle().Bold(true)
+
+	// The human's own turns lead the reader's document: bold, never coloured —
+	// a prompt is the one thing on screen the user wrote.
+	promptStyle = lipgloss.NewStyle().Bold(true)
+
+	// Inversion is the panel's only selection mark: it carries the cursor and
+	// the search hit without spending a colour, and it survives NO_COLOR.
+	matchStyle  = lipgloss.NewStyle().Reverse(true)
+	cursorStyle = lipgloss.NewStyle().Reverse(true)
 
 	workingStyle  = lipgloss.NewStyle().Foreground(colWorking)
 	needsYouStyle = lipgloss.NewStyle().Foreground(colNeedsYou)

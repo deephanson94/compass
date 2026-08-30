@@ -1,0 +1,233 @@
+package ui
+
+import (
+	"strconv"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/deephanson94/compass/internal/journey"
+)
+
+// doc is the flattened reader document, cached between keypresses — scrolling,
+// folding and searching all walk it, and a long transcript should be flattened
+// once per change, not once per key.
+func (m *Model) doc(width int) []readerLine {
+	c := &m.docCache
+	if c.valid && c.n == len(m.events) && c.w == width && c.ver == m.docVer {
+		return c.lines
+	}
+	lines := readerDoc(m.events, width, m.unfolded)
+	m.docCache = readerCache{lines: lines, valid: true, n: len(m.events), w: width, ver: m.docVer}
+	return lines
+}
+
+// readerWidth is the column the reader currently owns — the same arithmetic
+// deckLines does, so Space and the anchor act on the document being drawn.
+func (m *Model) readerWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	inner := w - 2*edgePad
+	if inner < 10 {
+		inner = w
+	}
+	switch {
+	case inner < minDeckCols:
+		return inner
+	case m.width >= deckWideCols:
+		return inner - fleetWidth - trailWidth - 2*gutterWidth
+	default:
+		return inner - fleetWidth - gutterWidth
+	}
+}
+
+// readerColumn is the deck's Lv3 middle panel: whose conversation this is, the
+// search when one is live, and the document.
+func (m *Model) readerColumn(w, h int) []string {
+	rows := []string{m.readerTitle(w), ""}
+	if h > 2 {
+		frame := RenderReader(m.events, ReaderOpts{
+			Width:    w,
+			Height:   h - 2,
+			Scroll:   m.scroll,
+			Unfolded: m.unfolded,
+			Query:    m.query,
+		})
+		rows = append(rows, strings.Split(frame, "\n")...)
+	}
+	return rows
+}
+
+// readerTitle mirrors the trail's: READER · <name>, with the search state —
+// the query being typed, or the one in force — on the right.
+func (m *Model) readerTitle(w int) string {
+	name := "—"
+	if s, ok := m.selected(); ok {
+		name = sessionName(s.Info)
+	}
+	right := ""
+	switch {
+	case m.searching:
+		right = "/" + m.draft + "▏"
+	case m.query != "":
+		right = "/" + m.query
+	}
+	left := dimStyle.Render(clip("READER · "+name, w-lipgloss.Width(right)-1))
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + dimStyle.Render(right)
+}
+
+// enterReader is Enter on a Lv2 row: the reader opens scrolled to that moment.
+func (m *Model) enterReader() {
+	rows := TrailRows(m.trail, m.level)
+	m.level = levelReader
+	if m.cursor < 0 || m.cursor >= len(rows) {
+		return
+	}
+	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
+	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
+		m.scroll = line
+	}
+}
+
+// scrollBy moves the reader, clamped to the document.
+func (m *Model) scrollBy(delta int) {
+	doc := m.doc(m.readerWidth())
+	m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
+}
+
+// readerHeight is the rows the document gets: the deck body minus the
+// column's title and its line of air.
+func (m *Model) readerHeight() int {
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	body := h - 5 - 2
+	if body < 1 {
+		body = 1
+	}
+	return body
+}
+
+// toggleFold is Space: the first folded result on screen opens (or the first
+// open one closes) — the document's own order decides, top of the screen down.
+func (m *Model) toggleFold() {
+	width := m.readerWidth()
+	doc := m.doc(width)
+	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	for i := top; i < len(doc) && i < top+m.readerHeight(); i++ {
+		if !doc[i].foldable() {
+			continue
+		}
+		m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
+		m.docVer++
+		m.docCache.valid = false
+		return
+	}
+	m.note = "nothing to unfold on screen"
+}
+
+// jumpMatch is n/N: the next (or previous) document row the query appears in.
+func (m *Model) jumpMatch(dir int) {
+	if m.query == "" {
+		m.note = "no search — / starts one"
+		return
+	}
+	doc := m.doc(m.readerWidth())
+	matches := readerMatches(doc, m.query)
+	if len(matches) == 0 {
+		m.note = "no matches"
+		return
+	}
+	if dir > 0 {
+		for _, line := range matches {
+			if line > m.scroll {
+				m.scroll = clampScroll(line, len(doc), m.readerHeight())
+				return
+			}
+		}
+		m.scroll = clampScroll(matches[0], len(doc), m.readerHeight()) // wrap
+		return
+	}
+	for i := len(matches) - 1; i >= 0; i-- {
+		if matches[i] < m.scroll {
+			m.scroll = clampScroll(matches[i], len(doc), m.readerHeight())
+			return
+		}
+	}
+	m.scroll = clampScroll(matches[len(matches)-1], len(doc), m.readerHeight())
+}
+
+// searchKey handles a keypress while the query is being typed.
+func (m *Model) searchKey(msg tea.KeyMsg) {
+	switch msg.String() {
+	case "enter":
+		m.query = strings.TrimSpace(m.draft)
+		m.draft = ""
+		m.searching = false
+		if m.query != "" {
+			m.scroll = 0
+			m.jumpMatch(1)
+		}
+	case "esc":
+		m.draft = ""
+		m.searching = false
+	case "backspace":
+		if r := []rune(m.draft); len(r) > 0 {
+			m.draft = string(r[:len(r)-1])
+		}
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.draft += string(msg.Runes)
+		}
+	}
+}
+
+// requestNarration asks the narrator to name the trail's closed legs, at most
+// once per shape of the trail — the narrator dedupes harder still.
+func (m *Model) requestNarration() {
+	if m.narrator == nil || m.selectedID == "" {
+		return
+	}
+	shape := trailShape(m.selectedID, m.trail)
+	if shape == m.narrated {
+		m.refreshLabels()
+		return
+	}
+	m.narrated = shape
+	prompt := ""
+	if n := len(m.trail.Prompts); n > 0 {
+		prompt = m.trail.Prompts[n-1].Text
+	}
+	m.narrator.Request(m.selectedID, m.trail, prompt)
+	m.refreshLabels()
+}
+
+// refreshLabels pulls whatever narration has landed for the selected trail.
+func (m *Model) refreshLabels() {
+	if m.narrator == nil || m.selectedID == "" {
+		return
+	}
+	m.labels = m.narrator.Labels(m.selectedID, m.trail)
+}
+
+// trailShape fingerprints a trail cheaply: a new closed leg, or a session
+// switch, is a new shape worth narrating.
+func trailShape(sessionID string, tr journey.Trail) string {
+	closed := len(tr.Legs)
+	if closed > 0 && tr.Legs[closed-1].Current {
+		closed--
+	}
+	last := ""
+	if closed > 0 {
+		last = tr.Legs[closed-1].Start.String()
+	}
+	return sessionID + "|" + strconv.Itoa(closed) + "|" + last
+}

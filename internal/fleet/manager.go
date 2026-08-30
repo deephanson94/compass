@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,10 @@ type Manager struct {
 	mu       sync.Mutex
 	root     string
 	sessions map[string]*entry
+
+	// excluded are cleaned absolute CWDs whose sessions the fleet refuses to
+	// show — compass's own narration dir, so it never watches itself narrate.
+	excluded map[string]bool
 }
 
 // NewManager returns a Manager watching the given Claude home directory.
@@ -34,6 +39,44 @@ func NewManager(root string) *Manager {
 
 // Root is the Claude home directory this Manager watches.
 func (m *Manager) Root() string { return m.root }
+
+// ExcludeCWD hides sessions whose CWD is path (the narrator's Dir): compass
+// must never watch itself narrate. Paths are compared cleaned and absolute, so
+// the caller can pass whatever form it has. An already-tracked session at that
+// path drops out on the next Refresh.
+func (m *Manager) ExcludeCWD(path string) {
+	path = normalizeDir(path)
+	if path == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.excluded == nil {
+		m.excluded = make(map[string]bool)
+	}
+	m.excluded[path] = true
+}
+
+// isExcluded reports whether a session's CWD is on the exclusion list. Caller
+// holds the mutex.
+func (m *Manager) isExcluded(cwd string) bool {
+	if len(m.excluded) == 0 || cwd == "" {
+		return false
+	}
+	return m.excluded[normalizeDir(cwd)]
+}
+
+// normalizeDir puts a directory in the one form the comparison uses: cleaned
+// and absolute where the filesystem can say so, cleaned where it cannot.
+func normalizeDir(path string) string {
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
+}
 
 // Refresh re-discovers sessions, polls each tailer, feeds the machines and
 // returns the fleet in display order: needs-you (longest waiting first), stuck
@@ -51,6 +94,9 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	live := make(map[string]bool, len(infos))
 	out := make([]Session, 0, len(infos))
 	for _, info := range infos {
+		if m.isExcluded(info.CWD) {
+			continue // never tracked, so the next sweep also forgets it
+		}
 		live[info.ID] = true
 		e := m.sessions[info.ID]
 		if e == nil || e.tailer.Path() != info.TranscriptPath {
@@ -70,6 +116,13 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 				e.machine.Observe(ev)
 				e.absorb(ev)
 			}
+		}
+
+		// Discovery reads the head of the file; the events may name a different
+		// cwd, and an excluded one only has to be seen once to disqualify.
+		if m.isExcluded(e.info.CWD) {
+			delete(live, info.ID)
+			continue
 		}
 
 		out = append(out, Session{Info: e.info, Snap: e.machine.Evaluate(now)})

@@ -50,7 +50,7 @@ func fixtureLv2Trail(base time.Time) journey.Trail {
 func TestT43TrailLv2Golden(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderTrail(fixtureLv2Trail(fixtureBase), nil, fixtureBase.Add(40*time.Minute), 38, 24, 2)
+	got := RenderTrail(fixtureLv2Trail(fixtureBase), TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 2, Cursor: -1})
 	compareGolden(t, "trail-lv2-38x24.txt", got)
 
 	if *update {
@@ -71,7 +71,7 @@ func TestT43TrailLv2Golden(t *testing.T) {
 	}
 
 	// The same journey at Lv1 is the M1 graph: no waypoint carries into it.
-	lv1 := RenderTrail(fixtureLv2Trail(fixtureBase), nil, fixtureBase.Add(40*time.Minute), 38, 24, 1)
+	lv1 := RenderTrail(fixtureLv2Trail(fixtureBase), TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 1, Cursor: -1})
 	for _, gone := range []string{"18 passed", "bug1", "touched", "payments never"} {
 		if strings.Contains(lv1, gone) {
 			t.Errorf("Lv1 frame leaked the Lv2 detail %q", gone)
@@ -87,7 +87,7 @@ func TestT43TrailLv2HeightBudget(t *testing.T) {
 	// Give HEAD detail of its own, so there is something to protect.
 	tr.Legs[3].Files = []string{"tokens.py", "middleware.py"}
 
-	full := strings.Split(RenderTrail(tr, nil, fixtureBase.Add(40*time.Minute), 38, 24, 2), "\n")
+	full := strings.Split(RenderTrail(tr, TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 2, Cursor: -1}), "\n")
 	rows := 0
 	for _, l := range full {
 		if strings.TrimSpace(l) != "" {
@@ -96,7 +96,7 @@ func TestT43TrailLv2HeightBudget(t *testing.T) {
 	}
 
 	for h := rows; h >= 4; h-- {
-		frame := RenderTrail(tr, nil, fixtureBase.Add(40*time.Minute), 38, h, 2)
+		frame := RenderTrail(tr, TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: h, Level: 2, Cursor: -1})
 		lines := strings.Split(frame, "\n")
 		if len(lines) != h {
 			t.Fatalf("height %d: frame is %d lines", h, len(lines))
@@ -133,7 +133,7 @@ func TestT44TrailGhostsGolden(t *testing.T) {
 		{Text: "update the changelog", Status: todo.Pending},
 	}
 
-	got := RenderTrail(fixtureTrail(fixtureBase), items, fixtureBase.Add(40*time.Minute), 38, 20, 1)
+	got := RenderTrail(fixtureTrail(fixtureBase), TrailOpts{Todos: items, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1})
 	compareGolden(t, "trail-ghosts-38x20.txt", got)
 
 	if *update {
@@ -156,8 +156,8 @@ func TestT44TrailGhostsGolden(t *testing.T) {
 
 	// No pending work, no ghosts: the frame is exactly the M1 trail.
 	done := []todo.Item{{Text: "read middleware.py", Status: todo.Completed}}
-	plain := RenderTrail(fixtureTrail(fixtureBase), done, fixtureBase.Add(40*time.Minute), 38, 20, 1)
-	if want := RenderTrail(fixtureTrail(fixtureBase), nil, fixtureBase.Add(40*time.Minute), 38, 20, 1); plain != want {
+	plain := RenderTrail(fixtureTrail(fixtureBase), TrailOpts{Todos: done, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1})
+	if want := RenderTrail(fixtureTrail(fixtureBase), TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1}); plain != want {
 		t.Errorf("a plan with nothing pending changed the frame\n--- got ---\n%s\n--- want ---\n%s", plain, want)
 	}
 }
@@ -178,7 +178,7 @@ func TestT44TrailGhostsMoreGolden(t *testing.T) {
 		items = append(items, todo.Item{Text: text, Status: todo.Pending})
 	}
 
-	got := RenderTrail(fixtureTrail(fixtureBase), items, fixtureBase.Add(40*time.Minute), 38, 20, 1)
+	got := RenderTrail(fixtureTrail(fixtureBase), TrailOpts{Todos: items, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1})
 	compareGolden(t, "trail-ghosts-more-38x20.txt", got)
 
 	if *update {
@@ -207,7 +207,7 @@ func TestTrailGhostsYieldToHead(t *testing.T) {
 		items = append(items, todo.Item{Text: text, Status: todo.Pending})
 	}
 	for h := 12; h >= 2; h-- {
-		frame := RenderTrail(fixtureTrail(fixtureBase), items, fixtureBase.Add(40*time.Minute), 38, h, 1)
+		frame := RenderTrail(fixtureTrail(fixtureBase), TrailOpts{Todos: items, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: h, Level: 1, Cursor: -1})
 		lines := strings.Split(frame, "\n")
 		ghosts := strings.Count(frame, glyphGhost)
 		if ghosts*2 > h {

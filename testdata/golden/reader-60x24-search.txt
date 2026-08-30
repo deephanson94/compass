@@ -1,0 +1,12 @@
+❯ fix the 401 bug in the auth middleware
+
+The refresh path looks wrong. Let me run the auth suite
+first and see which tests object.
+
+⏺ Bash(pytest tests/auth -x)
+  ⎿ 6 lines · space unfolds
+⏺ Read(src/auth/tokens.py)
+  ⎿ ✗ EACCES: permission denied reading src/auth/tokens.py
+
+The expiry check compares a UTC stamp against local time.
+Fixing tokens.py.

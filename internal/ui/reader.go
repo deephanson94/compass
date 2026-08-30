@@ -1,0 +1,506 @@
+package ui
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/deephanson94/compass/internal/transcript"
+)
+
+// The reader's vocabulary (SPEC §2.3). It is the CLI's own: a human turn is a
+// chevron, a tool call a filled dot, what came back hangs under it on an elbow.
+const (
+	glyphSaid   = "❯" // the human's turn
+	glyphCall   = "⏺" // a tool call
+	glyphResult = "⎿" // what it returned, folded
+	glyphErrRes = "✗" // …and it failed
+)
+
+const (
+	resultIndent  = "  "   // the gutter a result hangs in, under its call
+	bodyIndent    = "    " // an unfolded result's own lines, under the elbow
+	unfoldCap     = 20     // how many result lines an unfold is allowed to spend
+	readerMinBody = 24     // below this the document says nothing worth reading
+)
+
+// ReaderOpts is everything the reader needs beyond the events themselves.
+// Scroll is a line index into the flattened document, not an event index: the
+// document is what the eye moves through.
+type ReaderOpts struct {
+	Width, Height int
+	Scroll        int          // top line index into the flattened document
+	Unfolded      map[int]bool // event indices whose tool output is unfolded
+	Query         string       // current search ("" = none); matches highlighted
+}
+
+// RenderReader renders the Lv3 conversation panel: the session's events as one
+// document, oldest first — chronological, like the CLI itself — cropped to a
+// width×height block. Pure: the same events and options always draw the same
+// frame.
+func RenderReader(events []transcript.Event, o ReaderOpts) string {
+	h := o.Height
+	if h < 1 {
+		return ""
+	}
+	if o.Width < readerMinBody {
+		return strings.Join(fit(nil, h), "\n")
+	}
+
+	doc := readerDoc(events, o.Width, o.Unfolded)
+	if len(doc) == 0 {
+		doc = readerEmptyDoc(o.Width)
+	}
+	top := clampScroll(o.Scroll, len(doc), h)
+
+	rows := make([]string, 0, h)
+	for i := top; i < len(doc) && len(rows) < h; i++ {
+		rows = append(rows, doc[i].render(o.Query))
+	}
+	return strings.Join(fit(rows, h), "\n")
+}
+
+// ReaderAnchor maps a moment on the trail to a line in the reader: the first
+// line of the first event at or after at. It is the other half of Enter at Lv2
+// (SPEC §3) — a waypoint names a time, and the reader opens there. -1 means the
+// document has nothing at or after that moment.
+func ReaderAnchor(events []transcript.Event, o ReaderOpts, at time.Time) int {
+	doc := readerDoc(events, o.Width, o.Unfolded)
+	for i, l := range doc {
+		if l.event < 0 || l.at.IsZero() {
+			continue
+		}
+		if !l.at.Before(at) {
+			return i
+		}
+	}
+	return -1
+}
+
+// clampScroll holds a scroll offset inside the document: never past the last
+// screenful, never above the first line.
+func clampScroll(scroll, lines, height int) int {
+	maxTop := lines - height
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	if scroll > maxTop {
+		scroll = maxTop
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	return scroll
+}
+
+// readerKind is what a document row is, which decides its one accent and
+// whether Space can act on it.
+type readerKind int
+
+const (
+	readerBlank   readerKind = iota
+	readerSaid               // a human turn
+	readerText               // the model's own words
+	readerCall               // a tool call, one line
+	readerFold               // a folded result — Space's target
+	readerFoldErr            // …one that failed
+	readerBody               // an unfolded result's lines
+)
+
+// readerLine is one row of the flattened document: plain text, the accent it
+// wears, and the event it came from so folding and anchoring can find it.
+type readerLine struct {
+	text  string
+	kind  readerKind
+	event int       // index into the events slice; -1 for filler
+	at    time.Time // the event's timestamp, for ReaderAnchor
+}
+
+// foldable reports whether Space can act on this row.
+func (l readerLine) foldable() bool {
+	return l.kind == readerFold || l.kind == readerFoldErr
+}
+
+// render applies the row's accent, inverting whatever the search matched.
+func (l readerLine) render(query string) string {
+	return highlight(l.text, query, readerStyle(l.kind))
+}
+
+// readerStyle is the one accent a row is allowed to carry. Errors are the only
+// warm thing the reader may draw — the same rule the fleet lives by (SPEC §4).
+func readerStyle(k readerKind) lipgloss.Style {
+	switch k {
+	case readerSaid:
+		return promptStyle
+	case readerText:
+		return textStyle
+	case readerCall:
+		return textStyle
+	case readerFoldErr:
+		return stuckStyle
+	default:
+		return dimStyle
+	}
+}
+
+// docBuilder assembles the document, keeping the air between blocks honest:
+// one blank line between turns, none between a call and what it returned.
+type docBuilder struct {
+	lines []readerLine
+	width int
+}
+
+func (d *docBuilder) push(text string, kind readerKind, event int, at time.Time) {
+	d.lines = append(d.lines, readerLine{text: text, kind: kind, event: event, at: at})
+}
+
+// gap opens one line of air, never two, never at the top.
+func (d *docBuilder) gap() {
+	if n := len(d.lines); n > 0 && d.lines[n-1].kind != readerBlank {
+		d.lines = append(d.lines, readerLine{kind: readerBlank, event: -1})
+	}
+}
+
+// last is the kind of the row the builder is standing on.
+func (d *docBuilder) last() readerKind {
+	if n := len(d.lines); n > 0 {
+		return d.lines[n-1].kind
+	}
+	return readerBlank
+}
+
+// readerDoc flattens the events into rows. Sidechains are skipped: a subagent's
+// own conversation is the trail's branch lane, not this document's business.
+func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []readerLine {
+	d := &docBuilder{width: width}
+	for i, ev := range events {
+		if ev.IsSidechain {
+			continue
+		}
+		switch ev.Type {
+		case transcript.EventUser:
+			if text := strings.TrimSpace(ev.Text); text != "" {
+				d.said(i, ev.Timestamp, text)
+			}
+			for _, res := range ev.ToolResults {
+				d.result(i, ev.Timestamp, res, unfolded[i])
+			}
+		case transcript.EventAssistant:
+			if text := strings.TrimSpace(ev.Text); text != "" {
+				d.text(i, ev.Timestamp, text)
+			}
+			for _, use := range ev.ToolUses {
+				d.call(i, ev.Timestamp, use)
+			}
+		}
+	}
+	return d.lines
+}
+
+// said draws a human turn: the chevron leads it, the rest hangs under it.
+func (d *docBuilder) said(event int, at time.Time, text string) {
+	d.gap()
+	for _, row := range wrapPrefix(text, glyphSaid+" ", "  ", d.width) {
+		d.push(row, readerSaid, event, at)
+	}
+}
+
+// text draws the model's own words, wrapped — the one place in compass that
+// wraps rather than truncates, because a document is meant to be read.
+func (d *docBuilder) text(event int, at time.Time, text string) {
+	d.gap()
+	for _, row := range wrapPrefix(text, "", "", d.width) {
+		d.push(row, readerText, event, at)
+	}
+}
+
+// call draws a tool call as one line — `⏺ Bash(pytest -x)` — the M0 Activity
+// derivation's input summary in the parentheses.
+func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse) {
+	if k := d.last(); k == readerSaid || k == readerText {
+		d.gap()
+	}
+	name := use.Name
+	if name == "" {
+		name = "tool"
+	}
+	line := glyphCall + " " + name
+	if summary := toolSummary(use); summary != "" {
+		line += "(" + summary + ")"
+	} else {
+		line += "()"
+	}
+	d.push(clip(line, d.width), readerCall, event, at)
+}
+
+// result draws what a call returned: one folded row saying how much there is,
+// or — when it failed — the first line of the failure, which is the only part
+// anybody reads first. Unfolding spends up to unfoldCap rows on the rest.
+func (d *docBuilder) result(event int, at time.Time, res transcript.ToolResult, open bool) {
+	lines := resultBody(res.Text)
+	if len(lines) == 0 {
+		d.push(resultIndent+glyphResult+" "+clip("no output", d.width-len(resultIndent)-2), readerBody, event, at)
+		return
+	}
+
+	kind, head := readerFold, fmt.Sprintf("%s · space %s", plural(len(lines), "line"), foldWord(open))
+	if res.IsError {
+		kind, head = readerFoldErr, glyphErrRes+" "+lines[0]
+	}
+	d.push(resultIndent+glyphResult+" "+clip(head, d.width-len(resultIndent)-2), kind, event, at)
+	if !open {
+		return
+	}
+	for i, line := range lines {
+		if i == unfoldCap {
+			d.push(bodyIndent+clip("… "+plural(len(lines)-unfoldCap, "more line"), d.width-len(bodyIndent)), readerBody, event, at)
+			break
+		}
+		d.push(bodyIndent+clip(line, d.width-len(bodyIndent)), readerBody, event, at)
+	}
+}
+
+// resultBody is a tool result's text as rows: tabs opened out, trailing blank
+// lines dropped — a captured stdout ends in newlines nobody needs to scroll.
+func resultBody(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(strings.ReplaceAll(l, "\t", "    "), " ")
+	}
+	return lines
+}
+
+func foldWord(open bool) string {
+	if open {
+		return "folds"
+	}
+	return "unfolds"
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// readerEmptyDoc is the designed empty state: never a blank panel (SPEC §4).
+func readerEmptyDoc(width int) []readerLine {
+	return []readerLine{
+		{text: clip(glyphSaid+" nothing to read yet", width), kind: readerBody, event: -1},
+		{kind: readerBlank, event: -1},
+		{text: clip("the conversation appears here as it happens", width), kind: readerBody, event: -1},
+	}
+}
+
+// toolSummary is what a call is about, in one phrase: the same field the M0
+// Activity derivation reads (state.activityFor), rendered for the reader's
+// `Name(summary)` one-liner rather than for the fleet's activity column.
+func toolSummary(use transcript.ToolUse) string {
+	switch use.Name {
+	case "Bash":
+		return firstLine(inputField(use.Input, "command"))
+	case "Read", "Edit", "Write", "NotebookEdit":
+		return inputField(use.Input, "file_path")
+	case "Grep", "Glob":
+		if p := inputField(use.Input, "pattern"); p != "" {
+			return p
+		}
+		return inputField(use.Input, "path")
+	case "Task", "Agent":
+		return inputField(use.Input, "description")
+	case "WebFetch", "WebSearch":
+		if u := inputField(use.Input, "url"); u != "" {
+			return u
+		}
+		return inputField(use.Input, "query")
+	}
+	// An unknown tool still has something to say: take the first field that
+	// reads like a subject rather than printing raw JSON at the user.
+	for _, key := range []string{"description", "command", "file_path", "path", "pattern", "query", "prompt", "name"} {
+		if v := firstLine(inputField(use.Input, key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// inputField pulls one string field out of a raw tool input object.
+func inputField(input json.RawMessage, key string) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return ""
+	}
+	raw, ok := obj[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return s
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// wrapPrefix wraps text to width, leading the first row with first and every
+// continuation with cont. Words longer than the column are cut rather than
+// allowed to run past it.
+func wrapPrefix(text, first, cont string, width int) []string {
+	var out []string
+	prefix := first
+	room := width - len([]rune(prefix))
+	if room < 4 {
+		return []string{clip(prefix+text, width)}
+	}
+
+	for _, para := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		para = strings.TrimRight(para, " \t")
+		if strings.TrimSpace(para) == "" {
+			out = append(out, "")
+			continue
+		}
+		for _, row := range wrapLine(para, width-len([]rune(cont)), width-len([]rune(first)), len(out) == 0) {
+			out = append(out, prefix+row)
+			prefix = cont
+		}
+	}
+	if len(out) == 0 {
+		return []string{clip(first+text, width)}
+	}
+	return out
+}
+
+// wrapLine breaks one paragraph on word boundaries. The first row of the first
+// paragraph gets firstWidth (the lead glyph costs it a column or two); every
+// row after that gets width.
+func wrapLine(text string, width, firstWidth int, isFirst bool) []string {
+	room := width
+	if isFirst {
+		room = firstWidth
+	}
+	if room < 1 {
+		room = 1
+	}
+
+	var out []string
+	line := ""
+	flush := func() {
+		out = append(out, line)
+		line = ""
+		room = width
+	}
+	for _, word := range strings.Fields(text) {
+		for len([]rune(word)) > room && len([]rune(word)) > width {
+			// A word nothing can hold: cut it at the column and carry on.
+			if line != "" {
+				flush()
+				continue
+			}
+			r := []rune(word)
+			out = append(out, string(r[:room]))
+			word = string(r[room:])
+			room = width
+		}
+		switch {
+		case line == "":
+			line = word
+			room -= len([]rune(word))
+		case len([]rune(word))+1 <= room:
+			line += " " + word
+			room -= len([]rune(word)) + 1
+		default:
+			flush()
+			line = word
+			room -= len([]rune(word))
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
+}
+
+// highlight renders text in base, with every occurrence of query inverted. The
+// match is case-insensitive and rune-wise, so a query never lands mid-rune.
+func highlight(text, query string, base lipgloss.Style) string {
+	if text == "" {
+		return ""
+	}
+	q := []rune(query)
+	if len(q) == 0 {
+		return base.Render(text)
+	}
+	src := []rune(text)
+	lowerSrc, lowerQ := lower(src), lower(q)
+
+	var b strings.Builder
+	i, plain := 0, 0
+	for i+len(q) <= len(src) {
+		if !equalAt(lowerSrc, lowerQ, i) {
+			i++
+			continue
+		}
+		b.WriteString(base.Render(string(src[plain:i])))
+		b.WriteString(matchStyle.Render(string(src[i : i+len(q)])))
+		i += len(q)
+		plain = i
+	}
+	b.WriteString(base.Render(string(src[plain:])))
+	return b.String()
+}
+
+func lower(r []rune) []rune {
+	out := make([]rune, len(r))
+	for i, c := range r {
+		out[i] = unicode.ToLower(c)
+	}
+	return out
+}
+
+func equalAt(hay, needle []rune, at int) bool {
+	for i, c := range needle {
+		if hay[at+i] != c {
+			return false
+		}
+	}
+	return true
+}
+
+// readerMatches is every document row the query appears in, top-down — what
+// n and N step through.
+func readerMatches(doc []readerLine, query string) []int {
+	if strings.TrimSpace(query) == "" {
+		return nil
+	}
+	q := lower([]rune(query))
+	var out []int
+	for i, l := range doc {
+		src := lower([]rune(l.text))
+		for j := 0; j+len(q) <= len(src); j++ {
+			if equalAt(src, q, j) {
+				out = append(out, i)
+				break
+			}
+		}
+	}
+	return out
+}
