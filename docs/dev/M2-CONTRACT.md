@@ -48,13 +48,16 @@ the Agent tool_result's Text, ≤60 runes, `""` until Done.
 3. **Test parsing** on the result Text, first matching family wins:
    - *pytest*: summary counts (`N failed`, `N passed`, `N error(s)` on one
      line) → one `WaypointTestRun` `"N passed · M failed"` — zero parts
-     omitted, `"N passed"` alone when nothing failed. Lines `FAILED <path>::<name>`
+     omitted, `"N passed"` alone when nothing failed. **Errors count into the
+     failed part** (ruled at integration): a test that could not run did not
+     pass, and an error-only run must never compose a green-looking summary. Lines `FAILED <path>::<name>`
      → `WaypointTestFail` per test name (the `<name>` part), dedupe, cap 3.
    - *go test*: lines `--- FAIL: <TestName>` → `WaypointTestFail` each (cap 3,
      dedupe); `WaypointTestRun` is `"N failing"` when any, else `"ok"` when a
      line starts with `ok`.
    - *jest/vitest*: `Tests: … N failed … M passed …` → `"M passed · N failed"`;
-     failing names from `✕ <name>` or `× <name>` lines, cap 3.
+     failing names from `✕ <name>` or `× <name>` lines with any trailing
+     duration parenthetical (`(12 ms)`) stripped, cap 3.
    - *cargo test*: `test result: ok|FAILED. N passed; M failed` → same compose;
      failing names from `test <name> ... FAILED`, cap 3.
    - Nothing matches: `IsError` → `WaypointTestRun` `"failed"`; clean → no

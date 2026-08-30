@@ -200,8 +200,10 @@ var (
 	// "Tests  2 failed | 18 passed (20)").
 	jestTests = regexp.MustCompile(`^\s*Tests:?\s+\d`)
 	jestCount = regexp.MustCompile(`(\d+) (passed|failed)`)
-	// "✕ renders the header (3 ms)" — vitest uses × instead.
-	jestFail = regexp.MustCompile(`^\s*[✕×]\s+(\S.*)$`)
+	// "✕ renders the header (3 ms)" — vitest uses × instead; the trailing
+	// duration is noise, not part of the test's name.
+	jestFail     = regexp.MustCompile(`^\s*[✕×]\s+(\S.*)$`)
+	jestDuration = regexp.MustCompile(`\s*\(\d+(?:\.\d+)?\s*m?s\)$`)
 )
 
 // parseJest reads jest's and vitest's shared summary line and their failing
@@ -218,7 +220,7 @@ func parseJest(lines []string, at time.Time) ([]Waypoint, bool) {
 		}
 		if m := jestFail.FindStringSubmatch(line); m != nil {
 			matched = true
-			fails = append(fails, strings.TrimSpace(m[1]))
+			fails = append(fails, jestDuration.ReplaceAllString(strings.TrimSpace(m[1]), ""))
 		}
 	}
 	if !matched {
