@@ -20,6 +20,7 @@ const (
 	glyphPrompt = "◉" // the human turn the journey started from
 	glyphLeg    = "◆" // a closed leg
 	glyphHead   = "●" // HEAD — the leg in progress
+	glyphBreath = "◐" // HEAD on the breath's off-beat (SPEC §4's one animation)
 	glyphBranch = "◈" // a subagent lane
 	glyphGhost  = "◌" // planned work: a todo that has not happened yet
 	railStroke  = "│" // rail between two nodes
@@ -60,8 +61,9 @@ type TrailOpts struct {
 
 	Now           time.Time
 	Width, Height int
-	Level         int // 1, 2 or 3 (the trail renders identically at 2 and 3)
-	Cursor        int // index into TrailRows at Lv2+; -1 = no cursor
+	Level         int  // 1, 2 or 3 (the trail renders identically at 2 and 3)
+	Cursor        int  // index into TrailRows at Lv2+; -1 = no cursor
+	Pulse         bool // the breath's off-beat: HEAD draws ◐ instead of ●
 }
 
 // RenderTrail draws the trail into a width×height block: newest at the top like
@@ -273,7 +275,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		if n.leg >= 0 {
 			leg := tr.Legs[n.leg]
 			label, narrated := legLabel(leg, o)
-			b.selNode(b.pick(), legRow(leg, label, narrated, o.Now, o.Width))
+			b.selNode(b.pick(), legRow(leg, label, narrated, o.Now, o.Width, o.Pulse))
 			if o.Level >= levelWaypoints {
 				b.details(legDetails(leg, o.Width, b), leg.Current)
 			}
@@ -395,11 +397,14 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 // points at itself — `← 3m` — because it is the only line that is still moving.
 // A narrated leg spends the verb column on its own words: the prose already
 // says what the class was for, and the glyph keeps the class's tint.
-func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int) string {
+func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int, pulse bool) string {
 	glyph := glyphLeg
 	age := relAge(now, l.Start)
 	if l.Current {
 		glyph = glyphHead
+		if pulse {
+			glyph = glyphBreath
+		}
 		age = "← " + age
 	}
 	head := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
@@ -573,6 +578,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Height:    h,
 		Level:     m.level,
 		Cursor:    m.cursor,
+		Pulse:     m.pulse,
 	}
 }
 

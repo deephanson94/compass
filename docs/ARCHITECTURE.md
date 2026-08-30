@@ -245,11 +245,11 @@ a plain JSONL file; config at `~/.config/compass/config.toml` (zero-config defau
 
 | | Deliverable | Proves |
 |--|-------------|--------|
-| **M0** | tailer + state machine + fleet strip (no graph, no AI) | state detection is trustworthy — the amber dot is never wrong |
-| **M1** | segmenter + Lv1 trail graph + pane discovery + reveal/`g` + live mirror | the journey renders at a glance and the real CLI is visible without leaving compass |
-| **M2** | Lv2 waypoints (test parser, fix clusters, subagent branches) + ghost todos | Tab-zoom feels like focus, not navigation |
-| **M3** | narrator (haiku labels) + Lv3 reader + ask-the-trail | the panel becomes conversational |
-| **M4** | polish: breathing HEAD, themes, bell policy, config, docs, demo GIF | ship it |
+| ✅ **M0** | tailer + state machine + fleet strip (no graph, no AI) | state detection is trustworthy — the amber dot is never wrong |
+| ✅ **M1** | segmenter + Lv1 trail graph + pane discovery + reveal/`g` + live mirror | the journey renders at a glance and the real CLI is visible without leaving compass |
+| ✅ **M2** | Lv2 waypoints (test parser, fix clusters, subagent branches) + ghost todos | Tab-zoom feels like focus, not navigation |
+| ✅ **M3** | narrator (haiku labels) + Lv3 reader + ask-the-trail | the panel becomes conversational |
+| ✅ **M4** | polish: breathing HEAD, themes, bell policy, config, docs, demo GIF | ship it |
 
 M0 is deliberately boring: if compass only ever shipped the fleet strip with a
 correct amber dot, it would already earn its screen columns.

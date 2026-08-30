@@ -190,9 +190,29 @@ func (s *Segmenter) Trail() Trail {
 
 // substantivePrompt reports whether the event is a human turn with something in
 // it. Tool-result-only user lines, attachments and queue bookkeeping carry no
-// direction and must not break a leg.
+// direction and must not break a leg — and neither do harness envelopes
+// (scheduled wakes, task notifications): they arrive as user turns but nobody
+// asked anything, so they mark no ◉ and close no leg.
 func substantivePrompt(ev transcript.Event) bool {
-	return ev.Type == transcript.EventUser && strings.TrimSpace(ev.Text) != ""
+	if ev.Type != transcript.EventUser {
+		return false
+	}
+	text := strings.TrimSpace(ev.Text)
+	if text == "" {
+		return false
+	}
+	return !envelopeTurn(text)
+}
+
+// envelopeTurn recognises the harness's automated user turns by their opening
+// tag: "<system-reminder>", "<task-notification>", "<wake …>".
+func envelopeTurn(text string) bool {
+	for _, tag := range []string{"<system-reminder", "<task-notification", "<wake"} {
+		if strings.HasPrefix(text, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // observeResult merges a returning branch, records failure against the open
