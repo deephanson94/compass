@@ -14,7 +14,7 @@ There are two ways to build "a panel next to your agents":
   live-appended record of everything it does. Read that. Let tmux keep owning
   terminals — the user already lives there.
 
-Compass is a **read-only observer + tmux choreographer**. Consequences:
+Compass is a **read-only observer and pure tmux consumer**. Consequences:
 
 - Works with sessions started *anywhere* (another terminal, `claude` in a bare shell,
   even Claude Code on the web synced later) — if it wrote a transcript, it has a trail.
@@ -56,15 +56,15 @@ ghost solidifying into the trail.
 ### 2.4 Screen tail — the needs-you tripwire (herdr's one trick, borrowed cheaply)
 
 Permission prompts and interactive questions are UI-level; they may stall the
-transcript without explaining themselves in it. For panes compass launched (so it
-knows pane-id ↔ session-id), poll `tmux capture-pane -p -t <pane> | tail -n 12` at
-~1Hz *only when* a session's transcript has gone quiet mid-turn, and match the
-prompt patterns (`Do you want to…`, `❯ 1. Yes`, `Esc to interrupt`, spinner glyphs).
-No PTY ownership, ~zero cost, and it's the difference between "amber within a
-second" and "amber after a timeout guess". Transcript remains the source of truth
-for everything else; capture-pane is a tripwire, not a parser.
+transcript without explaining themselves in it. For sessions compass has mapped to a
+tmux pane (§4.1), poll `tmux capture-pane -p -t <pane> | tail -n 12` at ~1Hz *only
+when* that session's transcript has gone quiet mid-turn, and match the prompt
+patterns (`Do you want to…`, `❯ 1. Yes`, `Esc to interrupt`, spinner glyphs). No PTY
+ownership, ~zero cost, and it's the difference between "amber within a second" and
+"amber after a timeout guess". Transcript remains the source of truth for everything
+else; capture-pane is a tripwire, not a parser.
 
-Fallback ladder for sessions compass didn't launch: transcript-quiet heuristics
+Fallback ladder for sessions with no mappable pane: transcript-quiet heuristics
 (last event shape + mtime age) → optional `Notification`/`Stop` hooks the user can
 install later for perfect signals. Hooks are an enhancement, never a requirement.
 
@@ -125,8 +125,10 @@ Bedrock — so compass needs no keys, no config, and no billing surface of its o
 - Batched: one call summarizes all unlabeled legs/waypoints of a session (send the
   leg's condensed event digest, get back short labels as JSON).
 - Cached by leg-boundary uuid — a leg is narrated once, ever.
-- Budget-capped (default: ~1 call/session/2min, config; off switch for Bedrock cost
-  hawks). Panel shows heuristic labels until narration lands, then upgrades in place.
+- **On by default, no hard cap** (SPEC §7): Haiku is cheap, and batching + caching
+  already bound the call volume to roughly one call per leg boundary. `narrator =
+  "off"` in config for anyone who disagrees. Panel shows heuristic labels until
+  narration lands, then upgrades in place.
 
 ### 3.3 State machine (per session)
 
@@ -144,23 +146,53 @@ Bedrock — so compass needs no keys, no config, and no billing surface of its o
 `turn completed` = final assistant text with no pending tool_use (plus `Stop` hook
 when installed). A completed turn *ending in a question* also lands in NEEDS-YOU.
 
-## 4. tmux choreography
+## 4. tmux — consumed, never managed
 
-Compass never emulates a terminal; it conducts tmux:
+Design ruling (SPEC §7): compass creates no tmux sessions, windows, or panes for its
+own layout. It runs standalone in its own terminal tab (deck mode) or inside a pane
+*the user* made (sidecar mode), and talks to the tmux server only as a client:
+reads freely, writes only the two keypress-gated actions below. All tmux client
+commands work from outside tmux — they hit the server socket, so a compass tab that
+isn't "in" tmux still sees all five of your tmux sessions.
 
-- `compass` (no args): creates/attaches session `compass`, left pane = shell or
-  `claude`, right pane (42 cols) = `compass panel`. Existing Claude sessions found
-  on disk appear in the fleet immediately.
-- Jump key `1`–`9`: `tmux select-window`/`swap-pane` so the left pane shows that
-  session's real CLI. Sessions compass didn't launch and can't locate a pane for
-  still show trails; jumping offers `claude --resume <id>` in a new window.
-- `n`: new window, `claude` on the left, panel persists on the right.
-- Lv3: panel widens to 50% (`resize-pane`), restores on `q`.
-- **ask the trail** (`a`): new split running the real `claude` with an
-  `--append-system-prompt` historian preamble + the transcript path to read. The
-  answer engine is Claude Code itself — same auth, same UI the user already knows.
-- Users who hate magic: `compass panel` runs standalone in any pane they arrange
-  themselves; choreography features degrade gracefully to "trail-only".
+### 4.1 Pane discovery: mapping Claude sessions ↔ tmux panes
+
+Sessions are discovered from transcripts (not tmux), then *located*:
+
+1. `tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_id}
+   #{pane_pid} #{pane_current_path} #{pane_current_command}'` — every pane on the
+   server, refreshed lazily (a few seconds' staleness is fine for location labels).
+2. For each pane, walk `/proc` descendants of `pane_pid` looking for a `claude`
+   process; read its `/proc/<pid>/cwd`.
+3. Match cwd → project slug → the transcript file in that slug whose mtime says
+   "this one is live". Ambiguity (two sessions, same repo, same pane? impossible;
+   same repo, two panes) resolves by process start time vs session start.
+
+Result per session: `dev:1.0` shown in the fleet, a target for reveal and the
+capture-pane tripwire. Sessions with no pane (bare shell, other machine, exited CLI
+with `--resume` available) still get full trails — just no location line and no
+tripwire.
+
+### 4.2 The two write actions (both opt-outable: `tmux_actions = "readonly"`)
+
+- **Reveal** (`Enter`/`g`): `tmux select-window -t dev:1` + `select-pane -t %5` in
+  the session's own tmux session. compass changes *which pane is focused where you
+  already work*; it never moves, resizes, or creates anything.
+- **Ask the trail** (`a`): `tmux new-window -t dev: -n 'ask:api' claude
+  --append-system-prompt <historian preamble>` … pointing the historian at the
+  transcript path to read. The answer engine is Claude Code itself — same auth, same
+  UI. The window belongs to the user's tmux session; they kill it like any window.
+  No mappable tmux target → compass prints the exact command to copy instead.
+
+### 4.3 Outbound cues (no bells — SPEC §7)
+
+- **Tab title**: on every state change, emit `OSC 2` (`⌂ compass ▲2`) so the
+  terminal tab shows fleet health while unfocused. Works over SSH; Windows
+  Terminal renders it on the tab.
+- **`compass status`**: one-shot subcommand printing `●3 ▲1` for the user to embed
+  in their own tmux `status-right` via `#(compass status)`. Reads the same state
+  the panel does (cheap: transcript mtimes + last-line peek; no full parse).
+  compass never edits `.tmux.conf`.
 
 ## 5. Stack
 
@@ -190,7 +222,7 @@ a plain JSONL file; config at `~/.config/compass/config.toml` (zero-config defau
 | | Deliverable | Proves |
 |--|-------------|--------|
 | **M0** | tailer + state machine + fleet strip (no graph, no AI) | state detection is trustworthy — the amber dot is never wrong |
-| **M1** | segmenter + Lv1 trail graph + tmux launcher + jump keys | the journey renders and reads at a glance, offline |
+| **M1** | segmenter + Lv1 trail graph + pane discovery + reveal/`g` | the journey renders and reads at a glance, offline |
 | **M2** | Lv2 waypoints (test parser, fix clusters, subagent branches) + ghost todos | Tab-zoom feels like focus, not navigation |
 | **M3** | narrator (haiku labels) + Lv3 reader + ask-the-trail | the panel becomes conversational |
 | **M4** | polish: breathing HEAD, themes, bell policy, config, docs, demo GIF | ship it |
@@ -204,6 +236,6 @@ correct amber dot, it would already earn its screen columns.
 |------|-----------|
 | Transcript format is undocumented and shifts between Claude Code versions | version field is on every line; adapter layer with per-version quirks; fixtures recorded per CC release; fail-soft (unknown lines are skipped, trail degrades, never crashes) |
 | Permission prompts invisible in transcript | capture-pane tripwire (§2.4) + optional hooks |
-| Narrator cost on Bedrock | off-by-default budget there; heuristic labels are always complete |
+| Narrator cost surprises | batching + per-leg caching bound call volume structurally; `narrator = "off"` exists; heuristic labels are always complete |
 | Panel too narrow for Lv2 richness | Lv3 widening pattern proven in tmux; truncation rules in SPEC §4 |
 | herdr ships our roadmap | different bet (observe vs own); our moat is trail semantics from transcripts, which screen-scraping cannot reach |
