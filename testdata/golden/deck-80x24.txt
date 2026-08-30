@@ -1,16 +1,16 @@
  ⌂ compass                                                           ▲1  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────
 
- ▸1 ▲ infra     needs you        2m │ infra                                  2m
-     home-user-infra · tf/vpc       │ ▲ needs you · waiting on your answer
-                                    │
-  2 ● api       Bash: pytest…    3m │ “tighten the vpc security groups”
-     home-user-api · claude/auth-fx │
-                                    │ activity   AskUserQuestion
-  3 ○ docs      turn complete   22m │ cwd        /home/user/infra
-     home-user-docs · main          │ branch     tf/vpc
-                                    │ session    s-infra
-                                    │ transcript /x/infra.jsonl
+ FLEET                          │ TRAIL · infra                           [Lv1]
+                                │
+ ▸1 ▲ infra     needs you    2m │ ◌ nothing yet
+     (no pane) · tf/vpc         │
+                                │ scouting will appear here
+  2 ● api       Bash: pyt…   3m │
+     (no pane) · claude/auth-fx │
+                                │
+  3 ○ docs      turn comp…  22m │
+     (no pane) · main           │
 
 
 
@@ -21,4 +21,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────
- 1-9 select · j/k move · g needs-you · ? help · q quit
+ 1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit

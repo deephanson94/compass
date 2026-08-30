@@ -1,12 +1,13 @@
 package ui
 
-// helpKeys is the M0 keymap. Keys that arrive in later milestones are named
+// helpKeys is the M1 keymap. Keys that arrive in later milestones are named
 // here only when they already do something.
 var helpKeys = [][2]string{
 	{"1 – 9", "select a session"},
 	{"j / k", "move down / up (↓ ↑ too)"},
-	{"g", "grab the session waiting longest"},
-	{"tab", "zoom into the trail"},
+	{"enter", "reveal its pane in your tmux"},
+	{"g", "grab the session waiting longest, and reveal it"},
+	{"tab", "zoom into a leg (arrives in M2)"},
 	{"?", "this help"},
 	{"q", "quit"},
 }
@@ -22,7 +23,8 @@ func helpLines(w, h int) []string {
 		"",
 		rule(min(w, 40)),
 		dimStyle.Render(clip("compass observes; it never types for you.", w)),
-		dimStyle.Render(clip("glyphs: ● working  ▲ needs you  ◍ stuck  ○ idle", w)),
+		dimStyle.Render(clip("fleet:  ● working  ▲ needs you  ◍ stuck  ○ idle", w)),
+		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now  ◈ subagent", w)),
 	)
 	return lines
 }

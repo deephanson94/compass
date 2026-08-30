@@ -18,8 +18,18 @@ const (
 	ageWidth    = 4
 )
 
-// fleetLines renders the fleet column: one two-line entry per session, the
-// attention cases already sorted to the top by the Manager.
+// fleetColumn is the deck's left panel: the title, one line of air, and the
+// fleet itself.
+func (m *Model) fleetColumn(w, h int) []string {
+	rows := []string{dimStyle.Render(clip("FLEET", w)), ""}
+	if h > 2 {
+		rows = append(rows, m.fleetLines(w, h-2)...)
+	}
+	return rows
+}
+
+// fleetLines renders the fleet: one two-line entry per session, the attention
+// cases already sorted to the top by the Manager.
 func (m *Model) fleetLines(w, h int) []string {
 	if len(m.sessions) == 0 {
 		return []string{dimStyle.Render(clip("no sessions", w))}
@@ -103,7 +113,7 @@ func (m *Model) entryLines(i, w int) []string {
 			nameStyle.Render(name) + " " + textStyle.Render(mid) + " " + dimStyle.Render(age)
 	}
 
-	second := dimStyle.Render(clip(location(s.Info), w-4))
+	second := dimStyle.Render(clip(m.location(s.Info), w-4))
 	return []string{first, strings.Repeat(" ", 4) + second}
 }
 
@@ -133,20 +143,21 @@ func stateLabel(s state.State) string {
 	return s.String()
 }
 
-// location is the dim second line: project, then branch.
-func location(info fleet.SessionInfo) string {
-	slug := strings.TrimPrefix(info.ProjectSlug, "-")
-	branch := info.GitBranch
-	switch {
-	case slug != "" && branch != "":
-		return slug + " · " + branch
-	case slug != "":
-		return slug
-	case branch != "":
-		return branch
-	default:
-		return info.ID
+// location is the dim second line: where the session lives, then what it is
+// working on. "dev:1.0" is tmux session dev, window 1, pane 0 — so you always
+// know where to go (SPEC §2.5). A session with no pane says so plainly.
+func (m *Model) location(info fleet.SessionInfo) string {
+	where := "(no pane)"
+	if pane, ok := m.panes[info.ID]; ok && pane.Target != "" {
+		where = pane.Target
 	}
+	if branch := info.GitBranch; branch != "" {
+		return where + " · " + branch
+	}
+	if slug := strings.TrimPrefix(info.ProjectSlug, "-"); slug != "" {
+		return where + " · " + slug
+	}
+	return where
 }
 
 // sessionName calls a session by the last segment of its working directory —
