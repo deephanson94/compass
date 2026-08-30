@@ -43,8 +43,8 @@ creates or owns sessions, windows, or panes.
 
 1. **The CLI is sacred, and so is your tmux.** Sessions are the real `claude` binary
    in panes you own. compass never wraps, proxies, or re-renders the CLI, and never
-   creates or manages tmux sessions — it only observes, plus two keypress-gated
-   actions (reveal a pane, open an "ask" window).
+   creates or manages tmux sessions — it only observes, plus one keypress-gated
+   action (reveal: focus the pane you asked for).
 2. **Three keypresses, max.** Any session, any zoom level, any answer — reachable in
    ≤3 keypresses from anywhere. This is a hard constraint, tested in CI.
 3. **Zero config, read-only.** compass watches the JSONL transcripts Claude Code

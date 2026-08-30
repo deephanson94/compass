@@ -93,9 +93,10 @@ subjects and PR links; subagent nodes get the agent's final-report one-liner.
 - **Left half: the reader.** The full conversation rendered like `bat` renders code —
   syntax-highlighted tool calls, folded tool outputs (unfold with `Space`), search
   with `/`. Entering Lv3 from a selected Lv2 waypoint lands scrolled to *that moment*.
-- **Right half: ask the trail.** Press `a` and compass opens a real `claude` session
-  (in a new, labeled window of that session's own tmux session — again, the actual
-  CLI, in *your* tmux) pre-loaded with this session's transcript
+- **Right half: ask the trail.** Press `a` and compass suspends its TUI and runs a
+  real `claude` session in its own terminal — the way `git commit` hands you your
+  editor; quitting it drops you back into compass — pre-loaded with this session's
+  transcript
   and a system prompt making it the session's historian: *"why did you delete
   conftest.py?"*, *"what approaches did you try before this one?"*, *"summarize what
   a reviewer should look at."* It's Claude interrogating Claude's own journey.
@@ -169,11 +170,11 @@ window 1, pane 0) so you always know where to go.
 people who arrange it inside a tmux pane next to one CLI. Same engine, condensed
 layout, fleet as a strip on top.
 
-**compass never manages tmux.** It creates no sessions, windows, or panes for its own
-layout (decided — see §7). You own your multiplexer; compass reads it (`list-panes`,
-`capture-pane`) and performs exactly two opt-outable write actions, both only on an
-explicit keypress: **reveal** (focus the pane you asked to jump to) and **ask the
-trail** (open the historian in a new, clearly-labeled window — see §3).
+**compass never manages tmux.** It creates no sessions, windows, or panes — ever
+(decided — see §7). You own your multiplexer; compass reads it (`list-panes`,
+`capture-pane`) and performs exactly one opt-outable write action, only on an
+explicit keypress: **reveal** (focus the pane you asked to jump to). Ask-the-trail
+doesn't touch tmux at all — it runs in compass's own terminal (see §3).
 
 ## 3. Keymap — and the three-keypress proof
 
@@ -186,7 +187,7 @@ Global keys (work at every level):
 | `j`/`k` or `↓`/`↑` | move between nodes / waypoints / lines |
 | `Enter` | **reveal**: focus the selected session's pane in *your* tmux (`select-window` + `select-pane`), so switching to your tmux tab lands on it; on a Lv2 waypoint: open that moment in the Lv3 reader |
 | `g` | grab the oldest needs-you session: select it *and* reveal its pane, one key |
-| `a` | ask the trail: open the historian — a real `claude` — in a new, labeled window (`ask:api`) of the tmux session where that Claude lives; if it has no pane, compass shows the exact command to copy instead |
+| `a` | ask the trail: compass suspends its TUI and runs the historian — a real `claude` grounded in this session's transcript — in compass's own terminal; `exit`/`Ctrl-D` returns to compass |
 | `Space` | Lv3 reader: fold/unfold a tool output |
 | `/` | search (Lv3 reader) |
 | `?` | help overlay |
@@ -194,8 +195,8 @@ Global keys (work at every level):
 | `q` | at Lv1: quit compass; deeper: zoom out |
 
 Note what's *absent*: no "new session" key, no kill, no rename — compass doesn't
-manage sessions or tmux (§2.5). Reveal and ask are its only tmux writes, each behind
-an explicit keypress and disableable in config (`tmux_actions = "readonly"`).
+manage sessions or tmux (§2.5). Reveal is its only tmux write, behind an explicit
+keypress and disableable in config (`tmux_actions = "readonly"`).
 
 The constraint, proven:
 
@@ -249,10 +250,6 @@ fourth level. Any feature that can't fit this dies or moves to config.
 1. **Deck fleet density** — with many sessions (10+), does the two-line fleet entry
    (status + location) get cramped? Fallback: one-line entries with location revealed
    on selection. Decide with real data once M0 renders.
-2. **Historian window placement** — `a` opens `ask:name` in that session's tmux
-   session. Alternative: always open in a dedicated `compass-ask` tmux session so
-   asks never clutter work sessions. (Both are windows the *user* owns and can kill;
-   neither makes compass a layout manager.)
 
 ## 7. Decision log
 
@@ -264,3 +261,5 @@ fourth level. Any feature that can't fit this dies or moves to config.
 | 4 | Fleet scope | **Everything on the machine, one view.** compass runs standalone (own terminal tab, outside tmux) in deck mode and observes all tmux sessions + bare-shell sessions. compass is a pure *consumer* of tmux — it never creates or manages tmux sessions; the user keeps full control of their multiplexer. |
 | 5 | Bell policy | **No bells.** Visual-only: amber sort + age in panel, OSC tab-title badge (`⌂ compass ▲2`), optional `compass status` for the user's own tmux status-right. Bells over SSH (e.g. Windows Terminal → SSH → Linux) are unreliable and annoying — permanently out. |
 | 6 | Color usage | **Useful first.** Glyph shape and position carry all meaning; color reinforces. Monochrome/`NO_COLOR`/plain-ASCII fallbacks are first-class. |
+| 7 | Historian placement | **Suspend-and-exec.** `a` suspends the compass TUI and runs the historian `claude` in compass's own terminal (like `git commit` → editor); exit returns to compass. No tmux involvement — asks are one-off. Leaves *reveal* as compass's only tmux write action. |
+| 8 | Fleet density at 10+ sessions | Deferred to working mocks (M0/M1) — two-line entries vs one-line with location-on-selection. |

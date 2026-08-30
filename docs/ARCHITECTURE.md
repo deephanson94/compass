@@ -173,16 +173,18 @@ capture-pane tripwire. Sessions with no pane (bare shell, other machine, exited 
 with `--resume` available) still get full trails — just no location line and no
 tripwire.
 
-### 4.2 The two write actions (both opt-outable: `tmux_actions = "readonly"`)
+### 4.2 The one write action (opt-outable: `tmux_actions = "readonly"`)
 
 - **Reveal** (`Enter`/`g`): `tmux select-window -t dev:1` + `select-pane -t %5` in
   the session's own tmux session. compass changes *which pane is focused where you
   already work*; it never moves, resizes, or creates anything.
-- **Ask the trail** (`a`): `tmux new-window -t dev: -n 'ask:api' claude
-  --append-system-prompt <historian preamble>` … pointing the historian at the
-  transcript path to read. The answer engine is Claude Code itself — same auth, same
-  UI. The window belongs to the user's tmux session; they kill it like any window.
-  No mappable tmux target → compass prints the exact command to copy instead.
+
+**Ask the trail** (`a`) deliberately involves no tmux (SPEC §7): compass suspends
+its own TUI (bubbletea `tea.ExecProcess`) and runs `claude --append-system-prompt
+<historian preamble>` in the compass terminal, pointing the historian at the
+transcript path to read. The answer engine is Claude Code itself — same auth, same
+UI — and exiting it lands you back in compass. Works identically with or without
+tmux, locally or over SSH.
 
 ### 4.3 Outbound cues (no bells — SPEC §7)
 
