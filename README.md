@@ -15,29 +15,32 @@ your own tmux**. compass runs in its own terminal tab and watches all of them at
 once (a narrow `--sidecar` mode exists if you'd rather dock it inside a tmux pane).
 
 ```
-┌ compass ────────────────────────────────────────────────────────────────┐
-│  FLEET                        │  TRAIL · api                     [Lv1]  │
-│  1 ● api      fixing auth  3m │  ┊                                      │
-│      dev:1.0 · claude/auth-fx │  ◌ ship   open PR                       │
-│  2 ● webapp   tests 18✓ 2✗    │  ◌ test   full suite                    │
-│      dev:2.1 · main           │  ┊                                      │
-│  3 ▲ infra    needs you (2m!) │  ● fix    token refresh          ← 3m   │
-│      ops:0.0 · tf/vpc         │  │                                      │
-│  4 ○ docs     idle        22m │  ◆ test   pytest 18✓ 2✗           12m   │
-│      (no pane) · main         │  ├─◈ agent scouted payment flows        │
-│  5 ◍ etl      stuck? (8m)     │  ◆ build  refresh middleware      25m   │
-│      data:1.2 · feat/loader   │  │                                      │
-│                               │  ◆ scout  auth module map         31m   │
-│                               │  ╵                                      │
-│                               │  ◉ "fix the 401 bug"              38m   │
-│  Tab zoom · Enter reveal · a ask · g needs-you · ? help                 │
-└─────────────────────────────────────────────────────────────────────────┘
+┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
+│ FLEET                 │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ 1 ● api    fixing  3m │                                  │ ┊                              │
+│    dev:1.0 · auth-fx  │  ● I'll fix the token refresh    │ ◌ ship   open PR               │
+│ 2 ● webapp 18✓ 2✗     │    bug. Let me look at the       │ ◌ test   full suite            │
+│    dev:2.1 · main     │    middleware first…             │ ┊                              │
+│ 3 ▲ infra  needs you! │                                  │ ● fix    token refresh   ← 3m  │
+│    ops:0.0 · tf/vpc   │  ⏺ Read(src/auth/middleware.py)  │ │                              │
+│ 4 ○ docs   idle   22m │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
+│    (no pane) · main   │    ⎿ 18 passed, 2 failed…        │ ├─◈ agent scouted payments     │
+│ 5 ◍ etl    stuck? 8m  │                                  │ ◆ build  refresh middlware 25m │
+│    data:1.2 · loader  │  ✻ Churning… (23s · esc to       │ │                              │
+│                       │    interrupt)                    │ ◆ scout  auth module map  31m  │
+│                       │                                  │ ╵                              │
+│                       │  the real pane, mirrored live    │ ◉ "fix the 401 bug"       38m  │
+│ Tab zoom · Enter reveal · a ask · g needs-you · ? help                                    │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Press `3` to see infra's trail; `Enter` reveals its pane in *your* tmux (`ops:0.0`),
-already focused when you switch over. `g` grabs whichever session has been waiting
-on you longest. Nothing to manage: compass is a pure consumer of tmux — it never
-creates or owns sessions, windows, or panes.
+The middle panel is the **live mirror**: the selected session's actual tmux pane,
+streamed read-only via `capture-pane` (the same trick tmux's own `choose-tree`
+preview uses) — you watch the real CLI render, but compass owns no PTY and takes no
+input for it. Press `3` to watch infra instead; `Enter` reveals its pane in *your*
+tmux (`ops:0.0`), already focused when you switch over, for the moments you need to
+type. `g` grabs whichever session has been waiting on you longest. Nothing to
+manage: compass never creates or owns tmux sessions, windows, or panes.
 
 ## Principles
 

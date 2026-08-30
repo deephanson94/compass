@@ -140,28 +140,37 @@ escalating cues, all silent:
 
 **Deck mode (default).** `compass` runs full-screen in its own terminal tab — *outside*
 tmux. It sees every Claude session on the machine at once (transcripts aren't
-tmux-scoped), across all your tmux sessions and even bare-shell sessions. Fleet on the
-left, selected session's trail on the right; Lv3 splits the trail area.
+tmux-scoped), across all your tmux sessions and even bare-shell sessions. Three
+panels: fleet on the left, the **live mirror** of the selected session's pane in the
+middle, its trail on the right. Lv3 splits the trail area.
 
 ```
-┌ compass ────────────────────────────────────────────────────────────────┐
-│  FLEET                        │  TRAIL · api                     [Lv1]  │
-│  1 ● api      fixing auth  3m │  ┊                                      │
-│      dev:1.0 · claude/auth-fx │  ◌ ship   open PR                       │
-│  2 ● webapp   tests 18✓ 2✗    │  ◌ test   full suite                    │
-│      dev:2.1 · main           │  ┊                                      │
-│  3 ▲ infra    needs you (2m!) │  ● fix    token refresh          ← 3m   │
-│      ops:0.0 · tf/vpc         │  │                                      │
-│  4 ○ docs     idle        22m │  ◆ test   pytest 18✓ 2✗           12m   │
-│      (no pane) · main         │  ├─◈ agent scouted payment flows        │
-│  5 ◍ etl      stuck? (8m)     │  ◆ build  refresh middleware      25m   │
-│      data:1.2 · feat/loader   │  │                                      │
-│                               │  ◆ scout  auth module map         31m   │
-│                               │  ╵                                      │
-│                               │  ◉ "fix the 401 bug"              38m   │
-│  Tab zoom · Enter reveal · a ask · g needs-you · ? help                 │
-└─────────────────────────────────────────────────────────────────────────┘
+┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
+│ FLEET                 │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ 1 ● api    fixing  3m │                                  │ ┊                              │
+│    dev:1.0 · auth-fx  │  ● I'll fix the token refresh    │ ◌ ship   open PR               │
+│ 2 ● webapp 18✓ 2✗     │    bug. Let me look at the       │ ◌ test   full suite            │
+│    dev:2.1 · main     │    middleware first…             │ ┊                              │
+│ 3 ▲ infra  needs you! │                                  │ ● fix    token refresh   ← 3m  │
+│    ops:0.0 · tf/vpc   │  ⏺ Read(src/auth/middleware.py)  │ │                              │
+│ 4 ○ docs   idle   22m │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
+│    (no pane) · main   │    ⎿ 18 passed, 2 failed…        │ ├─◈ agent scouted payments     │
+│ 5 ◍ etl    stuck? 8m  │                                  │ ◆ build  refresh middlware 25m │
+│    data:1.2 · loader  │  ✻ Churning… (23s · esc to       │ │                              │
+│                       │    interrupt)                    │ ◆ scout  auth module map  31m  │
+│                       │                                  │ ╵                              │
+│                       │  the real pane, mirrored live    │ ◉ "fix the 401 bug"       38m  │
+│ Tab zoom · Enter reveal · a ask · g needs-you · ? help                                    │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**The mirror is glass, not a terminal.** It streams the selected session's tmux pane
+via `capture-pane` polling — the same mechanism tmux's own `choose-tree` preview
+uses — so you watch the *actual* CLI exactly as it renders, colors and all, while
+compass still owns no PTY and handles no input. Keystrokes always happen in the real
+pane: `Enter` reveals it in your tmux, already focused. Sessions with no pane show
+their latest transcript activity in the mirror's place. On terminals too narrow for
+three panels (<~110 cols) the mirror collapses and deck falls back to fleet + trail.
 
 Each fleet entry shows *where the session lives* (`dev:1.0` = tmux session `dev`,
 window 1, pane 0) so you always know where to go.
@@ -263,3 +272,4 @@ fourth level. Any feature that can't fit this dies or moves to config.
 | 6 | Color usage | **Useful first.** Glyph shape and position carry all meaning; color reinforces. Monochrome/`NO_COLOR`/plain-ASCII fallbacks are first-class. |
 | 7 | Historian placement | **Suspend-and-exec.** `a` suspends the compass TUI and runs the historian `claude` in compass's own terminal (like `git commit` → editor); exit returns to compass. No tmux involvement — asks are one-off. Leaves *reveal* as compass's only tmux write action. |
 | 8 | Fleet density at 10+ sessions | Deferred to working mocks (M0/M1) — two-line entries vs one-line with location-on-selection. |
+| 9 | Live CLI in deck mode | **Yes — the middle panel is a live mirror** of the selected session's pane, streamed read-only via `capture-pane` polling. Glass, not a terminal: compass renders the pane's screen but never takes input for it; interaction goes through reveal. Collapses on narrow terminals. (Possible future: an explicit interact mode forwarding keys via `send-keys` — parked, not designed.) |

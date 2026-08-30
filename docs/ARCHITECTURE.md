@@ -186,7 +186,29 @@ transcript path to read. The answer engine is Claude Code itself — same auth, 
 UI — and exiting it lands you back in compass. Works identically with or without
 tmux, locally or over SSH.
 
-### 4.3 Outbound cues (no bells — SPEC §7)
+### 4.3 The live mirror (deck's middle panel)
+
+The selected session's pane is mirrored with the same primitive tmux itself uses
+for `choose-tree` previews:
+
+```
+tmux capture-pane -p -e -J -t %5    # -e keeps ANSI colors, -J joins wrapped lines
+```
+
+- Polled at ~5Hz for the selected session only (one pane, one local-socket call —
+  negligible), dropped to 1Hz when compass's terminal loses focus, paused entirely
+  for panes of unselected sessions.
+- Rendered into the middle panel verbatim (it's already ANSI), cropped to fit;
+  compass draws a thin header (`⌁ dev:1.0 · live`) and nothing else — the content
+  is the CLI's own pixels.
+- Read-only by construction: capture-pane cannot carry input, so the consumer
+  guarantee isn't a policy here, it's physics. Typing goes through **reveal**.
+- No pane mapped (bare-shell session, remote, exited) → the panel shows the
+  session's latest transcript activity instead, clearly labeled `· from transcript`.
+- Width budget: mirror gets the pane's real width when it fits, else crops right;
+  below ~110 total columns the mirror collapses and deck is fleet + trail.
+
+### 4.4 Outbound cues (no bells — SPEC §7)
 
 - **Tab title**: on every state change, emit `OSC 2` (`⌂ compass ▲2`) so the
   terminal tab shows fleet health while unfocused. Works over SSH; Windows
@@ -224,7 +246,7 @@ a plain JSONL file; config at `~/.config/compass/config.toml` (zero-config defau
 | | Deliverable | Proves |
 |--|-------------|--------|
 | **M0** | tailer + state machine + fleet strip (no graph, no AI) | state detection is trustworthy — the amber dot is never wrong |
-| **M1** | segmenter + Lv1 trail graph + pane discovery + reveal/`g` | the journey renders and reads at a glance, offline |
+| **M1** | segmenter + Lv1 trail graph + pane discovery + reveal/`g` + live mirror | the journey renders at a glance and the real CLI is visible without leaving compass |
 | **M2** | Lv2 waypoints (test parser, fix clusters, subagent branches) + ghost todos | Tab-zoom feels like focus, not navigation |
 | **M3** | narrator (haiku labels) + Lv3 reader + ask-the-trail | the panel becomes conversational |
 | **M4** | polish: breathing HEAD, themes, bell policy, config, docs, demo GIF | ship it |
