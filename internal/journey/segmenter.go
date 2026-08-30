@@ -23,6 +23,10 @@ type Leg struct {
 	Votes   int       // number of votes folded in
 	Files   []string  // distinct file basenames touched, first-seen order, cap 5
 	Current bool      // still open — this is HEAD (at most one, the last leg)
+
+	// Waypoints are the leg's Lv2 detail rows: parsed test results, bug
+	// signatures, commits. Oldest first, cap 8 (docs/dev/M2-CONTRACT.md).
+	Waypoints []Waypoint
 }
 
 // Branch is a subagent lane: it forks off the leg that was open and merges back
@@ -34,6 +38,7 @@ type Branch struct {
 	End       time.Time // zero until Done
 	Done      bool      // its tool_result has been observed
 	AfterLeg  int       // index into Legs of the leg open when the fork happened; -1 if none yet
+	Report    string    // first non-empty line of the agent's result, ≤60 runes; "" until Done
 }
 
 // Trail is the whole journey as the panel needs it: what was asked, what was
