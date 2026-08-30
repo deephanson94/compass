@@ -1,0 +1,30 @@
+ ⌂ compass                                                                                                   ▲1  ●1  ○1
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ FLEET                          │ ⌁ dev:1.0 · live                             │ TRAIL · api                      [Lv1]
+                                │                                              │
+  1 ▲ infra     needs you    2m │                                              │ ● fix    tokens.py                ← 3m
+     (no pane) · tf/vpc         │                                              │ │
+                                │                                              │ ◆ test   pytest                    12m
+ ▸2 ● api       Bash: pyt…   3m │                                              │ ├─◈ scout the payments module        ✓
+     dev:1.0 · claude/auth-fx   │                                              │ ◆ build  tokens.py                 25m
+                                │                                              │ │
+  3 ○ docs      turn comp…  22m │                                              │ ◆ scout  middleware.py             31m
+     (no pane) · main           │                                              │ ╵
+                                │                                              │ ◉ "fix the 401 bug"                38m
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │ [38;5;39m⏺ Read(src/auth/middleware.py)[0m               │
+                                │   ⎿ read 214 lines                           │
+                                │                                              │
+                                │ [31m✗ test_refresh_expired_token — AssertionErro[0m │
+                                │                                              │
+                                │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m         │
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit

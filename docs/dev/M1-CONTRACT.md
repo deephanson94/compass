@@ -246,6 +246,19 @@ Goldens under `testdata/golden/`, ASCII profile forced as in M0. All offline.
   Target/ID/PID are exact in both paths; only an underscore inside a *command*
   name can smudge the Path/Command split in the fallback, which nothing
   load-bearing reads.
+- **UI resolutions**: at 110–115 cols the mirror takes the remainder below its
+  40-col preference (30+38+gutters leave 34; the floor holds from 116 up).
+  `RenderTrail` renders the bare graph; the `TRAIL · <name> [Lv1]` title is the
+  deck column's. A branch hangs directly under its fork node, replacing the `│`
+  connector; `AfterLeg == -1` branches sit at the rail's foot; `⋯`/`✓` share the
+  age column. The M0 detail card is retired — its content lives on as the
+  mirror's no-pane fallback. Dim `FLEET` header added per the §2.5 mockup. Tab
+  and action feedback share one dim footer note channel, cleared on keypress.
+  The mirror never paints a frame for an unmapped or newly selected session.
+- Pressure votes migrate (see the M1 test-reconciliation commit): a completed
+  streak carries Start/Votes/Files into the leg it opens; a dying streak
+  settles into the interrupted leg; `Trail()` displays an in-progress streak as
+  part of the open leg. Labels are lowercase; `Files` keep verbatim basenames.
 - `ListPanes` treats any Runner error as no-tmux → `(nil, nil)` (missing binary
   included). `ClaudeCwd` with an unreadable cwd → `("", false)`; pid itself is
   never a candidate (depth 1–6 = descendants). `MapSessions`: `LastEventAt` ties

@@ -1,0 +1,30 @@
+ ⌂ compass                                                                                                   ▲1  ●1  ○1
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ FLEET                          │ ⌁ no pane · from transcript                  │ TRAIL · api                      [Lv1]
+                                │                                              │
+  1 ▲ infra     needs you    2m │                                              │ ● fix    tokens.py                ← 3m
+     (no pane) · tf/vpc         │                                              │ │
+                                │                                              │ ◆ test   pytest                    12m
+ ▸2 ● api       Bash: pyt…   3m │                                              │ ├─◈ scout the payments module        ✓
+     (no pane) · claude/auth-fx │                                              │ ◆ build  tokens.py                 25m
+                                │                                              │ │
+  3 ○ docs      turn comp…  22m │                                              │ ◆ scout  middleware.py             31m
+     (no pane) · main           │                                              │ ╵
+                                │                                              │ ◉ "fix the 401 bug"                38m
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │                                              │
+                                │ "fix the 401 bug"                            │
+                                │                                              │
+                                │ ● working · tool call in flight              │
+                                │ Bash: pytest tests/auth -x                   │
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit

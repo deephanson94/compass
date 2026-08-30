@@ -4,17 +4,27 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 )
 
 // Layout constants. The deck spends its width on content, never on chrome: one
-// column of breathing room on each edge, a 34-column fleet, a wide gutter, and
-// the rest for the selected session.
+// column of breathing room on each edge, a fixed fleet, a fixed trail, and
+// every column the terminal can still spare for the live mirror.
 const (
-	fleetWidth  = 34
-	gutterWidth = 3
-	edgePad     = 1
-	minDeckCols = 62 // below this the detail card is dropped, fleet only
+	fleetWidth   = 30
+	trailWidth   = 38
+	gutterWidth  = 3
+	edgePad      = 1
+	minDeckCols  = 62  // below this the second column is dropped, fleet only
+	deckWideCols = 110 // at or above this the mirror opens in the middle
+
+	// mirrorMinCols is the design floor for the mirror: a pane narrower than
+	// this shows nothing a person can read. Fleet + trail + two gutters cost 74
+	// columns, so the floor is met from 116 columns up; between deckWideCols and
+	// there the mirror takes what is left rather than closing (SPEC §2.5 puts
+	// the fold at ~110).
+	mirrorMinCols = 40
 )
 
 // Palette. Amber and red are reserved, exclusively, for "needs you" and
@@ -34,6 +44,30 @@ var (
 	colNeedsYou = lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"}
 	colStuck    = lipgloss.AdaptiveColor{Light: "#b91c1c", Dark: "#f87171"}
 )
+
+// One muted hue per leg class (SPEC §4). They are cool by construction: the
+// warm end of the wheel belongs to needs-you and stuck alone, so a trail full
+// of work still leaves the panel calm. The colour only tints the glyph and the
+// verb — position and silhouette carry the meaning without it.
+var classColors = map[journey.Class]lipgloss.AdaptiveColor{
+	journey.Scout:  {Light: "#0e7490", Dark: "#22d3ee"}, // cyan — looking around
+	journey.Design: {Light: "#6d28d9", Dark: "#a78bfa"}, // violet — thinking
+	journey.Build:  {Light: "#1d4ed8", Dark: "#60a5fa"}, // blue — making
+	journey.Fix:    {Light: "#a21caf", Dark: "#e879f9"}, // fuchsia — repairing
+	journey.Test:   {Light: "#0f766e", Dark: "#2dd4bf"}, // teal — checking
+	journey.Ship:   {Light: "#4d7c0f", Dark: "#a3e635"}, // lime — landing it
+	journey.Docs:   {Light: "#475569", Dark: "#94a3b8"}, // slate — writing it down
+}
+
+// classStyle is the tint for one leg. An unknown class stays uncoloured rather
+// than borrowing somebody else's meaning.
+func classStyle(c journey.Class) lipgloss.Style {
+	col, ok := classColors[c]
+	if !ok {
+		return textStyle
+	}
+	return lipgloss.NewStyle().Foreground(col)
+}
 
 var (
 	textStyle  = lipgloss.NewStyle()
@@ -100,20 +134,4 @@ func clip(s string, w int) string {
 		return "…"
 	}
 	return strings.TrimRight(string(r[:w-1]), " ") + "…"
-}
-
-// clipLeft truncates from the left, keeping the tail — the useful half of a
-// long path.
-func clipLeft(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= w {
-		return s
-	}
-	if w == 1 {
-		return "…"
-	}
-	return "…" + string(r[len(r)-(w-1):])
 }

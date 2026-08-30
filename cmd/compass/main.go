@@ -25,6 +25,7 @@ func main() {
 
 	fs := flag.NewFlagSet("compass", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "Claude home directory to observe")
+	readonly := fs.Bool("readonly", false, "never write to tmux: reveal is disabled")
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -38,7 +39,7 @@ func main() {
 	case "help":
 		fs.Usage()
 	default:
-		if err := ui.Run(mgr); err != nil {
+		if err := ui.Run(mgr, *readonly); err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
 		}
