@@ -24,10 +24,20 @@ func main() {
 		sub, args = args[0], args[1:]
 	}
 
+	cfg := loadConfig()
+	rootDefault := defaultRoot()
+	if cfg.Root != "" {
+		rootDefault = expandHome(cfg.Root)
+	}
+	narratorDefault := "haiku"
+	if cfg.Narrator != "" {
+		narratorDefault = cfg.Narrator
+	}
+
 	fs := flag.NewFlagSet("compass", flag.ExitOnError)
-	root := fs.String("root", defaultRoot(), "Claude home directory to observe")
-	readonly := fs.Bool("readonly", false, "never write to tmux: reveal is disabled")
-	model := fs.String("narrator", "haiku", `narration model for leg labels ("off" disables)`)
+	root := fs.String("root", rootDefault, "Claude home directory to observe")
+	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: reveal is disabled")
+	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -72,6 +82,18 @@ func buildNarrator(mgr *fleet.Manager, root, model string) func(notify func()) u
 	return func(notify func()) ui.Narrator {
 		return narrator.New(runner, cache, notify)
 	}
+}
+
+// expandHome turns a leading ~/ into the user's home directory.
+func expandHome(path string) string {
+	if !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // defaultRoot is $COMPASS_ROOT, else ~/.claude.

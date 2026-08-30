@@ -24,6 +24,7 @@ const (
 	tickInterval    = time.Second            // transcripts, fleet order, the trail
 	paneInterval    = 5 * time.Second        // tmux panes come and go slowly
 	captureInterval = 200 * time.Millisecond // the mirror, and only the mirror
+	breathInterval  = 500 * time.Millisecond // HEAD's breath — SPEC §4's one animation
 )
 
 // The zoom levels Tab moves between (SPEC §2.3).
@@ -37,6 +38,7 @@ type (
 	tickMsg        time.Time
 	paneTickMsg    time.Time
 	captureTickMsg time.Time
+	breathTickMsg  time.Time
 )
 
 // narratedMsg is the narrator saying new labels have landed: the deck redraws
@@ -119,6 +121,7 @@ type Model struct {
 
 	showHelp  bool
 	searching bool
+	pulse     bool // HEAD's breath is on its off-beat
 	readonly  bool
 	note      string // one line of consequence, cleared by the next keypress
 
@@ -219,7 +222,7 @@ func (m *Model) SetMirror(frame string) {
 
 // Init kicks off the first refresh and the three cadences.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), tick(), paneTick(), captureTick(),
+	return tea.Batch(m.refresh(), tick(), paneTick(), captureTick(), breathTick(),
 		m.relistPanes(), tea.SetWindowTitle(tabTitle(0)))
 }
 
@@ -233,6 +236,10 @@ func paneTick() tea.Cmd {
 
 func captureTick() tea.Cmd {
 	return tea.Tick(captureInterval, func(t time.Time) tea.Msg { return captureTickMsg(t) })
+}
+
+func breathTick() tea.Cmd {
+	return tea.Tick(breathInterval, func(t time.Time) tea.Msg { return breathTickMsg(t) })
 }
 
 // refresh polls every transcript off the render loop, and — for the selected
@@ -320,6 +327,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case captureTickMsg:
 		return m, tea.Batch(captureTick(), m.capture())
+
+	case breathTickMsg:
+		// Only a working HEAD breathes; everything else redraws on data.
+		if s, ok := m.selected(); ok && s.Snap.State == state.Working {
+			m.pulse = !m.pulse
+		} else {
+			m.pulse = false
+		}
+		return m, breathTick()
 
 	case fleetMsg:
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true

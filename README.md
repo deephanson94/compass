@@ -70,9 +70,46 @@ manage: compass never creates or owns tmux sessions, windows, or panes.
 | **Lv2 — Waypoints** | `Tab` | Legs expanded: each bug, each test run (18✓ 2✗), files touched, commits, subagent findings |
 | **Lv3 — Deep dive** | `Tab` `Tab` | Split panel: pretty transcript reader + **ask the trail** — an interactive Claude grounded in this session's full history |
 
-## Status
+## Using it
 
-📐 Design phase. Read the docs and argue with us:
+```
+go build -o compass ./cmd/compass    # Go 1.24+; a single static binary
 
-- [`docs/SPEC.md`](docs/SPEC.md) — product spec: UX model, keymap, states, visual language
+compass                              # the deck, full screen — run it in its own terminal tab
+compass -readonly                    # observe only: reveal (compass's one tmux write) is off
+compass -narrator off                # heuristic labels only, no claude calls
+compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1"
+```
+
+Everything is optional configuration — compass runs with none. `~/.config/compass/config.toml`:
+
+```toml
+root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root override)
+narrator = "haiku"      # narration model; "off" disables
+readonly = false        # true keeps compass's hands off tmux entirely
+```
+
+For the fleet summary in every tmux session, add to your own `.tmux.conf`:
+
+```
+set -g status-right '#(compass status) · %H:%M'
+```
+
+### Keys
+
+| Key | |
+|-----|---|
+| `1`–`9` | select a session |
+| `Tab` / `Shift+Tab` | zoom: trail → waypoints → the conversation itself |
+| `j`/`k` | move — the fleet at Lv1, the trail's rows at Lv2, the reader at Lv3 |
+| `Enter` | Lv1: reveal the session's pane in *your* tmux · Lv2: open the reader at that moment |
+| `g` | grab the session that has waited on you longest (and reveal it) |
+| `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
+| `Space` `/` `n`/`N` | Lv3: unfold a result · search · walk the matches |
+| `?` | help |
+
+## Design docs
+
+- [`docs/SPEC.md`](docs/SPEC.md) — product spec: UX model, keymap, states, visual language, decision log
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical design: data sources, engine, stack, milestones
+- [`docs/dev/`](docs/dev/) — the per-milestone API contracts the code and tests were built against

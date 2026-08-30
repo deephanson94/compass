@@ -519,6 +519,24 @@ func TestT24PromptsBeforeAnyLeg(t *testing.T) {
 
 // ---------------------------------------------------------------- T25
 
+// Harness envelopes — scheduled wakes and task notifications arrive as user
+// turns, but nobody asked anything: no ◉ node, no leg boundary (M4, found by
+// running compass against its own build session).
+func TestEnvelopeTurnsAreNotPrompts(t *testing.T) {
+	tr := segment(
+		prompt(0, "fix the failing test"),
+		edit(1*time.Minute, "tu1", "/w/auth.go"),
+		prompt(2*time.Minute, "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n…"),
+		prompt(3*time.Minute, "<task-notification>\n<task-id>abc</task-id>"),
+		prompt(4*time.Minute, `<wake reason="external-event">…</wake>`),
+		edit(5*time.Minute, "tu2", "/w/auth.go"),
+	)
+	if len(tr.Prompts) != 1 {
+		t.Fatalf("Prompts = %d, want only the human one", len(tr.Prompts))
+	}
+	assertLegs(t, tr, legWant{journey.Build, 1 * time.Minute, 5 * time.Minute, 2, true})
+}
+
 // T25 — an Agent tool_use forks a branch off the open leg without splitting it,
 // and its tool_result closes the branch.
 func TestT25BranchForksWithoutSplittingTheLeg(t *testing.T) {
