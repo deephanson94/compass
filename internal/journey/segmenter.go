@@ -80,11 +80,18 @@ type Segmenter struct {
 	byBranch map[string]int // Agent tool_use id → index into branches
 	open     bool           // the last leg is still accepting votes
 
-	// Pressure from differing weak votes (rule 4): which class is pushing, how
-	// many in a row, and when the run started — the new leg inherits that time.
-	pressClass Class
-	pressCount int
-	pressAt    time.Time
+	// Pressure from differing weak votes (rule 4). The votes are buffered, not
+	// folded: if the streak dies they flush into the open leg, and on the third
+	// they migrate wholesale into the new leg they open — Start, Votes and Files
+	// travel with them. Trail() folds the buffer into the open leg for display
+	// so a streak-in-progress still reads as part of the journey.
+	press []pended
+}
+
+// pended is one buffered pressure vote.
+type pended struct {
+	v  vote
+	at time.Time
 }
 
 // NewSegmenter returns an empty segmenter: no legs, no opinions.
@@ -104,9 +111,11 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		s.observeResult(res, ev.Timestamp)
 	}
 
-	// Rule 2: a human prompt is a hard boundary, whatever was running.
+	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
+	// that never reached three stays with the leg it interrupted.
 	if substantivePrompt(ev) {
 		s.prompts = append(s.prompts, Prompt{Text: clip(firstLine(ev.Text), 60), At: ev.Timestamp})
+		s.flushPress()
 		s.closeLeg()
 	}
 
@@ -135,6 +144,16 @@ func (s *Segmenter) Trail() Trail {
 		tr.Legs = make([]Leg, len(s.legs))
 		for i := range s.legs {
 			l := &s.legs[i]
+			if s.open && i == len(s.legs)-1 && len(s.press) > 0 {
+				// A pressure streak in progress still reads as part of the
+				// open leg until it either settles or migrates.
+				clone := *l
+				clone.files = append([]fileCount(nil), l.files...)
+				for _, p := range s.press {
+					foldInto(&clone, p.v, p.at)
+				}
+				l = &clone
+			}
 			tr.Legs[i] = Leg{
 				Class: l.class,
 				Label: l.label(),
@@ -207,32 +226,52 @@ func (s *Segmenter) applyVote(v vote, at time.Time) {
 	}
 
 	if v.class == s.legs[len(s.legs)-1].voted {
-		// The leg is being confirmed: any pressure that had built up dies here.
-		s.pressCount = 0
+		// The leg is being confirmed: buffered pressure dies here and settles
+		// into the leg it interrupted.
+		s.flushPress()
 		s.fold(v, at)
 		return
 	}
 
 	if strong(v.class) { // rule 3
+		s.flushPress()
 		s.closeLeg()
 		s.openLeg(v, at)
 		s.fold(v, at)
 		return
 	}
 
-	// Rule 4: a differing weak vote is pressure, not a decision.
-	if s.pressCount > 0 && s.pressClass == v.class {
-		s.pressCount++
-	} else {
-		s.pressClass, s.pressCount, s.pressAt = v.class, 1, at
+	// Rule 4: a differing weak vote is pressure, not a decision. A different
+	// differing class restarts the streak; the interrupted one settles.
+	if len(s.press) > 0 && s.press[0].v.class != v.class {
+		s.flushPress()
 	}
-	if s.pressCount < 3 {
-		s.fold(v, at) // hysteresis: it folds into the leg it interrupted
+	s.press = append(s.press, pended{v: v, at: at})
+	if len(s.press) < 3 {
 		return
 	}
+
+	// Third consecutive: the buffered votes were the new leg all along.
+	moved := s.press
+	s.press = nil
 	s.closeLeg()
-	s.openLeg(v, s.pressAt) // the new leg began with the first of the three
-	s.fold(v, at)
+	s.openLeg(moved[0].v, moved[0].at)
+	for _, p := range moved {
+		s.fold(p.v, p.at)
+	}
+}
+
+// flushPress settles buffered pressure votes into the open leg (the streak
+// died before reaching three).
+func (s *Segmenter) flushPress() {
+	if !s.open {
+		s.press = nil
+		return
+	}
+	for _, p := range s.press {
+		s.fold(p.v, p.at)
+	}
+	s.press = nil
 }
 
 // openLeg starts a leg at start with the vote's class, applying the other half
@@ -245,13 +284,13 @@ func (s *Segmenter) openLeg(v vote, start time.Time) {
 	}
 	s.legs = append(s.legs, l)
 	s.open = true
-	s.pressCount = 0
 }
 
-// closeLeg seals the running leg; the next vote will open a fresh one.
+// closeLeg seals the running leg; the next vote will open a fresh one. The
+// pressure buffer is the caller's business: it either settles (flushPress) or
+// migrates into the next leg before this is called.
 func (s *Segmenter) closeLeg() {
 	s.open = false
-	s.pressCount = 0
 }
 
 // afterFailingTest reports whether the leg just before this one was a test run
@@ -266,7 +305,11 @@ func (s *Segmenter) afterFailingTest() bool {
 
 // fold merges one vote into the open leg.
 func (s *Segmenter) fold(v vote, at time.Time) {
-	l := &s.legs[len(s.legs)-1]
+	foldInto(&s.legs[len(s.legs)-1], v, at)
+}
+
+// foldInto merges one vote into a leg — the open one, or a display clone.
+func foldInto(l *legState, v vote, at time.Time) {
 	l.votes++
 	if !at.IsZero() {
 		if l.start.IsZero() {
@@ -313,11 +356,11 @@ func (l *legState) fileNames() []string {
 // the bare class verb.
 func (l *legState) label() string {
 	if name := l.dominantFile(); name != "" {
-		return clip(name, 24)
+		return strings.ToLower(clip(name, 24))
 	}
 	switch l.class {
 	case Test, Ship:
-		return clip(l.keyword, 24)
+		return strings.ToLower(clip(l.keyword, 24))
 	}
 	return ""
 }
