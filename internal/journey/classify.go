@@ -130,6 +130,7 @@ type vote struct {
 	class   Class
 	file    string // basename of the tool's file_path, "" if none
 	keyword string // "pytest", "go", "commit", "push"… "" if none
+	id      string // the tool_use id, so its result can be recognised (M2 rule 2)
 }
 
 // bashInput, pathInput and agentInput are the only three shapes of tool input
@@ -160,9 +161,19 @@ func Classify(ev transcript.Event) (Class, bool) {
 	return Scout, false
 }
 
-// classifyUse applies the vote table to a single tool_use, first matching rule
-// wins.
+// classifyUse votes on a single tool_use and stamps the vote with the call's
+// id, so the segmenter can recognise the result when it comes back.
 func classifyUse(use transcript.ToolUse) (vote, bool) {
+	v, ok := voteFor(use)
+	if !ok {
+		return vote{}, false
+	}
+	v.id = use.ID
+	return v, true
+}
+
+// voteFor is the vote table itself, first matching rule wins.
+func voteFor(use transcript.ToolUse) (vote, bool) {
 	switch {
 	case scoutTools[use.Name]:
 		return vote{class: Scout, file: basenameOf(use.Input)}, true

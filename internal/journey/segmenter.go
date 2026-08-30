@@ -23,6 +23,10 @@ type Leg struct {
 	Votes   int       // number of votes folded in
 	Files   []string  // distinct file basenames touched, first-seen order, cap 5
 	Current bool      // still open — this is HEAD (at most one, the last leg)
+
+	// Waypoints are the leg's Lv2 detail rows: parsed test results, bug
+	// signatures, commits. Oldest first, cap 8 (docs/dev/M2-CONTRACT.md).
+	Waypoints []Waypoint
 }
 
 // Branch is a subagent lane: it forks off the leg that was open and merges back
@@ -34,6 +38,7 @@ type Branch struct {
 	End       time.Time // zero until Done
 	Done      bool      // its tool_result has been observed
 	AfterLeg  int       // index into Legs of the leg open when the fork happened; -1 if none yet
+	Report    string    // first non-empty line of the agent's result, ≤60 runes; "" until Done
 }
 
 // Trail is the whole journey as the panel needs it: what was asked, what was
@@ -69,6 +74,11 @@ type legState struct {
 	files    []fileCount
 	keyword  string // first runner/subcommand word seen, for the label
 	hadError bool   // an IsError tool_result landed while this leg was open
+
+	// waypoints are the Lv2 detail rows results left here (M2 rule 1). They
+	// never migrate: a waypoint belongs to the leg that was open when its
+	// result came back, whatever the pressure gauge decides afterwards.
+	waypoints []Waypoint
 }
 
 // Segmenter folds a session's events into legs. Feed it events in file order;
@@ -79,6 +89,13 @@ type Segmenter struct {
 	branches []Branch
 	byBranch map[string]int // Agent tool_use id → index into branches
 	open     bool           // the last leg is still accepting votes
+
+	// Runner memory (M2 rule 2): the tool_use ids of Test and Ship votes, so
+	// their results — and only theirs — get parsed as test runs and commits.
+	// Entries are dropped when their result lands; the cap is the backstop for
+	// calls whose results never do.
+	runners     map[string]runner
+	runnerOrder []string // insertion order, for eviction
 
 	// Pressure from differing weak votes (rule 4). The votes are buffered, not
 	// folded: if the streak dies they flush into the open leg, and on the third
@@ -155,12 +172,13 @@ func (s *Segmenter) Trail() Trail {
 				l = &clone
 			}
 			tr.Legs[i] = Leg{
-				Class: l.class,
-				Label: l.label(),
-				Start: l.start,
-				End:   l.end,
-				Votes: l.votes,
-				Files: l.fileNames(),
+				Class:     l.class,
+				Label:     l.label(),
+				Start:     l.start,
+				End:       l.end,
+				Votes:     l.votes,
+				Files:     l.fileNames(),
+				Waypoints: l.waypointsCopy(),
 			}
 		}
 		if s.open {
@@ -177,22 +195,86 @@ func substantivePrompt(ev transcript.Event) bool {
 	return ev.Type == transcript.EventUser && strings.TrimSpace(ev.Text) != ""
 }
 
-// observeResult merges a returning branch and records failure against the open
-// leg — the signal behind the Fix upgrade (rule 5a).
+// observeResult merges a returning branch, records failure against the open
+// leg — the signal behind the Fix upgrade (rule 5a) — and hangs whatever the
+// result was worth on the trail (M2 rules 1 and 4–6).
 func (s *Segmenter) observeResult(res transcript.ToolResult, at time.Time) {
 	if i, ok := s.byBranch[res.ToolUseID]; ok {
 		b := &s.branches[i]
 		b.Done = true
 		b.End = at
+		if line := firstNonEmptyLine(res.Text); line != "" {
+			// An async agent answers twice — a launch acknowledgement first,
+			// its verdict later. The latest thing it actually said wins.
+			b.Report = clip(line, waypointText)
+		}
 	}
-	if !res.IsError || !s.open {
+	if res.IsError && s.open {
+		cur := &s.legs[len(s.legs)-1]
+		cur.hadError = true
+		if cur.class == Build {
+			// Retroactive, whole leg: work that hit an error was always a fix.
+			cur.class = Fix
+		}
+	}
+	s.attach(res, at)
+}
+
+// attach hangs a result's waypoints on the leg it came back to (M2 rule 1):
+// the open leg, else the last one — both are the newest leg, since only that
+// one can be open — and nowhere at all before the first leg exists.
+func (s *Segmenter) attach(res transcript.ToolResult, at time.Time) {
+	if len(s.legs) == 0 {
 		return
 	}
-	cur := &s.legs[len(s.legs)-1]
-	cur.hadError = true
-	if cur.class == Build {
-		// Retroactive, whole leg: work that hit an error was always a fix.
-		cur.class = Fix
+	leg := &s.legs[len(s.legs)-1]
+
+	// Rules 3 and 5: only a remembered Test or Ship call's own result is read
+	// as test output or as a commit.
+	if r, ok := s.runners[res.ToolUseID]; ok {
+		s.forget(res.ToolUseID) // resolved — the memory has done its job
+		switch r.kind {
+		case Test:
+			leg.addWaypoints(testWaypoints(res.Text, r.keyword, res.IsError, at))
+		case Ship:
+			leg.addWaypoints(shipWaypoints(res.Text, at))
+		}
+	}
+
+	// Rule 4: any tool's error is a bug, but only where bugs are being made.
+	if res.IsError && (leg.class == Build || leg.class == Fix) {
+		leg.addBug(firstNonEmptyLine(res.Text), at)
+	}
+}
+
+// remember records a Test or Ship vote's tool_use id so the result that comes
+// back can be parsed (rule 2).
+func (s *Segmenter) remember(v vote) {
+	if v.id == "" || (v.class != Test && v.class != Ship) {
+		return
+	}
+	if _, dup := s.runners[v.id]; dup {
+		return
+	}
+	if s.runners == nil {
+		s.runners = make(map[string]runner)
+	}
+	if len(s.runnerOrder) >= maxRunners {
+		delete(s.runners, s.runnerOrder[0])
+		s.runnerOrder = s.runnerOrder[1:]
+	}
+	s.runners[v.id] = runner{kind: v.class, keyword: v.keyword}
+	s.runnerOrder = append(s.runnerOrder, v.id)
+}
+
+// forget drops a resolved call from the runner memory.
+func (s *Segmenter) forget(id string) {
+	delete(s.runners, id)
+	for i, held := range s.runnerOrder {
+		if held == id {
+			s.runnerOrder = append(s.runnerOrder[:i], s.runnerOrder[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -303,8 +385,10 @@ func (s *Segmenter) afterFailingTest() bool {
 	return prev.voted == Test && prev.hadError
 }
 
-// fold merges one vote into the open leg.
+// fold merges one vote into the open leg. A Test or Ship vote also earns a
+// place in the runner memory: its result is the only one worth parsing.
 func (s *Segmenter) fold(v vote, at time.Time) {
+	s.remember(v)
 	foldInto(&s.legs[len(s.legs)-1], v, at)
 }
 
@@ -338,6 +422,54 @@ func (l *legState) addFile(name string) {
 		return
 	}
 	l.files = append(l.files, fileCount{name: name, n: 1})
+}
+
+// addWaypoints appends what one result was worth, up to the leg's cap; the
+// overflow drops silently, since a leg the panel cannot show more of has
+// already said what it has to say.
+func (l *legState) addWaypoints(wps []Waypoint) {
+	for _, w := range wps {
+		l.addWaypoint(w)
+	}
+}
+
+func (l *legState) addWaypoint(w Waypoint) {
+	if len(l.waypoints) >= maxWaypoints {
+		return
+	}
+	l.waypoints = append(l.waypoints, w)
+}
+
+// addBug records one error signature (rule 4): the same error hit twice is one
+// bug, and past three the leg is simply having a bad day.
+func (l *legState) addBug(text string, at time.Time) {
+	text = clip(text, waypointText)
+	if text == "" {
+		return
+	}
+	bugs := 0
+	for i := range l.waypoints {
+		if l.waypoints[i].Kind != WaypointBug {
+			continue
+		}
+		if l.waypoints[i].Text == text {
+			return
+		}
+		bugs++
+	}
+	if bugs >= maxBugs {
+		return
+	}
+	l.addWaypoint(Waypoint{Kind: WaypointBug, Text: text, At: at})
+}
+
+// waypointsCopy hands the caller its own slice — the segmenter keeps folding
+// into the original.
+func (l *legState) waypointsCopy() []Waypoint {
+	if len(l.waypoints) == 0 {
+		return nil
+	}
+	return append(make([]Waypoint, 0, len(l.waypoints)), l.waypoints...)
 }
 
 func (l *legState) fileNames() []string {

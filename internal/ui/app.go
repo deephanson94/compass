@@ -14,6 +14,7 @@ import (
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
+	"github.com/deephanson94/compass/internal/todo"
 )
 
 // The deck's three cadences. Nothing else moves: the panel draws on data, not
@@ -22,6 +23,12 @@ const (
 	tickInterval    = time.Second            // transcripts, fleet order, the trail
 	paneInterval    = 5 * time.Second        // tmux panes come and go slowly
 	captureInterval = 200 * time.Millisecond // the mirror, and only the mirror
+)
+
+// The zoom levels Tab moves between (SPEC §2.3). Lv3 arrives in M3.
+const (
+	levelTrail     = 1 // the graph of legs
+	levelWaypoints = 2 // every leg unfolded
 )
 
 type (
@@ -35,7 +42,9 @@ type fleetMsg struct {
 	err      error
 	at       time.Time
 	trail    journey.Trail
-	trailFor string // the session the trail belongs to; "" if none was polled
+	hasTrail bool // the transcript was polled; without it the trail stands
+	todos    []todo.Item
+	trailFor string // the session the payload belongs to; "" if none was polled
 }
 
 type panesMsg struct {
@@ -64,10 +73,12 @@ type Model struct {
 	sessions []fleet.Session
 	panes    map[string]tmuxop.Pane
 	trail    journey.Trail
+	todos    []todo.Item
 	mirror   string
 	err      error
 	now      time.Time
 	loaded   bool
+	level    int // trail zoom: 1 legs, 2 waypoints
 
 	selectedID string
 	width      int
@@ -88,6 +99,7 @@ func New(mgr *fleet.Manager) *Model {
 		runner:       tmuxop.RealRunner{},
 		proc:         tmuxop.RealProc{},
 		now:          time.Now(),
+		level:        levelTrail,
 		lastNeedsYou: -1,
 	}
 }
@@ -127,6 +139,12 @@ func (m *Model) SetTrail(tr journey.Trail) {
 	m.trail = tr
 }
 
+// SetTodos hands the model the selected session's own task list — the plan the
+// trail draws ahead of HEAD as ghosts.
+func (m *Model) SetTodos(items []todo.Item) {
+	m.todos = items
+}
+
 // SetMirror hands the model the latest captured frame for the selected session
 // ("" = nothing to mirror; the panel then falls back to the transcript).
 func (m *Model) SetMirror(frame string) {
@@ -161,7 +179,7 @@ func (m *Model) refresh() tea.Cmd {
 		// poll and nothing it would want overwritten.
 		return nil
 	}
-	selected := m.selectedID
+	selected, root := m.selectedID, mgr.Root()
 	path := ""
 	if s, ok := m.selected(); ok {
 		path = s.Info.TranscriptPath
@@ -170,10 +188,16 @@ func (m *Model) refresh() tea.Cmd {
 		now := time.Now()
 		sessions, err := mgr.Refresh(now)
 		msg := fleetMsg{sessions: sessions, err: err, at: now}
+		if selected != "" {
+			// The plan the session keeps for itself. A missing or unreadable
+			// todo file is not news: the trail simply has no future to draw.
+			msg.todos, _ = todo.Read(root, selected)
+			msg.trailFor = selected
+		}
 		if feeds != nil {
 			feeds.retain(sessions)
 			if selected != "" && path != "" {
-				msg.trail, msg.trailFor = feeds.poll(selected, path), selected
+				msg.trail, msg.hasTrail = feeds.poll(selected, path), true
 			}
 		}
 		return msg
@@ -234,7 +258,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
 		m.clampSelection()
 		if msg.trailFor != "" && msg.trailFor == m.selectedID {
-			m.trail = msg.trail
+			if msg.hasTrail {
+				m.trail = msg.trail
+			}
+			m.SetTodos(msg.todos)
 		}
 		return m, m.titleCmd()
 
@@ -285,9 +312,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = true
 		return m, nil
 	case "tab":
-		m.note = "waypoints (Lv2) arrive in M2"
+		m.zoomIn()
 		return m, nil
 	case "shift+tab", "esc":
+		m.zoomOut()
 		return m, nil
 	case "enter":
 		return m, m.reveal()
@@ -308,6 +336,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	}
 	return m, nil
+}
+
+// zoomIn is Tab: the trail unfolds its waypoints. There is nothing deeper yet,
+// so at Lv2 the key says where the next level went rather than doing nothing.
+func (m *Model) zoomIn() {
+	if m.level >= levelWaypoints {
+		m.note = "deep dive (Lv3) arrives in M3"
+		return
+	}
+	m.level = levelWaypoints
+}
+
+// zoomOut is Shift+Tab (and Esc): back to the graph. At Lv1 it is a no-op —
+// zooming out of the trail would be zooming out of compass.
+func (m *Model) zoomOut() {
+	if m.level > levelTrail {
+		m.level = levelTrail
+	}
 }
 
 // reveal moves the user's tmux focus onto the selected pane — compass's only
@@ -379,6 +425,7 @@ func (m *Model) point(id string) {
 	}
 	m.selectedID = id
 	m.trail = journey.Trail{}
+	m.todos = nil
 	m.mirror = ""
 }
 

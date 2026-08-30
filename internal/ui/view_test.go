@@ -171,11 +171,13 @@ func TestT16DeckViewGolden(t *testing.T) {
 }
 
 // T31 — the trail renderer alone, at the sidecar's 38 columns: prompt, three
-// closed legs, a returned subagent, and HEAD at the top.
+// closed legs, a returned subagent, and HEAD at the top. M2 widened the
+// signature (a plan and a zoom level); with no todos at Lv1 the frame is the
+// M1 frame, unchanged.
 func TestT31RenderTrailGolden(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderTrail(fixtureTrail(fixtureBase), fixtureBase.Add(40*time.Minute), 38, 20)
+	got := RenderTrail(fixtureTrail(fixtureBase), nil, fixtureBase.Add(40*time.Minute), 38, 20, 1)
 	compareGolden(t, "trail-38x20.txt", got)
 }
 

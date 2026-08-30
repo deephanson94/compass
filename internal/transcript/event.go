@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // EventType is the top-level `type` field of a transcript line.
@@ -32,7 +33,13 @@ type ToolUse struct {
 type ToolResult struct {
 	ToolUseID string
 	IsError   bool
+	Text      string // result text, bounded: head and tail kept, middle elided
 }
+
+// resultTextCap bounds how much of a tool result's text survives, per end.
+// Waypoint extraction reads summaries, which live at the edges — pytest's
+// last line, go test's FAIL lines — while full outputs can be megabytes.
+const resultTextCap = 2048
 
 // Event is one parsed transcript line.
 type Event struct {
@@ -79,6 +86,7 @@ type rawBlock struct {
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
+	Content   json.RawMessage `json:"content"`
 }
 
 // ParseLine parses one JSONL line. Unknown `type` values return an Event with
@@ -162,7 +170,11 @@ func parseContent(ev *Event, content json.RawMessage) {
 			case "tool_use":
 				ev.ToolUses = append(ev.ToolUses, ToolUse{ID: b.ID, Name: b.Name, Input: b.Input})
 			case "tool_result":
-				ev.ToolResults = append(ev.ToolResults, ToolResult{ToolUseID: b.ToolUseID, IsError: b.IsError})
+				ev.ToolResults = append(ev.ToolResults, ToolResult{
+					ToolUseID: b.ToolUseID,
+					IsError:   b.IsError,
+					Text:      resultText(b.Content),
+				})
 			}
 			// "thinking" blocks are intentionally ignored.
 		}
@@ -170,6 +182,53 @@ func parseContent(ev *Event, content json.RawMessage) {
 			ev.Text = strings.Join(texts, "\n")
 		}
 	}
+}
+
+// resultText extracts a tool_result's text — the content is either a plain
+// string or an array of blocks whose text entries are joined — clamped to
+// resultTextCap bytes at each end with the middle elided.
+func resultText(content json.RawMessage) string {
+	trimmed := skipSpace(content)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	switch trimmed[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err == nil {
+			return clampMiddle(s)
+		}
+	case '[':
+		var blocks []rawBlock
+		if err := json.Unmarshal(trimmed, &blocks); err != nil {
+			return ""
+		}
+		var texts []string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+		}
+		return clampMiddle(strings.Join(texts, "\n"))
+	}
+	return ""
+}
+
+// clampMiddle keeps the first and last resultTextCap bytes of s, joined by an
+// ellipsis line, cutting on rune boundaries.
+func clampMiddle(s string) string {
+	if len(s) <= 2*resultTextCap {
+		return s
+	}
+	head := s[:resultTextCap]
+	for len(head) > 0 && !utf8.ValidString(head) {
+		head = head[:len(head)-1]
+	}
+	tail := s[len(s)-resultTextCap:]
+	for len(tail) > 0 && !utf8.ValidString(tail) {
+		tail = tail[1:]
+	}
+	return head + "\n…\n" + tail
 }
 
 func skipSpace(b []byte) []byte {
