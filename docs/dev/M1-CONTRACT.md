@@ -234,3 +234,21 @@ delivered events. cmd/compass gains `-readonly`.
 | T34 | mirror fallback (no pane) | "from transcript" body |
 
 Goldens under `testdata/golden/`, ASCII profile forced as in M0. All offline.
+
+## Addendum — resolved during implementation
+
+- **tmux sanitizes tabs for detached clients** (verified on tmux 3.4): command
+  output for a client not attached to a session has `\t` rewritten to `_`, so the
+  contract's tab-separated `list-panes` rows arrive tab-less in compass's primary
+  deployment (a terminal tab outside tmux). The `-F` string stays as specified;
+  `parsePane` first parses tab rows, then falls back to an anchored regexp
+  (`^(.+?)_(%\d+)_(\d+)_(.*)_([^_]*)$`) keyed on the `%id` and numeric-pid fields.
+  Target/ID/PID are exact in both paths; only an underscore inside a *command*
+  name can smudge the Path/Command split in the fallback, which nothing
+  load-bearing reads.
+- `ListPanes` treats any Runner error as no-tmux → `(nil, nil)` (missing binary
+  included). `ClaudeCwd` with an unreadable cwd → `("", false)`; pid itself is
+  never a candidate (depth 1–6 = descendants). `MapSessions`: `LastEventAt` ties
+  break on ID asc; empty-CWD sessions skipped; panes without a claude descendant
+  are never candidates; returns a non-nil map. `Reveal` on a dotless target uses
+  it as the window target directly.
