@@ -10,41 +10,44 @@ doing something. `compass` is the sidecar panel that answers, at a glance:
 - **What is it doing right now?** — live state: working / needs you / idle / stuck
 - **What adventure is next?** — Claude's own plan, rendered as ghost waypoints ahead
 
-The main panel stays the **real, untouched Claude Code CLI** — zero re-implementation,
-zero new muscle memory. compass lives beside it in tmux.
+Your sessions stay exactly where they are — **real, untouched Claude Code CLIs in
+your own tmux**. compass runs in its own terminal tab and watches all of them at
+once (a narrow `--sidecar` mode exists if you'd rather dock it inside a tmux pane).
 
 ```
-┌ tmux ────────────────────────────────────┬──────────────────────────────┐
-│                                          │ ⌂ compass          ● 2 ▲ 1   │
-│  the real `claude` CLI — untouched       │ ─────────────────────────────│
-│                                          │ 1 ● api      fixing auth bug │
-│  ● I'll fix the token refresh bug.       │ 2 ● webapp   tests 18✓ 2✗    │
-│    First let me look at the middleware…  │ 3 ▲ infra    needs you (2m)  │
-│                                          │ 4 ○ docs     idle            │
-│  ⏺ Read(src/auth/middleware.py)          │ ─────────────────────────────│
-│  ⏺ Bash(pytest tests/auth -x)            │  TRAIL · api           [Lv1] │
-│    ...                                   │  ┊                           │
-│                                          │  ◌ ship   open PR            │
-│                                          │  ◌ test   full suite         │
-│                                          │  ┊                           │
-│                                          │  ● fix    token refresh ← 3m │
-│                                          │  │                           │
-│                                          │  ◆ test   pytest 18✓ 2✗  12m │
-│                                          │  ├─◈ agent scouted payments  │
-│                                          │  ◆ build  refresh middleware │
-│                                          │  │                           │
-│                                          │  ◆ scout  auth module map    │
-│                                          │  ╵                           │
-│                                          │  ◉ "fix the 401 bug"     38m │
-│                                          │ ─────────────────────────────│
-│ >                                        │ Tab zoom · 1-4 jump · a ask  │
-└──────────────────────────────────────────┴──────────────────────────────┘
+┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
+│ FLEET                 │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ 1 ● api    fixing  3m │                                  │ ┊                              │
+│    dev:1.0 · auth-fx  │  ● I'll fix the token refresh    │ ◌ ship   open PR               │
+│ 2 ● webapp 18✓ 2✗     │    bug. Let me look at the       │ ◌ test   full suite            │
+│    dev:2.1 · main     │    middleware first…             │ ┊                              │
+│ 3 ▲ infra  needs you! │                                  │ ● fix    token refresh   ← 3m  │
+│    ops:0.0 · tf/vpc   │  ⏺ Read(src/auth/middleware.py)  │ │                              │
+│ 4 ○ docs   idle   22m │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
+│    (no pane) · main   │    ⎿ 18 passed, 2 failed…        │ ├─◈ agent scouted payments     │
+│ 5 ◍ etl    stuck? 8m  │                                  │ ◆ build  refresh middlware 25m │
+│    data:1.2 · loader  │  ✻ Churning… (23s · esc to       │ │                              │
+│                       │    interrupt)                    │ ◆ scout  auth module map  31m  │
+│                       │                                  │ ╵                              │
+│                       │  the real pane, mirrored live    │ ◉ "fix the 401 bug"       38m  │
+│ Tab zoom · Enter reveal · a ask · g needs-you · ? help                                    │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The middle panel is the **live mirror**: the selected session's actual tmux pane,
+streamed read-only via `capture-pane` (the same trick tmux's own `choose-tree`
+preview uses) — you watch the real CLI render, but compass owns no PTY and takes no
+input for it. Press `3` to watch infra instead; `Enter` reveals its pane in *your*
+tmux (`ops:0.0`), already focused when you switch over, for the moments you need to
+type. `g` grabs whichever session has been waiting on you longest. Nothing to
+manage: compass never creates or owns tmux sessions, windows, or panes.
 
 ## Principles
 
-1. **The CLI is sacred.** The left panel is the real `claude` binary in a real tmux
-   pane. compass never wraps, proxies, or re-renders it.
+1. **The CLI is sacred, and so is your tmux.** Sessions are the real `claude` binary
+   in panes you own. compass never wraps, proxies, or re-renders the CLI, and never
+   creates or manages tmux sessions — it only observes, plus one keypress-gated
+   action (reveal: focus the pane you asked for).
 2. **Three keypresses, max.** Any session, any zoom level, any answer — reachable in
    ≤3 keypresses from anywhere. This is a hard constraint, tested in CI.
 3. **Zero config, read-only.** compass watches the JSONL transcripts Claude Code
@@ -52,9 +55,12 @@ zero new muscle memory. compass lives beside it in tmux.
    installed into your sessions. Delete compass and nothing changes.
 4. **Heuristics first, AI second.** The trail renders instantly and offline from
    deterministic classification. A Haiku *narrator* (through your existing `claude`
-   auth — subscription or Bedrock) enriches labels in the background, budget-capped.
-5. **Beautiful or it doesn't ship.** Calm, quiet, Apple-grade restraint. Color means
-   something; motion means something; nothing blinks for attention it hasn't earned.
+   auth — subscription or Bedrock) enriches labels in the background — on by
+   default, batched and cached so each leg is narrated exactly once.
+5. **Useful first, beautiful always.** Calm, quiet, Apple-grade restraint. Color and
+   glyphs reinforce meaning but never carry it alone — everything reads in pure
+   monochrome. Nothing blinks, and nothing rings a bell: attention is visual (amber
+   sort, tab-title badge), which is exactly what survives an SSH hop.
 
 ## The three zoom levels
 

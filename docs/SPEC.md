@@ -25,7 +25,8 @@ Sessions don't produce a flat log — they produce a **branching journey**, and 
 transcript data proves it: subagents are literal sidechains on disk that fork from the
 main conversation and merge back with a result. So we render the journey exactly the
 way developers already read branching history: a vertical rail of nodes, branch lanes
-for subagents, merges when they return. **New at the top**, like `git log`.
+for subagents, merges when they return. **New at the top**, like `git log` (decided —
+see §7).
 
 Node vocabulary:
 
@@ -87,13 +88,15 @@ test names; FIX legs get one line per distinct bug; SCOUT legs get the questions
 answered ("how do TokenStore and SessionCache interact"); SHIP legs get commit
 subjects and PR links; subagent nodes get the agent's final-report one-liner.
 
-**Lv3 — Deep dive.** The panel splits (or takes over the tmux window — user choice):
+**Lv3 — Deep dive.** The trail area splits 50/50 (decided — see §7):
 
 - **Left half: the reader.** The full conversation rendered like `bat` renders code —
   syntax-highlighted tool calls, folded tool outputs (unfold with `Space`), search
   with `/`. Entering Lv3 from a selected Lv2 waypoint lands scrolled to *that moment*.
-- **Right half: ask the trail.** Press `a` and compass spawns a real `claude` session
-  (in a tmux split — again, the actual CLI) pre-loaded with this session's transcript
+- **Right half: ask the trail.** Press `a` and compass suspends its TUI and runs a
+  real `claude` session in its own terminal — the way `git commit` hands you your
+  editor; quitting it drops you back into compass — pre-loaded with this session's
+  transcript
   and a system prompt making it the session's historian: *"why did you delete
   conftest.py?"*, *"what approaches did you try before this one?"*, *"summarize what
   a reviewer should look at."* It's Claude interrogating Claude's own journey.
@@ -119,8 +122,68 @@ Session state machine (per session, derived from transcript activity):
 | **stuck** | `◍` (red) | "working" with no transcript growth beyond threshold, or repeating failure loop | flagged with duration |
 
 **needs-you is the whole game.** The single most valuable thing compass does is make a
-blocked session impossible to miss. Amber sessions sort to the top, show how long
-they've waited, and (optionally) fire a terminal bell / desktop notification.
+blocked session impossible to miss. Attention is **visual-only by default** — no bells
+(bells over SSH are exactly the trouble we're avoiding; decided — see §7). Three
+escalating cues, all silent:
+
+1. **In panel** — amber sessions sort to the top of the fleet with an age counter.
+2. **Tab title** — compass sets its terminal tab title via OSC escape:
+   `⌂ compass ▲2` when two sessions need you, `⌂ compass` when all calm. Windows
+   Terminal, iTerm, GNOME Terminal etc. all render this on the *unfocused* tab, and
+   it travels fine over SSH.
+3. **tmux status bar (optional)** — `compass status` is a one-shot subcommand that
+   prints a compact fleet summary (`●3 ▲1`); drop `#(compass status)` into your own
+   `status-right` and every tmux session shows it. compass never touches your tmux
+   config itself.
+
+### 2.5 Two display modes, one binary
+
+**Deck mode (default).** `compass` runs full-screen in its own terminal tab — *outside*
+tmux. It sees every Claude session on the machine at once (transcripts aren't
+tmux-scoped), across all your tmux sessions and even bare-shell sessions. Three
+panels: fleet on the left, the **live mirror** of the selected session's pane in the
+middle, its trail on the right. Lv3 splits the trail area.
+
+```
+┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
+│ FLEET                 │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ 1 ● api    fixing  3m │                                  │ ┊                              │
+│    dev:1.0 · auth-fx  │  ● I'll fix the token refresh    │ ◌ ship   open PR               │
+│ 2 ● webapp 18✓ 2✗     │    bug. Let me look at the       │ ◌ test   full suite            │
+│    dev:2.1 · main     │    middleware first…             │ ┊                              │
+│ 3 ▲ infra  needs you! │                                  │ ● fix    token refresh   ← 3m  │
+│    ops:0.0 · tf/vpc   │  ⏺ Read(src/auth/middleware.py)  │ │                              │
+│ 4 ○ docs   idle   22m │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
+│    (no pane) · main   │    ⎿ 18 passed, 2 failed…        │ ├─◈ agent scouted payments     │
+│ 5 ◍ etl    stuck? 8m  │                                  │ ◆ build  refresh middlware 25m │
+│    data:1.2 · loader  │  ✻ Churning… (23s · esc to       │ │                              │
+│                       │    interrupt)                    │ ◆ scout  auth module map  31m  │
+│                       │                                  │ ╵                              │
+│                       │  the real pane, mirrored live    │ ◉ "fix the 401 bug"       38m  │
+│ Tab zoom · Enter reveal · a ask · g needs-you · ? help                                    │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**The mirror is glass, not a terminal.** It streams the selected session's tmux pane
+via `capture-pane` polling — the same mechanism tmux's own `choose-tree` preview
+uses — so you watch the *actual* CLI exactly as it renders, colors and all, while
+compass still owns no PTY and handles no input. Keystrokes always happen in the real
+pane: `Enter` reveals it in your tmux, already focused. Sessions with no pane show
+their latest transcript activity in the mirror's place. On terminals too narrow for
+three panels (<~110 cols) the mirror collapses and deck falls back to fleet + trail.
+
+Each fleet entry shows *where the session lives* (`dev:1.0` = tmux session `dev`,
+window 1, pane 0) so you always know where to go.
+
+**Sidecar mode.** `compass --sidecar` renders the original narrow (≈42-col) panel for
+people who arrange it inside a tmux pane next to one CLI. Same engine, condensed
+layout, fleet as a strip on top.
+
+**compass never manages tmux.** It creates no sessions, windows, or panes — ever
+(decided — see §7). You own your multiplexer; compass reads it (`list-panes`,
+`capture-pane`) and performs exactly one opt-outable write action, only on an
+explicit keypress: **reveal** (focus the pane you asked to jump to). Ask-the-trail
+doesn't touch tmux at all — it runs in compass's own terminal (see §3).
 
 ## 3. Keymap — and the three-keypress proof
 
@@ -128,28 +191,32 @@ Global keys (work at every level):
 
 | Key | Action |
 |-----|--------|
-| `1`–`9` | jump fleet: select session N *and* switch the left tmux pane to it |
+| `1`–`9` | select session N — its trail renders immediately |
 | `Tab` / `Shift+Tab` | zoom in / out (Lv1 ⇄ Lv2 ⇄ Lv3) |
 | `j`/`k` or `↓`/`↑` | move between nodes / waypoints / lines |
-| `Enter` | act on selection (open waypoint's moment; in fleet: focus session) |
-| `a` | ask the trail (spawns historian split) — from any level |
+| `Enter` | **reveal**: focus the selected session's pane in *your* tmux (`select-window` + `select-pane`), so switching to your tmux tab lands on it; on a Lv2 waypoint: open that moment in the Lv3 reader |
+| `g` | grab the oldest needs-you session: select it *and* reveal its pane, one key |
+| `a` | ask the trail: compass suspends its TUI and runs the historian — a real `claude` grounded in this session's transcript — in compass's own terminal; `exit`/`Ctrl-D` returns to compass |
 | `Space` | Lv3 reader: fold/unfold a tool output |
 | `/` | search (Lv3 reader) |
-| `g` | jump to a needs-you session (cycles amber sessions) |
-| `n` | new session (tmux window with `claude` + panel follows it) |
 | `?` | help overlay |
-| `q` / `Esc` | zoom out; at Lv1, return focus to the CLI pane |
+| `Esc` | zoom out one level |
+| `q` | at Lv1: quit compass; deeper: zoom out |
+
+Note what's *absent*: no "new session" key, no kill, no rename — compass doesn't
+manage sessions or tmux (§2.5). Reveal is its only tmux write, behind an explicit
+keypress and disableable in config (`tmux_actions = "readonly"`).
 
 The constraint, proven:
 
 | "I want to…" | Keys | Count |
 |--------------|------|-------|
 | see what session 3 is doing | `3` | 1 |
-| unblock whichever session needs me | `g` (focus lands in the real CLI, answer it) | 1 |
+| unblock whichever session needs me | `g`, then switch terminal tab — cursor is already on the right pane | 1 |
 | see why webapp's tests fail | `2` `Tab` | 2 |
 | read the exact moment a bug was fixed | `2` `Tab` … `Enter` (j/k to aim are free-aim, not depth) | 3 |
 | ask a session why it made a choice | `2` `a` | 2 |
-| start a fresh session | `n` | 1 |
+| get to session 3's actual CLI | `3` `Enter`, switch terminal tab | 2 |
 
 Rule of the constraint: **every destination is ≤3 *depth* keypresses**; `j`/`k`
 aiming within a list doesn't count against depth, and nothing may hide behind a
@@ -165,15 +232,22 @@ fourth level. Any feature that can't fit this dies or moves to config.
   built in). Right-aligned relative timestamps (`3m`, `40s`) in dim text.
 - **Motion**: exactly one animation — the HEAD node breathes (500ms ease, glyph
   alternation `●`/`◐`). Everything else moves only when data moves.
-- **Density**: the panel earns its 38–44 columns. Every line answers a question;
-  anything that doesn't is dimmed or dropped. Truncate with `…`, never wrap.
+- **Density**: every line answers a question; anything that doesn't is dimmed or
+  dropped. Truncate with `…`, never wrap. Sidecar mode earns its 38–44 columns;
+  deck mode spends its extra width on the trail, never on chrome.
+- **Useful before pretty**: color and glyphs are reinforcement, never the only
+  carrier of meaning. Everything must read correctly in pure monochrome — glyph
+  shape (`●▲○◍`) and position carry state on their own. `NO_COLOR` and dumb-glyph
+  (`* ! o x`) fallbacks are first-class, not afterthoughts (matters over SSH and in
+  odd terminals).
 - **Empty states are designed**: a fresh session shows `◉` and its prompt, plus
   "scouting will appear here" in dim text — never a blank panel.
 
 ## 5. What compass is not
 
-- Not a session manager that owns your processes — tmux owns them; compass arranges
-  and observes.
+- Not a session manager that owns your processes — tmux owns them; compass only
+  observes (plus the two keypress-gated actions: reveal, ask).
+- Not a tmux layout tool — it never creates sessions, windows, or panes for itself.
 - Not a replacement chat UI — input always happens in the real CLI.
 - Not a metrics dashboard — no token graphs, cost meters, or charts in v1. The trail
   is a narrative, not analytics.
@@ -182,14 +256,20 @@ fourth level. Any feature that can't fit this dies or moves to config.
 
 ## 6. Open questions (cooking together)
 
-1. **Trail direction** — newest-on-top (git log, spec'd above) vs newest-on-bottom
-   (chat order, matches the CLI's own flow). Needs a side-by-side mock.
-2. **Lv3 real estate** — split the 40-col panel (cramped) vs temporarily zoom the
-   panel to half the window vs new tmux window that swaps back on `q`. Current lean:
-   panel expands to 50% while in Lv3, restores on exit — tmux makes this cheap.
-3. **Narrator budget** — default cap for Haiku label calls (per session? per hour?)
-   and whether narration is opt-in or opt-out on Bedrock (where tokens are real money).
-4. **Fleet scope** — all projects on the machine, or current tmux session's projects
-   by default with `A` to widen?
-5. **Bell policy** — needs-you notification: silent amber only, terminal bell, or
-   `notify-send`? Probably a config with amber-only default.
+1. **Deck fleet density** — with many sessions (10+), does the two-line fleet entry
+   (status + location) get cramped? Fallback: one-line entries with location revealed
+   on selection. Decide with real data once M0 renders.
+
+## 7. Decision log
+
+| # | Question | Decision (2026-08-30) |
+|---|----------|-----------------------|
+| 1 | Trail direction | **Newest on top**, like `git log`. |
+| 2 | Lv3 real estate | **50/50 split** of the trail area (deck) / widened panel (sidecar). |
+| 3 | Narrator budget | **On by default (opt-out)**, no hard cap — Haiku is cheap enough. Caching and batching stay (efficiency, not cost policing). `narrator = "off"` in config for those who want it. |
+| 4 | Fleet scope | **Everything on the machine, one view.** compass runs standalone (own terminal tab, outside tmux) in deck mode and observes all tmux sessions + bare-shell sessions. compass is a pure *consumer* of tmux — it never creates or manages tmux sessions; the user keeps full control of their multiplexer. |
+| 5 | Bell policy | **No bells.** Visual-only: amber sort + age in panel, OSC tab-title badge (`⌂ compass ▲2`), optional `compass status` for the user's own tmux status-right. Bells over SSH (e.g. Windows Terminal → SSH → Linux) are unreliable and annoying — permanently out. |
+| 6 | Color usage | **Useful first.** Glyph shape and position carry all meaning; color reinforces. Monochrome/`NO_COLOR`/plain-ASCII fallbacks are first-class. |
+| 7 | Historian placement | **Suspend-and-exec.** `a` suspends the compass TUI and runs the historian `claude` in compass's own terminal (like `git commit` → editor); exit returns to compass. No tmux involvement — asks are one-off. Leaves *reveal* as compass's only tmux write action. |
+| 8 | Fleet density at 10+ sessions | Deferred to working mocks (M0/M1) — two-line entries vs one-line with location-on-selection. |
+| 9 | Live CLI in deck mode | **Yes — the middle panel is a live mirror** of the selected session's pane, streamed read-only via `capture-pane` polling. Glass, not a terminal: compass renders the pane's screen but never takes input for it; interaction goes through reveal. Collapses on narrow terminals. (Possible future: an explicit interact mode forwarding keys via `send-keys` — parked, not designed.) |
