@@ -138,9 +138,14 @@ non-empty Text (a real prompt) or `assistant`. `attachment`/`queue-operation`/
 3. **Any other pending tool_use exists** (mid-turn):
    - `now − lastEventAt < StuckAfter` → `Working`
    - else → `Stuck`, reason `"no output for <dur> mid-turn"` (dur rounded to s/m).
-4. **No pending tool_use, last substantive event is `assistant`** (turn complete):
-   - `Text`, right-trimmed of whitespace and markdown decoration (`*`, `_`, `` ` ``,
-     `)`), ends with `?` → `NeedsYou`, reason `"turn ended with a question"`
+4. **No pending tool_use, last substantive event is `assistant`**:
+   - **if a tool_result was observed after that assistant event**, the turn is
+     still in flight — the model owes its next beat (amended post-review; the
+     original rule mis-reported this window as idle). Same timing split as rule 3:
+     `Working`, reason `"processing results"`, activity `"thinking…"` — or `Stuck`.
+   - else the turn is complete: `Text`, right-trimmed of whitespace and markdown
+     decoration (`*`, `_`, `` ` ``, `)`), ends with `?` → `NeedsYou`, reason
+     `"turn ended with a question"`
    - else → `Idle`, reason `"turn complete"`.
 5. **Last substantive event is a `user` prompt** (model hasn't replied yet):
    - same timing split as rule 3: `Working` (reason `"starting turn"`) or `Stuck`.
@@ -239,6 +244,29 @@ coverage (each a named test):
 | T15 | StatusLine: mixed fleet / all-idle | `▲1 ◍1 ●2` shape / `○ all quiet` |
 | T16 | ui.View() golden: 80×24, NO_COLOR, 3-session fleet | stable snapshot (strip trailing spaces); update via `-update` flag |
 | T17 | markdown-decorated question `**ok?**` | NeedsYou (trim rule) |
+| T18 | tool_result returned 5s ago, model's reply not yet written | Working "processing results" (NOT idle); at 120s → Stuck |
 
 Golden files under `testdata/golden/`. All tests must pass with `go test ./...`
 offline (no network, no real `~/.claude`).
+
+## Addendum — ambiguities resolved during implementation (now pinned by tests)
+
+- **Discover enrichment**: `CWD`/`GitBranch`/`Title`/`StartedAt` come from a bounded
+  head read (≤64 lines); `LastEventAt` from a bounded 64 KB backwards tail scan
+  skipping timestamp-less bookkeeping lines; file mtime only as fallback.
+- **StatusLine**: all four counts in fleet order with zeros omitted (idle shown as
+  `○N` alongside actives); `○ all quiet` whenever nothing is needs-you, stuck, or
+  working — including an empty fleet.
+- **Reasons**: rule 3 Working = `"tool call in flight"`; rule 4 amended-branch
+  Working = `"processing results"`; rule 4 NeedsYou activity = `"awaiting your
+  reply"`; rule 5 reuses the `"no output for <dur> mid-turn"` stuck phrasing.
+- **Since with multiple pending tool_uses**: the oldest pending one; `Activity`
+  from the most recent tool_use.
+- **Sort keys**: needs-you/stuck by `Snap.Since` ascending (longest wait first);
+  working/idle by `Info.LastEventAt` descending; ties by session ID.
+- **Blank transcript lines** are dropped silently — not counted by `Skipped()`.
+- **`queue-operation`** fills `Event.Text` from its top-level `content` but is
+  never substantive.
+- **ui testability**: `New(mgr) *Model`, `SetSize(w,h)`, `SetSessions(s, now)`,
+  `View()` are exported precisely so T16 can golden-test a frame; goldens are
+  rendered under a forced ASCII color profile.
