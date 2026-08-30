@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/narrator"
 	"github.com/deephanson94/compass/internal/ui"
 )
 
@@ -26,12 +27,14 @@ func main() {
 	fs := flag.NewFlagSet("compass", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "Claude home directory to observe")
 	readonly := fs.Bool("readonly", false, "never write to tmux: reveal is disabled")
+	model := fs.String("narrator", "haiku", `narration model for leg labels ("off" disables)`)
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
 	mgr := fleet.NewManager(*root)
+	build := buildNarrator(mgr, *root, *model)
 
 	switch sub {
 	case "status":
@@ -39,10 +42,35 @@ func main() {
 	case "help":
 		fs.Usage()
 	default:
-		if err := ui.Run(mgr, *readonly); err != nil {
+		if err := ui.Run(mgr, *readonly, build); err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
 		}
+	}
+}
+
+// buildNarrator assembles the narration service: the claude CLI in headless
+// mode, working out of a compass-private dir the fleet is told to ignore, and
+// a label cache beside it. "off", or an unusable cache path, leaves the trail
+// on its heuristic labels — narration is polish, never a requirement.
+func buildNarrator(mgr *fleet.Manager, root, model string) func(notify func()) ui.Narrator {
+	if model == "off" {
+		return nil
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = root
+	}
+	dir := filepath.Join(base, "compass", "narrator")
+	mgr.ExcludeCWD(dir)
+
+	cache, err := narrator.OpenCache(filepath.Join(base, "compass", "labels.jsonl"))
+	if err != nil {
+		return nil
+	}
+	runner := &narrator.CLIRunner{Model: model, Dir: dir}
+	return func(notify func()) ui.Narrator {
+		return narrator.New(runner, cache, notify)
 	}
 }
 

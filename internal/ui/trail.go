@@ -3,10 +3,12 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/todo"
@@ -44,19 +46,38 @@ const (
 	maxGhosts        = 4                  // the plan shows its next four moves
 )
 
+// TrailOpts is everything the trail needs beyond the journey itself: the plan
+// ahead of it, the narrated labels over it, the clock the ages are relative to,
+// the block it has to fill, how deep the zoom is and where the cursor sits.
+type TrailOpts struct {
+	Todos  []todo.Item
+	Labels map[string]string // narrated overlay, keyed by narrator LegKey; nil ok
+
+	// SessionID names whose journey this is. The Labels map is keyed by the
+	// narrator's LegKey — session, leg start and class — so the renderer needs
+	// the session to look a leg up. "" simply finds nothing.
+	SessionID string
+
+	Now           time.Time
+	Width, Height int
+	Level         int // 1, 2 or 3 (the trail renders identically at 2 and 3)
+	Cursor        int // index into TrailRows at Lv2+; -1 = no cursor
+}
+
 // RenderTrail draws the trail into a width×height block: newest at the top like
 // `git log`, one line per node, the rail running down the left. Level 1 is the
 // graph of legs; level 2 unfolds each leg's waypoints beneath it. Pending todos
 // hang above HEAD as ghosts at either level — the journey's future. The frame is
 // exactly height lines; when the journey is longer than the panel the oldest
 // rows fall off the bottom, so HEAD is never the thing that gets cropped.
-func RenderTrail(tr journey.Trail, todos []todo.Item, now time.Time, width, height, level int) string {
-	return strings.Join(fit(trailRows(tr, todos, now, width, height, level), height), "\n")
+func RenderTrail(tr journey.Trail, o TrailOpts) string {
+	return strings.Join(fit(trailRows(tr, o), o.Height), "\n")
 }
 
 // trailRows is RenderTrail without the bottom padding, so a column that wants
 // to know where its content stops can ask.
-func trailRows(tr journey.Trail, todos []todo.Item, now time.Time, width, height, level int) []string {
+func trailRows(tr journey.Trail, o TrailOpts) []string {
+	width, height := o.Width, o.Height
 	if width < trailPrefixWidth || height < 1 {
 		return nil
 	}
@@ -65,9 +86,12 @@ func trailRows(tr journey.Trail, todos []todo.Item, now time.Time, width, height
 		return crop(trailEmptyRows(width), height)
 	}
 
-	var b trailBuilder
-	b.ghosts(todos, width, height)
-	b.journey(tr, nodes, now, width, level)
+	b := trailBuilder{cursor: -1}
+	if o.Level >= levelWaypoints {
+		b.cursor = o.Cursor
+	}
+	b.ghosts(o.Todos, width, height)
+	b.journey(tr, nodes, o)
 
 	if len(tr.Legs) == 0 {
 		// A journey that has only been asked for: say what comes next rather
@@ -95,7 +119,15 @@ type trailLine struct {
 	text    string // a node row's finished line, or a detail row's body
 	group   int    // detail rows: which group they belong to; -1 for node rows
 	head    bool   // this detail belongs to HEAD, so it is the last to go
+	sel     int    // index into TrailRows, or -1 when the row is not selectable
 	dropped bool
+}
+
+// detailRow is one Lv2 body row before it is hung off its node: its text, and
+// whether the cursor may land on it.
+type detailRow struct {
+	text string
+	sel  int // index into TrailRows, or -1
 }
 
 // trailBuilder assembles the rows, keeping the detail groups separable so the
@@ -103,20 +135,36 @@ type trailLine struct {
 type trailBuilder struct {
 	lines  []trailLine
 	groups int
+
+	cursor int // the selectable row to invert; -1 for none
+	picked int // how many selectable rows have been handed out so far
+}
+
+// pick hands out the next selectable row index. It is called wherever a
+// selectable row belongs, drawn or not, so the enumeration TrailRows returns
+// and the rows RenderTrail draws never drift apart on a narrow panel.
+func (b *trailBuilder) pick() int {
+	b.picked++
+	return b.picked - 1
 }
 
 func (b *trailBuilder) node(text string) {
-	b.lines = append(b.lines, trailLine{text: text, group: -1})
+	b.lines = append(b.lines, trailLine{text: text, group: -1, sel: -1})
+}
+
+// selNode is a node row the cursor can land on.
+func (b *trailBuilder) selNode(sel int, text string) {
+	b.lines = append(b.lines, trailLine{text: text, group: -1, sel: sel})
 }
 
 // details opens a new group and hangs the bodies off it, in order.
-func (b *trailBuilder) details(bodies []string, head bool) {
+func (b *trailBuilder) details(bodies []detailRow, head bool) {
 	if len(bodies) == 0 {
 		return
 	}
 	b.groups++
 	for _, body := range bodies {
-		b.lines = append(b.lines, trailLine{text: body, group: b.groups, head: head})
+		b.lines = append(b.lines, trailLine{text: body.text, group: b.groups, head: head, sel: body.sel})
 	}
 }
 
@@ -139,16 +187,27 @@ func (b *trailBuilder) render(height int) []string {
 		switch {
 		case l.dropped:
 		case l.group < 0:
-			out = append(out, l.text)
+			out = append(out, b.cursored(l, l.text))
 		default:
 			mark := wayTee
 			if b.lastOfGroup(i) {
 				mark = wayEnd
 			}
-			out = append(out, ruleStyle.Render(railStroke+"  "+mark)+" "+l.text)
+			out = append(out, b.cursored(l, ruleStyle.Render(railStroke+"  "+mark)+" "+l.text))
 		}
 	}
 	return out
+}
+
+// cursored inverts the row the Lv2 cursor stands on. The row is stripped back
+// to its plain text first: a reset left over from the class tint would cancel
+// the inversion halfway across the line. Inversion is the whole mark — it costs
+// no colour and it survives NO_COLOR (SPEC §4).
+func (b *trailBuilder) cursored(l trailLine, text string) string {
+	if b.cursor < 0 || l.sel != b.cursor {
+		return text
+	}
+	return cursorStyle.Render(strings.TrimRight(ansi.Strip(text), " "))
 }
 
 // lastOfGroup reports whether row i is the deepest surviving row of its group.
@@ -208,16 +267,24 @@ func ghostCost(show, total int) int {
 
 // journey lays the graph itself: every node newest first, its Lv2 detail
 // beneath it, the subagents that forked off it, and the rail down to the next.
-func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, now time.Time, width, level int) {
+func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts) {
 	last := len(nodes) - 1
 	for i, n := range nodes {
-		b.node(n.render(tr, now, width))
-		if level >= 2 && n.leg >= 0 {
+		if n.leg >= 0 {
 			leg := tr.Legs[n.leg]
-			b.details(legDetails(leg, width), leg.Current)
+			label, narrated := legLabel(leg, o)
+			b.selNode(b.pick(), legRow(leg, label, narrated, o.Now, o.Width))
+			if o.Level >= levelWaypoints {
+				b.details(legDetails(leg, o.Width, b), leg.Current)
+			}
+		} else {
+			b.node(promptRow(tr.Prompts[n.prompt], o.Now, o.Width))
 		}
 
-		forks := b.branches(tr, n.leg, width, level)
+		forks := 0
+		if n.leg >= 0 {
+			forks = b.branches(tr, n.leg, o)
+		}
 
 		switch {
 		case i == last:
@@ -229,7 +296,51 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, now time.Tim
 		}
 	}
 	// Branches that forked before any leg opened hang off the bottom of the rail.
-	b.branches(tr, -1, width, level)
+	b.branches(tr, -1, o)
+}
+
+// TrailRow is one selectable row of the trail: what it is, what it says, and
+// the moment it stands for. Enter at Lv2 opens the reader at that moment
+// (SPEC §3), so every selectable row has to name one.
+type TrailRow struct {
+	Time time.Time // the moment the row stands for
+	Kind string    // "leg", "waypoint" or "branch"
+	Text string    // what the row says, undecorated
+	Leg  int       // index into Trail.Legs the row belongs to, or -1
+}
+
+// TrailRows enumerates the trail's selectable rows in the order RenderTrail
+// draws them — newest first, top-down. Legs, their waypoints (from Lv2 down)
+// and the subagent lanes can be selected; prompts, rails, ghosts and the
+// synthetic "touched" row cannot: they name no moment of their own. The
+// enumeration is geometry-free, so a cursor index means the same thing at any
+// width, and TrailOpts.Cursor indexes straight into this slice.
+func TrailRows(tr journey.Trail, level int) []TrailRow {
+	var out []TrailRow
+	branches := func(after int) {
+		for i := len(tr.Branches) - 1; i >= 0; i-- {
+			if br := tr.Branches[i]; br.AfterLeg == after {
+				out = append(out, TrailRow{Time: br.Start, Kind: "branch",
+					Text: branchName(br.Label), Leg: after})
+			}
+		}
+	}
+
+	for _, n := range trailNodes(tr) {
+		if n.leg < 0 {
+			continue
+		}
+		leg := tr.Legs[n.leg]
+		out = append(out, TrailRow{Time: leg.Start, Kind: "leg", Text: leg.Label, Leg: n.leg})
+		if level >= levelWaypoints {
+			for _, w := range leg.Waypoints {
+				out = append(out, TrailRow{Time: w.At, Kind: "waypoint", Text: w.Text, Leg: n.leg})
+			}
+		}
+		branches(n.leg)
+	}
+	branches(-1)
+	return out
 }
 
 // trailNode is one row on the rail: a leg or a prompt, resolved to a time so
@@ -259,16 +370,32 @@ func trailNodes(tr journey.Trail) []trailNode {
 	return nodes
 }
 
-func (n trailNode) render(tr journey.Trail, now time.Time, width int) string {
-	if n.leg >= 0 {
-		return legRow(tr.Legs[n.leg], now, width)
+// legKey is the identity the narrator's cache is keyed by: session, the leg's
+// start and its class (M3 contract, narrator.LegKey). The renderer forms it
+// itself so the ui package stays free of the narrator's plumbing — the format
+// is contract, not implementation detail.
+func legKey(sessionID string, l journey.Leg) string {
+	return sessionID + "/" + strconv.FormatInt(l.Start.UnixNano(), 10) + "/" + l.Class.String()
+}
+
+// legLabel resolves what a leg says: the narrated line when one has landed for
+// it, the heuristic label otherwise. HEAD always keeps its heuristic label —
+// narration is for history, and the live leg is still changing its mind.
+func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
+	if l.Current || len(o.Labels) == 0 {
+		return l.Label, false
 	}
-	return promptRow(tr.Prompts[n.prompt], now, width)
+	if text := strings.TrimSpace(o.Labels[legKey(o.SessionID, l)]); text != "" {
+		return text, true
+	}
+	return l.Label, false
 }
 
 // legRow: glyph, class verb, label, and the age held at the right margin. HEAD
 // points at itself — `← 3m` — because it is the only line that is still moving.
-func legRow(l journey.Leg, now time.Time, width int) string {
+// A narrated leg spends the verb column on its own words: the prose already
+// says what the class was for, and the glyph keeps the class's tint.
+func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int) string {
 	glyph := glyphLeg
 	age := relAge(now, l.Start)
 	if l.Current {
@@ -277,13 +404,23 @@ func legRow(l journey.Leg, now time.Time, width int) string {
 	}
 	head := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
 
+	if narrated {
+		// Narrated: one phrase across the verb and label columns.
+		textWidth := width - 2 - 1 - len([]rune(age))
+		if textWidth < trailMinLabel {
+			return classStyle(l.Class).Render(glyph) + padLeft(dimStyle.Render(age), width-1)
+		}
+		return classStyle(l.Class).Render(glyph) + " " +
+			textStyle.Render(pad(clip(label, textWidth), textWidth)) + " " + dimStyle.Render(age)
+	}
+
 	labelWidth := width - trailPrefixWidth - 1 - len([]rune(age))
 	if labelWidth < trailMinLabel {
 		// Too narrow for a label: the verb and the age still answer "what, when".
 		return head + padLeft(dimStyle.Render(age), width-(trailPrefixWidth-1))
 	}
-	label := textStyle.Render(pad(clip(l.Label, labelWidth), labelWidth))
-	return head + " " + label + " " + dimStyle.Render(age)
+	labelText := textStyle.Render(pad(clip(label, labelWidth), labelWidth))
+	return head + " " + labelText + " " + dimStyle.Render(age)
 }
 
 // promptRow quotes the human turn — the only words on the trail that are not
@@ -302,21 +439,27 @@ func promptRow(p journey.Prompt, now time.Time, width int) string {
 // then — for the classes that touch files — what it touched. Every row is dim:
 // at Lv2 the legs are still the structure and the waypoints are what hangs off
 // them.
-func legDetails(l journey.Leg, width int) []string {
+func legDetails(l journey.Leg, width int, b *trailBuilder) []detailRow {
 	body := width - trailWayWidth
-	if body < trailMinLabel {
-		return nil
-	}
-	out := make([]string, 0, len(l.Waypoints)+1)
+	out := make([]detailRow, 0, len(l.Waypoints)+1)
 	bugs := 0
 	for _, w := range l.Waypoints {
+		// The index is spent whether or not the panel is wide enough to draw
+		// the row: TrailRows counts moments, not columns.
+		sel := b.pick()
 		if w.Kind == journey.WaypointBug {
 			bugs++
 		}
-		out = append(out, waypointBody(w, bugs, body))
+		if body < trailMinLabel {
+			continue
+		}
+		out = append(out, detailRow{text: waypointBody(w, bugs, body), sel: sel})
+	}
+	if body < trailMinLabel {
+		return nil
 	}
 	if row := touchedBody(l, body); row != "" {
-		out = append(out, row)
+		out = append(out, detailRow{text: row, sel: -1})
 	}
 	return out
 }
@@ -355,13 +498,14 @@ func touchedBody(l journey.Leg, width int) string {
 // ones that forked before any leg opened), newest first, each hanging off the
 // rail at the node it left from. At Lv2 a returned agent also says what it
 // found. It returns how many lanes it drew.
-func (b *trailBuilder) branches(tr journey.Trail, after, width, level int) int {
-	drawn := 0
+func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
+	width, drawn := o.Width, 0
 	for i := len(tr.Branches) - 1; i >= 0; i-- {
 		br := tr.Branches[i]
 		if br.AfterLeg != after {
 			continue
 		}
+		sel := b.pick()
 		mark := branchOpen
 		if br.Done {
 			mark = branchDone
@@ -371,13 +515,13 @@ func (b *trailBuilder) branches(tr journey.Trail, after, width, level int) int {
 			continue
 		}
 		label := dimStyle.Render(pad(clip(branchName(br.Label), labelWidth), labelWidth))
-		b.node(ruleStyle.Render(railFork) + textStyle.Render(glyphBranch) + " " +
-			label + " " + dimStyle.Render(mark))
+		b.selNode(sel, ruleStyle.Render(railFork)+textStyle.Render(glyphBranch)+" "+
+			label+" "+dimStyle.Render(mark))
 		drawn++
 
-		if level >= 2 && strings.TrimSpace(br.Report) != "" {
+		if o.Level >= levelWaypoints && strings.TrimSpace(br.Report) != "" {
 			if body := width - trailWayWidth; body >= trailMinLabel {
-				b.details([]string{dimStyle.Render(clip(br.Report, body))}, false)
+				b.details([]detailRow{{text: dimStyle.Render(clip(br.Report, body)), sel: -1}}, false)
 			}
 		}
 	}
@@ -413,9 +557,23 @@ func crop(rows []string, height int) []string {
 func (m *Model) trailColumn(w, h int) []string {
 	rows := []string{m.trailTitle(w), ""}
 	if h > 2 {
-		rows = append(rows, trailRows(m.trail, m.todos, m.now, w, h-2, m.level)...)
+		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-2))...)
 	}
 	return rows
+}
+
+// trailOpts is the model's state as the renderer wants it.
+func (m *Model) trailOpts(w, h int) TrailOpts {
+	return TrailOpts{
+		Todos:     m.todos,
+		Labels:    m.labels,
+		SessionID: m.selectedID,
+		Now:       m.now,
+		Width:     w,
+		Height:    h,
+		Level:     m.level,
+		Cursor:    m.cursor,
+	}
 }
 
 // trailTitle: whose trail this is, and how deep we are in it.
@@ -425,7 +583,10 @@ func (m *Model) trailTitle(w int) string {
 		name = sessionName(s.Info)
 	}
 	level := "[Lv1]"
-	if m.level >= 2 {
+	switch {
+	case m.level >= levelReader:
+		level = "[Lv3]"
+	case m.level >= levelWaypoints:
 		level = "[Lv2]"
 	}
 	left := dimStyle.Render(clip("TRAIL · "+name, w-len(level)-1))

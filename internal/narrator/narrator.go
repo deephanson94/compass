@@ -126,6 +126,18 @@ func (n *Narrator) Request(sessionID string, tr journey.Trail, prompt string) {
 	go n.run(digests)
 }
 
+// Idle reports whether no batch is in flight. Callers that need Request's
+// cooling-off bookkeeping to be settled — tests, a status row — wait on this
+// rather than guessing at goroutine timing.
+func (n *Narrator) Idle() bool {
+	if n == nil {
+		return true
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return !n.inFlight
+}
+
 // digests builds the batch: every closed leg the cache has no name for and the
 // cooling-off set is not holding back. Caller holds the mutex.
 func (n *Narrator) digests(sessionID string, tr journey.Trail, prompt string, cooling map[string]bool) []Digest {

@@ -177,7 +177,7 @@ func TestT16DeckViewGolden(t *testing.T) {
 func TestT31RenderTrailGolden(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderTrail(fixtureTrail(fixtureBase), nil, fixtureBase.Add(40*time.Minute), 38, 20, 1)
+	got := RenderTrail(fixtureTrail(fixtureBase), TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1})
 	compareGolden(t, "trail-38x20.txt", got)
 }
 

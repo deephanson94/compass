@@ -15,6 +15,7 @@ import (
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
 	"github.com/deephanson94/compass/internal/todo"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // The deck's three cadences. Nothing else moves: the panel draws on data, not
@@ -25,10 +26,11 @@ const (
 	captureInterval = 200 * time.Millisecond // the mirror, and only the mirror
 )
 
-// The zoom levels Tab moves between (SPEC §2.3). Lv3 arrives in M3.
+// The zoom levels Tab moves between (SPEC §2.3).
 const (
 	levelTrail     = 1 // the graph of legs
 	levelWaypoints = 2 // every leg unfolded
+	levelReader    = 3 // the conversation itself
 )
 
 type (
@@ -37,14 +39,27 @@ type (
 	captureTickMsg time.Time
 )
 
+// narratedMsg is the narrator saying new labels have landed: the deck redraws
+// and picks them up. It carries nothing — the cache is the payload.
+type narratedMsg struct{}
+
 type fleetMsg struct {
 	sessions []fleet.Session
 	err      error
 	at       time.Time
 	trail    journey.Trail
 	hasTrail bool // the transcript was polled; without it the trail stands
+	events   []transcript.Event
 	todos    []todo.Item
 	trailFor string // the session the payload belongs to; "" if none was polled
+}
+
+// Narrator is the deck's view of the narration service (internal/narrator):
+// ask for labels, read the ones that have landed. An interface, so the panel
+// stays renderable — and testable — without the CLI behind it.
+type Narrator interface {
+	Labels(sessionID string, tr journey.Trail) map[string]string
+	Request(sessionID string, tr journey.Trail, prompt string)
 }
 
 type panesMsg struct {
@@ -65,30 +80,60 @@ type revealMsg struct {
 // screen: the fleet Manager owns the truth, the feeds own the trails, and tmux
 // owns the panes.
 type Model struct {
-	mgr    *fleet.Manager
-	feeds  *feedStore
-	runner tmuxop.Runner
-	proc   tmuxop.Proc
+	mgr      *fleet.Manager
+	feeds    *feedStore
+	runner   tmuxop.Runner
+	proc     tmuxop.Proc
+	narrator Narrator
 
 	sessions []fleet.Session
 	panes    map[string]tmuxop.Pane
 	trail    journey.Trail
+	events   []transcript.Event
 	todos    []todo.Item
+	labels   map[string]string // narrated leg labels for the selected session
 	mirror   string
 	err      error
 	now      time.Time
 	loaded   bool
-	level    int // trail zoom: 1 legs, 2 waypoints
+	level    int // zoom: 1 legs, 2 waypoints, 3 the conversation
+
+	// cursor is the Lv2 selection: an index into TrailRows(trail, level), or -1
+	// before the level is entered. narrated is the trail the last narration was
+	// asked for, so a trail that has not moved is not asked about twice.
+	cursor   int
+	narrated string
+
+	// The reader's own state, all of it Lv3: where the document is scrolled,
+	// which results are unfolded, and the search.
+	scroll   int
+	unfolded map[int]bool
+	query    string
+	draft    string // the query being typed; searching is true while it is
+	docVer   int    // bumped whenever a fold changes, to retire the cache
+	docCache readerCache
 
 	selectedID string
 	width      int
 	height     int
 
-	showHelp bool
-	readonly bool
-	note     string // one line of consequence, cleared by the next keypress
+	showHelp  bool
+	searching bool
+	readonly  bool
+	note      string // one line of consequence, cleared by the next keypress
 
 	lastNeedsYou int
+}
+
+// readerCache holds the flattened document between keypresses: scrolling,
+// folding and searching all need it, and re-flattening a long transcript on
+// every key would be work nobody asked for.
+type readerCache struct {
+	lines []readerLine
+	valid bool
+	n     int // events the document was built from
+	w     int // and the width it was wrapped to
+	ver   int // and the fold generation
 }
 
 // New returns a deck bound to a fleet Manager.
@@ -100,18 +145,39 @@ func New(mgr *fleet.Manager) *Model {
 		proc:         tmuxop.RealProc{},
 		now:          time.Now(),
 		level:        levelTrail,
+		cursor:       -1,
+		unfolded:     map[int]bool{},
 		lastNeedsYou: -1,
 	}
 }
 
 // Run starts the full-screen deck. In readonly mode compass keeps its one write
 // action — reveal — to itself.
-func Run(mgr *fleet.Manager, readonly bool) error {
+//
+// build, when it is not nil, is asked for the narrator once the program exists:
+// the narrator needs a way to say "labels landed", and that way is a message
+// into this program. A nil return simply leaves the trail on its heuristics.
+func Run(mgr *fleet.Manager, readonly bool, build func(notify func()) Narrator) error {
 	m := New(mgr)
 	m.readonly = readonly
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	if build != nil {
+		m.narrator = build(func() { p.Send(narratedMsg{}) })
+	}
 	_, err := p.Run()
 	return err
+}
+
+// SetNarrator hands the deck its narrator (a harness passes a fake one).
+func (m *Model) SetNarrator(n Narrator) {
+	m.narrator = n
+}
+
+// SetEvents installs the selected session's transcript — what the Lv3 reader
+// renders (exported so a harness can render a fixed document).
+func (m *Model) SetEvents(events []transcript.Event) {
+	m.events = events
+	m.docCache.valid = false
 }
 
 // SetSize sets the render dimensions (bubbletea does this via WindowSizeMsg;
@@ -197,7 +263,8 @@ func (m *Model) refresh() tea.Cmd {
 		if feeds != nil {
 			feeds.retain(sessions)
 			if selected != "" && path != "" {
-				msg.trail, msg.hasTrail = feeds.poll(selected, path), true
+				msg.trail, msg.events = feeds.poll(selected, path)
+				msg.hasTrail = true
 			}
 		}
 		return msg
@@ -260,10 +327,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.trailFor != "" && msg.trailFor == m.selectedID {
 			if msg.hasTrail {
 				m.trail = msg.trail
+				m.SetEvents(msg.events)
+				m.requestNarration()
 			}
 			m.SetTodos(msg.todos)
 		}
 		return m, m.titleCmd()
+
+	case narratedMsg:
+		m.refreshLabels()
+		return m, nil
+
+	case askDoneMsg:
+		if msg.err != nil {
+			m.note = "ask ended: " + msg.err.Error()
+		}
+		return m, nil
 
 	case panesMsg:
 		m.panes = msg.panes
@@ -303,6 +382,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// While a search query is being typed, every key belongs to it.
+	if m.searching {
+		m.note = ""
+		m.searchKey(msg)
+		return m, nil
+	}
+
 	m.note = "" // a keypress answers the last note
 
 	switch key {
@@ -314,45 +400,141 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		m.zoomIn()
 		return m, nil
-	case "shift+tab", "esc":
+	case "shift+tab":
 		m.zoomOut()
 		return m, nil
-	case "enter":
-		return m, m.reveal()
-	case "j", "down":
-		m.move(1)
-		return m, m.refresh()
-	case "k", "up":
-		m.move(-1)
-		return m, m.refresh()
-	case "g":
-		if !m.selectOldestNeedsYou() {
-			m.note = "nothing is waiting on you"
+	case "esc":
+		// At Lv3 a standing search clears first; the second Esc zooms out.
+		if m.level >= levelReader && m.query != "" {
+			m.query = ""
 			return m, nil
 		}
-		return m, tea.Batch(m.refresh(), m.reveal())
+		m.zoomOut()
+		return m, nil
+	case "a":
+		return m, m.ask()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.selectIndex(int(key[0] - '1'))
 		return m, m.refresh()
 	}
+
+	// The rest of the keys mean different things at different depths.
+	switch m.level {
+	case levelReader:
+		return m.readerKey(key)
+	case levelWaypoints:
+		switch key {
+		case "j", "down":
+			m.cursorMove(1)
+			return m, nil
+		case "k", "up":
+			m.cursorMove(-1)
+			return m, nil
+		case "enter":
+			m.enterReader()
+			return m, nil
+		case "g":
+			if !m.selectOldestNeedsYou() {
+				m.note = "nothing is waiting on you"
+				return m, nil
+			}
+			return m, tea.Batch(m.refresh(), m.reveal())
+		}
+	default: // levelTrail
+		switch key {
+		case "j", "down":
+			m.move(1)
+			return m, m.refresh()
+		case "k", "up":
+			m.move(-1)
+			return m, m.refresh()
+		case "enter":
+			return m, m.reveal()
+		case "g":
+			if !m.selectOldestNeedsYou() {
+				m.note = "nothing is waiting on you"
+				return m, nil
+			}
+			return m, tea.Batch(m.refresh(), m.reveal())
+		}
+	}
 	return m, nil
 }
 
-// zoomIn is Tab: the trail unfolds its waypoints. There is nothing deeper yet,
-// so at Lv2 the key says where the next level went rather than doing nothing.
-func (m *Model) zoomIn() {
-	if m.level >= levelWaypoints {
-		m.note = "deep dive (Lv3) arrives in M3"
-		return
+// readerKey is the Lv3 keymap: the document is the object, so the keys move
+// through it rather than through the fleet.
+func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "j", "down":
+		m.scrollBy(1)
+	case "k", "up":
+		m.scrollBy(-1)
+	case "ctrl+d":
+		m.scrollBy(m.readerHeight() / 2)
+	case "ctrl+u":
+		m.scrollBy(-m.readerHeight() / 2)
+	case "g":
+		m.scroll = 0
+	case "G":
+		m.scrollBy(1 << 30) // clamped to the last screenful
+	case " ", "space":
+		m.toggleFold()
+	case "/":
+		m.searching = true
+		m.draft = ""
+	case "n":
+		m.jumpMatch(1)
+	case "N":
+		m.jumpMatch(-1)
 	}
-	m.level = levelWaypoints
+	return m, nil
 }
 
-// zoomOut is Shift+Tab (and Esc): back to the graph. At Lv1 it is a no-op —
-// zooming out of the trail would be zooming out of compass.
+// cursorMove walks the Lv2 selection over the trail's selectable rows.
+func (m *Model) cursorMove(delta int) {
+	rows := TrailRows(m.trail, m.level)
+	if len(rows) == 0 {
+		m.cursor = -1
+		return
+	}
+	c := m.cursor + delta
+	if m.cursor < 0 {
+		c = 0
+	}
+	if c < 0 {
+		c = 0
+	}
+	if c >= len(rows) {
+		c = len(rows) - 1
+	}
+	m.cursor = c
+}
+
+// zoomIn is Tab: Lv1's legs unfold their waypoints, Lv2 opens the conversation
+// itself. At the bottom the key says so rather than doing nothing.
+func (m *Model) zoomIn() {
+	switch {
+	case m.level < levelWaypoints:
+		m.level = levelWaypoints
+		if m.cursor < 0 {
+			m.cursorMove(0)
+		}
+	case m.level < levelReader:
+		m.enterReader()
+	default:
+		m.note = "this is the deepest level"
+	}
+}
+
+// zoomOut is Shift+Tab: one level back up. At Lv1 it is a no-op — zooming out
+// of the trail would be zooming out of compass.
 func (m *Model) zoomOut() {
-	if m.level > levelTrail {
+	switch {
+	case m.level > levelWaypoints:
+		m.level = levelWaypoints
+	case m.level > levelTrail:
 		m.level = levelTrail
+		m.cursor = -1
 	}
 }
 
@@ -427,6 +609,13 @@ func (m *Model) point(id string) {
 	m.trail = journey.Trail{}
 	m.todos = nil
 	m.mirror = ""
+	m.labels = nil
+	m.events = nil
+	m.docCache.valid = false
+	m.unfolded = map[int]bool{}
+	m.scroll = 0
+	m.cursor = -1
+	m.query, m.draft, m.searching = "", "", false
 }
 
 func (m *Model) selectIndex(i int) {
@@ -574,8 +763,15 @@ func (m *Model) statusChips() string {
 // last keypress did.
 func (m *Model) footerLine(w int) string {
 	keys := "1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit"
-	if m.showHelp {
+	switch {
+	case m.showHelp:
 		keys = "? or esc closes help"
+	case m.searching:
+		keys = "type to search · enter finds · esc cancels"
+	case m.level >= levelReader:
+		keys = "j/k scroll · space fold · / search · n/N match · a ask · esc back"
+	case m.level >= levelWaypoints:
+		keys = "j/k rows · enter opens the moment · tab deeper · a ask · esc back"
 	}
 	left := dimStyle.Render(clip(keys, w))
 	if m.note == "" {
@@ -604,6 +800,24 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 
 	fw := fleetWidth
+	if m.level >= levelReader {
+		// Lv3: the conversation takes the mirror's place (SPEC §2.3); on a
+		// narrow deck it takes the trail's too.
+		if m.width >= deckWideCols {
+			rw := w - fw - trailWidth - 2*gutterWidth
+			return joinColumns(h, []column{
+				{fw, m.fleetColumn(fw, h)},
+				{rw, m.readerColumn(rw, h)},
+				{trailWidth, m.trailColumn(trailWidth, h)},
+			})
+		}
+		rw := w - fw - gutterWidth
+		return joinColumns(h, []column{
+			{fw, m.fleetColumn(fw, h)},
+			{rw, m.readerColumn(rw, h)},
+		})
+	}
+
 	if m.width >= deckWideCols {
 		// The mirror takes everything the fixed columns do not need.
 		mw := w - fw - trailWidth - 2*gutterWidth
