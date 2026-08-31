@@ -629,3 +629,30 @@ func onlySession(t *testing.T, m *fleet.Manager) fleet.Session {
 	}
 	return sessions[0]
 }
+
+// Discovery records both addresses. A claude process keeps the directory it
+// was launched in for its whole life, so the origin is what /proc will report
+// however far the session has since wandered — it is how the session is found
+// in a tmux pane, and it has to survive the walk to wherever it is now.
+func TestDiscoveryRecordsWhereASessionWasOpened(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, "77770000-7777-4777-8777-777700000001", "/hdd4/agentic_better_prompt", "main").
+		prompt(ago(4*time.Hour), "have a look at the porter repo").
+		text(ago(4*time.Hour), "changing directory").
+		moveTo("/hdd4/porter", "trial/gates-that-score-the-oracle").
+		prompt(ago(time.Minute), "check the s7 chunk split").
+		text(ago(14*time.Second), "reading porter_checks/s7_chunks.py").
+		write(root, "-hdd4-agentic-better-prompt")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if got := infos[0].CWD; got != "/hdd4/porter" {
+		t.Errorf("cwd is %q, want where the session is now", got)
+	}
+	if got := infos[0].OriginCWD; got != "/hdd4/agentic_better_prompt" {
+		t.Errorf("origin is %q, want where the session was opened — that is the "+
+			"directory the claude process is still standing in", got)
+	}
+}

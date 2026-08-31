@@ -19,11 +19,22 @@ type SessionInfo struct {
 	ID             string // session uuid (filename stem)
 	TranscriptPath string
 	ProjectSlug    string // directory name under projects/
-	CWD            string
-	GitBranch      string
-	Title          string    // first user prompt: first line, max 80 runes, "…" if cut
-	StartedAt      time.Time // first event timestamp
-	LastEventAt    time.Time // last event timestamp (file mtime as fallback)
+
+	// CWD is where the session is now — it moves when Claude changes
+	// directory, and it is what the deck shows.
+	//
+	// OriginCWD is where the session was opened, and it never moves. That is
+	// the one that finds a tmux pane: a claude process keeps the working
+	// directory it was launched in for its whole life, so /proc reports the
+	// origin however far the session has since wandered. Matching on CWD alone
+	// loses a session the moment it cd's into a sibling repo — which is most
+	// long sessions.
+	CWD         string
+	OriginCWD   string
+	GitBranch   string
+	Title       string    // first user prompt: first line, max 80 runes, "…" if cut
+	StartedAt   time.Time // first event timestamp
+	LastEventAt time.Time // last event timestamp (file mtime as fallback)
 }
 
 // Key identifies a session uniquely. The session id does not: one id can own
@@ -193,7 +204,7 @@ func peekHead(f *os.File, info *SessionInfo) {
 			continue
 		}
 		if info.CWD == "" {
-			info.CWD = ev.CWD
+			info.CWD, info.OriginCWD = ev.CWD, ev.CWD
 		}
 		if info.GitBranch == "" {
 			info.GitBranch = ev.GitBranch

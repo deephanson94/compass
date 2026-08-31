@@ -3,28 +3,28 @@
 
  FLEET · live                   │ ⌁ no pane · from transcript                  │ TRAIL · api                      [Lv1]
                                 │                                              │
-  1 ▲ infra     needs you    2m │                                              │ ◉ "fix the 401 bug"                38m
-     no pane · tf/vpc           │                                              │ ╷
-                                │                                              │ ◆ scout  middleware.py             31m
+  1 ▲ infra     needs you    2m │ moment26 eighteen passed and two failed,     │ ◉ "fix the 401 bug"                38m
+     no pane · tf/vpc           │ both of them in the refresh path and both    │ ╷
+                                │ about an expired token                       │ ◆ scout  middleware.py             31m
  ▸2 ● api       Bash: pyt…   3m │                                              │ │
-     no pane · claude/auth-fx   │                                              │ ◆ build  tokens.py                 25m
-                                │                                              │ │
-  3 ○ docs      turn comp…  22m │                                              │ ◆ test   pytest                    12m
+     no pane · claude/auth-fx   │ moment28 opening tokens.py, which is where   │ ◆ build  tokens.py                 25m
+                                │ the expiry comparison the failing tests      │ │
+  3 ○ docs      turn comp…  22m │ object to actually lives                     │ ◆ test   pytest                    12m
      no pane · main             │                                              │ ├─◈ scout the payments module        ✓
-                                │                                              │ ● fix    tokens.py                ← 3m
+                                │ moment30 a syntax error at tokens.py line 88 │ ● fix    tokens.py                ← 3m
+                                │ was hiding the real fault; fixing that first │
+                                │ and rerunning                                │
                                 │                                              │
+                                │ moment34 the expiry check compares a UTC     │
+                                │ stamp against local time, which is why it    │
+                                │ only fails after a refresh                   │
                                 │                                              │
+                                │ moment37 patching tokens.py to compare in    │
+                                │ UTC, then rerunning the two tests that were  │
+                                │ objecting                                    │
                                 │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │ "fix the 401 bug"                            │
-                                │                                              │
-                                │ ● working · tool call in flight              │
-                                │ Bash: pytest tests/auth -x                   │
+                                │ moment39 both refresh tests pass now;        │
+                                │ rerunning the whole auth suite to be sure    │
+                                │ nothing else moved                           │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  j/k move · enter attach (prefix d returns) · g grab · ? help · q quit

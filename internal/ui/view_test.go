@@ -163,6 +163,10 @@ func deckModel(w, h int, panes map[string]tmuxop.Pane, frame string) *Model {
 	m.SetPanes(panes)
 	m.point(sessionKey("s-api")) // the session the SPEC mockup follows
 	m.SetTrail(fixtureTrail(fixtureBase))
+	// A real session always has a transcript behind it, pane or no pane — the
+	// no-pane golden asserted an empty middle panel only because the fixture
+	// had nothing to put in it.
+	m.SetEvents(followEvents(fixtureBase))
 	m.SetMirror(frame)
 	return m
 }
@@ -256,8 +260,14 @@ func TestT33DeckNarrowGolden(t *testing.T) {
 	}
 }
 
-// T34 — a session with no tmux pane: the mirror says where its content comes
-// from instead, and shows the session's own words.
+// T34 — a session with no tmux pane. The mirror says where its content comes
+// from, and then shows that content: the session's own conversation, which is
+// the same thing the pane would have been rendering.
+//
+// It used to show three dim facts the fleet column already carries, resting on
+// the floor of a panel forty rows tall. This golden asserted that was correct
+// because the fixture had no transcript to draw instead — on a real terminal
+// it reads as an empty screen, which is how it was reported.
 func TestT34MirrorNoPaneGolden(t *testing.T) {
 	forceASCII(t)
 
@@ -268,10 +278,9 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 
 	for _, want := range []string{
 		"⌁ no pane · from transcript", // the header names the source
-		`"fix the 401 bug"`,           // title
-		"tool call in flight",         // reason
-		"Bash: pytest tests/auth -x",  // activity
-		"no pane · claude/auth-fx",    // and the fleet agrees
+		"moment30",                    // and the newest turn is on screen
+		"no pane · claude/auth-fx",    // the fleet agrees about the pane
+		"Bash: pyt",                   // and still carries the state
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no-pane mirror is missing %q", want)
@@ -280,4 +289,54 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	if strings.Contains(got, mirrorMark+" dev:1.0 · live") {
 		t.Error("a session with no pane must not claim a live mirror")
 	}
+	// The panel is full, not three lines on the floor of an empty column.
+	mid := middleColumn(got)
+	if drawn := countNonBlank(mid); drawn < 10 {
+		t.Errorf("the middle panel drew %d lines of %d; it reads as empty:\n%s",
+			drawn, len(mid), strings.Join(mid, "\n"))
+	}
+}
+
+// Before a transcript has been read there is nothing to mirror, and the panel
+// says who the session is rather than going blank.
+func TestMirrorWithoutATranscriptStillSaysWho(t *testing.T) {
+	forceASCII(t)
+
+	m := deckModel(120, 30, map[string]tmuxop.Pane{}, "")
+	m.SetEvents(nil)
+
+	got := m.View()
+	for _, want := range []string{
+		"⌁ no pane · from transcript",
+		`"fix the 401 bug"`,          // title
+		"tool call in flight",        // reason
+		"Bash: pytest tests/auth -x", // activity
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the fallback is missing %q", want)
+		}
+	}
+}
+
+// middleColumn pulls the mirror's column out of a rendered deck frame.
+func middleColumn(frame string) []string {
+	var out []string
+	for _, line := range strings.Split(frame, "\n") {
+		parts := strings.Split(line, "│")
+		if len(parts) < 3 {
+			continue
+		}
+		out = append(out, parts[1])
+	}
+	return out
+}
+
+func countNonBlank(lines []string) int {
+	n := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			n++
+		}
+	}
+	return n
 }
