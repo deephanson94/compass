@@ -3,15 +3,15 @@
 
  FLEET · live                   │ TRAIL · api                             [Lv1]
                                 │
-  dev                           │ ● fix    tokens.py                       ← 3m
- ▸1 ● api       Bash: pyt…   3m │ │
-     :1.0 · claude/auth-fx      │ ◆ test   pytest                           12m
-                                │ ├─◈ scout the payments module               ✓
+  dev                           │ ◉ "fix the 401 bug"                       38m
+ ▸1 ● api       Bash: pyt…   3m │ ╷
+     :1.0 · claude/auth-fx      │ ◆ scout  middleware.py                    31m
+                                │ │
   elsewhere                   ▲ │ ◆ build  tokens.py                        25m
   2 ▲ infra     needs you    2m │ │
-     no pane · tf/vpc           │ ◆ scout  middleware.py                    31m
-                                │ ╵
-  3 ○ docs      turn comp…  22m │ ◉ "fix the 401 bug"                       38m
+     no pane · tf/vpc           │ ◆ test   pytest                           12m
+                                │ ├─◈ scout the payments module               ✓
+  3 ○ docs      turn comp…  22m │ ● fix    tokens.py                       ← 3m
      no pane · main             │
 
 

@@ -30,6 +30,10 @@ const (
 	breathInterval  = 500 * time.Millisecond // HEAD's breath — SPEC §4's one animation
 )
 
+// trailChrome is what the trail column spends above the graph itself: its
+// title, and one line of air (trailColumn).
+const trailChrome = 2
+
 // The zoom levels Tab moves between (SPEC §2.3).
 const (
 	levelTrail     = 1 // the graph of legs
@@ -131,6 +135,13 @@ type Model struct {
 	docVer   int    // bumped whenever a fold changes, to retire the cache
 	docCache readerCache
 
+	// The trail's own viewport, and only the trail's: how far the panel is
+	// scrolled into the trail's document, and whether it is pinned to the
+	// bottom. Pinned is the resting state (M7 contract): a growing journey
+	// keeps its newest row on screen without anybody pressing a key.
+	trailScroll int
+	trailPinned bool
+
 	// selectedKey is the session the deck is pointed at, held by its Key() —
 	// its transcript path. The session id is a label two sessions can share
 	// (M6 contract); the path is the one thing that never repeats.
@@ -182,6 +193,7 @@ func New(mgr *fleet.Manager) *Model {
 		now:          time.Now(),
 		level:        levelTrail,
 		cursor:       -1,
+		trailPinned:  true,
 		unfolded:     map[int]bool{},
 		lastNeedsYou: -1,
 	}
@@ -534,8 +546,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorMove(-1)
 			return m, nil
 		case "enter":
-			m.enterReader()
-			return m, nil
+			// The reader is already open on this row (the middle panel follows
+			// the cursor), so Enter has only ever meant one thing: go there.
+			return m, m.attach()
 		case "g":
 			if !m.selectOldestNeedsYou() {
 				m.note = "nothing is waiting on you"
@@ -551,6 +564,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.move(-1)
 			return m, m.refresh()
+		case "ctrl+d":
+			m.trailScrollBy(m.trailHalfPage())
+			return m, nil
+		case "ctrl+u":
+			m.trailScrollBy(-m.trailHalfPage())
+			return m, nil
+		case "G":
+			// Back to the present, whatever the offset was.
+			m.trailPinned = true
+			return m, nil
 		case "enter":
 			return m, m.attach()
 		case "g":
@@ -568,6 +591,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // through it rather than through the fleet.
 func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
+	case "enter":
+		// Enter means one thing at every depth (M7 contract).
+		return m, m.attach()
 	case "j", "down":
 		m.scrollBy(1)
 	case "k", "up":
@@ -611,6 +637,110 @@ func (m *Model) cursorMove(delta int) {
 		c = len(rows) - 1
 	}
 	m.cursor = c
+	if c == len(rows)-1 {
+		// The newest row is the present: standing on it puts the panel back to
+		// following the journey.
+		m.trailPinned = true
+	}
+	m.keepCursorVisible()
+	m.anchorReader()
+}
+
+// trailBox is the block the trail column is currently drawn into: the same
+// arithmetic deckLines and trailColumn do, so a scroll key moves the viewport
+// that is actually on screen. Width first, then the rows the graph itself gets
+// — the column spends two on its title and its line of air.
+func (m *Model) trailBox() (int, int) {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	inner := w - 2*edgePad
+	if inner < 10 {
+		inner = w
+	}
+	width := inner
+	switch {
+	case inner < minDeckCols:
+		// The trail is not on screen at all; a sane box keeps the arithmetic
+		// honest until it is.
+	case m.width >= deckWideCols:
+		width = trailWidth
+	default:
+		width = inner - fleetWidth - gutterWidth
+	}
+
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	height := h - 5 - trailChrome
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+// trailHalfPage is what ctrl+d and ctrl+u move: half the trail's screenful.
+func (m *Model) trailHalfPage() int {
+	_, h := m.trailBox()
+	if h < 2 {
+		return 1
+	}
+	return h / 2
+}
+
+// trailView measures the trail against its viewport: the whole document, one
+// screenful, and the offset the panel is showing right now — a pinned panel is
+// showing the last screenful, whatever Scroll says.
+func (m *Model) trailView() (total, height, top int) {
+	w, h := m.trailBox()
+	total = len(TrailLines(m.trail, m.trailOpts(w, h)))
+	top = m.trailScroll
+	if m.trailPinned {
+		top = lastScreenful(total, h)
+	}
+	return total, h, clampScroll(top, total, h)
+}
+
+// lastScreenful is the offset a pinned panel is showing: the bottom of the
+// document, which is where the journey's newest row lives.
+func lastScreenful(total, height int) int {
+	return clampScroll(total, total, height)
+}
+
+// trailScrollBy moves the trail's viewport, clamped to the document. Scrolling
+// up unpins; landing back on the last screenful re-pins, so the common case
+// needs no key at all (M7 contract).
+func (m *Model) trailScrollBy(delta int) {
+	total, h, top := m.trailView()
+	m.trailScroll = clampScroll(top+delta, total, h)
+	m.trailPinned = m.trailScroll >= lastScreenful(total, h)
+}
+
+// keepCursorVisible scrolls the trail only as far as it must to keep the Lv2
+// cursor's row on screen — a cursor already inside the viewport moves nothing,
+// not even the pin.
+func (m *Model) keepCursorVisible() {
+	if m.level < levelWaypoints || m.cursor < 0 {
+		return
+	}
+	w, h := m.trailBox()
+	row := TrailCursorRow(m.trail, m.trailOpts(w, h))
+	if row < 0 {
+		return
+	}
+	total, height, top := m.trailView()
+	switch {
+	case row < top:
+		top = row
+	case row >= top+height:
+		top = row - height + 1
+	default:
+		return // already on screen: the offset and the pin both stand
+	}
+	m.trailScroll = clampScroll(top, total, height)
+	m.trailPinned = m.trailScroll >= lastScreenful(total, height)
 }
 
 // zoomIn is Tab: Lv1's legs unfold their waypoints, Lv2 opens the conversation
@@ -619,9 +749,9 @@ func (m *Model) zoomIn() {
 	switch {
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
-		if m.cursor < 0 {
-			m.cursorMove(0)
-		}
+		// Lv2 is the trail with a cursor on it, and the middle panel reading
+		// whatever that cursor stands on: cursorMove(0) settles both.
+		m.cursorMove(0)
 	case m.level < levelReader:
 		m.enterReader()
 	default:
@@ -635,6 +765,8 @@ func (m *Model) zoomOut() {
 	switch {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
+		// The reader goes back to following the cursor it left behind.
+		m.anchorReader()
 	case m.level > levelTrail:
 		m.level = levelTrail
 		m.cursor = -1
@@ -763,6 +895,7 @@ func (m *Model) point(key string) {
 	m.unfolded = map[int]bool{}
 	m.scroll = 0
 	m.cursor = -1
+	m.trailScroll, m.trailPinned = 0, true
 	m.query, m.draft, m.searching = "", "", false
 }
 
@@ -946,9 +1079,9 @@ func (m *Model) footerLine(w int) string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.level >= levelReader:
-		keys = "j/k scroll · space fold · / search · n/N match · a ask · esc back"
+		keys = "j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · enter opens the moment · tab deeper · a ask · esc back"
+		keys = "j/k rows · enter attach · tab deeper · a ask · esc back"
 	}
 	left := dimStyle.Render(clip(keys, w))
 	if m.note == "" {
@@ -991,38 +1124,33 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 
 	fw := fleetWidth
-	if m.level >= levelReader {
-		// Lv3: the conversation takes the mirror's place (SPEC §2.3); on a
-		// narrow deck it takes the trail's too.
-		if m.width >= deckWideCols {
-			rw := w - fw - trailWidth - 2*gutterWidth
-			return joinColumns(h, []column{
-				{fw, m.fleetColumn(fw, h)},
-				{rw, m.readerColumn(rw, h)},
-				{trailWidth, m.trailColumn(trailWidth, h)},
-			})
-		}
-		rw := w - fw - gutterWidth
-		return joinColumns(h, []column{
-			{fw, m.fleetColumn(fw, h)},
-			{rw, m.readerColumn(rw, h)},
-		})
-	}
-
 	if m.width >= deckWideCols {
-		// The mirror takes everything the fixed columns do not need.
+		// The middle panel follows the trail (M7 contract): the live mirror at
+		// Lv1, and from Lv2 down the reader — anchored to the cursor's row
+		// there, holding focus at Lv3. It takes everything the fixed columns
+		// do not need.
+		middle := m.mirrorColumn
+		if m.level >= levelWaypoints {
+			middle = m.readerColumn
+		}
 		mw := w - fw - trailWidth - 2*gutterWidth
 		return joinColumns(h, []column{
 			{fw, m.fleetColumn(fw, h)},
-			{mw, m.mirrorColumn(mw, h)},
+			{mw, middle(mw, h)},
 			{trailWidth, m.trailColumn(trailWidth, h)},
 		})
 	}
 
+	// Too narrow for three: the middle panel is dropped and the trail keeps
+	// working, except at Lv3, where the conversation takes the trail's place.
 	tw := w - fw - gutterWidth
+	second := m.trailColumn
+	if m.level >= levelReader {
+		second = m.readerColumn
+	}
 	return joinColumns(h, []column{
 		{fw, m.fleetColumn(fw, h)},
-		{tw, m.trailColumn(tw, h)},
+		{tw, second(tw, h)},
 	})
 }
 

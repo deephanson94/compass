@@ -112,6 +112,16 @@ func pressEnter(m *Model) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 }
 
+// pressTab sends Tab, which deepens the zoom.
+func pressTab(m *Model) {
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+}
+
+// pressCtrl sends a control key — ctrl+d and ctrl+u are no runes either.
+func pressCtrl(m *Model, k tea.KeyType) {
+	m.Update(tea.KeyMsg{Type: k})
+}
+
 // T58 — the live view at 120x30: two named tmux groups and `elsewhere`, the
 // needs-you session floated to the top of ITS group (never out of it), the
 // group's amber echo on its header, the location lines reduced to `:w.p`, and
@@ -657,4 +667,119 @@ func indexOfLine(lines []string, sub string) int {
 		}
 	}
 	return -1
+}
+
+// The Lv1 trail scrolls without ever becoming the object: ctrl+d and ctrl+u
+// move the panel, G re-pins it to the present, and j/k still walk the fleet
+// (M7 contract, scrolling).
+func TestLv1ScrollsTheTrail(t *testing.T) {
+	forceASCII(t)
+
+	m := followModel(120, 14)
+	w, h := m.trailBox()
+	if len(TrailLines(m.trail, m.trailOpts(w, h))) <= h {
+		t.Fatalf("the fixture trail fits its panel (%d rows); nothing to scroll", h)
+	}
+	if !m.trailPinned {
+		t.Fatal("a fresh deck must be pinned to the newest row")
+	}
+
+	_, _, floor := m.trailView() // the offset a pinned panel is showing
+	pressCtrl(m, tea.KeyCtrlU)
+	if m.trailPinned {
+		t.Error("scrolling up must unpin the panel")
+	}
+	if m.trailScroll >= floor {
+		t.Errorf("ctrl+u left the panel at %d, want above the floor at %d", m.trailScroll, floor)
+	}
+
+	pressCtrl(m, tea.KeyCtrlD)
+	if !m.trailPinned {
+		t.Errorf("scrolling back to the bottom must re-pin: offset %d", m.trailScroll)
+	}
+
+	pressCtrl(m, tea.KeyCtrlU)
+	press(m, "G")
+	if !m.trailPinned {
+		t.Error("G must re-pin the trail to the newest row")
+	}
+
+	// j and k are the fleet's at Lv1: the trail is not the object there.
+	key := m.selectedKey
+	press(m, "j")
+	if m.selectedKey == key {
+		t.Error("j at Lv1 must walk the fleet, not the trail")
+	}
+	if m.level != levelTrail || m.cursor != -1 {
+		t.Errorf("Lv1 grew a trail cursor: level %d, cursor %d", m.level, m.cursor)
+	}
+}
+
+// T77 — Enter means one thing (M7 contract): at the trail, at the waypoints and
+// inside the reader it hands the terminal to the session, and it does nothing
+// else — the level it was pressed at is the level it leaves behind.
+func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
+	forceASCII(t)
+
+	for _, tc := range []struct {
+		name  string
+		tabs  int
+		level int
+	}{
+		{"Lv1", 0, levelTrail},
+		{"Lv2", 1, levelWaypoints},
+		{"Lv3", 2, levelReader},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := groupedModel(120, 30)
+			var got *exec.Cmd
+			m.spawn = func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd {
+				got = cmd
+				return nil
+			}
+			for i := 0; i < tc.tabs; i++ {
+				pressTab(m)
+			}
+			if m.level != tc.level {
+				t.Fatalf("%d tabs left the deck at Lv%d", tc.tabs, m.level)
+			}
+			cursor := m.cursor
+
+			pressEnter(m)
+			if got == nil {
+				t.Fatalf("enter at %s built no attach command (note %q)", tc.name, m.note)
+			}
+			args := strings.Join(got.Args, " ")
+			for _, want := range []string{"tmux", "select-pane", "%1", "attach-session"} {
+				if !strings.Contains(args, want) {
+					t.Errorf("the %s attach command is missing %q: %v", tc.name, want, got.Args)
+				}
+			}
+			if m.level != tc.level {
+				t.Errorf("enter zoomed the deck to Lv%d; enter attaches, tab deepens", m.level)
+			}
+			if m.cursor != cursor {
+				t.Errorf("enter moved the trail cursor to %d, want %d", m.cursor, cursor)
+			}
+			if m.note != "" {
+				t.Errorf("an attach that worked says nothing: %q", m.note)
+			}
+		})
+	}
+
+	// The footer says so at every depth, and says it whole: the keymap is
+	// clipped to the deck's inner width, and eighty columns is the floor.
+	t.Run("the footers promise it", func(t *testing.T) {
+		m := groupedModel(80, 24)
+		for _, want := range []string{
+			"j/k move · enter attach (prefix d returns) · g grab · ? help · q quit",
+			"j/k rows · enter attach · tab deeper · a ask · esc back",
+			"j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back",
+		} {
+			if got := m.View(); !strings.Contains(got, want) {
+				t.Errorf("the Lv%d footer does not fit an 80-column deck: %q", m.level, want)
+			}
+			pressTab(m)
+		}
+	})
 }

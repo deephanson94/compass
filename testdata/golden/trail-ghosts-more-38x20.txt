@@ -1,18 +1,18 @@
-┊ +2 more
-◌ drop the debug logging
-┊
-◌ rerun the auth suite
-┊
-◌ update the changelog
-┊
-◌ add a regression test
-┊
-● fix    tokens.py                ← 3m
+◉ "fix the 401 bug"                38m
+╷
+◆ scout  middleware.py             31m
+│
+◆ build  tokens.py                 25m
 │
 ◆ test   pytest                    12m
 ├─◈ scout the payments module        ✓
-◆ build  tokens.py                 25m
-│
-◆ scout  middleware.py             31m
-╵
-◉ "fix the 401 bug"                38m
+● fix    tokens.py                ← 3m
+┊
+◌ add a regression test
+┊
+◌ update the changelog
+┊
+◌ rerun the auth suite
+┊
+◌ drop the debug logging
+┊ +2 more

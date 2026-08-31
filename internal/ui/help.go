@@ -5,11 +5,13 @@ package ui
 var helpKeys = [][2]string{
 	{"1 – 9", "select a session"},
 	{"j / k", "move down / up (↓ ↑ too)"},
-	{"enter", "attach to its pane (outside tmux, prefix d returns)"},
+	{"enter", "attach to its pane, at any level (prefix d returns)"},
 	{"g", "grab the session waiting longest, and attach"},
 	{"A", "browse the archive — every past session, by project"},
-	{"tab", "zoom in: unfold each leg's waypoints (Lv2)"},
+	{"tab", "zoom in: unfold each leg's waypoints (Lv2), then read it (Lv3)"},
 	{"⇧ tab", "zoom back out to the trail (esc too)"},
+	{"ctrl+d/u", "half a page: the trail, or the reader at Lv3"},
+	{"G", "re-pin the trail to the newest row"},
 	{"?", "this help"},
 	{"q", "quit"},
 }

@@ -3,15 +3,15 @@
 
  FLEET · live                   │ ⌁ no pane · from transcript                  │ TRAIL · api                      [Lv1]
                                 │                                              │
-  1 ▲ infra     needs you    2m │                                              │ ● fix    tokens.py                ← 3m
-     no pane · tf/vpc           │                                              │ │
-                                │                                              │ ◆ test   pytest                    12m
- ▸2 ● api       Bash: pyt…   3m │                                              │ ├─◈ scout the payments module        ✓
+  1 ▲ infra     needs you    2m │                                              │ ◉ "fix the 401 bug"                38m
+     no pane · tf/vpc           │                                              │ ╷
+                                │                                              │ ◆ scout  middleware.py             31m
+ ▸2 ● api       Bash: pyt…   3m │                                              │ │
      no pane · claude/auth-fx   │                                              │ ◆ build  tokens.py                 25m
                                 │                                              │ │
-  3 ○ docs      turn comp…  22m │                                              │ ◆ scout  middleware.py             31m
-     no pane · main             │                                              │ ╵
-                                │                                              │ ◉ "fix the 401 bug"                38m
+  3 ○ docs      turn comp…  22m │                                              │ ◆ test   pytest                    12m
+     no pane · main             │                                              │ ├─◈ scout the payments module        ✓
+                                │                                              │ ● fix    tokens.py                ← 3m
                                 │                                              │
                                 │                                              │
                                 │                                              │

@@ -83,11 +83,24 @@ func (m *Model) readerTitle(w int) string {
 	return left + strings.Repeat(" ", gap) + dimStyle.Render(right)
 }
 
-// enterReader is Enter on a Lv2 row: the reader opens scrolled to that moment.
+// enterReader is Tab on a Lv2 row: the reader is already open on that moment —
+// the middle panel has been following the cursor since Lv2 — so all this does
+// is hand it the keys.
 func (m *Model) enterReader() {
-	rows := TrailRows(m.trail, m.level)
 	m.level = levelReader
-	if m.cursor < 0 || m.cursor >= len(rows) {
+	m.anchorReader()
+}
+
+// anchorReader points the reader at the row the Lv2 cursor stands on: the
+// middle panel is that moment of the conversation, and it re-anchors on every
+// cursor move (M7 contract). A row the document does not reach yet leaves the
+// reader where it is rather than jumping it somewhere arbitrary.
+func (m *Model) anchorReader() {
+	if m.cursor < 0 {
+		return
+	}
+	rows := TrailRows(m.trail, m.level)
+	if m.cursor >= len(rows) {
 		return
 	}
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
