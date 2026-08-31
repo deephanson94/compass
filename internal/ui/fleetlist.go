@@ -402,12 +402,44 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	first := marker + indexStyled + " " + accent.Render(fleet.Glyph(st)) + " " +
 		name + midStyle.Render(mid) + " " + dimStyle.Render(age)
 
-	where := m.location(s.Info)
+	return []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
+}
+
+// secondLine is what the session is actually doing, in the trail's own words:
+// the class of work and the tool call it is in. The two panels then describe a
+// session the same way, and the class is the same one Lv1 would draw.
+//
+// It used to be the tmux address and the git branch — ":0.0 claude · HEAD" —
+// which answered a question nobody was asking. The address is what `enter`
+// spends, not what a reader spends; the selected session's is in the mirror's
+// own header, and `compass panes` has them all. A branch reading "HEAD" three
+// times in a fleet says less than nothing.
+func (m *Model) secondLine(s fleet.Session, w int) string {
 	if m.archiveView {
-		where = branchOf(s.Info)
+		return dimStyle.Render(clip(branchOf(s.Info), w))
 	}
-	second := dimStyle.Render(clip(where, w-4))
-	return []string{first, strings.Repeat(" ", 4) + second}
+	// What it is doing, or — when it is not doing anything — what it is about.
+	// "idle" is what the first line already said; the prompt behind the session
+	// is the thing a reader still wants from a quiet row.
+	act := s.Snap.Activity
+	if strings.TrimSpace(act) == "" || act == "idle" {
+		act = s.Info.Title
+	}
+	if strings.TrimSpace(act) == "" {
+		act = s.Snap.Reason
+	}
+	if !s.HasClass {
+		// Nothing classifiable yet — a session that has only been asked for, or
+		// one woken from the archive whose replay has not reached a tool call.
+		return dimStyle.Render(clip(act, w))
+	}
+	class := s.Class.String()
+	head := classStyle(s.Class).Render(glyphLeg + " " + pad(class, trailVerbWidth))
+	rest := w - 2 - trailVerbWidth - 1
+	if rest < 4 {
+		return head
+	}
+	return head + " " + dimStyle.Render(clip(withoutClassVerb(act, class), rest))
 }
 
 // wantsAttention is the pair of states that float to the top of their group.
@@ -418,17 +450,6 @@ func wantsAttention(s state.State) bool {
 // headline is the one thing worth saying about a session on its own line. The
 // list answers "who wants me"; the card next to it answers "why".
 func headline(s fleet.Session) string {
-	switch s.Snap.State {
-	case state.NeedsYou:
-		return "needs you"
-	case state.Working, state.Stuck:
-		if s.Snap.Activity != "" {
-			return s.Snap.Activity
-		}
-	}
-	if s.Snap.Reason != "" {
-		return s.Snap.Reason
-	}
 	return stateLabel(s.Snap.State)
 }
 
@@ -442,7 +463,9 @@ func archiveHeadline(s fleet.Session) string {
 }
 
 // stateLabel is the human spelling of a state; State.String() stays the
-// machine-readable one.
+// machine-readable one. It is also the fleet row's headline: the state is what
+// the first line answers, and what the session is *doing* is the second line's
+// job (in the trail's own class vocabulary), so neither repeats the other.
 func stateLabel(s state.State) string {
 	if s == state.NeedsYou {
 		return "needs you"

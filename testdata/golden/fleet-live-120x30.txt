@@ -4,22 +4,22 @@
  FLEET · live                   │ ⌁ dev:1.0 · live                             │ TRAIL · api                      [Lv1]
                                 │                                              │
   dev                           │                                              │ ◉ "fix the 401 bug"                38m
- ▸1 ● api       Bash: pyt…   3m │                                              │ ╷
-     :1.0 auth-fix · claude/au… │                                              │ ◆ scout  middleware.py             31m
+ ▸1 ● api       working      3m │                                              │ ╷
+     ◆ test   Bash: pytest tes… │                                              │ ◆ scout  middleware.py             31m
                                 │                                              │ │
-  2 ● webapp    tests 18✓…  40s │                                              │ ◆ build  tokens.py                 25m
-     :2.1 webapp · main         │                                              │ │
+  2 ● webapp    working     40s │                                              │ ◆ build  tokens.py                 25m
+     ◆ test   tests 18✓ 2✗      │                                              │ │
                                 │                                              │ ◆ test   pytest                    12m
   ops                         ▲ │                                              │ ├─◈ scout the payments module        ✓
   3 ▲ infra     needs you    2m │                                              │ ● fix    tokens.py                ← 3m
-     :1.0 vpc · tf/vpc          │                                              │
+     ◆ design AskUserQuestion   │                                              │
                                 │                                              │
-  4 ○ tfstate   turn comp…  15m │                                              │
-     :0.0 tf_state · main       │                                              │
+  4 ○ tfstate   idle        15m │                                              │
+     ◆ build  reconcile the st… │                                              │
                                 │                                              │
   elsewhere                     │                                              │
-  5 ○ scratch   turn comp…  22m │                                              │
-     no pane · main             │                                              │
+  5 ○ scratch   idle        22m │                                              │
+     ◆ scout  try the streamin… │                                              │
                                 │ [38;5;39m⏺ Read(src/auth/middleware.py)[0m               │
  5 archived · A browses         │   ⎿ read 214 lines                           │
                                 │                                              │

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/transcript"
 )
@@ -57,6 +58,13 @@ type Session struct {
 	// is the archive — real, readable, and never amber
 	// (docs/dev/M5-CONTRACT.md).
 	Live bool
+
+	// Class is the kind of work the session is doing right now, in the trail's
+	// own vocabulary, so the fleet and the trail describe it the same way.
+	// HasClass is false until an event says something classifiable — and for
+	// every archived session, which is not doing anything.
+	Class    journey.Class
+	HasClass bool
 }
 
 // titleMax is how much of a first prompt survives into the fleet list.

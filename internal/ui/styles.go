@@ -12,12 +12,21 @@ import (
 // column of breathing room on each edge, a fixed fleet, a fixed trail, and
 // every column the terminal can still spare for the live mirror.
 const (
-	fleetWidth   = 30
-	trailWidth   = 38
-	gutterWidth  = 3
-	edgePad      = 1
-	minDeckCols  = 62  // below this the second column is dropped, fleet only
-	deckWideCols = 110 // at or above this the mirror opens in the middle
+	fleetWidth = 30 // the floor; both side panels grow with the terminal
+	trailWidth = 38
+
+	// The side panels are what compass is for, and a very wide terminal used to
+	// spend every extra column on the mirror — a pane rendering of something
+	// you can already look at. Past mirrorEnough the surplus is split between
+	// them instead, up to these caps: a fleet row wants its name, its state and
+	// its work legible, and a trail row wants its class, its label and its age.
+	fleetWidthMax = 42
+	trailWidthMax = 52
+	mirrorEnough  = 72 // the mirror keeps at least this before anyone else grows
+	gutterWidth   = 3
+	edgePad       = 1
+	minDeckCols   = 62  // below this the second column is dropped, fleet only
+	deckWideCols  = 110 // at or above this the mirror opens in the middle
 
 	// readerMinCols is the design floor for the Lv3 reader: a conversation
 	// narrower than this is unreadable, so when the fixed columns would push it

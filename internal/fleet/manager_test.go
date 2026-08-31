@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 )
 
@@ -655,4 +656,145 @@ func TestDiscoveryRecordsWhereASessionWasOpened(t *testing.T) {
 		t.Errorf("origin is %q, want where the session was opened — that is the "+
 			"directory the claude process is still standing in", got)
 	}
+}
+
+// The fleet learns what kind of work a session is doing, in the trail's own
+// vocabulary, by classifying events as they arrive. The two panels then
+// describe a session the same way — and a fleet row can say "◆ test  pytest"
+// instead of spending its line on a tmux address.
+func TestFleetLearnsWhatASessionIsDoing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lay  func(*transcriptBuilder)
+		want journey.Class
+	}{
+		{"a test run", func(b *transcriptBuilder) {
+			b.tool(ago(time.Minute), "t1", "Bash", map[string]any{"command": "pytest tests/auth -x"})
+		}, journey.Test},
+		{"reading around", func(b *transcriptBuilder) {
+			b.tool(ago(time.Minute), "t2", "Read", map[string]any{"file_path": "/home/user/app/mw.py"})
+		}, journey.Scout},
+		{"landing it", func(b *transcriptBuilder) {
+			b.tool(ago(time.Minute), "t3", "Bash", map[string]any{"command": "git commit -m done"})
+		}, journey.Ship},
+		{"the newest classifiable event wins", func(b *transcriptBuilder) {
+			b.tool(ago(5*time.Minute), "t4", "Bash", map[string]any{"command": "pytest -x"})
+			b.tool(ago(time.Minute), "t5", "Write", map[string]any{"file_path": "/home/user/app/new.py"})
+		}, journey.Build},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			b := newTranscript(t, "beef0000-0000-4000-8000-000000000001", "/home/user/app", "main").
+				prompt(ago(10*time.Minute), "get on with it")
+			tc.lay(b)
+			b.write(root, "-home-user-app")
+
+			got := onlySession(t, liveManager(root))
+			if !got.HasClass {
+				t.Fatalf("the session was never classified")
+			}
+			if got.Class != tc.want {
+				t.Errorf("class is %v, want %v", got.Class, tc.want)
+			}
+		})
+	}
+}
+
+// An archived session is not doing anything, so it claims no class — neither
+// one that was always archived, nor, more importantly, one that falls asleep
+// while it had a class. A stale "◆ test" on a session that stopped hours ago
+// is the fleet claiming work that is not happening.
+func TestAnArchivedSessionClaimsNoClass(t *testing.T) {
+	t.Run("archived from the start", func(t *testing.T) {
+		root := t.TempDir()
+		newTranscript(t, "beef0000-0000-4000-8000-000000000002", "/home/user/app", "main").
+			prompt(ago(40*24*time.Hour), "long ago").
+			tool(ago(40*24*time.Hour), "t1", "Bash", map[string]any{"command": "pytest -x"}).
+			write(root, "-home-user-app")
+
+		got := onlySession(t, fleet.NewManager(root))
+		if got.Live {
+			t.Fatal("a session 40 days quiet is not live")
+		}
+		if got.HasClass {
+			t.Errorf("an archived session claims to be doing %v", got.Class)
+		}
+	})
+
+	// The reset matters most where a waking session does NOT replay: with a
+	// resume cache it picks up from a saved mark, so a class left over from
+	// before it slept would surface as work that is not happening.
+	t.Run("waking from a resume does not carry the old class", func(t *testing.T) {
+		root := t.TempDir()
+		const sess = "beef0000-0000-4000-8000-000000000004"
+		path := filepath.Join(root, "projects", "-home-user-app", sess+".jsonl")
+		newTranscript(t, sess, "/home/user/app", "main").
+			prompt(ago(2*time.Minute), "run the suite").
+			tool(ago(time.Minute), "t1", "Bash", map[string]any{"command": "pytest -x"}).
+			write(root, "-home-user-app")
+
+		m := fleet.NewManager(root)
+		m.UseResumeCache(fleet.OpenResumeCache(filepath.Join(t.TempDir(), "resume.json")))
+		if live, _ := m.Refresh(fleetNow); !live[0].HasClass {
+			t.Fatal("the session should be classified while live")
+		}
+		if asleep, _ := m.Refresh(fleetNow.Add(time.Hour)); asleep[0].Live {
+			t.Fatal("the session should be archived an hour on")
+		}
+
+		// It speaks again, but says nothing a class can be read from.
+		later := newTranscript(t, sess, "/home/user/app", "main")
+		later.prompt(fleetNow.Add(time.Hour), "still there?")
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range later.lines {
+			if _, err := f.WriteString(line); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.Close()
+
+		woke, err := m.Refresh(fleetNow.Add(time.Hour).Add(time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !woke[0].Live {
+			t.Fatal("the session should be live again")
+		}
+		if woke[0].HasClass {
+			t.Errorf("a session woken from a resume kept the class it slept with (%v); "+
+				"nothing since it woke says it is doing that", woke[0].Class)
+		}
+	})
+
+	t.Run("falling asleep drops it", func(t *testing.T) {
+		root := t.TempDir()
+		newTranscript(t, "beef0000-0000-4000-8000-000000000003", "/home/user/app", "main").
+			prompt(ago(2*time.Minute), "run the suite").
+			tool(ago(time.Minute), "t1", "Bash", map[string]any{"command": "pytest -x"}).
+			write(root, "-home-user-app")
+
+		m := fleet.NewManager(root) // the default 5m recency door
+		live, err := m.Refresh(fleetNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !live[0].Live || !live[0].HasClass {
+			t.Fatalf("the session should be live and classified: %+v", live[0])
+		}
+
+		// An hour later nothing has been written, so it is archived.
+		asleep, err := m.Refresh(fleetNow.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if asleep[0].Live {
+			t.Fatal("the session is still live an hour after its last word")
+		}
+		if asleep[0].HasClass {
+			t.Errorf("a sleeping session still claims to be doing %v", asleep[0].Class)
+		}
+	})
 }
