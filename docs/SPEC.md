@@ -25,8 +25,10 @@ Sessions don't produce a flat log — they produce a **branching journey**, and 
 transcript data proves it: subagents are literal sidechains on disk that fork from the
 main conversation and merge back with a result. So we render the journey exactly the
 way developers already read branching history: a vertical rail of nodes, branch lanes
-for subagents, merges when they return. **New at the top**, like `git log` (decided —
-see §7).
+for subagents, merges when they return. **Time flows downward**: the opening prompt
+at the top, the newest work at the bottom, pinned there so the latest is always on
+screen (decided — see §7, #12, which reversed the original git-log ordering after
+the first dogfood).
 
 Node vocabulary:
 
@@ -40,8 +42,8 @@ Node vocabulary:
 | `▲` | attention marker — a question, permission prompt, or failure lives here |
 
 The ghost nodes are the compass part: the trail doesn't stop at HEAD, it fades ahead
-into where the session is *going*. Past below, present at the fold, future above it in
-dashed strokes.
+into where the session is *going*. Past above, present at the fold, future below it in
+dashed strokes — the plan is simply further down the same road.
 
 ### 2.2 Legs: the Lv1 classification
 
@@ -146,21 +148,21 @@ middle, its trail on the right. Lv3 splits the trail area.
 
 ```
 ┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
-│ FLEET                 │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
-│ 1 ● api    fixing  3m │                                  │ ┊                              │
-│    dev:1.0 · auth-fx  │  ● I'll fix the token refresh    │ ◌ ship   open PR               │
-│ 2 ● webapp 18✓ 2✗     │    bug. Let me look at the       │ ◌ test   full suite            │
-│    dev:2.1 · main     │    middleware first…             │ ┊                              │
-│ 3 ▲ infra  needs you! │                                  │ ● fix    token refresh   ← 3m  │
-│    ops:0.0 · tf/vpc   │  ⏺ Read(src/auth/middleware.py)  │ │                              │
-│ 4 ○ docs   idle   22m │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
-│    (no pane) · main   │    ⎿ 18 passed, 2 failed…        │ ├─◈ agent scouted payments     │
-│ 5 ◍ etl    stuck? 8m  │                                  │ ◆ build  refresh middlware 25m │
-│    data:1.2 · loader  │  ✻ Churning… (23s · esc to       │ │                              │
-│                       │    interrupt)                    │ ◆ scout  auth module map  31m  │
-│                       │                                  │ ╵                              │
-│                       │  the real pane, mirrored live    │ ◉ "fix the 401 bug"       38m  │
-│ Tab zoom · Enter reveal · a ask · g needs-you · ? help                                    │
+│ FLEET · live          │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ dev                   │                                  │ ◉ "fix the 401 bug"       38m  │
+│▸1 ● api    fixing  3m │  ● I'll fix the token refresh    │ ╷                              │
+│    :1.0 · auth-fx     │    bug. Let me look at the       │ ◆ scout  auth module map  31m  │
+│ 2 ● webapp 18✓ 2✗     │    middleware first…             │ │                              │
+│    :2.1 · main        │                                  │ ◆ build  refresh middlware 25m │
+│ ops                 ▲ │  ⏺ Read(src/auth/middleware.py)  │ ├─◈ agent scouted payments     │
+│ 3 ▲ infra  needs you! │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
+│    :0.0 · tf/vpc      │    ⎿ 18 passed, 2 failed…        │ │                              │
+│ elsewhere             │                                  │ ● fix    token refresh   ← 3m  │
+│ 4 ○ docs   idle   22m │  ✻ Churning… (23s · esc to       │ ┊                              │
+│    no pane · main     │    interrupt)                    │ ◌ test   full suite            │
+│                       │                                  │ ┊                              │
+│ 268 archived · A      │  the real pane, mirrored live    │ ◌ ship   open PR               │
+│ j/k move · enter attach (prefix d returns) · g grab · ? help · q quit                     │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -264,7 +266,7 @@ fourth level. Any feature that can't fit this dies or moves to config.
 
 | # | Question | Decision (2026-08-30) |
 |---|----------|-----------------------|
-| 1 | Trail direction | **Newest on top**, like `git log`. |
+| 1 | Trail direction | ~~**Newest on top**, like `git log`.~~ **Reversed by #12** after dogfooding. |
 | 2 | Lv3 real estate | **50/50 split** of the trail area (deck) / widened panel (sidecar). |
 | 3 | Narrator budget | **On by default (opt-out)**, no hard cap — Haiku is cheap enough. Caching and batching stay (efficiency, not cost policing). `narrator = "off"` in config for those who want it. |
 | 4 | Fleet scope | **Everything on the machine, one view.** compass runs standalone (own terminal tab, outside tmux) in deck mode and observes all tmux sessions + bare-shell sessions. compass is a pure *consumer* of tmux — it never creates or manages tmux sessions; the user keeps full control of their multiplexer. |
@@ -274,4 +276,6 @@ fourth level. Any feature that can't fit this dies or moves to config.
 | 8 | Fleet density at 10+ sessions | **Two-line entries confirmed** against the M1 golden frames (status line + dim location line). Revisit only if a 15+-session fleet feels cramped in practice. |
 | 9 | Live CLI in deck mode | **Yes — the middle panel is a live mirror** of the selected session's pane, streamed read-only via `capture-pane` polling. Glass, not a terminal: compass renders the pane's screen but never takes input for it; interaction goes through reveal. Collapses on narrow terminals. (Possible future: an explicit interact mode forwarding keys via `send-keys` — parked, not designed.) |
 | 10 | Fleet liveness (2026-08-31, first dogfood: 280 transcripts vs ~15 real sessions) | **The fleet means "something can need you."** Live = in a tmux pane, plus a small recency door (default 5m, `-live-within 0` shuts it) so a pane-matching miss can never hide a session that is writing its transcript right now. Everything else is the archive: never tailed, never amber, one `A` away, fully browsable (trail/reader/ask all work there). |
+| 12 | Trail direction, revisited (2026-08-31, dogfood) | **Time flows downward** — oldest at top, newest at the bottom, **pinned** to the bottom so the latest needs no keys. Newest-on-top was chosen before anyone had used it and fought the thing it describes: a conversation reads downward. Ghost todos moved below HEAD with it (the future is further down, not further up). The trail also became a real viewport — it used to *drop* rows to fit, silently discarding the older half of a long journey. |
+| 13 | The trail drives the conversation | From Lv2 the middle panel is the **reader anchored to the trail cursor**, re-anchored on every move: the trail is a minimap, the conversation is the code. Lv1 keeps the live mirror (watching), Lv3 hands the reader focus (reading). `Enter` therefore means one thing at every level — go to the live session. |
 | 11 | Fleet grouping | **Live view groups by tmux session → window** (tmux's own order; amber floats within its group, header carries a `▲` echo; `elsewhere` for live-unmapped; headers dropped when degenerate). **Archive groups by project directory, newest first** — "I start sessions in the respective directory." `1`–`9` stay flat; `g` stays one key. |
