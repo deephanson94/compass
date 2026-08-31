@@ -106,6 +106,12 @@ For the fleet summary in every tmux session, add to your own `.tmux.conf`:
 set -g status-right '#(compass status) · %H:%M'
 ```
 
+`compass status` is a fresh process every time tmux draws the bar, so it keeps
+a small cache (`~/.cache/compass/resume.json`) of where it had read to in each
+live transcript and what it had concluded there. Without it every invocation
+re-reads every live session from byte zero. Deleting the file costs one slow
+run and nothing else.
+
 ### Keys
 
 | Key | |

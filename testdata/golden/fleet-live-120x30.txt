@@ -5,17 +5,17 @@
                                 │                                              │
   dev                           │                                              │ ◉ "fix the 401 bug"                38m
  ▸1 ● api       Bash: pyt…   3m │                                              │ ╷
-     :1.0 · claude/auth-fx      │                                              │ ◆ scout  middleware.py             31m
+     :1.0 auth-fix · claude/au… │                                              │ ◆ scout  middleware.py             31m
                                 │                                              │ │
   2 ● webapp    tests 18✓…  40s │                                              │ ◆ build  tokens.py                 25m
-     :2.1 · main                │                                              │ │
+     :2.1 webapp · main         │                                              │ │
                                 │                                              │ ◆ test   pytest                    12m
   ops                         ▲ │                                              │ ├─◈ scout the payments module        ✓
   3 ▲ infra     needs you    2m │                                              │ ● fix    tokens.py                ← 3m
-     :1.0 · tf/vpc              │                                              │
+     :1.0 vpc · tf/vpc          │                                              │
                                 │                                              │
   4 ○ tfstate   turn comp…  15m │                                              │
-     :0.0 · main                │                                              │
+     :0.0 tf_state · main       │                                              │
                                 │                                              │
   elsewhere                     │                                              │
   5 ○ scratch   turn comp…  22m │                                              │

@@ -3,10 +3,14 @@ package tmuxop_test
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/tmuxop"
@@ -71,6 +75,7 @@ type fakeProc struct {
 	comm     map[int]string
 	cmdline  map[int]string
 	cwd      map[int]string
+	started  map[int]time.Time
 }
 
 // Children hands back a copy: the walker must never be able to reorder or
@@ -82,6 +87,11 @@ func (p *fakeProc) Children(pid int) []int {
 func (p *fakeProc) Comm(pid int) string    { return p.comm[pid] }
 func (p *fakeProc) Cmdline(pid int) string { return p.cmdline[pid] }
 func (p *fakeProc) Cwd(pid int) string     { return p.cwd[pid] }
+
+// StartTime defaults to the zero time — unreadable — which is what most of
+// these fixtures want: a fake that says nothing about age must not change how
+// anything is paired.
+func (p *fakeProc) StartTime(pid int) time.Time { return p.started[pid] }
 
 // chain builds pid → pid+1 → … depth links below root, naming the deepest one.
 func chain(root, depth int, leafComm, leafCwd string) *fakeProc {
@@ -105,7 +115,7 @@ func chain(root, depth int, leafComm, leafCwd string) *fakeProc {
 
 // listPanesFormat is the -F argument the contract fixes. The fields are
 // TAB-separated because the parser splits the output on tabs.
-const listPanesFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_id}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}"
+const listPanesFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_id}\t#{pane_pid}\t#{pane_current_command}\t#{window_name}"
 
 func listPanesArgs() []string {
 	return []string{"list-panes", "-a", "-F", listPanesFormat}
@@ -115,9 +125,9 @@ func listPanesArgs() []string {
 // rows, including a pane_current_path containing spaces.
 func TestT27ListPanesParsesOutput(t *testing.T) {
 	out := strings.Join([]string{
-		"dev:1.0\t%5\t12345\t/home/user/compass\tclaude",
-		"dev:1.1\t%6\t12346\t/home/user/my project/src\tzsh",
-		"work:0.0\t%9\t2\t/\tnode server.js",
+		"dev:1.0\t%5\t12345\tclaude\tcode",
+		"dev:1.1\t%6\t12346\tzsh\tcode",
+		"work:0.0\t%9\t2\tnode server.js\tsrv",
 	}, "\n") + "\n"
 
 	r := &fakeRunner{outputs: [][]byte{[]byte(out)}}
@@ -130,9 +140,9 @@ func TestT27ListPanesParsesOutput(t *testing.T) {
 	r.assertCalls(t, listPanesArgs())
 
 	want := []tmuxop.Pane{
-		{Target: "dev:1.0", ID: "%5", PID: 12345, Path: "/home/user/compass", Command: "claude"},
-		{Target: "dev:1.1", ID: "%6", PID: 12346, Path: "/home/user/my project/src", Command: "zsh"},
-		{Target: "work:0.0", ID: "%9", PID: 2, Path: "/", Command: "node server.js"},
+		{Target: "dev:1.0", ID: "%5", PID: 12345, Command: "claude", Window: "code"},
+		{Target: "dev:1.1", ID: "%6", PID: 12346, Command: "zsh", Window: "code"},
+		{Target: "work:0.0", ID: "%9", PID: 2, Command: "node server.js", Window: "srv"},
 	}
 	if !reflect.DeepEqual(panes, want) {
 		t.Errorf("ListPanes =\n  %+v\nwant\n  %+v", panes, want)
@@ -142,12 +152,12 @@ func TestT27ListPanesParsesOutput(t *testing.T) {
 // Malformed rows are dropped; the well-formed ones around them survive.
 func TestT27ListPanesSkipsMalformedRows(t *testing.T) {
 	out := strings.Join([]string{
-		"dev:1.0\t%5\t12345\t/home/user/compass\tclaude",
+		"dev:1.0\t%5\t12345\tclaude\tcode",
 		"this row has no tabs at all",
 		"dev:1.1\t%6\t12346", // too few fields
 		"",                   // blank line
 		"   ",                // whitespace line
-		"dev:2.0\t%7\t777\t/w\tvim",
+		"dev:2.0\t%7\t777\tvim\tedit",
 	}, "\n")
 
 	r := &fakeRunner{outputs: [][]byte{[]byte(out)}}
@@ -156,8 +166,8 @@ func TestT27ListPanesSkipsMalformedRows(t *testing.T) {
 		t.Fatalf("ListPanes: unexpected error %v", err)
 	}
 	want := []tmuxop.Pane{
-		{Target: "dev:1.0", ID: "%5", PID: 12345, Path: "/home/user/compass", Command: "claude"},
-		{Target: "dev:2.0", ID: "%7", PID: 777, Path: "/w", Command: "vim"},
+		{Target: "dev:1.0", ID: "%5", PID: 12345, Command: "claude", Window: "code"},
+		{Target: "dev:2.0", ID: "%7", PID: 777, Command: "vim", Window: "edit"},
 	}
 	if !reflect.DeepEqual(panes, want) {
 		t.Errorf("ListPanes =\n  %+v\nwant\n  %+v", panes, want)
@@ -372,11 +382,11 @@ func TestT29MapSessionsDeterministicPairing(t *testing.T) {
 	// Deliberately out of Target order, and with a decoy whose pane_current_path
 	// matches but whose claude descendant is somewhere else entirely.
 	panes := []tmuxop.Pane{
-		{Target: "dev:2.0", ID: "%9", PID: 900, Path: "/w/app", Command: "claude"},
-		{Target: "dev:0.0", ID: "%1", PID: 300, Path: "/w/app", Command: "claude"},
-		{Target: "dev:1.0", ID: "%5", PID: 500, Path: "/w/app", Command: "claude"},
-		{Target: "dev:3.0", ID: "%7", PID: 700, Path: "/w/app", Command: "claude"},
-		{Target: "dev:4.0", ID: "%8", PID: 800, Path: "/w/app", Command: "vim"},
+		{Target: "dev:2.0", ID: "%9", PID: 900, Command: "claude"},
+		{Target: "dev:0.0", ID: "%1", PID: 300, Command: "claude"},
+		{Target: "dev:1.0", ID: "%5", PID: 500, Command: "claude"},
+		{Target: "dev:3.0", ID: "%7", PID: 700, Command: "claude"},
+		{Target: "dev:4.0", ID: "%8", PID: 800, Command: "vim"},
 	}
 
 	got := tmuxop.MapSessions(sessions, panes, mapProc())
@@ -406,8 +416,8 @@ func TestT29MapSessionsIsDeterministic(t *testing.T) {
 		sessionAt("s-new", "/w/app", 10*time.Minute),
 	}
 	panes := []tmuxop.Pane{
-		{Target: "dev:2.0", ID: "%9", PID: 900, Path: "/w/app"},
-		{Target: "dev:1.0", ID: "%5", PID: 500, Path: "/w/app"},
+		{Target: "dev:2.0", ID: "%9", PID: 900},
+		{Target: "dev:1.0", ID: "%5", PID: 500},
 	}
 	for i := 0; i < 50; i++ {
 		got := tmuxop.MapSessions(sessions, panes, mapProc())
@@ -426,7 +436,7 @@ func TestT29MapSessionsLeftoversStayUnmapped(t *testing.T) {
 		sessionAt("s2", "/w/app", 2*time.Minute),
 		sessionAt("s3", "/w/app", 3*time.Minute),
 	}
-	panes := []tmuxop.Pane{{Target: "dev:1.0", ID: "%5", PID: 500, Path: "/w/app"}}
+	panes := []tmuxop.Pane{{Target: "dev:1.0", ID: "%5", PID: 500}}
 
 	got := tmuxop.MapSessions(sessions, panes, mapProc())
 	if len(got) != 1 {
@@ -446,7 +456,7 @@ func TestT29MapSessionsEmptyInputs(t *testing.T) {
 	if got := tmuxop.MapSessions(sessions, nil, mapProc()); len(got) != 0 {
 		t.Errorf("MapSessions with no panes = %+v, want empty", got)
 	}
-	panes := []tmuxop.Pane{{Target: "dev:1.0", ID: "%5", PID: 500, Path: "/w/app"}}
+	panes := []tmuxop.Pane{{Target: "dev:1.0", ID: "%5", PID: 500}}
 	if got := tmuxop.MapSessions(nil, panes, mapProc()); len(got) != 0 {
 		t.Errorf("MapSessions with no sessions = %+v, want empty", got)
 	}
@@ -542,5 +552,364 @@ func TestClaudeCwdFindsEveryInstallShape(t *testing.T) {
 				t.Errorf("cwd = %q, want /w/api", cwd)
 			}
 		})
+	}
+}
+
+// mapNow is "now" for the pairing tests below, expressed in the same base
+// clock sessionAt uses. `ago` reads the way the fleet does — a session's last
+// word was so long ago — which at(offset) alone does not.
+var mapNow = 100 * time.Hour
+
+func ago(d time.Duration) time.Duration { return mapNow - d }
+
+// The dogfood bug, in one test. A cwd is not an identity: people run many
+// sessions out of one directory over the months. A session that went quiet two
+// days ago cannot be the one running in a pane whose claude started an hour
+// ago — and it must not win that pane just because it also claims the address.
+//
+// This is the failure the screenshot showed: the dead session took the pane,
+// which marked it live (M5), so the fleet showed a two-day-old session wearing
+// a live mirror of somebody else's work — while the session actually in the
+// pane sat in `elsewhere` with no pane at all.
+func TestDeadSessionCannotClaimALivePane(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/w/app"},
+		started:  map[int]time.Time{701: at(ago(time.Hour))}, // this claude began an hour ago
+	}
+	panes := []tmuxop.Pane{{Target: "tinker:0.0", ID: "%1", PID: 700, Command: "claude"}}
+
+	// The dead one is listed first and would win any first-match scan.
+	sessions := []fleet.SessionInfo{
+		sessionAt("s-dead", "/w/app", ago(48*time.Hour)),
+		sessionAt("s-live", "/w/app", ago(25*time.Second)),
+	}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if _, ok := got[keyOf("s-dead")]; ok {
+		t.Errorf("a session two days quiet took a pane whose claude started an hour ago: %+v",
+			got[keyOf("s-dead")])
+	}
+	if got[keyOf("s-live")].Target != "tinker:0.0" {
+		t.Errorf("the session actually in the pane got %+v, want tinker:0.0", got[keyOf("s-live")])
+	}
+}
+
+// But the rule ranks, it never vetoes. A session resumed a moment ago has not
+// written a line since its pane's claude started, and it is still that pane's
+// session when nothing else is competing for it.
+func TestResumedSessionKeepsItsPane(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/w/app"},
+		started:  map[int]time.Time{701: at(ago(time.Minute))}, // just launched
+	}
+	panes := []tmuxop.Pane{{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"}}
+	sessions := []fleet.SessionInfo{sessionAt("s-resumed", "/w/app", ago(3*time.Hour))}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if got[keyOf("s-resumed")].Target != "dev:0.0" {
+		t.Errorf("a resumed session lost its own pane: %+v", got)
+	}
+}
+
+// Two panes at one cwd, one live session and one long dead. The live session
+// must take the pane whose claude is young — the only one it can be in — and
+// the dead one may have the other.
+//
+// The young pane is deliberately at the HIGHER Target. Offering panes in
+// Target order lets the old pane take the live session first, leaving the
+// 48-hour-dead one welded to a claude that started ten minutes ago: the very
+// weld this rule exists to prevent. Both orders are tested because the first
+// version of this test only had the easy one, and it passed against a build
+// with the rule deleted entirely.
+func TestPlausibleSessionGetsFirstPick(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		youngTarget string
+		oldTarget   string
+	}{
+		{"young pane first", "tinker:0.0", "tinker:1.0"},
+		{"young pane last", "tinker:1.0", "tinker:0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakeProc{
+				children: map[int][]int{700: {701}, 800: {801}},
+				comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
+				cwd:      map[int]string{701: "/w/app", 801: "/w/app"},
+				started: map[int]time.Time{
+					701: at(ago(10 * time.Minute)), // young
+					801: at(ago(72 * time.Hour)),   // older than either session
+				},
+			}
+			panes := []tmuxop.Pane{
+				{Target: tc.youngTarget, ID: "%1", PID: 700, Command: "claude"},
+				{Target: tc.oldTarget, ID: "%2", PID: 800, Command: "claude"},
+			}
+			sessions := []fleet.SessionInfo{
+				sessionAt("s-dead", "/w/app", ago(48*time.Hour)),
+				sessionAt("s-live", "/w/app", ago(25*time.Second)),
+			}
+
+			got := tmuxop.MapSessions(sessions, panes, p)
+			if got[keyOf("s-live")].Target != tc.youngTarget {
+				t.Errorf("the live session got %q, want the young pane %q",
+					got[keyOf("s-live")].Target, tc.youngTarget)
+			}
+			if got[keyOf("s-dead")].Target != tc.oldTarget {
+				t.Errorf("a session quiet for 48h got %q, want the pane it could be in (%q)",
+					got[keyOf("s-dead")].Target, tc.oldTarget)
+			}
+		})
+	}
+}
+
+// One session, two panes of different ages: it belongs to the pane it could be
+// in. This is the case where the rule itself decides rather than merely
+// agreeing with recency — a claude launched a minute ago cannot be running a
+// session that last spoke two hours back, however new that pane is, so the
+// session goes to the older pane instead.
+func TestSessionGoesToThePaneItCouldBeIn(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}, 800: {801}},
+		comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
+		cwd:      map[int]string{701: "/w/app", 801: "/w/app"},
+		started: map[int]time.Time{
+			701: at(ago(time.Minute)), // dev:0.0 — a claude launched a minute ago
+			801: at(ago(3 * time.Hour)),
+		},
+	}
+	panes := []tmuxop.Pane{
+		{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"},
+		{Target: "dev:1.0", ID: "%2", PID: 800, Command: "claude"},
+	}
+	sessions := []fleet.SessionInfo{sessionAt("s-idle", "/w/app", ago(2*time.Hour))}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if to := got[keyOf("s-idle")].Target; to != "dev:1.0" {
+		t.Errorf("a session last heard from 2h ago went to %q; it cannot be in a "+
+			"claude that started a minute ago, so it belongs to dev:1.0", to)
+	}
+}
+
+// With nothing to tell them apart — no claude age readable anywhere — the
+// pairing must stay exactly what it was: newest session, lowest Target.
+func TestUnknownClaudeAgeChangesNothing(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}, 800: {801}},
+		comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
+		cwd:      map[int]string{701: "/w/app", 801: "/w/app"},
+		// started is nil: /proc said nothing about either.
+	}
+	panes := []tmuxop.Pane{
+		{Target: "dev:1.0", ID: "%2", PID: 800, Command: "claude"},
+		{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"},
+	}
+	sessions := []fleet.SessionInfo{
+		sessionAt("s-old", "/w/app", ago(time.Hour)),
+		sessionAt("s-new", "/w/app", ago(time.Minute)),
+	}
+	for i := 0; i < 30; i++ {
+		got := tmuxop.MapSessions(sessions, panes, p)
+		if got[keyOf("s-new")].Target != "dev:0.0" || got[keyOf("s-old")].Target != "dev:1.0" {
+			t.Fatalf("run %d: newest session must take the lowest Target, got %+v", i, got)
+		}
+	}
+}
+
+// tmux run from OUTSIDE any session — which is exactly where compass lives,
+// its own terminal tab — prints through a sanitizer that turns the tabs the
+// format asks for into underscores. These rows are verbatim tmux 3.4 output
+// captured that way, with the window names from a real fleet: "pixie_tuiZ" and
+// "ts_feasibility" carry underscores of their own, and a session named
+// "tinker-sub1" proves the anchor is the pane id, not the first separator.
+func TestPanesSurviveTheOutsideTmuxSanitizer(t *testing.T) {
+	r := &fakeRunner{outputs: [][]byte{[]byte(strings.Join([]string{
+		"tinker:0.0_%0_4126_claude_claude",
+		"tinker:3.0_%12_4200_bash_pixie_tuiZ",
+		"tinker-sub1:5.0_%31_4310_node_ts_feasibility",
+		"bash:0.1_%2_4001_bash_port-fwd-",
+	}, "\n"))}}
+
+	got, err := tmuxop.ListPanes(r)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	want := []tmuxop.Pane{
+		{Target: "tinker:0.0", ID: "%0", PID: 4126, Command: "claude", Window: "claude"},
+		{Target: "tinker:3.0", ID: "%12", PID: 4200, Command: "bash", Window: "pixie_tuiZ"},
+		{Target: "tinker-sub1:5.0", ID: "%31", PID: 4310, Command: "node", Window: "ts_feasibility"},
+		{Target: "bash:0.1", ID: "%2", PID: 4001, Command: "bash", Window: "port-fwd-"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ListPanes returned %d panes, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("pane %d =\n  %+v\nwant\n  %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// StartTime is read from real /proc, so it gets a real test — and one that can
+// tell field 22 from its neighbours. Asserting only "this process is younger
+// than an hour" cannot: field 21 is zero on every modern kernel, so reading it
+// by mistake returns the boot time, which is also younger than an hour on the
+// short-lived containers CI runs in. A freshly spawned child pins it: it must
+// have started at or after this process did, and both after boot.
+func TestStartTimeReadsProc(t *testing.T) {
+	p := tmuxop.RealProc{}
+
+	self := p.StartTime(os.Getpid())
+	if self.IsZero() {
+		t.Fatal("could not read this process's own start time from /proc")
+	}
+	if age := time.Since(self); age < 0 || age > time.Hour {
+		t.Errorf("this test process claims to be %v old", age)
+	}
+
+	cmd := exec.Command("/bin/sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot spawn a child to compare against: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+
+	child := p.StartTime(cmd.Process.Pid)
+	if child.IsZero() {
+		t.Fatal("could not read a just-spawned child's start time")
+	}
+	if child.Before(self) {
+		t.Errorf("a child spawned now started at %v, before its parent at %v — "+
+			"that is the wrong field of /proc/<pid>/stat", child, self)
+	}
+	if boot := p.StartTime(1); !boot.IsZero() {
+		if !boot.Before(child) {
+			t.Errorf("pid 1 started at %v, not before a child spawned just now (%v)", boot, child)
+		}
+		if boot.Equal(self) {
+			t.Errorf("pid 1 and this process share a start time (%v); every pid is "+
+				"reading the boot time rather than its own start", boot)
+		}
+	}
+	if got := p.StartTime(0); !got.IsZero() {
+		t.Errorf("StartTime(0) = %v, want the zero time", got)
+	}
+}
+
+// A tmux window name is whatever someone typed into `rename-window`, and
+// compass draws it into a TUI. Control characters — an ESC most of all — must
+// not survive the trip, or a pane title repaints the deck.
+func TestWindowNamesCannotCarryEscapes(t *testing.T) {
+	r := &fakeRunner{outputs: [][]byte{[]byte(strings.Join([]string{
+		"dev:0.0\t%1\t100\tclaude\t\x1b[31mred\x1b[0m",
+		"dev:1.0\t%2\t101\tclaude\tplain-name",
+		"dev:2.0\t%3\t102\tclaude\tbell\x07and\x00nul",
+	}, "\n"))}}
+
+	got, err := tmuxop.ListPanes(r)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	want := []string{"[31mred[0m", "plain-name", "bellandnul"}
+	for i := range want {
+		if got[i].Window != want[i] {
+			t.Errorf("pane %d window = %q, want %q", i, got[i].Window, want[i])
+		}
+		if strings.ContainsFunc(got[i].Window, unicode.IsControl) {
+			t.Errorf("pane %d window still carries a control character: %q", i, got[i].Window)
+		}
+	}
+}
+
+// A session with no time at all must not outbid one that has a time. It sorts
+// last among contenders, so treating it as plausible with everything would let
+// it take the only pane and leave the better-ranked session with none — the
+// one thing the rule may never do.
+func TestATimelessSessionCannotOutbidATimedOne(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/w/app"},
+		started:  map[int]time.Time{701: at(ago(time.Minute))},
+	}
+	panes := []tmuxop.Pane{{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"}}
+	sessions := []fleet.SessionInfo{
+		sessionAt("s-timed", "/w/app", ago(time.Hour)),
+		{ID: "s-timeless", TranscriptPath: keyOf("s-timeless"), CWD: "/w/app"},
+	}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if _, ok := got[keyOf("s-timed")]; !ok {
+		t.Errorf("the session with a clock lost its pane to one without: %+v", got)
+	}
+	if _, ok := got[keyOf("s-timeless")]; ok {
+		t.Error("a session with no time at all took the only pane")
+	}
+}
+
+// The tick arithmetic, at uptimes no test machine will ever have. The obvious
+// form — ticks * time.Second / clockTicks — overflows int64 nanoseconds at
+// about 2.9 years and silently returns a time in the distant past, which makes
+// every session plausible everywhere and switches the pairing rule off.
+func TestStartFromTicksSurvivesLongUptimes(t *testing.T) {
+	boot := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, up := range []time.Duration{
+		0,
+		time.Second,
+		36 * time.Hour,
+		365 * 24 * time.Hour,
+		3 * 365 * 24 * time.Hour,  // past the overflow
+		10 * 365 * 24 * time.Hour, // a machine nobody has rebooted
+	} {
+		ticks := int64(up / (time.Second / 100)) // USER_HZ = 100
+		got := tmuxop.StartFromTicks(boot, ticks)
+		if want := boot.Add(up); !got.Equal(want) {
+			t.Errorf("uptime %v: start is %v, want %v", up, got, want)
+		}
+	}
+
+	// And the sub-second remainder converts exactly — a tick is 10ms.
+	if got, want := tmuxop.StartFromTicks(boot, 7), boot.Add(70*time.Millisecond); !got.Equal(want) {
+		t.Errorf("7 ticks = %v, want %v", got, want)
+	}
+}
+
+// A boot time that could not be read is not remembered: a single unlucky
+// moment — fd exhaustion, a sandboxed /proc — must not switch the pairing rule
+// off for the rest of the session with nothing to show for it.
+func TestBootTimeRemembersOnlySuccess(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "absent")
+	noBtime := filepath.Join(dir, "no-btime")
+	good := filepath.Join(dir, "good")
+	if err := os.WriteFile(noBtime, []byte("cpu 1 2 3\nprocesses 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(good, []byte("cpu 1 2 3\nbtime 1600000000\nprocesses 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmuxop.ResetBootTime()
+	t.Cleanup(tmuxop.ResetBootTime)
+
+	for _, path := range []string{missing, noBtime, missing} {
+		if got := tmuxop.BootTimeFrom(path); !got.IsZero() {
+			t.Fatalf("%s gave a boot time of %v", filepath.Base(path), got)
+		}
+	}
+	// A failure must not have poisoned the cache: the next good read answers.
+	want := time.Unix(1600000000, 0)
+	if got := tmuxop.BootTimeFrom(good); !got.Equal(want) {
+		t.Fatalf("after three failed reads the good one gave %v, want %v — "+
+			"a failure was memoized", got, want)
+	}
+	// And a success is remembered, so /proc/stat is read once per process.
+	if got := tmuxop.BootTimeFrom(missing); !got.Equal(want) {
+		t.Errorf("a successful boot time was not cached: %v", got)
 	}
 }

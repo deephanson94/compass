@@ -58,6 +58,14 @@ func (b *transcriptBuilder) uuid() (id, parent string) {
 	return id, parent
 }
 
+// moveTo is a session changing directory: every line from here on carries the
+// new cwd and branch, exactly as Claude Code writes them. What the session was
+// when it started stays in the lines already laid down.
+func (b *transcriptBuilder) moveTo(cwd, branch string) *transcriptBuilder {
+	b.cwd, b.branch = cwd, branch
+	return b
+}
+
 func (b *transcriptBuilder) common(ts time.Time) map[string]any {
 	id, parent := b.uuid()
 	var p any
@@ -137,6 +145,15 @@ func (b *transcriptBuilder) result(ts time.Time, toolID, content string) *transc
 }
 
 // write flushes the transcript to <root>/projects/<slug>/<sessionID>.jsonl.
+// latch is a bookkeeping line: it carries a clock but says nothing, exactly as
+// the mode and last-prompt markers at the end of a real transcript do.
+func (b *transcriptBuilder) latch(ts time.Time) *transcriptBuilder {
+	o := b.common(ts)
+	o["type"] = "queue-operation"
+	o["op"] = "latch"
+	return b.add(o)
+}
+
 func (b *transcriptBuilder) write(root, slug string) {
 	b.t.Helper()
 	dir := filepath.Join(root, "projects", slug)
@@ -412,4 +429,203 @@ func TestT15StatusLine(t *testing.T) {
 			t.Errorf("StatusLine = %q, want %q — see the CONTRACT AMBIGUITY note above", got, want)
 		}
 	})
+}
+
+// A session's location is where it is *now*, not where it was opened. Claude
+// Code writes cwd and gitBranch on every line, and a session that changes
+// directory keeps writing the new one — but discovery read only the head of
+// the file and kept the first it saw, so a session that moved was filed at an
+// address it had left. That is how a pane gets paired with the wrong session:
+// the stale address matches a pane the session is not in, and the session that
+// *is* in it matches nothing (see TestDeadSessionCannotClaimALivePane).
+func TestSessionLocationIsWhereItIsNow(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, "11111111-1111-4111-8111-111111111111", "/home/user/alpha", "main").
+		prompt(ago(3*time.Hour), "start here").
+		text(ago(3*time.Hour), "working in alpha").
+		moveTo("/home/user/porter", "trial/gates-that-score-the-oracle").
+		prompt(ago(2*time.Minute), "now over here").
+		text(ago(time.Minute), "working in porter").
+		write(root, "-home-user-alpha")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("want one session, got %d", len(infos))
+	}
+	got := infos[0]
+	if got.CWD != "/home/user/porter" {
+		t.Errorf("cwd is %q, want where the session stands now (/home/user/porter)", got.CWD)
+	}
+	if got.GitBranch != "trial/gates-that-score-the-oracle" {
+		t.Errorf("branch is %q, want the branch it is on now", got.GitBranch)
+	}
+}
+
+// A transcript whose current location has scrolled out of the tail window
+// still has one: the head is the fallback, not dead weight. The filler has to
+// be long enough to push the only cwd-bearing line past the window, or the
+// tail answers and the fallback is never reached — which is what the first
+// version of this test did.
+func TestLocationFallsBackToTheHead(t *testing.T) {
+	root := t.TempDir()
+	b := newTranscript(t, "22222222-2222-4222-8222-222222222222", "/home/user/beta", "main").
+		prompt(ago(time.Hour), "the only line that carries a cwd")
+	for len(strings.Join(b.lines, "")) < 96*1024 {
+		b.lines = append(b.lines, `{"type":"queue-operation","op":"latch"}`+"\n")
+	}
+	b.write(root, "-home-user-beta")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("want one session, got %d", len(infos))
+	}
+	if infos[0].CWD != "/home/user/beta" {
+		t.Errorf("cwd is %q; with nothing in the tail the head has to answer", infos[0].CWD)
+	}
+	if infos[0].GitBranch != "main" {
+		t.Errorf("branch is %q, want the head's", infos[0].GitBranch)
+	}
+}
+
+// cwd and branch are one answer, read off one line. Taken independently, a
+// session leaving a git repository keeps the branch of the directory it left:
+// Claude Code writes an empty gitBranch there, and "empty" is indistinguishable
+// from "this line does not carry one", so the old branch would survive and be
+// printed beside the new directory.
+func TestBranchTravelsWithTheDirectory(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, "33333333-3333-4333-8333-333333333333", "/home/user/repo", "feature-x").
+		prompt(ago(time.Hour), "in the repo").
+		text(ago(time.Hour), "on feature-x").
+		moveTo("/tmp/scratch", ""). // not a git repository at all
+		prompt(ago(time.Minute), "now in scratch").
+		text(ago(30*time.Second), "no branch here").
+		write(root, "-home-user-repo")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if got := infos[0].CWD; got != "/tmp/scratch" {
+		t.Fatalf("cwd is %q, want /tmp/scratch", got)
+	}
+	if got := infos[0].GitBranch; got != "" {
+		t.Errorf("branch is %q, but the session is in a directory git knows nothing about", got)
+	}
+}
+
+// A subagent's lines sit inline in the main transcript, and while a Task runs
+// they are the newest lines in the file. They are not this session speaking —
+// every other reader skips them — so they must not set its location either.
+func TestSubagentLinesDoNotMoveTheSession(t *testing.T) {
+	root := t.TempDir()
+	b := newTranscript(t, "44444444-4444-4444-8444-444444444444", "/home/user/main", "main").
+		prompt(ago(time.Hour), "go and scout").
+		text(ago(59*time.Minute), "spawning a subagent")
+	// The subagent works somewhere else, and is the last thing in the file.
+	b.moveTo("/home/user/subagent-dir", "detached")
+	for _, o := range []string{"scouting over here", "found it"} {
+		b.text(ago(time.Minute), o)
+		b.lines[len(b.lines)-1] = strings.Replace(
+			b.lines[len(b.lines)-1], `"isSidechain":false`, `"isSidechain":true`, 1)
+	}
+	b.write(root, "-home-user-main")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if got := infos[0].CWD; got != "/home/user/main" {
+		t.Errorf("cwd is %q — a subagent's own directory became the session's", got)
+	}
+	if got := infos[0].GitBranch; got != "main" {
+		t.Errorf("branch is %q — a subagent's branch became the session's", got)
+	}
+}
+
+// Discovery speaks once, at first sight; from then on the Manager's own fold
+// is the authority on where a live session is. Both location rules therefore
+// have to hold on that path too — a fix applied only to discovery is a fix
+// that stops working the moment a session is live, which is every session the
+// fleet actually cares about.
+func TestLiveSessionLocationFollowsTheSameRules(t *testing.T) {
+	t.Run("branch travels with the directory", func(t *testing.T) {
+		root := t.TempDir()
+		newTranscript(t, "55555555-5555-4555-8555-555555555555", "/home/user/repo", "feature-x").
+			prompt(ago(time.Hour), "in the repo").
+			text(ago(59*time.Minute), "on feature-x").
+			moveTo("/tmp/scratch", ""). // not a git repository at all
+			prompt(ago(time.Minute), "now in scratch").
+			text(ago(30*time.Second), "no branch here").
+			write(root, "-home-user-repo")
+
+		got := onlySession(t, liveManager(root))
+		if got.Info.CWD != "/tmp/scratch" {
+			t.Fatalf("cwd is %q, want /tmp/scratch", got.Info.CWD)
+		}
+		if got.Info.GitBranch != "" {
+			t.Errorf("branch is %q, but the session is in a directory git knows nothing about",
+				got.Info.GitBranch)
+		}
+	})
+
+	t.Run("a subagent does not move the session", func(t *testing.T) {
+		root := t.TempDir()
+		b := newTranscript(t, "66666666-6666-4666-8666-666666666666", "/home/user/main", "main").
+			prompt(ago(time.Hour), "go and scout").
+			text(ago(59*time.Minute), "spawning a subagent")
+		b.moveTo("/home/user/subagent-dir", "detached")
+		for _, line := range []string{"scouting over here", "found it"} {
+			b.text(ago(time.Minute), line)
+			b.lines[len(b.lines)-1] = strings.Replace(
+				b.lines[len(b.lines)-1], `"isSidechain":false`, `"isSidechain":true`, 1)
+		}
+		b.write(root, "-home-user-main")
+
+		got := onlySession(t, liveManager(root))
+		if got.Info.CWD != "/home/user/main" {
+			t.Errorf("cwd is %q — a subagent's own directory became the session's", got.Info.CWD)
+		}
+		if got.Info.GitBranch != "main" {
+			t.Errorf("branch is %q — a subagent's branch became the session's", got.Info.GitBranch)
+		}
+	})
+
+	// A subagent writing right now is this session being busy. The location
+	// rules ignore sidechain lines; the clock must not.
+	t.Run("a subagent still counts as activity", func(t *testing.T) {
+		root := t.TempDir()
+		b := newTranscript(t, "6a6a6a6a-6666-4666-8666-666666666666", "/home/user/main", "main").
+			prompt(ago(time.Hour), "go and scout").
+			text(ago(59*time.Minute), "spawning a subagent")
+		b.text(ago(time.Second), "still scouting")
+		b.lines[len(b.lines)-1] = strings.Replace(
+			b.lines[len(b.lines)-1], `"isSidechain":false`, `"isSidechain":true`, 1)
+		b.write(root, "-home-user-main")
+
+		got := onlySession(t, liveManager(root))
+		if want := ago(time.Second); !got.Info.LastEventAt.Equal(want) {
+			t.Errorf("last activity is %v, want the subagent's line at %v — a Task "+
+				"in flight is not a quiet session", got.Info.LastEventAt, want)
+		}
+	})
+}
+
+// onlySession refreshes a manager that should be watching exactly one session.
+func onlySession(t *testing.T, m *fleet.Manager) fleet.Session {
+	t.Helper()
+	sessions, err := m.Refresh(fleetNow)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want one session, got %d", len(sessions))
+	}
+	return sessions[0]
 }

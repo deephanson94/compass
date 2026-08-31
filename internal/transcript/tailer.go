@@ -114,3 +114,33 @@ func (t *Tailer) parse(line []byte) (Event, bool) {
 
 // Skipped is the number of malformed-JSON lines dropped so far.
 func (t *Tailer) Skipped() int { return t.skipped }
+
+// Mark is where a Tailer has read to: the byte offset, and any partial last
+// line it is still holding. It lets a later process resume a transcript
+// instead of re-reading it from the start.
+type Mark struct {
+	Offset int64  `json:"offset"`
+	Carry  string `json:"carry,omitempty"`
+}
+
+// Mark returns the Tailer's position.
+func (t *Tailer) Mark() Mark {
+	return Mark{Offset: t.offset, Carry: string(t.carry)}
+}
+
+// Resume places a Tailer at a mark taken earlier, possibly by another process.
+// A mark past the end of the file — the transcript was truncated or replaced
+// since — is refused, and the Tailer stays at the start: re-reading a file is
+// slow, but resuming into the middle of one that is no longer the same file
+// would report a state that never existed. Reports whether the mark was taken.
+func (t *Tailer) Resume(m Mark) bool {
+	if m.Offset <= 0 {
+		return false
+	}
+	fi, err := os.Stat(t.path)
+	if err != nil || fi.Size() < m.Offset {
+		return false
+	}
+	t.offset, t.carry = m.Offset, []byte(m.Carry)
+	return true
+}

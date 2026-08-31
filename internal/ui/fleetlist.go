@@ -458,6 +458,12 @@ func (m *Model) location(info fleet.SessionInfo) string {
 	where := "no pane"
 	if pane, ok := m.panes[info.Key()]; ok && pane.Target != "" {
 		where = paneSuffix(pane.Target)
+		// The window's name is what the user actually navigates by — they named
+		// it "porter-test", not ":4.0" — so it sits right after the coordinates
+		// and ahead of the branch, which is the part that may be clipped away.
+		if pane.Window != "" {
+			where += " " + pane.Window
+		}
 	}
 	if b := branchOf(info); b != "" {
 		return where + " · " + b
