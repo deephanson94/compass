@@ -46,6 +46,12 @@ type Runner interface {
 // never moves once a leg is closed — the class can still be upgraded under it
 // (Build → Fix), which is why it belongs in the key: a re-classified leg is
 // honestly a different leg and deserves a fresh name.
+//
+// The first part is the session's KEY — fleet.SessionInfo.Key(), the transcript
+// path — not its id: one id can own transcripts under several project slugs,
+// and two such sessions must not narrate into each other's cached labels
+// (docs/dev/M6-CONTRACT.md). The parameter keeps its old name; what callers
+// pass has changed.
 func LegKey(sessionID string, l journey.Leg) string {
 	return sessionID + "/" + strconv.FormatInt(l.Start.UnixNano(), 10) + "/" + l.Class.String()
 }
@@ -77,7 +83,8 @@ func New(r Runner, c *Cache, notify func()) *Narrator {
 }
 
 // Labels returns the cached labels for the trail's CLOSED legs, keyed by
-// LegKey. Pure lookup, no I/O beyond the in-memory cache. HEAD is left out on
+// LegKey — so sessionID here is the caller's session key, as everywhere in this
+// package. Pure lookup, no I/O beyond the in-memory cache. HEAD is left out on
 // purpose: an open leg is still changing, and narration is for history.
 func (n *Narrator) Labels(sessionID string, tr journey.Trail) map[string]string {
 	out := make(map[string]string)

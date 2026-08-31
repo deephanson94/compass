@@ -89,7 +89,11 @@ func parsePane(line string) (Pane, bool) {
 // MapSessions pairs sessions to panes: a session matches a pane whose claude
 // descendant's cwd equals the session's CWD. When several sessions share a cwd,
 // they are paired to matching panes in order (sessions by LastEventAt desc,
-// panes by Target asc); leftovers stay unmapped. Returns sessionID → Pane.
+// panes by Target asc); leftovers stay unmapped.
+//
+// Returns SessionInfo.Key() → Pane. Keying by the transcript path rather than
+// the session id is what keeps two same-id sessions from sharing one pane —
+// the pane belongs to the transcript that won it (docs/dev/M6-CONTRACT.md).
 func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]Pane {
 	out := make(map[string]Pane)
 	if len(sessions) == 0 || len(panes) == 0 {
@@ -129,7 +133,7 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 		if len(free) == 0 {
 			continue // no pane left at this cwd: the session stays unmapped
 		}
-		out[s.ID] = free[0]
+		out[s.Key()] = free[0]
 		byCwd[s.CWD] = free[1:]
 	}
 	return out

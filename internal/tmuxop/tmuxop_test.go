@@ -348,14 +348,26 @@ func mapProc() *fakeProc {
 	}
 }
 
+// sessionAt builds a fixture session. Identity is the transcript path (M6), so
+// every fixture carries one — two sessions with no path would collide in the
+// returned map under the same empty key.
+func sessionAt(id, cwd string, last time.Duration) fleet.SessionInfo {
+	return fleet.SessionInfo{
+		ID: id, TranscriptPath: keyOf(id), CWD: cwd, LastEventAt: at(last),
+	}
+}
+
+// keyOf is the key MapSessions returns a pairing under: the transcript path.
+func keyOf(id string) string { return "/x/projects/-w-app/" + id + ".jsonl" }
+
 // T29 — two sessions share a cwd and two panes match: newest session (by
 // LastEventAt) takes the lowest Target. A session with no matching pane is
 // simply absent from the map.
 func TestT29MapSessionsDeterministicPairing(t *testing.T) {
 	sessions := []fleet.SessionInfo{
-		{ID: "s-old", CWD: "/w/app", LastEventAt: at(1 * time.Minute)},
-		{ID: "s-new", CWD: "/w/app", LastEventAt: at(10 * time.Minute)},
-		{ID: "s-lonely", CWD: "/w/nowhere", LastEventAt: at(5 * time.Minute)},
+		sessionAt("s-old", "/w/app", 1*time.Minute),
+		sessionAt("s-new", "/w/app", 10*time.Minute),
+		sessionAt("s-lonely", "/w/nowhere", 5*time.Minute),
 	}
 	// Deliberately out of Target order, and with a decoy whose pane_current_path
 	// matches but whose claude descendant is somewhere else entirely.
@@ -372,26 +384,26 @@ func TestT29MapSessionsDeterministicPairing(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("MapSessions returned %d pairs, want 2: %+v", len(got), got)
 	}
-	if got["s-new"].Target != "dev:1.0" {
-		t.Errorf("s-new → %q, want dev:1.0 (newest session takes the lowest matching Target)", got["s-new"].Target)
+	if got[keyOf("s-new")].Target != "dev:1.0" {
+		t.Errorf("s-new → %q, want dev:1.0 (newest session takes the lowest matching Target)", got[keyOf("s-new")].Target)
 	}
-	if got["s-old"].Target != "dev:2.0" {
-		t.Errorf("s-old → %q, want dev:2.0", got["s-old"].Target)
+	if got[keyOf("s-old")].Target != "dev:2.0" {
+		t.Errorf("s-old → %q, want dev:2.0", got[keyOf("s-old")].Target)
 	}
-	if _, ok := got["s-lonely"]; ok {
-		t.Errorf("s-lonely → %+v, want it left unmapped", got["s-lonely"])
+	if _, ok := got[keyOf("s-lonely")]; ok {
+		t.Errorf("s-lonely → %+v, want it left unmapped", got[keyOf("s-lonely")])
 	}
 	// The whole Pane travels, not just the target.
-	if got["s-new"].ID != "%5" || got["s-new"].PID != 500 {
-		t.Errorf("s-new → %+v, want the full pane record for %%5", got["s-new"])
+	if got[keyOf("s-new")].ID != "%5" || got[keyOf("s-new")].PID != 500 {
+		t.Errorf("s-new → %+v, want the full pane record for %%5", got[keyOf("s-new")])
 	}
 }
 
 // The pairing must not depend on map or slice iteration luck.
 func TestT29MapSessionsIsDeterministic(t *testing.T) {
 	sessions := []fleet.SessionInfo{
-		{ID: "s-old", CWD: "/w/app", LastEventAt: at(1 * time.Minute)},
-		{ID: "s-new", CWD: "/w/app", LastEventAt: at(10 * time.Minute)},
+		sessionAt("s-old", "/w/app", 1*time.Minute),
+		sessionAt("s-new", "/w/app", 10*time.Minute),
 	}
 	panes := []tmuxop.Pane{
 		{Target: "dev:2.0", ID: "%9", PID: 900, Path: "/w/app"},
@@ -399,9 +411,9 @@ func TestT29MapSessionsIsDeterministic(t *testing.T) {
 	}
 	for i := 0; i < 50; i++ {
 		got := tmuxop.MapSessions(sessions, panes, mapProc())
-		if got["s-new"].ID != "%5" || got["s-old"].ID != "%9" {
+		if got[keyOf("s-new")].ID != "%5" || got[keyOf("s-old")].ID != "%9" {
 			t.Fatalf("run %d: s-new → %q, s-old → %q; want %%5 and %%9 every time",
-				i, got["s-new"].ID, got["s-old"].ID)
+				i, got[keyOf("s-new")].ID, got[keyOf("s-old")].ID)
 		}
 	}
 }
@@ -410,9 +422,9 @@ func TestT29MapSessionsIsDeterministic(t *testing.T) {
 // ones that lose.
 func TestT29MapSessionsLeftoversStayUnmapped(t *testing.T) {
 	sessions := []fleet.SessionInfo{
-		{ID: "s1", CWD: "/w/app", LastEventAt: at(1 * time.Minute)},
-		{ID: "s2", CWD: "/w/app", LastEventAt: at(2 * time.Minute)},
-		{ID: "s3", CWD: "/w/app", LastEventAt: at(3 * time.Minute)},
+		sessionAt("s1", "/w/app", 1*time.Minute),
+		sessionAt("s2", "/w/app", 2*time.Minute),
+		sessionAt("s3", "/w/app", 3*time.Minute),
 	}
 	panes := []tmuxop.Pane{{Target: "dev:1.0", ID: "%5", PID: 500, Path: "/w/app"}}
 
@@ -420,7 +432,7 @@ func TestT29MapSessionsLeftoversStayUnmapped(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("MapSessions returned %d pairs, want 1: %+v", len(got), got)
 	}
-	if _, ok := got["s3"]; !ok {
+	if _, ok := got[keyOf("s3")]; !ok {
 		t.Errorf("MapSessions = %+v, want the newest session (s3) to win the only pane", got)
 	}
 }
