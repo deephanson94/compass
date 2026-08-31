@@ -3,15 +3,15 @@
 
  FLEET · live                   │ ⌁ dev:1.0 · live                             │ TRAIL · api                      [Lv1]
                                 │                                              │
-  dev                           │                                              │ ● fix    tokens.py                ← 3m
- ▸1 ● api       Bash: pyt…   3m │                                              │ │
-     :1.0 · claude/auth-fx      │                                              │ ◆ test   pytest                    12m
-                                │                                              │ ├─◈ scout the payments module        ✓
+  dev                           │                                              │ ◉ "fix the 401 bug"                38m
+ ▸1 ● api       Bash: pyt…   3m │                                              │ ╷
+     :1.0 · claude/auth-fx      │                                              │ ◆ scout  middleware.py             31m
+                                │                                              │ │
   2 ● webapp    tests 18✓…  40s │                                              │ ◆ build  tokens.py                 25m
      :2.1 · main                │                                              │ │
-                                │                                              │ ◆ scout  middleware.py             31m
-  ops                         ▲ │                                              │ ╵
-  3 ▲ infra     needs you    2m │                                              │ ◉ "fix the 401 bug"                38m
+                                │                                              │ ◆ test   pytest                    12m
+  ops                         ▲ │                                              │ ├─◈ scout the payments module        ✓
+  3 ▲ infra     needs you    2m │                                              │ ● fix    tokens.py                ← 3m
      :1.0 · tf/vpc              │                                              │
                                 │                                              │
   4 ○ tfstate   turn comp…  15m │                                              │
@@ -27,4 +27,4 @@
                                 │                                              │
                                 │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m         │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit
+ j/k move · enter attach (prefix d returns) · g grab · ? help · q quit

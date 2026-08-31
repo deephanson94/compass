@@ -30,16 +30,21 @@ const DefaultLiveWindow = 5 * time.Minute
 // Manager owns the fleet: discovery, one tailer and one state machine per live
 // session, and the display ordering. It is safe for concurrent use.
 type Manager struct {
-	mu       sync.Mutex
-	root     string
+	mu   sync.Mutex
+	root string
+
+	// sessions is one entry per tracked session, keyed by SessionInfo.Key() —
+	// the transcript path. Two transcripts sharing a session id are two
+	// sessions here, each with its own tailer, machine and verdict.
 	sessions map[string]*entry
 
 	// excluded are cleaned absolute CWDs whose sessions the fleet refuses to
 	// show — compass's own narration dir, so it never watches itself narrate.
 	excluded map[string]bool
 
-	// paneMapped are the session ids the ui last found in a tmux pane, and
-	// liveWindow is the recency door for the rest (docs/dev/M5-CONTRACT.md).
+	// paneMapped are the keys of the sessions the ui last found in a tmux
+	// pane, and liveWindow is the recency door for the rest
+	// (docs/dev/M5-CONTRACT.md).
 	paneMapped map[string]bool
 	liveWindow time.Duration
 
@@ -61,15 +66,17 @@ func NewManager(root string) *Manager {
 func (m *Manager) Root() string { return m.root }
 
 // MarkPaneMapped tells the manager which sessions currently sit in a tmux
-// pane; the ui feeds it after every MapSessions. A pane makes a session live
+// pane; the ui feeds it after every MapSessions. The map is keyed by
+// SessionInfo.Key(), so a pane makes exactly the session holding it live —
+// never a twin that happens to share its id. A pane makes a session live
 // however long it has been quiet. The zero state — never called, or an empty
 // map — means no panes are known, and only the recency door admits anyone.
-func (m *Manager) MarkPaneMapped(ids map[string]bool) {
+func (m *Manager) MarkPaneMapped(keys map[string]bool) {
 	// Copied, not kept: the ui's map is the ui's to reuse.
-	mapped := make(map[string]bool, len(ids))
-	for id, ok := range ids {
-		if ok && id != "" {
-			mapped[id] = true
+	mapped := make(map[string]bool, len(keys))
+	for key, ok := range keys {
+		if ok && key != "" {
+			mapped[key] = true
 		}
 	}
 	m.mu.Lock()
@@ -95,7 +102,7 @@ func (m *Manager) SetLiveWindow(d time.Duration) {
 // isLive answers rule 1: a session is live if tmux has it, or if its
 // transcript moved inside the window. Caller holds the mutex.
 func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
-	if m.paneMapped[info.ID] {
+	if m.paneMapped[info.Key()] {
 		return true
 	}
 	if m.liveWindow <= 0 || info.LastEventAt.IsZero() {
@@ -167,11 +174,12 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		if m.isExcluded(info.CWD) {
 			continue // never tracked, so the next sweep also forgets it
 		}
-		kept[info.ID] = true
-		e := m.sessions[info.ID]
-		if e == nil || e.info.TranscriptPath != info.TranscriptPath {
+		key := info.Key()
+		kept[key] = true
+		e := m.sessions[key]
+		if e == nil {
 			e = &entry{}
-			m.sessions[info.ID] = e
+			m.sessions[key] = e
 		}
 		e.merge(info)
 
@@ -197,7 +205,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		// Discovery reads the head of the file; the events may name a different
 		// cwd, and an excluded one only has to be seen once to disqualify.
 		if m.isExcluded(e.info.CWD) {
-			delete(kept, info.ID)
+			delete(kept, key)
 			continue
 		}
 
@@ -208,9 +216,9 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		}
 	}
 
-	for id := range m.sessions {
-		if !kept[id] {
-			delete(m.sessions, id)
+	for key := range m.sessions {
+		if !kept[key] {
+			delete(m.sessions, key)
 		}
 	}
 

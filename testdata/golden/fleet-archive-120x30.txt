@@ -27,4 +27,4 @@
                                 │ ○ idle · archived                            │
                                 │ idle                                         │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 1-9 select · j/k move · enter reveal · A live fleet · ? help · q quit
+ j/k move · enter attach (prefix d returns) · A live fleet · ? help · q quit

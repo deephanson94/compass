@@ -104,7 +104,7 @@ func (m *Model) fleetBlock(rows []fleetRow, w int) (lines []string, selStart, se
 			continue
 		}
 		prevHeader = false
-		if m.sessions[r.sess].Info.ID == m.selectedID && selStart < 0 {
+		if m.sessions[r.sess].Info.Key() == m.selectedKey && selStart < 0 {
 			selStart = len(lines)
 			selEnd = selStart + entryLines - 1
 		}
@@ -214,7 +214,7 @@ func (m *Model) liveGroups() []fleetGroup {
 			continue
 		}
 		name := elsewhereGroup
-		if pane, ok := m.panes[s.Info.ID]; ok && pane.Target != "" {
+		if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
 			if n := tmuxSessionName(pane.Target); n != "" {
 				name = n
 			}
@@ -357,7 +357,7 @@ func echoWidth(echo string) int {
 // saying where it lives.
 func (m *Model) entryLines(r fleetRow, w int) []string {
 	s := m.sessions[r.sess]
-	selected := s.Info.ID == m.selectedID
+	selected := s.Info.Key() == m.selectedKey
 	st := s.Snap.State
 	if m.archiveView {
 		st = state.Idle // the archive can never be amber (M5 contract, fleet rule 2)
@@ -456,7 +456,7 @@ func stateLabel(s state.State) string {
 // (SPEC §2.5). A session with no pane says so plainly.
 func (m *Model) location(info fleet.SessionInfo) string {
 	where := "no pane"
-	if pane, ok := m.panes[info.ID]; ok && pane.Target != "" {
+	if pane, ok := m.panes[info.Key()]; ok && pane.Target != "" {
 		where = paneSuffix(pane.Target)
 	}
 	if b := branchOf(info); b != "" {
@@ -498,7 +498,7 @@ func paneSuffix(target string) string {
 // sorts after window 9, which a string compare would get wrong. A session with
 // no pane sorts last, which leaves the `elsewhere` group in fleet order.
 func (m *Model) paneCoords(i int) (window, pane int) {
-	p, ok := m.panes[m.sessions[i].Info.ID]
+	p, ok := m.panes[m.sessions[i].Info.Key()]
 	if !ok || p.Target == "" {
 		return math.MaxInt32, math.MaxInt32
 	}

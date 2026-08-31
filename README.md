@@ -11,43 +11,51 @@ doing something. `compass` is the sidecar panel that answers, at a glance:
 - **What adventure is next?** — Claude's own plan, rendered as ghost waypoints ahead
 
 Your sessions stay exactly where they are — **real, untouched Claude Code CLIs in
-your own tmux**. compass runs in its own terminal tab and watches all of them at
-once (a narrow `--sidecar` mode exists if you'd rather dock it inside a tmux pane).
+your own tmux**. compass runs in its own terminal tab (or a tmux window of its own)
+and watches all of them at once.
 
 ```
 ┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
-│ FLEET                 │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
-│ 1 ● api    fixing  3m │                                  │ ┊                              │
-│    dev:1.0 · auth-fx  │  ● I'll fix the token refresh    │ ◌ ship   open PR               │
-│ 2 ● webapp 18✓ 2✗     │    bug. Let me look at the       │ ◌ test   full suite            │
-│    dev:2.1 · main     │    middleware first…             │ ┊                              │
-│ 3 ▲ infra  needs you! │                                  │ ● fix    token refresh   ← 3m  │
-│    ops:0.0 · tf/vpc   │  ⏺ Read(src/auth/middleware.py)  │ │                              │
-│ 4 ○ docs   idle   22m │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
-│    (no pane) · main   │    ⎿ 18 passed, 2 failed…        │ ├─◈ agent scouted payments     │
-│ 5 ◍ etl    stuck? 8m  │                                  │ ◆ build  refresh middlware 25m │
-│    data:1.2 · loader  │  ✻ Churning… (23s · esc to       │ │                              │
-│                       │    interrupt)                    │ ◆ scout  auth module map  31m  │
-│                       │                                  │ ╵                              │
-│                       │  the real pane, mirrored live    │ ◉ "fix the 401 bug"       38m  │
-│ Tab zoom · Enter reveal · a ask · g needs-you · ? help                                    │
+│ FLEET · live          │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ dev                   │                                  │ ◉ "fix the 401 bug"       38m  │
+│▸1 ● api    fixing  3m │  ● I'll fix the token refresh    │ ╷                              │
+│    :1.0 · auth-fx     │    bug. Let me look at the       │ ◆ scout  auth module map  31m  │
+│ 2 ● webapp 18✓ 2✗     │    middleware first…             │ │                              │
+│    :2.1 · main        │                                  │ ◆ build  refresh middlware 25m │
+│ ops                 ▲ │  ⏺ Read(src/auth/middleware.py)  │ ├─◈ agent scouted payments     │
+│ 3 ▲ infra  needs you! │  ⏺ Bash(pytest tests/auth -x)    │ ◆ test   pytest 18✓ 2✗    12m  │
+│    :0.0 · tf/vpc      │    ⎿ 18 passed, 2 failed…        │ │                              │
+│ elsewhere             │                                  │ ● fix    token refresh   ← 3m  │
+│ 4 ○ docs   idle   22m │  ✻ Churning… (23s · esc to       │ ┊                              │
+│    no pane · main     │    interrupt)                    │ ◌ test   full suite            │
+│                       │                                  │ ┊                              │
+│ 268 archived · A      │  the real pane, mirrored live    │ ◌ ship   open PR               │
+│ j/k move · enter attach (prefix d returns) · g grab · ? help · q quit                     │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 The middle panel is the **live mirror**: the selected session's actual tmux pane,
 streamed read-only via `capture-pane` (the same trick tmux's own `choose-tree`
-preview uses) — you watch the real CLI render, but compass owns no PTY and takes no
-input for it. Press `3` to watch infra instead; `Enter` reveals its pane in *your*
-tmux (`ops:0.0`), already focused when you switch over, for the moments you need to
-type. `g` grabs whichever session has been waiting on you longest. Nothing to
-manage: compass never creates or owns tmux sessions, windows, or panes.
+preview uses) — you watch the real CLI render, but compass owns no PTY. Press `3`
+to watch infra instead. When you want to *type*, `Enter` hands you the terminal:
+outside tmux compass suspends and attaches, so the pane is a real PTY with a real
+keyboard and your own prefix + `d` brings the deck back; inside tmux your client
+just switches. `g` grabs whichever session has been waiting on you longest and
+attaches to it. Nothing to manage: compass never creates or owns tmux sessions,
+windows, or panes.
+
+The trail on the right reads like the conversation does — oldest at the top, the
+newest work at the bottom, and it stays pinned there so the latest is always on
+screen. From `Tab` (Lv2) down, the middle panel becomes the conversation itself,
+anchored to whatever trail row your cursor is on: the trail is a minimap, the
+transcript is the code.
 
 ## Principles
 
 1. **The CLI is sacred, and so is your tmux.** Sessions are the real `claude` binary
    in panes you own. compass never wraps, proxies, or re-renders the CLI, and never
    creates or manages tmux sessions — it only observes, plus one keypress-gated
-   action (reveal: focus the pane you asked for).
+   action: `Enter`, which hands you the session's own terminal.
 2. **Three keypresses, max.** Any session, any zoom level, any answer — reachable in
    ≤3 keypresses from anywhere. This is a hard constraint, tested in CI.
 3. **Zero config, read-only.** compass watches the JSONL transcripts Claude Code
@@ -68,7 +76,7 @@ manage: compass never creates or owns tmux sessions, windows, or panes.
 |-------|--------------|-------|
 | **Lv1 — Trail** | default | The journey as a git graph: scout → build → test → fix, subagents as branches, plan as ghost nodes |
 | **Lv2 — Waypoints** | `Tab` | Legs expanded: each bug, each test run (18✓ 2✗), files touched, commits, subagent findings |
-| **Lv3 — Deep dive** | `Tab` `Tab` | Split panel: pretty transcript reader + **ask the trail** — an interactive Claude grounded in this session's full history |
+| **Lv3 — Deep dive** | `Tab` `Tab` | The reader takes focus: scroll, unfold tool output, search. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
 
 ## Using it
 
@@ -76,9 +84,11 @@ manage: compass never creates or owns tmux sessions, windows, or panes.
 go build -o compass ./cmd/compass    # Go 1.24+; a single static binary
 
 compass                              # the deck, full screen — run it in its own terminal tab
-compass -readonly                    # observe only: reveal (compass's one tmux write) is off
+compass -readonly                    # observe only: Enter no longer attaches
 compass -narrator off                # heuristic labels only, no claude calls
+compass -live-within 0               # only sessions tmux is holding count as live
 compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1"
+compass panes                        # diagnostic: which pane holds which session
 ```
 
 Everything is optional configuration — compass runs with none. `~/.config/compass/config.toml`:
@@ -87,6 +97,7 @@ Everything is optional configuration — compass runs with none. `~/.config/comp
 root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root override)
 narrator = "haiku"      # narration model; "off" disables
 readonly = false        # true keeps compass's hands off tmux entirely
+live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:
@@ -100,11 +111,14 @@ set -g status-right '#(compass status) · %H:%M'
 | Key | |
 |-----|---|
 | `1`–`9` | select a session |
+| `Enter` | go to it: compass hands you the session's terminal (prefix + `d` returns) |
 | `Tab` / `Shift+Tab` | zoom: trail → waypoints → the conversation itself |
-| `j`/`k` | move — the fleet at Lv1, the trail's rows at Lv2, the reader at Lv3 |
-| `Enter` | Lv1: reveal the session's pane in *your* tmux · Lv2: open the reader at that moment |
-| `g` | grab the session that has waited on you longest (and reveal it) |
+| `j`/`k` | move — the fleet at Lv1, the trail's rows at Lv2 (the conversation follows), the reader at Lv3 |
+| `g` | grab the session that has waited on you longest, and go to it |
+| `A` | browse the archive: every past session, grouped by project |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
+| `ctrl+d`/`ctrl+u` | half a page: the trail at Lv1, the reader at Lv3 |
+| `G` | back to the present — the newest row, at any level |
 | `Space` `/` `n`/`N` | Lv3: unfold a result · search · walk the matches |
 | `?` | help |
 

@@ -83,11 +83,24 @@ func (m *Model) readerTitle(w int) string {
 	return left + strings.Repeat(" ", gap) + dimStyle.Render(right)
 }
 
-// enterReader is Enter on a Lv2 row: the reader opens scrolled to that moment.
+// enterReader is Tab on a Lv2 row: the reader is already open on that moment —
+// the middle panel has been following the cursor since Lv2 — so all this does
+// is hand it the keys.
 func (m *Model) enterReader() {
-	rows := TrailRows(m.trail, m.level)
 	m.level = levelReader
-	if m.cursor < 0 || m.cursor >= len(rows) {
+	m.anchorReader()
+}
+
+// anchorReader points the reader at the row the Lv2 cursor stands on: the
+// middle panel is that moment of the conversation, and it re-anchors on every
+// cursor move (M7 contract). A row the document does not reach yet leaves the
+// reader where it is rather than jumping it somewhere arbitrary.
+func (m *Model) anchorReader() {
+	if m.cursor < 0 {
+		return
+	}
+	rows := TrailRows(m.trail, m.level)
+	if m.cursor >= len(rows) {
 		return
 	}
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
@@ -191,12 +204,14 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 }
 
 // requestNarration asks the narrator to name the trail's closed legs, at most
-// once per shape of the trail — the narrator dedupes harder still.
+// once per shape of the trail — the narrator dedupes harder still. Everything
+// it hands over is keyed by the session's Key(): two sessions sharing an id
+// must never read each other's labels (M6 contract).
 func (m *Model) requestNarration() {
-	if m.narrator == nil || m.selectedID == "" {
+	if m.narrator == nil || m.selectedKey == "" {
 		return
 	}
-	shape := trailShape(m.selectedID, m.trail)
+	shape := trailShape(m.selectedKey, m.trail)
 	if shape == m.narrated {
 		m.refreshLabels()
 		return
@@ -206,21 +221,21 @@ func (m *Model) requestNarration() {
 	if n := len(m.trail.Prompts); n > 0 {
 		prompt = m.trail.Prompts[n-1].Text
 	}
-	m.narrator.Request(m.selectedID, m.trail, prompt)
+	m.narrator.Request(m.selectedKey, m.trail, prompt)
 	m.refreshLabels()
 }
 
 // refreshLabels pulls whatever narration has landed for the selected trail.
 func (m *Model) refreshLabels() {
-	if m.narrator == nil || m.selectedID == "" {
+	if m.narrator == nil || m.selectedKey == "" {
 		return
 	}
-	m.labels = m.narrator.Labels(m.selectedID, m.trail)
+	m.labels = m.narrator.Labels(m.selectedKey, m.trail)
 }
 
 // trailShape fingerprints a trail cheaply: a new closed leg, or a session
 // switch, is a new shape worth narrating.
-func trailShape(sessionID string, tr journey.Trail) string {
+func trailShape(key string, tr journey.Trail) string {
 	closed := len(tr.Legs)
 	if closed > 0 && tr.Legs[closed-1].Current {
 		closed--
@@ -229,5 +244,5 @@ func trailShape(sessionID string, tr journey.Trail) string {
 	if closed > 0 {
 		last = tr.Legs[closed-1].Start.String()
 	}
-	return sessionID + "|" + strconv.Itoa(closed) + "|" + last
+	return key + "|" + strconv.Itoa(closed) + "|" + last
 }

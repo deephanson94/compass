@@ -1,9 +1,9 @@
-● fix    tokens.py                ← 3m
+◉ "fix the 401 bug"                38m
+╷
+◆ maps the auth module             31m
+│
+◆ wires the token refresh          25m
 │
 ◆ test   pytest                    12m
 ├─◈ scout the payments module        ✓
-◆ wires the token refresh          25m
-│
-◆ maps the auth module             31m
-╵
-◉ "fix the 401 bug"                38m
+● fix    tokens.py                ← 3m

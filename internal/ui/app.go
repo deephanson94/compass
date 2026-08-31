@@ -4,7 +4,10 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -26,6 +29,10 @@ const (
 	captureInterval = 200 * time.Millisecond // the mirror, and only the mirror
 	breathInterval  = 500 * time.Millisecond // HEAD's breath — SPEC §4's one animation
 )
+
+// trailChrome is what the trail column spends above the graph itself: its
+// title, and one line of air (trailColumn).
+const trailChrome = 2
 
 // The zoom levels Tab moves between (SPEC §2.3).
 const (
@@ -59,26 +66,34 @@ type fleetMsg struct {
 // Narrator is the deck's view of the narration service (internal/narrator):
 // ask for labels, read the ones that have landed. An interface, so the panel
 // stays renderable — and testable — without the CLI behind it.
+//
+// The string it is handed is the session's Key(), not its id: LegKey's
+// signature did not change, but what compass passes into it did (M6 contract).
 type Narrator interface {
-	Labels(sessionID string, tr journey.Trail) map[string]string
-	Request(sessionID string, tr journey.Trail, prompt string)
+	Labels(key string, tr journey.Trail) map[string]string
+	Request(key string, tr journey.Trail, prompt string)
 }
 
-// panesMsg carries both shapes of the same truth: the sessionID → pane map the
-// deck looks things up in, and tmux's own ordering of the panes — which is the
-// order the live fleet groups itself in (M5 contract, package tmuxop).
+// panesMsg carries both shapes of the same truth: the key → pane map the deck
+// looks things up in — keyed by SessionInfo.Key(), never by the session id
+// (M6 contract) — and tmux's own ordering of the panes, which is the order the
+// live fleet groups itself in (M5 contract, package tmuxop).
 type panesMsg struct {
 	panes map[string]tmuxop.Pane
 	list  []tmuxop.Pane
 }
 
 type captureMsg struct {
-	id    string // the session the frame was captured for
+	key   string // the session the frame was captured for
 	frame string
 }
 
-type revealMsg struct {
+// attachDoneMsg comes back when compass has its terminal again — or, inside
+// tmux, when the client has finished moving. It names the pane, so the deck
+// can say where the user just went.
+type attachDoneMsg struct {
 	target string
+	inside bool // the client switched; compass never gave up its terminal
 	err    error
 }
 
@@ -93,8 +108,8 @@ type Model struct {
 	narrator Narrator
 
 	sessions []fleet.Session
-	panes    map[string]tmuxop.Pane
-	paneList []tmuxop.Pane // tmux's own order: the live view's group order
+	panes    map[string]tmuxop.Pane // keyed by SessionInfo.Key(), like everything else
+	paneList []tmuxop.Pane          // tmux's own order: the live view's group order
 	trail    journey.Trail
 	events   []transcript.Event
 	todos    []todo.Item
@@ -120,22 +135,39 @@ type Model struct {
 	docVer   int    // bumped whenever a fold changes, to retire the cache
 	docCache readerCache
 
-	selectedID string
-	width      int
-	height     int
+	// The trail's own viewport, and only the trail's: how far the panel is
+	// scrolled into the trail's document, and whether it is pinned to the
+	// bottom. Pinned is the resting state (M7 contract): a growing journey
+	// keeps its newest row on screen without anybody pressing a key.
+	trailScroll int
+	trailPinned bool
+
+	// selectedKey is the session the deck is pointed at, held by its Key() —
+	// its transcript path. The session id is a label two sessions can share
+	// (M6 contract); the path is the one thing that never repeats.
+	selectedKey string
+
+	width  int
+	height int
 
 	// The fleet column's own state: which of the two fleets is on screen, the
 	// selection the other one is holding for when you come back, and how far the
 	// column is scrolled (in rendered lines).
 	archiveView bool
-	restSelID   string
+	restSelKey  string // the other view's selection, also a Key()
 	fleetScroll int
 
 	showHelp  bool
 	searching bool
 	pulse     bool // HEAD's breath is on its off-beat
 	readonly  bool
+	inTmux    bool   // $TMUX was set: Enter switches the client instead of suspending
 	note      string // one line of consequence, cleared by the next keypress
+
+	// spawn is how a built command reaches the world. The deck leaves it nil
+	// and runs the command itself; a harness installs one to read the command
+	// Enter built, with no tmux server anywhere near the test.
+	spawn func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd
 
 	lastNeedsYou int
 }
@@ -161,13 +193,18 @@ func New(mgr *fleet.Manager) *Model {
 		now:          time.Now(),
 		level:        levelTrail,
 		cursor:       -1,
+		trailPinned:  true,
 		unfolded:     map[int]bool{},
 		lastNeedsYou: -1,
 	}
 }
 
 // Run starts the full-screen deck. In readonly mode compass keeps its one write
-// action — reveal — to itself.
+// action — attach — to itself.
+//
+// $TMUX is read once, here: whether compass is already inside the user's tmux
+// decides both what Enter does and what the footer promises. New() leaves it
+// false, so a harness renders one deterministic deck.
 //
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
@@ -175,6 +212,7 @@ func New(mgr *fleet.Manager) *Model {
 func Run(mgr *fleet.Manager, readonly bool, build func(notify func()) Narrator) error {
 	m := New(mgr)
 	m.readonly = readonly
+	m.inTmux = os.Getenv("TMUX") != ""
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if build != nil {
 		m.narrator = build(func() { p.Send(narratedMsg{}) })
@@ -209,8 +247,8 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 	m.clampSelection()
 }
 
-// SetPanes gives the model the sessionID → pane mapping: the location line in
-// the fleet, the source of the mirror, and the target of a reveal.
+// SetPanes gives the model the key → pane mapping: the location line in the
+// fleet, the source of the mirror, and the pane Enter attaches to.
 func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
 	m.panes = panes
 }
@@ -271,10 +309,13 @@ func (m *Model) refresh() tea.Cmd {
 		// poll and nothing it would want overwritten.
 		return nil
 	}
-	selected, root := m.selectedID, mgr.Root()
-	path := ""
+	selected, root := m.selectedKey, mgr.Root()
+	// The todo file on disk is named after the session id, not the key: the id
+	// is what claude itself writes under. Two sessions sharing an id share that
+	// plan, which is the truth on disk — not something compass may invent.
+	path, sessionID := "", ""
 	if s, ok := m.selected(); ok {
-		path = s.Info.TranscriptPath
+		path, sessionID = s.Info.TranscriptPath, s.Info.ID
 	}
 	return func() tea.Msg {
 		now := time.Now()
@@ -283,7 +324,7 @@ func (m *Model) refresh() tea.Cmd {
 		if selected != "" {
 			// The plan the session keeps for itself. A missing or unreadable
 			// todo file is not news: the trail simply has no future to draw.
-			msg.todos, _ = todo.Read(root, selected)
+			msg.todos, _ = todo.Read(root, sessionID)
 			msg.trailFor = selected
 		}
 		if feeds != nil {
@@ -320,17 +361,19 @@ func (m *Model) relistPanes() tea.Cmd {
 }
 
 // markMapped tells the fleet which sessions currently sit in a pane — the other
-// half of liveness (M5 contract, fleet rule 1). A harness drives the deck with
-// no Manager at all, so a nil one is simply nothing to tell.
+// half of liveness (M5 contract, fleet rule 1). The set it passes is a set of
+// keys, so a twin sharing an id does not inherit its sibling's pane (M6
+// contract). A harness drives the deck with no Manager at all, so a nil one is
+// simply nothing to tell.
 func markMapped(mgr *fleet.Manager, mapped map[string]tmuxop.Pane) {
 	if mgr == nil {
 		return
 	}
-	ids := make(map[string]bool, len(mapped))
-	for id := range mapped {
-		ids[id] = true
+	keys := make(map[string]bool, len(mapped))
+	for key := range mapped {
+		keys[key] = true
 	}
-	mgr.MarkPaneMapped(ids)
+	mgr.MarkPaneMapped(keys)
 }
 
 // capture mirrors the selected pane, and only it: 200ms of one capture-pane is
@@ -340,13 +383,13 @@ func (m *Model) capture() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	runner, id := m.runner, m.selectedID
+	runner, key := m.runner, m.selectedKey
 	return func() tea.Msg {
 		frame, err := tmuxop.Capture(runner, pane.ID)
 		if err != nil {
-			return captureMsg{id: id}
+			return captureMsg{key: key}
 		}
-		return captureMsg{id: id, frame: frame}
+		return captureMsg{key: key, frame: frame}
 	}
 }
 
@@ -377,9 +420,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, breathTick()
 
 	case fleetMsg:
+		// Init lists panes against a fleet that has not arrived yet, so the
+		// first pairing has nothing to pair. Re-list the moment there is
+		// something to pair with: otherwise every session reads "no pane" —
+		// and the mirror falls back to the transcript — until the 5s pane tick.
+		first := !m.loaded
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
 		m.clampSelection()
-		if msg.trailFor != "" && msg.trailFor == m.selectedID {
+		if first && len(m.sessions) > 0 {
+			return m, tea.Batch(m.titleCmd(), m.relistPanes())
+		}
+		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
 			if msg.hasTrail {
 				m.trail = msg.trail
 				m.SetEvents(msg.events)
@@ -405,16 +456,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case captureMsg:
-		if msg.id == m.selectedID {
+		if msg.key == m.selectedKey {
 			m.mirror = msg.frame
 		}
 		return m, nil
 
-	case revealMsg:
-		if msg.err != nil {
-			m.note = "reveal failed"
-		} else {
-			m.note = "revealed " + msg.target
+	case attachDoneMsg:
+		switch {
+		case msg.err != nil && msg.inside:
+			// Inside tmux the handover is one sequence — select-window,
+			// select-pane, switch-client — and tmux runs the rest even when a
+			// step fails, so the client may well have moved anyway (a detached
+			// server, for instance, has no client to switch and says so while
+			// the selects still land). Report what tmux said rather than
+			// claiming an outcome the deck cannot see.
+			m.note = "tmux: " + firstLine(msg.err.Error())
+		case msg.err != nil:
+			m.note = "attach failed: " + firstLine(msg.err.Error())
+		case msg.inside:
+			// Nothing was suspended, so nothing announced its own return: the
+			// deck says where the client went instead.
+			m.note = "switched to " + msg.target
 		}
 		return m, nil
 
@@ -491,15 +553,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.cursorMove(-1)
 			return m, nil
-		case "enter":
-			m.enterReader()
+		case "G":
+			// G means the same thing at every depth: back to the present. At
+			// Lv2 the cursor is what the viewport follows, so it is the cursor
+			// that travels — and landing on the newest row re-pins the panel.
+			m.cursorToPresent()
 			return m, nil
+		case "enter":
+			// The reader is already open on this row (the middle panel follows
+			// the cursor), so Enter has only ever meant one thing: go there.
+			return m, m.attach()
 		case "g":
 			if !m.selectOldestNeedsYou() {
 				m.note = "nothing is waiting on you"
 				return m, nil
 			}
-			return m, tea.Batch(m.refresh(), m.reveal())
+			return m, tea.Batch(m.refresh(), m.attach())
 		}
 	default: // levelTrail
 		switch key {
@@ -509,14 +578,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.move(-1)
 			return m, m.refresh()
+		case "ctrl+d":
+			m.trailScrollBy(m.trailHalfPage())
+			return m, nil
+		case "ctrl+u":
+			m.trailScrollBy(-m.trailHalfPage())
+			return m, nil
+		case "G":
+			// Back to the present, whatever the offset was.
+			m.trailPinned = true
+			return m, nil
 		case "enter":
-			return m, m.reveal()
+			return m, m.attach()
 		case "g":
 			if !m.selectOldestNeedsYou() {
 				m.note = "nothing is waiting on you"
 				return m, nil
 			}
-			return m, tea.Batch(m.refresh(), m.reveal())
+			return m, tea.Batch(m.refresh(), m.attach())
 		}
 	}
 	return m, nil
@@ -526,6 +605,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // through it rather than through the fleet.
 func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
+	case "enter":
+		// Enter means one thing at every depth (M7 contract).
+		return m, m.attach()
 	case "j", "down":
 		m.scrollBy(1)
 	case "k", "up":
@@ -560,7 +642,10 @@ func (m *Model) cursorMove(delta int) {
 	}
 	c := m.cursor + delta
 	if m.cursor < 0 {
-		c = 0
+		// A cursor that has not been placed yet starts at the present: Tab into
+		// Lv2 — and switching sessions inside it — opens on the newest row, the
+		// same place the pinned trail is already showing.
+		c = len(rows) - 1
 	}
 	if c < 0 {
 		c = 0
@@ -569,6 +654,116 @@ func (m *Model) cursorMove(delta int) {
 		c = len(rows) - 1
 	}
 	m.cursor = c
+	if c == len(rows)-1 {
+		// The newest row is the present: standing on it puts the panel back to
+		// following the journey.
+		m.trailPinned = true
+	}
+	m.keepCursorVisible()
+	m.anchorReader()
+}
+
+// cursorToPresent puts the Lv2 cursor on the newest row, wherever it stood.
+// cursorMove clamps, so the whole journey in one delta is simply the end of it.
+func (m *Model) cursorToPresent() {
+	m.cursorMove(len(TrailRows(m.trail, m.level)))
+}
+
+// trailBox is the block the trail column is currently drawn into: the same
+// arithmetic deckLines and trailColumn do, so a scroll key moves the viewport
+// that is actually on screen. Width first, then the rows the graph itself gets
+// — the column spends two on its title and its line of air.
+func (m *Model) trailBox() (int, int) {
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	inner := w - 2*edgePad
+	if inner < 10 {
+		inner = w
+	}
+	width := inner
+	switch {
+	case inner < minDeckCols:
+		// The trail is not on screen at all; a sane box keeps the arithmetic
+		// honest until it is.
+	case m.width >= deckWideCols:
+		width = trailWidth
+	default:
+		width = inner - fleetWidth - gutterWidth
+	}
+
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	height := h - 5 - trailChrome
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+// trailHalfPage is what ctrl+d and ctrl+u move: half the trail's screenful.
+func (m *Model) trailHalfPage() int {
+	_, h := m.trailBox()
+	if h < 2 {
+		return 1
+	}
+	return h / 2
+}
+
+// trailView measures the trail against its viewport: the whole document, one
+// screenful, and the offset the panel is showing right now — a pinned panel is
+// showing the last screenful, whatever Scroll says.
+func (m *Model) trailView() (total, height, top int) {
+	w, h := m.trailBox()
+	total = len(TrailLines(m.trail, m.trailOpts(w, h)))
+	top = m.trailScroll
+	if m.trailPinned {
+		top = lastScreenful(total, h)
+	}
+	return total, h, clampScroll(top, total, h)
+}
+
+// lastScreenful is the offset a pinned panel is showing: the bottom of the
+// document, which is where the journey's newest row lives.
+func lastScreenful(total, height int) int {
+	return clampScroll(total, total, height)
+}
+
+// trailScrollBy moves the trail's viewport, clamped to the document. Scrolling
+// up unpins; landing back on the last screenful re-pins, so the common case
+// needs no key at all (M7 contract).
+func (m *Model) trailScrollBy(delta int) {
+	total, h, top := m.trailView()
+	m.trailScroll = clampScroll(top+delta, total, h)
+	m.trailPinned = m.trailScroll >= lastScreenful(total, h)
+}
+
+// keepCursorVisible scrolls the trail only as far as it must to keep the Lv2
+// cursor's row on screen — a cursor already inside the viewport moves nothing,
+// not even the pin.
+func (m *Model) keepCursorVisible() {
+	if m.level < levelWaypoints || m.cursor < 0 {
+		return
+	}
+	w, h := m.trailBox()
+	row := TrailCursorRow(m.trail, m.trailOpts(w, h))
+	if row < 0 {
+		return
+	}
+	total, height, top := m.trailView()
+	switch {
+	case row < top:
+		top = row
+	case row >= top+height:
+		top = row - height + 1
+	default:
+		return // already on screen: the offset and the pin both stand
+	}
+	m.trailScroll = clampScroll(top, total, height)
+	m.trailPinned = m.trailScroll >= lastScreenful(total, height)
 }
 
 // zoomIn is Tab: Lv1's legs unfold their waypoints, Lv2 opens the conversation
@@ -577,9 +772,9 @@ func (m *Model) zoomIn() {
 	switch {
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
-		if m.cursor < 0 {
-			m.cursorMove(0)
-		}
+		// Lv2 is the trail with a cursor on it, and the middle panel reading
+		// whatever that cursor stands on: cursorMove(0) settles both.
+		m.cursorMove(0)
 	case m.level < levelReader:
 		m.enterReader()
 	default:
@@ -593,17 +788,24 @@ func (m *Model) zoomOut() {
 	switch {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
+		// The reader goes back to following the cursor it left behind.
+		m.anchorReader()
 	case m.level > levelTrail:
 		m.level = levelTrail
 		m.cursor = -1
 	}
 }
 
-// reveal moves the user's tmux focus onto the selected pane — compass's only
-// write, and only ever from a keypress.
-func (m *Model) reveal() tea.Cmd {
+// attach hands the terminal to the selected session — Enter's whole job (M6
+// contract). Outside tmux compass suspends itself the way `ask` does: the pane
+// owns the terminal until the user detaches with their own prefix `d`, and the
+// deck comes back exactly as it was. Inside tmux there is nothing to suspend —
+// the command moves the client and returns at once.
+//
+// It is compass's only write, and only ever from a keypress.
+func (m *Model) attach() tea.Cmd {
 	if m.readonly {
-		m.note = "read-only · reveal is off"
+		m.note = "read-only · attach is off"
 		return nil
 	}
 	pane, ok := m.selectedPane()
@@ -611,10 +813,27 @@ func (m *Model) reveal() tea.Cmd {
 		m.note = "no tmux pane for this session"
 		return nil
 	}
-	runner := m.runner
-	return func() tea.Msg {
-		return revealMsg{target: pane.Target, err: tmuxop.Reveal(runner, pane.Target, pane.ID)}
+	cmd := tmuxop.Attach(pane.Target, pane.ID, m.inTmux)
+	done := func(err error) tea.Msg {
+		return attachDoneMsg{target: pane.Target, inside: m.inTmux, err: err}
 	}
+	if m.spawn != nil {
+		return m.spawn(cmd, m.inTmux, done)
+	}
+	if m.inTmux {
+		// Nothing is suspended, so the command runs off the render loop like any
+		// other — and tmux's own words are worth more than "exit status 1".
+		return func() tea.Msg {
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				if said := strings.TrimSpace(string(out)); said != "" {
+					err = errors.New(said)
+				}
+			}
+			return done(err)
+		}
+	}
+	return tea.ExecProcess(cmd, done)
 }
 
 // selected is the session the deck is pointed at.
@@ -631,16 +850,16 @@ func (m *Model) selectedPane() (tmuxop.Pane, bool) {
 	if !ok {
 		return tmuxop.Pane{}, false
 	}
-	pane, ok := m.panes[s.Info.ID]
+	pane, ok := m.panes[s.Info.Key()]
 	return pane, ok
 }
 
-// selectedIndex resolves the sticky selection (by session id) to a row. The
-// fleet re-sorts every second; the cursor must stay on the session, not on the
-// line number.
+// selectedIndex resolves the sticky selection (by key) to a row. The fleet
+// re-sorts every second; the cursor must stay on the session, not on the line
+// number — and never on its twin.
 func (m *Model) selectedIndex() int {
 	for i, s := range m.sessions {
-		if s.Info.ID == m.selectedID {
+		if s.Info.Key() == m.selectedKey {
 			return i
 		}
 	}
@@ -649,7 +868,7 @@ func (m *Model) selectedIndex() int {
 
 func (m *Model) clampSelection() {
 	if len(m.sessions) == 0 {
-		m.selectedID, m.restSelID = "", ""
+		m.selectedKey, m.restSelKey = "", ""
 		return
 	}
 	order := m.fleetOrder()
@@ -657,11 +876,11 @@ func (m *Model) clampSelection() {
 		return // an empty view keeps whatever it had; the column says it is empty
 	}
 	for _, i := range order {
-		if m.sessions[i].Info.ID == m.selectedID {
+		if m.sessions[i].Info.Key() == m.selectedKey {
 			return
 		}
 	}
-	m.point(m.sessions[order[0]].Info.ID)
+	m.point(m.sessions[order[0]].Info.Key())
 }
 
 // toggleArchive swaps the two fleets, and their selections with them: the live
@@ -672,24 +891,24 @@ func (m *Model) toggleArchive() {
 		return
 	}
 	m.archiveView = !m.archiveView
-	m.selectedID, m.restSelID = m.restSelID, m.selectedID
+	m.selectedKey, m.restSelKey = m.restSelKey, m.selectedKey
 	m.fleetScroll = 0
-	if m.selectedID != "" {
-		// A remembered id is a fresh selection for everything downstream.
-		id := m.selectedID
-		m.selectedID = ""
-		m.point(id)
+	if m.selectedKey != "" {
+		// A remembered key is a fresh selection for everything downstream.
+		key := m.selectedKey
+		m.selectedKey = ""
+		m.point(key)
 	}
 	m.clampSelection()
 }
 
 // point moves the selection. Trail and mirror belong to the session that was
 // selected, so they leave with it rather than lingering as somebody else's.
-func (m *Model) point(id string) {
-	if id == m.selectedID {
+func (m *Model) point(key string) {
+	if key == m.selectedKey {
 		return
 	}
-	m.selectedID = id
+	m.selectedKey = key
 	m.trail = journey.Trail{}
 	m.todos = nil
 	m.mirror = ""
@@ -699,6 +918,7 @@ func (m *Model) point(id string) {
 	m.unfolded = map[int]bool{}
 	m.scroll = 0
 	m.cursor = -1
+	m.trailScroll, m.trailPinned = 0, true
 	m.query, m.draft, m.searching = "", "", false
 }
 
@@ -709,7 +929,7 @@ func (m *Model) selectIndex(i int) {
 	if i < 0 || i >= len(order) {
 		return
 	}
-	m.point(m.sessions[order[i]].Info.ID)
+	m.point(m.sessions[order[i]].Info.Key())
 }
 
 // move is j/k: one session down or up the rendered order, skipping headers —
@@ -721,7 +941,7 @@ func (m *Model) move(delta int) {
 	}
 	pos := 0
 	for p, i := range order {
-		if m.sessions[i].Info.ID == m.selectedID {
+		if m.sessions[i].Info.Key() == m.selectedKey {
 			pos = p
 			break
 		}
@@ -733,7 +953,7 @@ func (m *Model) move(delta int) {
 	if pos >= len(order) {
 		pos = len(order) - 1
 	}
-	m.point(m.sessions[order[pos]].Info.ID)
+	m.point(m.sessions[order[pos]].Info.Key())
 }
 
 // selectOldestNeedsYou grabs the session that has been waiting longest — the
@@ -746,7 +966,7 @@ func (m *Model) selectOldestNeedsYou() bool {
 			if m.archiveView {
 				m.toggleArchive()
 			}
-			m.point(s.Info.ID)
+			m.point(s.Info.Key())
 			return true
 		}
 	}
@@ -869,12 +1089,12 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
 		// on the fleet's own last row: "N archived · A browses".
-		keys = "1-9 select · j/k move · enter reveal · A live fleet · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · A live fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -882,9 +1102,9 @@ func (m *Model) footerLine(w int) string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.level >= levelReader:
-		keys = "j/k scroll · space fold · / search · n/N match · a ask · esc back"
+		keys = "j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · enter opens the moment · tab deeper · a ask · esc back"
+		keys = "j/k rows · enter attach · tab deeper · a ask · esc back"
 	}
 	left := dimStyle.Render(clip(keys, w))
 	if m.note == "" {
@@ -896,6 +1116,20 @@ func (m *Model) footerLine(w int) string {
 		return note // the note is the news; the keymap is always there
 	}
 	return left + strings.Repeat(" ", gap) + note
+}
+
+// enterKeymap is what Enter promises, and — outside tmux, where compass hands
+// its whole terminal over — how to come back (M6 contract). `prefix d` is the
+// user's own detach key, because the terminal is genuinely theirs by then.
+//
+// The number keys are not in this line: the fleet column prints its own 1–9
+// beside each session, and the parenthetical is what the footer owes an
+// 80-column deck instead.
+func (m *Model) enterKeymap() string {
+	if m.inTmux {
+		return "enter attach"
+	}
+	return "enter attach (prefix d returns)"
 }
 
 // column is one vertical panel of the deck.
@@ -913,38 +1147,33 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 
 	fw := fleetWidth
-	if m.level >= levelReader {
-		// Lv3: the conversation takes the mirror's place (SPEC §2.3); on a
-		// narrow deck it takes the trail's too.
-		if m.width >= deckWideCols {
-			rw := w - fw - trailWidth - 2*gutterWidth
-			return joinColumns(h, []column{
-				{fw, m.fleetColumn(fw, h)},
-				{rw, m.readerColumn(rw, h)},
-				{trailWidth, m.trailColumn(trailWidth, h)},
-			})
-		}
-		rw := w - fw - gutterWidth
-		return joinColumns(h, []column{
-			{fw, m.fleetColumn(fw, h)},
-			{rw, m.readerColumn(rw, h)},
-		})
-	}
-
 	if m.width >= deckWideCols {
-		// The mirror takes everything the fixed columns do not need.
+		// The middle panel follows the trail (M7 contract): the live mirror at
+		// Lv1, and from Lv2 down the reader — anchored to the cursor's row
+		// there, holding focus at Lv3. It takes everything the fixed columns
+		// do not need.
+		middle := m.mirrorColumn
+		if m.level >= levelWaypoints {
+			middle = m.readerColumn
+		}
 		mw := w - fw - trailWidth - 2*gutterWidth
 		return joinColumns(h, []column{
 			{fw, m.fleetColumn(fw, h)},
-			{mw, m.mirrorColumn(mw, h)},
+			{mw, middle(mw, h)},
 			{trailWidth, m.trailColumn(trailWidth, h)},
 		})
 	}
 
+	// Too narrow for three: the middle panel is dropped and the trail keeps
+	// working, except at Lv3, where the conversation takes the trail's place.
 	tw := w - fw - gutterWidth
+	second := m.trailColumn
+	if m.level >= levelReader {
+		second = m.readerColumn
+	}
 	return joinColumns(h, []column{
 		{fw, m.fleetColumn(fw, h)},
-		{tw, m.trailColumn(tw, h)},
+		{tw, second(tw, h)},
 	})
 }
 

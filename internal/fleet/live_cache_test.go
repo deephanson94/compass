@@ -69,10 +69,21 @@ func renderFleet(sessions []fleet.Session) []string {
 	return out
 }
 
+// keyIn resolves a session id to its key within one fleet snapshot, so an
+// assertion can name a session the way the fixture does while indexing a map
+// that is keyed by path.
+func keyIn(t *testing.T, sessions []fleet.Session, id string) string {
+	t.Helper()
+	return pick(t, sessions, id).Info.Key()
+}
+
+// infoKeys renders the fleet for field-by-field comparison, keyed by session
+// KEY (M6): keying by id would collapse two sessions sharing one into a single
+// entry and quietly pass a comparison that should fail.
 func infoKeys(sessions []fleet.Session) map[string]string {
 	out := make(map[string]string, len(sessions))
 	for _, s := range sessions {
-		out[s.Info.ID] = infoKey(s.Info)
+		out[s.Info.Key()] = infoKey(s.Info)
 	}
 	return out
 }
@@ -173,9 +184,10 @@ func TestT56AppendedEventAdvancesOnlyThatSession(t *testing.T) {
 		t.Errorf("%s: LastEventAt = %v, want the appended event's %v",
 			idCacheLive, grown.Info.LastEventAt, fleetNow)
 	}
-	if beforeKeys[idCacheLive] == afterKeys[idCacheLive] {
+	liveKey := grown.Info.Key()
+	if beforeKeys[liveKey] == afterKeys[liveKey] {
 		t.Errorf("%s: SessionInfo did not change even though the file grew:\n%s",
-			idCacheLive, afterKeys[idCacheLive])
+			idCacheLive, afterKeys[liveKey])
 	}
 	if !grown.Live {
 		t.Errorf("%s: Live = false, want true", idCacheLive)
@@ -183,9 +195,10 @@ func TestT56AppendedEventAdvancesOnlyThatSession(t *testing.T) {
 
 	// Nobody else moved a byte.
 	for _, id := range []string{idCacheOther, idCacheArch} {
-		if beforeKeys[id] != afterKeys[id] {
+		key := keyIn(t, after, id)
+		if beforeKeys[key] != afterKeys[key] {
 			t.Errorf("%s changed while another file grew:\nbefore: %s\nafter:  %s",
-				id, beforeKeys[id], afterKeys[id])
+				id, beforeKeys[key], afterKeys[key])
 		}
 	}
 	other := pick(t, after, idCacheOther)
@@ -248,9 +261,10 @@ func TestT56TruncatedFileIsReReadCorrectly(t *testing.T) {
 	}
 
 	for _, id := range []string{idCacheOther, idCacheArch} {
-		if beforeKeys[id] != afterKeys[id] {
+		key := keyIn(t, after, id)
+		if beforeKeys[key] != afterKeys[key] {
 			t.Errorf("%s changed while another file was truncated:\nbefore: %s\nafter:  %s",
-				id, beforeKeys[id], afterKeys[id])
+				id, beforeKeys[key], afterKeys[key])
 		}
 	}
 	// idCacheOther's last event is 1m before fleetNow, so at +90s it is 2m30s
@@ -326,10 +340,11 @@ func TestT56UnchangedSizeAndMtimeMeansNoReopen(t *testing.T) {
 	after := mustRefresh(t, m, fleetNow.Add(time.Second))
 	afterKeys := infoKeys(after)
 
-	if beforeKeys[idCacheArch] != afterKeys[idCacheArch] {
+	archKey := keyIn(t, after, idCacheArch)
+	if beforeKeys[archKey] != afterKeys[archKey] {
 		t.Errorf("the archived SessionInfo was re-derived although (size, mtime) never changed:\n"+
 			"before: %s\nafter:  %s\n(the cache must be keyed on size and mtime — see M5-CONTRACT.md)",
-			beforeKeys[idCacheArch], afterKeys[idCacheArch])
+			beforeKeys[archKey], afterKeys[archKey])
 	}
 	s := pick(t, after, idCacheArch)
 	if !s.Info.LastEventAt.Equal(ago(3 * time.Hour)) {

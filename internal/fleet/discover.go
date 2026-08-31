@@ -26,6 +26,16 @@ type SessionInfo struct {
 	LastEventAt    time.Time // last event timestamp (file mtime as fallback)
 }
 
+// Key identifies a session uniquely. The session id does not: one id can own
+// transcripts under several project slugs — a session that changes directory
+// writes under the new slug, and both files answer to the same id. The
+// transcript path always tells them apart, so every map, selection and cache
+// that keys a session keys it by this (docs/dev/M6-CONTRACT.md).
+//
+// The id stays what it always was: the label the reader, the historian
+// preamble and `claude --resume` use. It is a name, not a key.
+func (i SessionInfo) Key() string { return i.TranscriptPath }
+
 // Session pairs a session's identity with its current condition.
 type Session struct {
 	Info SessionInfo

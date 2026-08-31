@@ -77,6 +77,12 @@ func forceASCII(t *testing.T) {
 // fixtureBase is the clock every golden in this file is drawn against.
 var fixtureBase = time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 
+// sessionKey is the identity a fixture session is filed under: its transcript
+// path, which is what SessionInfo.Key() returns (M6 contract). Panes, feeds,
+// narration and the selection are all keyed by it — never by the id, which two
+// sessions may share.
+func sessionKey(id string) string { return "/x/" + id + ".jsonl" }
+
 // fixtureSessions is the three-session fleet the deck goldens share: one
 // waiting on the human, one working, one idle. All three are live and none of
 // them is in a tmux session compass can see, so the M5 live view renders them
@@ -85,7 +91,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 	return []fleet.Session{
 		{
 			Info: fleet.SessionInfo{
-				ID: "s-infra", TranscriptPath: "/x/infra.jsonl", ProjectSlug: "-home-user-infra",
+				ID: "s-infra", TranscriptPath: sessionKey("s-infra"), ProjectSlug: "-home-user-infra",
 				CWD: "/home/user/infra", GitBranch: "tf/vpc",
 				Title: "tighten the vpc security groups", StartedAt: base, LastEventAt: base.Add(38 * time.Minute),
 			},
@@ -94,7 +100,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 		},
 		{
 			Info: fleet.SessionInfo{
-				ID: "s-api", TranscriptPath: "/x/api.jsonl", ProjectSlug: "-home-user-api",
+				ID: "s-api", TranscriptPath: sessionKey("s-api"), ProjectSlug: "-home-user-api",
 				CWD: "/home/user/api", GitBranch: "claude/auth-fx",
 				Title: "fix the 401 bug", StartedAt: base, LastEventAt: base.Add(39 * time.Minute),
 			},
@@ -103,7 +109,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 		},
 		{
 			Info: fleet.SessionInfo{
-				ID: "s-docs", TranscriptPath: "/x/docs.jsonl", ProjectSlug: "-home-user-docs",
+				ID: "s-docs", TranscriptPath: sessionKey("s-docs"), ProjectSlug: "-home-user-docs",
 				CWD: "/home/user/docs", GitBranch: "main",
 				Title: "update the readme", StartedAt: base, LastEventAt: base.Add(18 * time.Minute),
 			},
@@ -155,7 +161,7 @@ func deckModel(w, h int, panes map[string]tmuxop.Pane, frame string) *Model {
 	m.SetSize(w, h)
 	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
 	m.SetPanes(panes)
-	m.point("s-api") // the session the SPEC mockup follows
+	m.point(sessionKey("s-api")) // the session the SPEC mockup follows
 	m.SetTrail(fixtureTrail(fixtureBase))
 	m.SetMirror(frame)
 	return m
@@ -172,7 +178,26 @@ func TestT16DeckViewGolden(t *testing.T) {
 	m.SetSize(80, 24)
 	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
 
-	compareGolden(t, "deck-80x24.txt", m.View())
+	got := m.View()
+	compareGolden(t, "deck-80x24.txt", got)
+	if *update {
+		return
+	}
+
+	// The footer is clipped to the deck's inner width, so a keymap that
+	// overflowed would silently lose its tail rather than wrap. Eighty columns
+	// is the floor, and the attach hint is the longest thing it carries: both
+	// keymaps have to survive the clip whole.
+	for _, want := range []string{
+		"j/k move · enter attach (prefix d returns) · g grab · ? help · q quit",
+		"j/k move · enter attach (prefix d returns) · A live fleet · ? help · q quit",
+	} {
+		m.archiveView = strings.Contains(want, "A live fleet")
+		if frame := m.View(); !strings.Contains(frame, want) {
+			t.Errorf("the footer does not fit an 80-column deck: %q", want)
+		}
+	}
+	m.archiveView = false
 }
 
 // T31 — the trail renderer alone, at the sidecar's 38 columns: prompt, three
@@ -193,7 +218,7 @@ func TestT32DeckThreeColumnGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{
-		"s-api": {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
 	}, fixtureFrame)
 
 	got := m.View()
@@ -215,7 +240,7 @@ func TestT33DeckNarrowGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(80, 24, map[string]tmuxop.Pane{
-		"s-api": {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
 	}, fixtureFrame)
 
 	got := m.View()

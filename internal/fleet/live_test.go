@@ -55,12 +55,30 @@ const (
 )
 
 // paneMap builds the map the ui hands to MarkPaneMapped after a MapSessions.
-func paneMap(ids ...string) map[string]bool {
-	m := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		m[id] = true
+// It takes session KEYS — transcript paths (M6) — verbatim; a test naming an
+// id resolves it with panesFor first.
+func paneMap(keys ...string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		m[key] = true
 	}
 	return m
+}
+
+// panesFor is paneMap for tests that think in session ids: it resolves each id
+// to the transcript under root that carries it, the same way discovery does.
+// Identity is the path, so a test may not hand MarkPaneMapped a bare id.
+func panesFor(t *testing.T, root string, ids ...string) map[string]bool {
+	t.Helper()
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		found, err := filepath.Glob(filepath.Join(root, "projects", "*", id+".jsonl"))
+		if err != nil || len(found) == 0 {
+			t.Fatalf("no transcript for %s under %s", id, root)
+		}
+		keys = append(keys, found...)
+	}
+	return paneMap(keys...)
 }
 
 func mustRefresh(t *testing.T, m *fleet.Manager, now time.Time) []fleet.Session {
@@ -73,14 +91,30 @@ func mustRefresh(t *testing.T, m *fleet.Manager, now time.Time) []fleet.Session 
 }
 
 // pick returns the session with the given id, failing if the fleet dropped it.
+// pick finds the one session carrying an id. Identity is the transcript path
+// (M6), so an id CAN name two sessions; every fixture in this file gives each
+// session its own, and a duplicate here would mean the fixture — or the
+// manager — is not what the test thinks. Better loud than first-match.
 func pick(t *testing.T, sessions []fleet.Session, id string) fleet.Session {
 	t.Helper()
+	var found []fleet.Session
 	for _, s := range sessions {
 		if s.Info.ID == id {
-			return s
+			found = append(found, s)
 		}
 	}
-	t.Fatalf("session %s missing from fleet %v", id, sessionIDs(sessions))
+	switch len(found) {
+	case 1:
+		return found[0]
+	case 0:
+		t.Fatalf("session %s missing from fleet %v", id, sessionIDs(sessions))
+	default:
+		keys := make([]string, 0, len(found))
+		for _, s := range found {
+			keys = append(keys, s.Info.Key())
+		}
+		t.Fatalf("id %s names %d sessions (%v); pick needs exactly one", id, len(found), keys)
+	}
 	return fleet.Session{}
 }
 
@@ -247,7 +281,7 @@ func t54Root(t *testing.T) string {
 func TestT54LivePartitionFlagsAndOrder(t *testing.T) {
 	root := t54Root(t)
 	m := fleet.NewManager(root)
-	m.MarkPaneMapped(paneMap(idStalePane))
+	m.MarkPaneMapped(panesFor(t, root, idStalePane))
 
 	sessions := mustRefresh(t, m, fleetNow)
 	if len(sessions) != 4 {
@@ -411,7 +445,7 @@ func TestT55ArchiveToLiveCrossingReplaysTheTranscript(t *testing.T) {
 	assertArchivedSnap(t, before)
 
 	// The pane appears. Nothing about the file changed.
-	m.MarkPaneMapped(paneMap(idArchQuestion))
+	m.MarkPaneMapped(panesFor(t, root, idArchQuestion))
 	crossed := pick(t, mustRefresh(t, m, fleetNow), idArchQuestion)
 	if !crossed.Live {
 		t.Fatalf("after MarkPaneMapped: Live = false, want true")
@@ -442,7 +476,7 @@ func TestT55ArchiveToLiveCrossingReplaysTheTranscript(t *testing.T) {
 	}
 
 	// And the crossing is repeatable, not a one-shot.
-	m.MarkPaneMapped(paneMap(idArchQuestion))
+	m.MarkPaneMapped(panesFor(t, root, idArchQuestion))
 	againLive := pick(t, mustRefresh(t, m, fleetNow), idArchQuestion)
 	if againLive.Snap.State != state.NeedsYou {
 		t.Errorf("second crossing: state = %s, want needs-you", againLive.Snap.State)
@@ -491,7 +525,7 @@ func TestT55StatusLineIgnoresTheArchive(t *testing.T) {
 		if got, want := m.StatusLine(fleetNow), "○ all quiet"; got != want {
 			t.Fatalf("archived StatusLine = %q, want %q", got, want)
 		}
-		m.MarkPaneMapped(paneMap(idArchQuestion))
+		m.MarkPaneMapped(panesFor(t, root, idArchQuestion))
 		if got, want := m.StatusLine(fleetNow), "▲1"; got != want {
 			t.Errorf("pane-mapped StatusLine = %q, want %q — liveness, not age, decides", got, want)
 		}
@@ -524,9 +558,10 @@ func TestT57SetLiveWindow(t *testing.T) {
 	})
 
 	t.Run("window 0 is panes only", func(t *testing.T) {
-		m := fleet.NewManager(build(t))
+		root := build(t)
+		m := fleet.NewManager(root)
 		m.SetLiveWindow(0)
-		m.MarkPaneMapped(paneMap(idStalePane))
+		m.MarkPaneMapped(panesFor(t, root, idStalePane))
 
 		sessions := mustRefresh(t, m, fleetNow)
 		if got, want := joined(liveIDs(sessions)), idStalePane; got != want {
@@ -605,7 +640,7 @@ func TestLiveExclusionBeatsPaneMapping(t *testing.T) {
 	workingAt(t, root, slugBeta, idLiveWorker, 10*time.Second)     // cwd /home/user/beta
 
 	m := fleet.NewManager(root)
-	m.MarkPaneMapped(paneMap(idFreshUnmapped, idLiveWorker))
+	m.MarkPaneMapped(panesFor(t, root, idFreshUnmapped, idLiveWorker))
 	assertOrder(t, mustRefresh(t, m, fleetNow), idFreshUnmapped, idLiveWorker)
 
 	m.ExcludeCWD("/home/user/alpha")
@@ -667,13 +702,13 @@ func TestMarkPaneMappedReplacesRatherThanUnions(t *testing.T) {
 
 	m := fleet.NewManager(root)
 
-	m.MarkPaneMapped(paneMap(idStalePane))
+	m.MarkPaneMapped(panesFor(t, root, idStalePane))
 	if got, want := joined(liveIDs(mustRefresh(t, m, fleetNow))), idStalePane; got != want {
 		t.Fatalf("live = %v, want %v", got, want)
 	}
 
 	// The pane moved to the other session.
-	m.MarkPaneMapped(paneMap(idArchived5h))
+	m.MarkPaneMapped(panesFor(t, root, idArchived5h))
 	if got, want := joined(liveIDs(mustRefresh(t, m, fleetNow))), idArchived5h; got != want {
 		t.Fatalf("live = %v, want only %v — the previous mapping must not linger", got, want)
 	}
@@ -695,7 +730,7 @@ func TestMarkPaneMappedNilOrEmptyClearsTheMapping(t *testing.T) {
 			needsYouAt(t, root, slugAlpha, idFreshUnmapped, 1*time.Minute) // the door keeps it live
 
 			m := fleet.NewManager(root)
-			m.MarkPaneMapped(paneMap(idStalePane))
+			m.MarkPaneMapped(panesFor(t, root, idStalePane))
 			if got, want := joined(liveIDs(mustRefresh(t, m, fleetNow))), joined([]string{idFreshUnmapped, idStalePane}); got != want {
 				t.Fatalf("live = %v, want %v", got, want)
 			}
@@ -721,7 +756,7 @@ func TestLiveIsTheUnionOfPanesAndTheRecencyDoor(t *testing.T) {
 	idleAt(t, root, slugBeta, idStalePane, 3*time.Hour)
 
 	m := fleet.NewManager(root)
-	m.MarkPaneMapped(paneMap(idFreshUnmapped, idStalePane))
+	m.MarkPaneMapped(panesFor(t, root, idFreshUnmapped, idStalePane))
 
 	sessions := mustRefresh(t, m, fleetNow)
 	if len(sessions) != 2 {
@@ -742,7 +777,7 @@ func TestMarkPaneMappedDoesNotRetainTheCallersMap(t *testing.T) {
 	idleAt(t, root, slugBeta, idArchived5h, 5*time.Hour)
 
 	m := fleet.NewManager(root)
-	mapping := paneMap(idStalePane)
+	mapping := panesFor(t, root, idStalePane)
 	m.MarkPaneMapped(mapping)
 
 	// The caller reuses its map for the next tick, before Refresh runs.
