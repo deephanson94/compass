@@ -299,6 +299,9 @@ func (e *entry) merge(info SessionInfo) {
 	if e.info.CWD == "" {
 		e.info.CWD = info.CWD
 	}
+	if e.info.OriginCWD == "" {
+		e.info.OriginCWD = info.OriginCWD
+	}
 	if e.info.GitBranch == "" {
 		e.info.GitBranch = info.GitBranch
 	}
@@ -328,6 +331,9 @@ func (e *entry) merge(info SessionInfo) {
 func (e *entry) absorb(ev transcript.Event) {
 	if !ev.IsSidechain && ev.CWD != "" {
 		e.info.CWD, e.info.GitBranch = ev.CWD, ev.GitBranch
+		if e.info.OriginCWD == "" {
+			e.info.OriginCWD = ev.CWD
+		}
 	}
 	if !ev.Timestamp.IsZero() {
 		if e.info.StartedAt.IsZero() || ev.Timestamp.Before(e.info.StartedAt) {

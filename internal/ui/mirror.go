@@ -10,6 +10,11 @@ import (
 // The mirror is glass, not a terminal (decision log #9): compass paints the
 // pane's own screen and never takes a key for it.
 const (
+	// readerEnd is any offset past the end of a document: RenderReader clamps
+	// a scroll to the last screenful, so this asks for the newest lines
+	// without having to measure the document first.
+	readerEnd = 1 << 30
+
 	mirrorMark   = "⌁"
 	ansiReset    = "\x1b[0m"
 	mirrorChrome = 2 // header, then one line of air
@@ -34,7 +39,7 @@ func (m *Model) mirrorColumn(w, h int) []string {
 		return rows
 	}
 	if !live || strings.TrimSpace(m.mirror) == "" {
-		return append(rows, bottom(m.transcriptBody(w), body)...)
+		return append(rows, bottom(m.transcriptBody(w, body), body)...)
 	}
 	return append(rows, bottom(frameLines(m.mirror, w, body), body)...)
 }
@@ -62,13 +67,39 @@ func frameLines(frame string, w, h int) []string {
 	return out
 }
 
-// transcriptBody is the fallback for a session with no tmux pane: the same
-// three facts the fleet already sorted on, quietly.
-func (m *Model) transcriptBody(w int) []string {
-	s, ok := m.selected()
-	if !ok {
+// transcriptBody is what a session with no tmux pane shows in the mirror's
+// place: its own conversation, newest last.
+//
+// It used to be three dim facts — title, state, activity — which the fleet
+// column already carries. On a tall terminal that is three lines resting on
+// the floor of a forty-row panel, and it reads as an empty screen, because
+// next to nothing is what it was. A paneless session is not a session with
+// nothing to show: compass is reading its transcript either way, and the
+// transcript is the same thing the pane would have been rendering.
+func (m *Model) transcriptBody(w, h int) []string {
+	if _, ok := m.selected(); !ok {
 		return []string{dimStyle.Render(clip("no session selected", w))}
 	}
+	if len(m.events) == 0 {
+		return m.transcriptFacts(w)
+	}
+	// Anchored to the end: the newest turn is the one a mirror would be
+	// showing. A scroll past the document's end clamps to the last screenful,
+	// which is exactly what is wanted here.
+	frame := RenderReader(m.events, ReaderOpts{
+		Width: w, Height: h, Scroll: readerEnd,
+		Unfolded: m.unfolded,
+	})
+	if strings.TrimSpace(frame) == "" {
+		return m.transcriptFacts(w)
+	}
+	return strings.Split(frame, "\n")
+}
+
+// transcriptFacts is the last resort: a session whose transcript has not been
+// read yet still says who it is.
+func (m *Model) transcriptFacts(w int) []string {
+	s, _ := m.selected()
 	var rows []string
 	if s.Info.Title != "" {
 		rows = append(rows, dimStyle.Render(clip(`"`+s.Info.Title+`"`, w)), "")

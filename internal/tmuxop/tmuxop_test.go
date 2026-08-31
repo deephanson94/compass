@@ -913,3 +913,106 @@ func TestBootTimeRemembersOnlySuccess(t *testing.T) {
 		t.Errorf("a successful boot time was not cached: %v", got)
 	}
 }
+
+// The dogfood case, reported from a real fleet. `claude` is launched in
+// agentic_better_prompt, then cd's into the porter repo next door. The claude
+// PROCESS keeps the directory it was launched in for its whole life, so /proc
+// still says agentic_better_prompt — while the transcript, correctly, now says
+// porter. Matching on where the session is loses it; matching on where it was
+// opened finds it.
+func TestASessionThatChangedDirectoryKeepsItsPane(t *testing.T) {
+	const launched = "/hdd4/agentic_better_prompt"
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: launched}, // never moves
+		started:  map[int]time.Time{701: at(ago(4 * time.Hour))},
+	}
+	panes := []tmuxop.Pane{
+		{Target: "tinker:0.0", ID: "%1", PID: 700, Command: "claude", Window: "claude"},
+	}
+	sessions := []fleet.SessionInfo{{
+		ID:             "s-porter",
+		TranscriptPath: keyOf("s-porter"),
+		CWD:            "/hdd4/porter", // where it went
+		OriginCWD:      launched,       // where it began
+		LastEventAt:    at(ago(14 * time.Second)),
+	}}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if got[keyOf("s-porter")].Target != "tinker:0.0" {
+		t.Errorf("the session is in tinker:0.0 and reads as `elsewhere`: %+v", got)
+	}
+}
+
+// A session answering to two addresses must still hold at most one pane, even
+// when panes exist at both.
+func TestASessionWithTwoAddressesTakesOnePane(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}, 800: {801}},
+		comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
+		cwd:      map[int]string{701: "/w/origin", 801: "/w/moved"},
+		started:  map[int]time.Time{701: at(ago(time.Hour)), 801: at(ago(2 * time.Hour))},
+	}
+	panes := []tmuxop.Pane{
+		{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"},
+		{Target: "dev:1.0", ID: "%2", PID: 800, Command: "claude"},
+	}
+	sessions := []fleet.SessionInfo{{
+		ID: "s-wanderer", TranscriptPath: keyOf("s-wanderer"),
+		OriginCWD: "/w/origin", CWD: "/w/moved",
+		LastEventAt: at(ago(time.Minute)),
+	}}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if len(got) != 1 {
+		t.Fatalf("one session took %d panes: %+v", len(got), got)
+	}
+	if got[keyOf("s-wanderer")].Target != "dev:0.0" {
+		t.Errorf("it took %q; the origin is where /proc reports a claude, so that "+
+			"is the address tried first", got[keyOf("s-wanderer")].Target)
+	}
+}
+
+// A session that never moved has one address, and nothing about it changes.
+func TestAnUnmovedSessionIsUnaffected(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/w/app"},
+		started:  map[int]time.Time{701: at(ago(time.Hour))},
+	}
+	panes := []tmuxop.Pane{{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"}}
+	sessions := []fleet.SessionInfo{{
+		ID: "s-still", TranscriptPath: keyOf("s-still"),
+		CWD: "/w/app", OriginCWD: "/w/app",
+		LastEventAt: at(ago(time.Minute)),
+	}}
+	if got := tmuxop.MapSessions(sessions, panes, p); got[keyOf("s-still")].Target != "dev:0.0" {
+		t.Errorf("a session that never moved lost its pane: %+v", got)
+	}
+}
+
+// The other direction: a session resumed in a new directory. Its transcript
+// opens with the old session's cwd, but the claude now running it was launched
+// somewhere else — so here it is the current address that meets the pane, and
+// the origin that is stale.
+func TestAResumedSessionMatchesWhereItIsNow(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/hdd4/porter"},
+		started:  map[int]time.Time{701: at(ago(10 * time.Minute))},
+	}
+	panes := []tmuxop.Pane{{Target: "tinker:2.0", ID: "%3", PID: 700, Command: "claude"}}
+	sessions := []fleet.SessionInfo{{
+		ID: "s-resumed", TranscriptPath: keyOf("s-resumed"),
+		OriginCWD:   "/hdd4/somewhere-else", // where it was first opened, weeks ago
+		CWD:         "/hdd4/porter",         // where it was resumed
+		LastEventAt: at(ago(time.Minute)),
+	}}
+
+	if got := tmuxop.MapSessions(sessions, panes, p); got[keyOf("s-resumed")].Target != "tinker:2.0" {
+		t.Errorf("a session resumed in a new directory found no pane: %+v", got)
+	}
+}

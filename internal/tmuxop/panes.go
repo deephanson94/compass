@@ -141,70 +141,41 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Target < ordered[j].Target })
 
 	// One /proc walk per pane, not per session-pane pair.
+	var found []claudePane
 	byCwd := make(map[string][]claudePane)
 	for _, pane := range ordered {
 		cwd, pid, ok := ClaudeIn(p, pane.PID)
 		if !ok {
 			continue // a pane with no claude in it is not a location
 		}
-		byCwd[cwd] = append(byCwd[cwd], claudePane{pane: pane, since: p.StartTime(pid)})
+		cp := claudePane{pane: pane, cwd: cwd, since: p.StartTime(pid)}
+		found = append(found, cp)
+		byCwd[cwd] = append(byCwd[cwd], cp)
 	}
-	if len(byCwd) == 0 {
+	if len(found) == 0 {
 		return out
 	}
 
-	byCwdSessions := make(map[string][]fleet.SessionInfo, len(byCwd))
+	// A session answers to two addresses: where it is now, and where it was
+	// opened. /proc reports the second, so that is usually the one that meets a
+	// pane — but a session resumed somewhere new has the opposite shape, and
+	// listing both costs nothing.
+	contenders := make(map[string][]fleet.SessionInfo, len(byCwd))
 	for _, s := range sessions {
-		if s.CWD == "" {
-			continue
+		for _, cwd := range addressesOf(s) {
+			if _, ok := byCwd[cwd]; ok {
+				contenders[cwd] = append(contenders[cwd], s)
+			}
 		}
-		if _, ok := byCwd[s.CWD]; !ok {
-			continue // no pane there at all: nothing to compete for
-		}
-		byCwdSessions[s.CWD] = append(byCwdSessions[s.CWD], s)
 	}
-
-	for cwd, contenders := range byCwdSessions {
-		sort.SliceStable(contenders, func(i, j int) bool {
-			a, b := contenders[i], contenders[j]
+	for cwd := range contenders {
+		sort.SliceStable(contenders[cwd], func(i, j int) bool {
+			a, b := contenders[cwd][i], contenders[cwd][j]
 			if !a.LastEventAt.Equal(b.LastEventAt) {
 				return a.LastEventAt.After(b.LastEventAt)
 			}
 			return a.Key() < b.Key()
 		})
-		for key, pane := range assign(byCwd[cwd], contenders) {
-			out[key] = pane
-		}
-	}
-	return out
-}
-
-// claudePane is a pane and the age of the claude running in it. A zero `since`
-// means /proc would not say, which is never held against anyone.
-type claudePane struct {
-	pane  Pane
-	since time.Time
-}
-
-// assign hands the panes at one cwd to the sessions that claim it, newest
-// first. Panes whose claude is younger than a session's last word go to a
-// session that could be in them; only then does anything else get a look.
-func assign(panes []claudePane, contenders []fleet.SessionInfo) map[string]Pane {
-	out := make(map[string]Pane, len(panes))
-	taken := make([]bool, len(contenders))
-
-	claim := func(cp claudePane, plausible bool) bool {
-		for i, s := range contenders {
-			if taken[i] {
-				continue
-			}
-			if plausible && !couldBeIn(s, cp) {
-				continue
-			}
-			out[s.Key()], taken[i] = cp.pane, true
-			return true
-		}
-		return false
 	}
 
 	// Youngest claude first. Offering panes in Target order instead lets an old
@@ -214,10 +185,28 @@ func assign(panes []claudePane, contenders []fleet.SessionInfo) map[string]Pane 
 	// exists to prevent. The youngest pane is the most constrained, so it
 	// chooses first. A pane whose claude age is unknown constrains nothing and
 	// sorts last, which leaves the all-unknown case in Target order.
-	byAge := append([]claudePane(nil), panes...)
+	byAge := append([]claudePane(nil), found...)
 	sort.SliceStable(byAge, func(i, j int) bool { return byAge[j].since.Before(byAge[i].since) })
 
-	free := make([]claudePane, 0, len(panes))
+	taken := map[string]bool{}
+	claim := func(cp claudePane, plausible bool) bool {
+		for _, s := range contenders[cp.cwd] {
+			if taken[s.Key()] {
+				continue
+			}
+			if plausible && !couldBeIn(s, cp) {
+				continue
+			}
+			out[s.Key()], taken[s.Key()] = cp.pane, true
+			return true
+		}
+		return false
+	}
+
+	// Both passes run across every pane before the next begins: a pane that
+	// could still be paired plausibly must not lose its session to some other
+	// pane's fallback.
+	var free []claudePane
 	for _, cp := range byAge {
 		if !claim(cp, true) {
 			free = append(free, cp)
@@ -227,6 +216,31 @@ func assign(panes []claudePane, contenders []fleet.SessionInfo) map[string]Pane 
 		claim(cp, false)
 	}
 	return out
+}
+
+// addressesOf is where a session may be found: where it is now, and where it
+// was opened. They are the same until it changes directory.
+func addressesOf(s fleet.SessionInfo) []string {
+	switch {
+	case s.CWD == "" && s.OriginCWD == "":
+		return nil
+	case s.OriginCWD == "" || s.OriginCWD == s.CWD:
+		return []string{s.CWD}
+	case s.CWD == "":
+		return []string{s.OriginCWD}
+	default:
+		// The origin first: a claude process keeps its launch directory, so
+		// that is the address /proc will be reporting.
+		return []string{s.OriginCWD, s.CWD}
+	}
+}
+
+// claudePane is a pane and the age of the claude running in it. A zero `since`
+// means /proc would not say, which is never held against anyone.
+type claudePane struct {
+	pane  Pane
+	cwd   string // the cwd of the claude inside it, as /proc reports it
+	since time.Time
 }
 
 // procSlack forgives the last tick of arithmetic between a transcript's own
