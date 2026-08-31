@@ -13,6 +13,16 @@ import (
 	"github.com/deephanson94/compass/internal/state"
 )
 
+// liveManager is the M0-era Manager these tests were written against: every
+// session in the fixture root is live, however old its timestamps. The tests
+// in this file exercise ordering, status lines and exclusion — liveness has
+// its own suite (live_test.go, M5).
+func liveManager(root string) *fleet.Manager {
+	m := fleet.NewManager(root)
+	m.SetLiveWindow(1000 * time.Hour)
+	return m
+}
+
 // fleetNow is the single instant every Manager test evaluates at; every fixture
 // timestamp below is expressed as a distance from it, so nothing depends on the
 // wall clock.
@@ -217,7 +227,7 @@ func TestT14ManagerRefreshOrdersByState(t *testing.T) {
 	stuckAt(t, root, "-home-user-alpha", idStuck, 5*time.Minute)
 	needsYouAt(t, root, "-home-user-alpha", idNeedsYou, 8*time.Minute)
 
-	sessions, err := fleet.NewManager(root).Refresh(fleetNow)
+	sessions, err := liveManager(root).Refresh(fleetNow)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -277,7 +287,7 @@ func TestManagerRefreshOrdersWithinEachState(t *testing.T) {
 	idleAt(t, root, slug, idOld, 45*time.Minute)
 	idleAt(t, root, slug, idNew, 1*time.Minute)
 
-	sessions, err := fleet.NewManager(root).Refresh(fleetNow)
+	sessions, err := liveManager(root).Refresh(fleetNow)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -309,7 +319,7 @@ func TestManagerRefreshIsRepeatableAndPicksUpNewLines(t *testing.T) {
 		tool(ago(10*time.Second), "toolu_ee", "Bash", map[string]any{"command": "pytest -x"}).
 		write(root, slug)
 
-	mgr := fleet.NewManager(root)
+	mgr := liveManager(root)
 	first, err := mgr.Refresh(fleetNow)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
@@ -358,7 +368,7 @@ func TestT15StatusLine(t *testing.T) {
 		workingAt(t, root, "-home-user-beta", idWorking, 10*time.Second)
 		workingAt(t, root, "-home-user-beta", "cc000009-0000-4000-8000-000000000009", 40*time.Second)
 
-		got := fleet.NewManager(root).StatusLine(fleetNow)
+		got := liveManager(root).StatusLine(fleetNow)
 		if want := "▲1 ◍1 ●2"; got != want {
 			t.Errorf("StatusLine = %q, want %q", got, want)
 		}
@@ -369,7 +379,7 @@ func TestT15StatusLine(t *testing.T) {
 		idleAt(t, root, "-home-user-alpha", idIdle, 14*time.Minute)
 		idleAt(t, root, "-home-user-beta", "dd000009-0000-4000-8000-000000000009", 2*time.Hour)
 
-		got := fleet.NewManager(root).StatusLine(fleetNow)
+		got := liveManager(root).StatusLine(fleetNow)
 		if want := "○ all quiet"; got != want {
 			t.Errorf("StatusLine = %q, want %q", got, want)
 		}
@@ -394,7 +404,7 @@ func TestT15StatusLine(t *testing.T) {
 		// sessions are never counted, which yields "▲1". This test pins the
 		// literal wording; if the intent is the second reading, amend the
 		// contract (and this assertion) rather than silently diverging.
-		got := fleet.NewManager(root).StatusLine(fleetNow)
+		got := liveManager(root).StatusLine(fleetNow)
 		if want := "▲1 ○1"; got != want {
 			t.Errorf("StatusLine = %q, want %q — see the CONTRACT AMBIGUITY note above", got, want)
 		}

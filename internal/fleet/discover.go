@@ -45,20 +45,47 @@ const titleMax = 80
 // session subdirectories (subagents are M1) and skips empty files. The result
 // is sorted by LastEventAt descending. A missing root or projects directory
 // returns (nil, nil) — an empty machine is not an error.
+//
+// Discover is uncached: its callers are one-shot. The Manager, which scans
+// every second, uses the same walk with a cache (see scanProjects).
 func Discover(root string) ([]SessionInfo, error) {
+	out, _, err := scanProjects(root, nil)
+	return out, err
+}
+
+// cachedInfo is one peeked transcript plus the file identity it was read from.
+// A single Stat per file — the one the scan already does to skip empty
+// transcripts — answers whether that read is still good.
+type cachedInfo struct {
+	size    int64
+	modTime time.Time
+	info    SessionInfo
+}
+
+// scanProjects walks the projects tree once. Given the previous scan's cache
+// it reuses the SessionInfo of every transcript whose (size, mtime) has not
+// moved, so an unchanged file is never opened; it returns the cache for the
+// next call, pruned to the files that still exist. A nil prev simply peeks
+// everything.
+//
+// Only discovery is cached. A live session's fresh lines still arrive through
+// its tailer, which reads the file itself — so a stale peek can never make a
+// running session look quiet.
+func scanProjects(root string, prev map[string]cachedInfo) ([]SessionInfo, map[string]cachedInfo, error) {
 	if root == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	projects := filepath.Join(root, "projects")
 	slugs, err := os.ReadDir(projects)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
 	var out []SessionInfo
+	next := make(map[string]cachedInfo, len(prev))
 	for _, slug := range slugs {
 		if !slug.IsDir() {
 			continue
@@ -76,14 +103,21 @@ func Discover(root string) ([]SessionInfo, error) {
 			if err != nil || fi.Size() == 0 {
 				continue
 			}
+			path := filepath.Join(dir, f.Name())
+			if c, ok := prev[path]; ok && c.size == fi.Size() && c.modTime.Equal(fi.ModTime()) {
+				out = append(out, c.info)
+				next[path] = c
+				continue
+			}
 			info := SessionInfo{
 				ID:             strings.TrimSuffix(f.Name(), ".jsonl"),
-				TranscriptPath: filepath.Join(dir, f.Name()),
+				TranscriptPath: path,
 				ProjectSlug:    slug.Name(),
 				LastEventAt:    fi.ModTime(), // refined to the last event time by the Manager
 			}
 			peek(&info, fi.Size())
 			out = append(out, info)
+			next[path] = cachedInfo{size: fi.Size(), modTime: fi.ModTime(), info: info}
 		}
 	}
 
@@ -93,7 +127,7 @@ func Discover(root string) ([]SessionInfo, error) {
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out, nil
+	return out, next, nil
 }
 
 // Peeking reads both ends of a transcript and nothing in between: cwd, branch

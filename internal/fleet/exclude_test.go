@@ -46,14 +46,14 @@ func TestT49ExcludeCWDHidesThatCWDOnly(t *testing.T) {
 	root := twoCWDs(t)
 
 	// Baseline: both are there, needs-you first.
-	assertIDs(t, refreshIDs(t, fleet.NewManager(root)), idNeedsYou, idWorking)
+	assertIDs(t, refreshIDs(t, liveManager(root)), idNeedsYou, idWorking)
 
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 	m.ExcludeCWD("/home/user/alpha")
 	assertIDs(t, refreshIDs(t, m), idWorking)
 
 	// And the other way round, so the test cannot pass by hiding everything.
-	other := fleet.NewManager(root)
+	other := liveManager(root)
 	other.ExcludeCWD("/home/user/beta")
 	assertIDs(t, refreshIDs(t, other), idNeedsYou)
 }
@@ -62,7 +62,7 @@ func TestT49ExcludeCWDHidesThatCWDOnly(t *testing.T) {
 // already discovered and tailed must disappear on the next Refresh.
 func TestT49ExcludeCWDAppliesToAlreadyTrackedSessions(t *testing.T) {
 	root := twoCWDs(t)
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 
 	assertIDs(t, refreshIDs(t, m), idNeedsYou, idWorking)
 	m.ExcludeCWD("/home/user/alpha")
@@ -82,7 +82,7 @@ func TestT49ExcludeCWDHidesEverySessionAtThatPath(t *testing.T) {
 	stuckAt(t, root, "-home-user-alpha", idStuck, 5*time.Minute)       // /home/user/alpha
 	workingAt(t, root, "-home-user-beta", idWorking, 10*time.Second)   // /home/user/beta
 
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 	assertIDs(t, refreshIDs(t, m), idNeedsYou, idStuck, idWorking)
 
 	m.ExcludeCWD("/home/user/alpha")
@@ -94,7 +94,7 @@ func TestT49ExcludeCWDHidesEverySessionAtThatPath(t *testing.T) {
 // used.
 func TestT49ExcludeCWDWithNoMatchIsANoOp(t *testing.T) {
 	root := twoCWDs(t)
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 	m.ExcludeCWD(filepath.Join(t.TempDir(), "compass", "narrator"))
 	assertIDs(t, refreshIDs(t, m), idNeedsYou, idWorking)
 }
@@ -114,7 +114,7 @@ func TestT49ExcludeCWDIsExactNotAPrefix(t *testing.T) {
 	} {
 		t.Run(path, func(t *testing.T) {
 			root := twoCWDs(t)
-			m := fleet.NewManager(root)
+			m := liveManager(root)
 			m.ExcludeCWD(path)
 			assertIDs(t, refreshIDs(t, m), idNeedsYou, idWorking)
 		})
@@ -124,7 +124,7 @@ func TestT49ExcludeCWDIsExactNotAPrefix(t *testing.T) {
 // Excluding the same path twice is the same as excluding it once.
 func TestT49ExcludeCWDIsIdempotent(t *testing.T) {
 	root := twoCWDs(t)
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 	m.ExcludeCWD("/home/user/alpha")
 	m.ExcludeCWD("/home/user/alpha")
 	assertIDs(t, refreshIDs(t, m), idWorking)
@@ -133,7 +133,7 @@ func TestT49ExcludeCWDIsIdempotent(t *testing.T) {
 // Excluding every cwd leaves an empty fleet, not an error.
 func TestT49ExcludingEverythingIsAnEmptyFleetNotAnError(t *testing.T) {
 	root := twoCWDs(t)
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 	m.ExcludeCWD("/home/user/alpha")
 	m.ExcludeCWD("/home/user/beta")
 
@@ -154,17 +154,17 @@ func TestT49ExcludingEverythingIsAnEmptyFleetNotAnError(t *testing.T) {
 func TestT49StatusLineReflectsTheExclusion(t *testing.T) {
 	root := twoCWDs(t)
 
-	if got, want := fleet.NewManager(root).StatusLine(fleetNow), "▲1 ●1"; got != want {
+	if got, want := liveManager(root).StatusLine(fleetNow), "▲1 ●1"; got != want {
 		t.Fatalf("baseline StatusLine = %q, want %q", got, want)
 	}
 
-	hidAlpha := fleet.NewManager(root)
+	hidAlpha := liveManager(root)
 	hidAlpha.ExcludeCWD("/home/user/alpha")
 	if got, want := hidAlpha.StatusLine(fleetNow), "●1"; got != want {
 		t.Errorf("StatusLine with /home/user/alpha excluded = %q, want %q", got, want)
 	}
 
-	hidBeta := fleet.NewManager(root)
+	hidBeta := liveManager(root)
 	hidBeta.ExcludeCWD("/home/user/beta")
 	if got, want := hidBeta.StatusLine(fleetNow), "▲1"; got != want {
 		t.Errorf("StatusLine with /home/user/beta excluded = %q, want %q", got, want)
@@ -184,7 +184,7 @@ func TestT49NarratorDirSessionIsHidden(t *testing.T) {
 		text(ago(5*time.Second), `[{"key":"k1","label":"maps the auth module"}]`).
 		write(root, "-narrator")
 
-	m := fleet.NewManager(root)
+	m := liveManager(root)
 	// Without the exclusion compass watches itself.
 	if got := refreshIDs(t, m); len(got) != 2 {
 		t.Fatalf("baseline fleet = %v, want both the real session and the narration", got)
