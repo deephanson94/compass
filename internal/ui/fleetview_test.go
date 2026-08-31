@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
 )
@@ -25,14 +26,15 @@ func archivedSnap(at time.Time) state.Snapshot {
 // four projects. It is the same fixture for both views — the live fleet and the
 // archive are two readings of one Refresh.
 func fixtureGroupedFleet(base time.Time) []fleet.Session {
-	live := func(id, cwd, branch, title string, snap state.Snapshot) fleet.Session {
+	live := func(id, cwd, branch, title string, class journey.Class, snap state.Snapshot) fleet.Session {
 		return fleet.Session{
 			Info: fleet.SessionInfo{
 				ID: id, TranscriptPath: sessionKey(id), ProjectSlug: "-home-user-" + id,
 				CWD: cwd, GitBranch: branch, Title: title, StartedAt: base, LastEventAt: snap.Since,
 			},
-			Snap: snap,
-			Live: true,
+			Snap:  snap,
+			Live:  true,
+			Class: class, HasClass: true,
 		}
 	}
 	gone := func(id, cwd, branch, title string, at time.Time) fleet.Session {
@@ -48,15 +50,15 @@ func fixtureGroupedFleet(base time.Time) []fleet.Session {
 	// Fleet order, as the Manager hands it over: needs-you longest-wait, stuck,
 	// working, idle — then the archive, newest first.
 	return []fleet.Session{
-		live("s-infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups",
+		live("s-infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", journey.Design,
 			state.Snapshot{State: state.NeedsYou, Since: base.Add(38 * time.Minute), Reason: "waiting on your answer", Activity: "AskUserQuestion"}),
-		live("s-api", "/home/user/api", "claude/auth-fx", "fix the 401 bug",
+		live("s-api", "/home/user/api", "claude/auth-fx", "fix the 401 bug", journey.Test,
 			state.Snapshot{State: state.Working, Since: base.Add(37 * time.Minute), Reason: "tool call in flight", Activity: "Bash: pytest tests/auth -x"}),
-		live("s-webapp", "/home/user/webapp", "main", "flake in the checkout suite",
+		live("s-webapp", "/home/user/webapp", "main", "flake in the checkout suite", journey.Test,
 			state.Snapshot{State: state.Working, Since: base.Add(39*time.Minute + 20*time.Second), Reason: "tool call in flight", Activity: "tests 18✓ 2✗"}),
-		live("s-tfstate", "/home/user/tfstate", "main", "reconcile the state file",
+		live("s-tfstate", "/home/user/tfstate", "main", "reconcile the state file", journey.Build,
 			state.Snapshot{State: state.Idle, Since: base.Add(25 * time.Minute), Reason: "turn complete", Activity: "idle"}),
-		live("s-scratch", "/home/user/scratch", "main", "try the streaming api",
+		live("s-scratch", "/home/user/scratch", "main", "try the streaming api", journey.Scout,
 			state.Snapshot{State: state.Idle, Since: base.Add(18 * time.Minute), Reason: "turn complete", Activity: "idle"}),
 
 		gone("a-docs", "/home/user/docs", "main", "update the readme", base.Add(-time.Hour)),
@@ -138,13 +140,14 @@ func TestT58LiveFleetGolden(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		" dev",                    // the tmux session, unnumbered and dim
-		" ops",                    // …in the order the pane list names them
-		" elsewhere",              // …and the live sessions tmux cannot place
-		":1.0 auth-fix · claude/", // coordinates, then the window's own name, then the branch
-		"no pane · main",          // and says so plainly when there is none
-		"5 archived · A browses",  // the last fleet row
-		"FLEET · live",            // which fleet this is
+		" dev",                      // the tmux session, unnumbered and dim
+		" ops",                      // …in the order the pane list names them
+		" elsewhere",                // …and the live sessions tmux cannot place
+		"◆ test   Bash: pytest",     // what the session is doing, in the trail's words
+		"◆ design AskUserQuestion",  // …whatever the state
+		"◆ build  reconcile the st", // and a quiet row says what it was about
+		"5 archived · A browses",    // the last fleet row
+		"FLEET · live",              // which fleet this is
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("live view is missing %q", want)
@@ -565,11 +568,13 @@ func TestT64DuplicateIDsAreTwoSessions(t *testing.T) {
 	if got := countLines(col, "▸"); got != 1 {
 		t.Errorf("%d selection markers on screen, want exactly 1", got)
 	}
-	if got := countLines(col, ":1.0"); got != 1 {
-		t.Errorf("%d rows claim the pane, want exactly 1", got)
+	// The grouping is what says which twin tmux can place: the one holding the
+	// pane sits under its tmux session, the other under `elsewhere`.
+	if got := countLines(col, " dev"); got != 1 {
+		t.Errorf("%d rows sit under the pane's tmux session, want exactly 1", got)
 	}
-	if got := countLines(col, "no pane"); got != 1 {
-		t.Errorf("%d rows say they have no pane, want exactly 1", got)
+	if got := countLines(col, "elsewhere"); got != 1 {
+		t.Errorf("%d twins were placed nowhere, want exactly 1", got)
 	}
 	if row := markedRow(col); !strings.Contains(row, "alpha") {
 		t.Errorf("the marker sits on %q, want the alpha twin", row)
@@ -883,4 +888,165 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 			pressTab(m)
 		}
 	})
+}
+
+// A fleet row says what a session is doing, in the same words the trail uses.
+// It used to spend its second line on ":0.0 claude · HEAD" — the tmux address
+// and a branch reading HEAD — which answered a question nobody asks: the
+// address is what `enter` spends, not what a reader does, and the selected
+// session's is in the mirror's own header.
+func TestFleetRowSaysWhatTheSessionIsDoing(t *testing.T) {
+	forceASCII(t)
+
+	m := New(nil)
+	m.SetSize(120, 30)
+	m.SetSessions(fixtureGroupedFleet(fixtureBase), fixtureBase.Add(40*time.Minute))
+	panes, list := fixtureGroupedPanes()
+	m.SetPanes(panes)
+	m.SetPaneOrder(list)
+	col := strings.Join(fleetText(m, 120, 30), "\n")
+
+	for _, want := range []string{
+		"● api       working",       // the state is the first line's whole job…
+		"◆ test   Bash: pytest",     // …and the second says what it is doing
+		"▲ infra     needs you",     //
+		"◆ design AskUserQuestion",  //
+		"○ tfstate   idle",          // a quiet row still names its class…
+		"◆ build  reconcile the st", // …and says what it was about
+	} {
+		if !strings.Contains(col, want) {
+			t.Errorf("fleet is missing %q:\n%s", want, col)
+		}
+	}
+	// The address is gone from every row.
+	if strings.Contains(col, ":1.0") || strings.Contains(col, "no pane") {
+		t.Errorf("a fleet row is still spending a line on the tmux address:\n%s", col)
+	}
+}
+
+// A session compass has not classified yet still says something.
+func TestFleetRowWithoutAClass(t *testing.T) {
+	forceASCII(t)
+
+	s := fixtureGroupedFleet(fixtureBase)[0]
+	s.HasClass = false
+	m := New(nil)
+	m.SetSize(120, 30)
+	m.SetSessions([]fleet.Session{s}, fixtureBase.Add(40*time.Minute))
+	col := strings.Join(fleetText(m, 120, 30), "\n")
+	if !strings.Contains(col, "AskUserQuestion") {
+		t.Errorf("an unclassified row lost its activity:\n%s", col)
+	}
+	if strings.Contains(col, "◆ ") {
+		t.Errorf("an unclassified row invented a class:\n%s", col)
+	}
+}
+
+// The side panels are what only compass draws; the mirror is a rendering of a
+// pane the user can look at directly. Past the mirror's floor the surplus goes
+// to the sides, and no further than their caps.
+func TestWideTerminalsFeedTheSidePanels(t *testing.T) {
+	narrowF, narrowT := sidePanelWidths(118)
+	if narrowF != fleetWidth || narrowT != trailWidth {
+		t.Errorf("at 118 the panels are %d/%d, want the floors %d/%d",
+			narrowF, narrowT, fleetWidth, trailWidth)
+	}
+
+	last := 0
+	for w := 118; w <= 260; w += 2 {
+		f, tr := sidePanelWidths(w)
+		mirror := w - f - tr - 2*gutterWidth
+		if f < fleetWidth || tr < trailWidth {
+			t.Fatalf("at %d a panel fell below its floor: %d/%d", w, f, tr)
+		}
+		if f > fleetWidthMax || tr > trailWidthMax {
+			t.Fatalf("at %d a panel passed its cap: %d/%d", w, f, tr)
+		}
+		if mirror < mirrorEnough && (f > fleetWidth || tr > trailWidth) {
+			t.Fatalf("at %d the panels grew while the mirror had only %d", w, mirror)
+		}
+		if f+tr < last {
+			t.Fatalf("at %d the panels shrank as the terminal grew", w)
+		}
+		last = f + tr
+	}
+
+	if f, tr := sidePanelWidths(200); f != fleetWidthMax || tr != trailWidthMax {
+		t.Errorf("at 200 the panels are %d/%d, want both capped at %d/%d",
+			f, tr, fleetWidthMax, trailWidthMax)
+	}
+}
+
+// Below the two-column floor the trail is the one panel worth keeping: the only
+// reason to run compass this narrow is to sit it beside a CLI in your own tmux,
+// and beside a CLI the trail is the half that is not already on screen.
+func TestANarrowPaneKeepsTheTrail(t *testing.T) {
+	forceASCII(t)
+
+	m := New(nil)
+	m.SetSize(46, 24)
+	m.SetSessions(fixtureGroupedFleet(fixtureBase), fixtureBase.Add(40*time.Minute))
+	m.point(sessionKey("s-api"))
+	m.SetTrail(fixtureTrail(fixtureBase))
+
+	got := m.View()
+	if !strings.Contains(got, "TRAIL · api") {
+		t.Errorf("a 46-column pane dropped the trail:\n%s", got)
+	}
+	if strings.Contains(got, "FLEET · live") {
+		t.Errorf("a 46-column pane kept the fleet instead:\n%s", got)
+	}
+	// The alarm is not lost with it: the header still counts the fleet.
+	if !strings.Contains(got, "▲") {
+		t.Errorf("the header stopped carrying the fleet's alarm:\n%s", got)
+	}
+}
+
+// And the deck actually spends a wide terminal on the side panels, rather than
+// computing widths it does not use: at 200 columns the trail column is wider
+// than its floor, measured off the rendered frame.
+func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
+	forceASCII(t)
+
+	build := func(w int) *Model {
+		m := New(nil)
+		m.SetSize(w, 30)
+		m.SetSessions(fixtureGroupedFleet(fixtureBase), fixtureBase.Add(40*time.Minute))
+		panes, list := fixtureGroupedPanes()
+		m.SetPanes(panes)
+		m.SetPaneOrder(list)
+		m.point(sessionKey("s-api"))
+		m.SetTrail(fixtureTrail(fixtureBase))
+		return m
+	}
+
+	narrow := columnWidths(t, build(118).View())
+	wide := columnWidths(t, build(200).View())
+	if len(narrow) != 3 || len(wide) != 3 {
+		t.Fatalf("expected three columns, got %v and %v", narrow, wide)
+	}
+	if wide[0] <= narrow[0] {
+		t.Errorf("the fleet stayed at %d columns on a 200-column terminal", wide[0])
+	}
+	if wide[2] <= narrow[2] {
+		t.Errorf("the trail stayed at %d columns on a 200-column terminal", wide[2])
+	}
+}
+
+// columnWidths measures a rendered deck's columns from the hairlines between
+// them — what is actually on screen, not what the arithmetic intended.
+func columnWidths(t *testing.T, frame string) []int {
+	t.Helper()
+	for _, line := range strings.Split(frame, "\n") {
+		if !strings.Contains(line, "FLEET") {
+			continue
+		}
+		var out []int
+		for _, part := range strings.Split(line, "│") {
+			out = append(out, lipgloss.Width(part))
+		}
+		return out
+	}
+	t.Fatal("no fleet header in the frame")
+	return nil
 }

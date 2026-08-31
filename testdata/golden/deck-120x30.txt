@@ -4,15 +4,15 @@
  FLEET · live                   │ ⌁ dev:1.0 · live                             │ TRAIL · api                      [Lv1]
                                 │                                              │
   dev                           │                                              │ ◉ "fix the 401 bug"                38m
- ▸1 ● api       Bash: pyt…   3m │                                              │ ╷
-     :1.0 auth-fix · claude/au… │                                              │ ◆ scout  middleware.py             31m
+ ▸1 ● api       working      3m │                                              │ ╷
+     ◆ test   Bash: pytest tes… │                                              │ ◆ scout  middleware.py             31m
                                 │                                              │ │
   elsewhere                   ▲ │                                              │ ◆ build  tokens.py                 25m
   2 ▲ infra     needs you    2m │                                              │ │
-     no pane · tf/vpc           │                                              │ ◆ test   pytest                    12m
+     ◆ design AskUserQuestion   │                                              │ ◆ test   pytest                    12m
                                 │                                              │ ├─◈ scout the payments module        ✓
-  3 ○ docs      turn comp…  22m │                                              │ ● fix    tokens.py                ← 3m
-     no pane · main             │                                              │
+  3 ○ docs      idle        22m │                                              │ ● fix    tokens.py                ← 3m
+     ◆ docs   update the readme │                                              │
                                 │                                              │
                                 │                                              │
                                 │                                              │

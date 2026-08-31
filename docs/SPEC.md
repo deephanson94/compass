@@ -184,9 +184,12 @@ anchored to the trail cursor (#13): watching at Lv1, reading below it.
 Each fleet entry shows *where the session lives* (`dev:1.0` = tmux session `dev`,
 window 1, pane 0) so you always know where to go.
 
-A narrow in-tmux variant (a ≈42-col strip beside one CLI) was sketched early and
-has never been built. The deck is the only mode; if the strip is ever wanted, it is
-a new decision, not a promise outstanding.
+**Beside a session.** There is no second mode, but the deck fits the pane it is
+given, and a user who splits their own tmux gets the sidecar the early sketch was
+reaching for: from 62 columns the mirror closes (the real CLI is next door) and the
+fleet sits beside the trail; below 62 the trail has it alone, with the header
+carrying the fleet's alarm and the trail's title naming the selected session. compass
+still creates no split of its own — the user does, and compass renders to fit.
 
 **compass never manages tmux.** It creates no sessions, windows, or panes — ever
 (decided — see §7). You own your multiplexer; compass reads it (`list-panes`,

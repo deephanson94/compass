@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/transcript"
 )
@@ -19,6 +20,13 @@ type entry struct {
 	tailer   *transcript.Tailer
 	machine  *state.Machine
 	sawEvent bool // once events carry timestamps, they beat the file's mtime
+
+	// class is the kind of work the session's latest classifiable event
+	// belongs to — the trail's own vocabulary, so the fleet and the trail
+	// describe a session the same way. Only live sessions have one: an
+	// archived session is not doing anything.
+	class    journey.Class
+	hasClass bool
 }
 
 // DefaultLiveWindow is the recency door a new Manager opens: a session with no
@@ -232,7 +240,10 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 
 		if live {
 			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
-			out = append(out, Session{Info: e.info, Snap: e.machine.Evaluate(now), Live: true})
+			out = append(out, Session{
+				Info: e.info, Snap: e.machine.Evaluate(now), Live: true,
+				Class: e.class, HasClass: e.hasClass,
+			})
 		} else {
 			archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
 		}
@@ -276,6 +287,7 @@ func (e *entry) sleep() {
 	e.tailer = nil
 	e.machine = nil
 	e.sawEvent = false
+	e.hasClass = false
 }
 
 // archivedSnap is the whole verdict an archived session gets: it did something
@@ -329,6 +341,15 @@ func (e *entry) merge(info SessionInfo) {
 // Timestamps are a different question: a subagent writing right now is this
 // session being busy, so every line moves the clock.
 func (e *entry) absorb(ev transcript.Event) {
+	// The class the trail would put this moment in. It is the same vocabulary
+	// Lv1 uses, folded per event rather than segmented into legs — the fleet
+	// only needs to know what a session is doing right now, not how its work
+	// divided up. A subagent's tools are its own, not this session's.
+	if !ev.IsSidechain {
+		if c, ok := journey.Classify(ev); ok {
+			e.class, e.hasClass = c, true
+		}
+	}
 	if !ev.IsSidechain && ev.CWD != "" {
 		e.info.CWD, e.info.GitBranch = ev.CWD, ev.GitBranch
 		if e.info.OriginCWD == "" {

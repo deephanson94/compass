@@ -91,6 +91,29 @@ compass status                       # one-shot fleet summary, e.g. "▲1 ●2 �
 compass panes                        # diagnostic: which pane holds which session
 ```
 
+### Beside a session, not instead of it
+
+`Enter` hands you a session's terminal, but then the deck is gone. To keep the
+panels on screen while you type, put compass in a pane of your own tmux — it is
+a consumer of your multiplexer, so this is just a split:
+
+```
+tmux split-window -h -l 70 'compass'    # fleet + trail beside the CLI
+tmux split-window -h -l 46 'compass'    # the trail alone, for a narrow strip
+```
+
+compass fits itself to the pane. From 62 columns up it drops the live mirror —
+the real CLI is right there, so a rendering of it is redundant — and shows the
+fleet beside the trail. Below 62 it shows the trail alone: the header keeps the
+fleet's alarm (`▲2 ●1 ○3`) and the trail's title names whichever session `j`/`k`
+has landed on.
+
+One keypress, in your own `.tmux.conf`:
+
+```
+bind C-g split-window -h -l 70 'compass'
+```
+
 Everything is optional configuration — compass runs with none. `~/.config/compass/config.toml`:
 
 ```toml

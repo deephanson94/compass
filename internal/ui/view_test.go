@@ -95,8 +95,9 @@ func fixtureSessions(base time.Time) []fleet.Session {
 				CWD: "/home/user/infra", GitBranch: "tf/vpc",
 				Title: "tighten the vpc security groups", StartedAt: base, LastEventAt: base.Add(38 * time.Minute),
 			},
-			Snap: state.Snapshot{State: state.NeedsYou, Since: base.Add(38 * time.Minute), Reason: "waiting on your answer", Activity: "AskUserQuestion"},
-			Live: true,
+			Snap:  state.Snapshot{State: state.NeedsYou, Since: base.Add(38 * time.Minute), Reason: "waiting on your answer", Activity: "AskUserQuestion"},
+			Live:  true,
+			Class: journey.Design, HasClass: true,
 		},
 		{
 			Info: fleet.SessionInfo{
@@ -104,8 +105,9 @@ func fixtureSessions(base time.Time) []fleet.Session {
 				CWD: "/home/user/api", GitBranch: "claude/auth-fx",
 				Title: "fix the 401 bug", StartedAt: base, LastEventAt: base.Add(39 * time.Minute),
 			},
-			Snap: state.Snapshot{State: state.Working, Since: base.Add(37 * time.Minute), Reason: "tool call in flight", Activity: "Bash: pytest tests/auth -x"},
-			Live: true,
+			Snap:  state.Snapshot{State: state.Working, Since: base.Add(37 * time.Minute), Reason: "tool call in flight", Activity: "Bash: pytest tests/auth -x"},
+			Live:  true,
+			Class: journey.Test, HasClass: true,
 		},
 		{
 			Info: fleet.SessionInfo{
@@ -113,8 +115,9 @@ func fixtureSessions(base time.Time) []fleet.Session {
 				CWD: "/home/user/docs", GitBranch: "main",
 				Title: "update the readme", StartedAt: base, LastEventAt: base.Add(18 * time.Minute),
 			},
-			Snap: state.Snapshot{State: state.Idle, Since: base.Add(18 * time.Minute), Reason: "turn complete", Activity: "idle"},
-			Live: true,
+			Snap:  state.Snapshot{State: state.Idle, Since: base.Add(18 * time.Minute), Reason: "turn complete", Activity: "idle"},
+			Live:  true,
+			Class: journey.Docs, HasClass: true,
 		},
 	}
 }
@@ -279,8 +282,7 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	for _, want := range []string{
 		"⌁ no pane · from transcript", // the header names the source
 		"moment30",                    // and the newest turn is on screen
-		"no pane · claude/auth-fx",    // the fleet agrees about the pane
-		"Bash: pyt",                   // and still carries the state
+		"◆ test   Bash: pyt",          // and says what the session is doing
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no-pane mirror is missing %q", want)
@@ -288,6 +290,11 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	}
 	if strings.Contains(got, mirrorMark+" dev:1.0 · live") {
 		t.Error("a session with no pane must not claim a live mirror")
+	}
+	// With no pane anywhere the group headers would all read "elsewhere", which
+	// is noise: the mirror's own header says it once, and says it better.
+	if strings.Contains(got, "elsewhere") {
+		t.Error("a fleet where nothing has a pane should not label every row")
 	}
 	// The panel is full, not three lines on the floor of an empty column.
 	mid := middleColumn(got)

@@ -1143,7 +1143,16 @@ type column struct {
 // anything), then the trail.
 func (m *Model) deckLines(w, h int) []string {
 	if w < minDeckCols {
-		return fit(m.fleetColumn(w, h), h)
+		// One column only. It is the trail: the reason to run compass this
+		// narrow is to sit it beside a CLI in your own tmux, and beside a CLI
+		// the trail is the half that is not already on screen. The fleet's
+		// alarm is not lost with it — the header carries `▲2 ●1 ○3`, and the
+		// trail's own title names whichever session j/k has landed on.
+		one := m.trailColumn
+		if m.level >= levelReader {
+			one = m.readerColumn
+		}
+		return fit(one(w, h), h)
 	}
 
 	fw := fleetWidth
@@ -1156,11 +1165,12 @@ func (m *Model) deckLines(w, h int) []string {
 		if m.level >= levelWaypoints {
 			middle = m.readerColumn
 		}
-		mw := w - fw - trailWidth - 2*gutterWidth
+		fw, tw := sidePanelWidths(w)
+		mw := w - fw - tw - 2*gutterWidth
 		return joinColumns(h, []column{
 			{fw, m.fleetColumn(fw, h)},
 			{mw, middle(mw, h)},
-			{trailWidth, m.trailColumn(trailWidth, h)},
+			{tw, m.trailColumn(tw, h)},
 		})
 	}
 
@@ -1175,6 +1185,29 @@ func (m *Model) deckLines(w, h int) []string {
 		{fw, m.fleetColumn(fw, h)},
 		{tw, second(tw, h)},
 	})
+}
+
+// sidePanelWidths shares out a wide terminal. The fleet and the trail are the
+// two panels only compass draws; the mirror is a rendering of a pane the user
+// can look at directly. So once the mirror has enough width to be readable,
+// every further column goes to the sides — evenly, and no further than their
+// caps, past which a row is padding rather than information.
+func sidePanelWidths(w int) (fleet, trail int) {
+	fleet, trail = fleetWidth, trailWidth
+	spare := w - fleet - trail - 2*gutterWidth - mirrorEnough
+	for spare > 0 && (fleet < fleetWidthMax || trail < trailWidthMax) {
+		grew := false
+		if trail < trailWidthMax && spare > 0 {
+			trail, spare, grew = trail+1, spare-1, true
+		}
+		if fleet < fleetWidthMax && spare > 0 {
+			fleet, spare, grew = fleet+1, spare-1, true
+		}
+		if !grew {
+			break
+		}
+	}
+	return fleet, trail
 }
 
 // joinColumns sets the columns side by side, held apart by hairlines — the only

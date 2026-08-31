@@ -4,13 +4,13 @@
  FLEET · live                   │ TRAIL · infra                           [Lv1]
                                 │
  ▸1 ▲ infra     needs you    2m │ ◌ nothing yet
-     no pane · tf/vpc           │
+     ◆ design AskUserQuestion   │
                                 │ scouting will appear here
-  2 ● api       Bash: pyt…   3m │
-     no pane · claude/auth-fx   │
+  2 ● api       working      3m │
+     ◆ test   Bash: pytest tes… │
                                 │
-  3 ○ docs      turn comp…  22m │
-     no pane · main             │
+  3 ○ docs      idle        22m │
+     ◆ docs   update the readme │
 
 
 
