@@ -172,8 +172,18 @@ func (RealProc) StartTime(pid int) time.Time {
 	if boot.IsZero() {
 		return time.Time{}
 	}
-	// Whole seconds first: ticks*time.Second overflows int64 nanoseconds at
-	// about 2.9 years of uptime, and servers reach that.
+	return startFromTicks(boot, ticks)
+}
+
+// startFromTicks turns a process's start, counted in clock ticks since boot,
+// into a wall time. Whole seconds are converted first: ticks*time.Second
+// overflows int64 nanoseconds at about 2.9 years of uptime, and servers reach
+// that. Splitting the division loses nothing — a tick is exactly 10ms, so the
+// remainder converts without rounding.
+//
+// It is a plain function of its arguments so that the arithmetic can be tested
+// without a machine that has been up for three years.
+func startFromTicks(boot time.Time, ticks int64) time.Time {
 	d := time.Duration(ticks/clockTicks)*time.Second +
 		time.Duration(ticks%clockTicks)*time.Second/clockTicks
 	return boot.Add(d)
@@ -194,13 +204,15 @@ var boot struct {
 	at time.Time
 }
 
-func bootTime() time.Time {
+func bootTime() time.Time { return bootTimeFrom(filepath.Join("/proc", "stat")) }
+
+func bootTimeFrom(path string) time.Time {
 	boot.Lock()
 	defer boot.Unlock()
 	if !boot.at.IsZero() {
 		return boot.at
 	}
-	raw, err := os.ReadFile(filepath.Join("/proc", "stat"))
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return time.Time{}
 	}

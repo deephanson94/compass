@@ -66,7 +66,12 @@ func main() {
 
 	switch sub {
 	case "status":
+		// The status line runs from tmux every few seconds, as a fresh process
+		// each time, and the sessions worth reporting on are the long live ones
+		// that cost the most to replay. Resume where the last run stopped.
+		resume := openResume(mgr, *root)
 		fmt.Println(mgr.StatusLine(time.Now()))
+		resume.Save()
 	case "panes":
 		printPanes(os.Stdout, mgr, *root, time.Now())
 	case "help":
@@ -102,6 +107,19 @@ func buildNarrator(mgr *fleet.Manager, root, model string) func(notify func()) u
 	return func(notify func()) ui.Narrator {
 		return narrator.New(runner, cache, notify)
 	}
+}
+
+// openResume points the manager at a resume cache beside the narrator's, and
+// hands it back for saving once the work is done. A cache path that cannot be
+// worked out is simply no cache: the run replays, which is what it did before.
+func openResume(mgr *fleet.Manager, root string) *fleet.ResumeCache {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = root
+	}
+	c := fleet.OpenResumeCache(filepath.Join(base, "compass", "resume.json"))
+	mgr.UseResumeCache(c)
+	return c
 }
 
 // expandHome turns a leading ~/ into the user's home directory.

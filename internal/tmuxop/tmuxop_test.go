@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/tmuxop"
@@ -796,5 +798,118 @@ func TestStartTimeReadsProc(t *testing.T) {
 	}
 	if got := p.StartTime(0); !got.IsZero() {
 		t.Errorf("StartTime(0) = %v, want the zero time", got)
+	}
+}
+
+// A tmux window name is whatever someone typed into `rename-window`, and
+// compass draws it into a TUI. Control characters — an ESC most of all — must
+// not survive the trip, or a pane title repaints the deck.
+func TestWindowNamesCannotCarryEscapes(t *testing.T) {
+	r := &fakeRunner{outputs: [][]byte{[]byte(strings.Join([]string{
+		"dev:0.0\t%1\t100\tclaude\t\x1b[31mred\x1b[0m",
+		"dev:1.0\t%2\t101\tclaude\tplain-name",
+		"dev:2.0\t%3\t102\tclaude\tbell\x07and\x00nul",
+	}, "\n"))}}
+
+	got, err := tmuxop.ListPanes(r)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	want := []string{"[31mred[0m", "plain-name", "bellandnul"}
+	for i := range want {
+		if got[i].Window != want[i] {
+			t.Errorf("pane %d window = %q, want %q", i, got[i].Window, want[i])
+		}
+		if strings.ContainsFunc(got[i].Window, unicode.IsControl) {
+			t.Errorf("pane %d window still carries a control character: %q", i, got[i].Window)
+		}
+	}
+}
+
+// A session with no time at all must not outbid one that has a time. It sorts
+// last among contenders, so treating it as plausible with everything would let
+// it take the only pane and leave the better-ranked session with none — the
+// one thing the rule may never do.
+func TestATimelessSessionCannotOutbidATimedOne(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/w/app"},
+		started:  map[int]time.Time{701: at(ago(time.Minute))},
+	}
+	panes := []tmuxop.Pane{{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"}}
+	sessions := []fleet.SessionInfo{
+		sessionAt("s-timed", "/w/app", ago(time.Hour)),
+		{ID: "s-timeless", TranscriptPath: keyOf("s-timeless"), CWD: "/w/app"},
+	}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if _, ok := got[keyOf("s-timed")]; !ok {
+		t.Errorf("the session with a clock lost its pane to one without: %+v", got)
+	}
+	if _, ok := got[keyOf("s-timeless")]; ok {
+		t.Error("a session with no time at all took the only pane")
+	}
+}
+
+// The tick arithmetic, at uptimes no test machine will ever have. The obvious
+// form — ticks * time.Second / clockTicks — overflows int64 nanoseconds at
+// about 2.9 years and silently returns a time in the distant past, which makes
+// every session plausible everywhere and switches the pairing rule off.
+func TestStartFromTicksSurvivesLongUptimes(t *testing.T) {
+	boot := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, up := range []time.Duration{
+		0,
+		time.Second,
+		36 * time.Hour,
+		365 * 24 * time.Hour,
+		3 * 365 * 24 * time.Hour,  // past the overflow
+		10 * 365 * 24 * time.Hour, // a machine nobody has rebooted
+	} {
+		ticks := int64(up / (time.Second / 100)) // USER_HZ = 100
+		got := tmuxop.StartFromTicks(boot, ticks)
+		if want := boot.Add(up); !got.Equal(want) {
+			t.Errorf("uptime %v: start is %v, want %v", up, got, want)
+		}
+	}
+
+	// And the sub-second remainder converts exactly — a tick is 10ms.
+	if got, want := tmuxop.StartFromTicks(boot, 7), boot.Add(70*time.Millisecond); !got.Equal(want) {
+		t.Errorf("7 ticks = %v, want %v", got, want)
+	}
+}
+
+// A boot time that could not be read is not remembered: a single unlucky
+// moment — fd exhaustion, a sandboxed /proc — must not switch the pairing rule
+// off for the rest of the session with nothing to show for it.
+func TestBootTimeRemembersOnlySuccess(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "absent")
+	noBtime := filepath.Join(dir, "no-btime")
+	good := filepath.Join(dir, "good")
+	if err := os.WriteFile(noBtime, []byte("cpu 1 2 3\nprocesses 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(good, []byte("cpu 1 2 3\nbtime 1600000000\nprocesses 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmuxop.ResetBootTime()
+	t.Cleanup(tmuxop.ResetBootTime)
+
+	for _, path := range []string{missing, noBtime, missing} {
+		if got := tmuxop.BootTimeFrom(path); !got.IsZero() {
+			t.Fatalf("%s gave a boot time of %v", filepath.Base(path), got)
+		}
+	}
+	// A failure must not have poisoned the cache: the next good read answers.
+	want := time.Unix(1600000000, 0)
+	if got := tmuxop.BootTimeFrom(good); !got.Equal(want) {
+		t.Fatalf("after three failed reads the good one gave %v, want %v — "+
+			"a failure was memoized", got, want)
+	}
+	// And a success is remembered, so /proc/stat is read once per process.
+	if got := tmuxop.BootTimeFrom(missing); !got.Equal(want) {
+		t.Errorf("a successful boot time was not cached: %v", got)
 	}
 }

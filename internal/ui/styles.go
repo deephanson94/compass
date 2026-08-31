@@ -141,12 +141,24 @@ func clip(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	r := []rune(s)
-	if len(r) <= w {
+	if lipgloss.Width(s) <= w {
 		return s
 	}
 	if w == 1 {
 		return "…"
 	}
-	return strings.TrimRight(string(r[:w-1]), " ") + "…"
+	// Cells, not runes: one CJK ideograph or emoji occupies two columns, and a
+	// panel measured in runes overflows into its neighbour. Session titles,
+	// branches and tmux window names are all arbitrary user text.
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		cw := lipgloss.Width(string(r))
+		if used+cw > w-1 {
+			break
+		}
+		b.WriteRune(r)
+		used += cw
+	}
+	return strings.TrimRight(b.String(), " ") + "…"
 }

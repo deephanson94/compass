@@ -145,6 +145,15 @@ func (b *transcriptBuilder) result(ts time.Time, toolID, content string) *transc
 }
 
 // write flushes the transcript to <root>/projects/<slug>/<sessionID>.jsonl.
+// latch is a bookkeeping line: it carries a clock but says nothing, exactly as
+// the mode and last-prompt markers at the end of a real transcript do.
+func (b *transcriptBuilder) latch(ts time.Time) *transcriptBuilder {
+	o := b.common(ts)
+	o["type"] = "queue-operation"
+	o["op"] = "latch"
+	return b.add(o)
+}
+
 func (b *transcriptBuilder) write(root, slug string) {
 	b.t.Helper()
 	dir := filepath.Join(root, "projects", slug)
@@ -538,4 +547,85 @@ func TestSubagentLinesDoNotMoveTheSession(t *testing.T) {
 	if got := infos[0].GitBranch; got != "main" {
 		t.Errorf("branch is %q — a subagent's branch became the session's", got)
 	}
+}
+
+// Discovery speaks once, at first sight; from then on the Manager's own fold
+// is the authority on where a live session is. Both location rules therefore
+// have to hold on that path too — a fix applied only to discovery is a fix
+// that stops working the moment a session is live, which is every session the
+// fleet actually cares about.
+func TestLiveSessionLocationFollowsTheSameRules(t *testing.T) {
+	t.Run("branch travels with the directory", func(t *testing.T) {
+		root := t.TempDir()
+		newTranscript(t, "55555555-5555-4555-8555-555555555555", "/home/user/repo", "feature-x").
+			prompt(ago(time.Hour), "in the repo").
+			text(ago(59*time.Minute), "on feature-x").
+			moveTo("/tmp/scratch", ""). // not a git repository at all
+			prompt(ago(time.Minute), "now in scratch").
+			text(ago(30*time.Second), "no branch here").
+			write(root, "-home-user-repo")
+
+		got := onlySession(t, liveManager(root))
+		if got.Info.CWD != "/tmp/scratch" {
+			t.Fatalf("cwd is %q, want /tmp/scratch", got.Info.CWD)
+		}
+		if got.Info.GitBranch != "" {
+			t.Errorf("branch is %q, but the session is in a directory git knows nothing about",
+				got.Info.GitBranch)
+		}
+	})
+
+	t.Run("a subagent does not move the session", func(t *testing.T) {
+		root := t.TempDir()
+		b := newTranscript(t, "66666666-6666-4666-8666-666666666666", "/home/user/main", "main").
+			prompt(ago(time.Hour), "go and scout").
+			text(ago(59*time.Minute), "spawning a subagent")
+		b.moveTo("/home/user/subagent-dir", "detached")
+		for _, line := range []string{"scouting over here", "found it"} {
+			b.text(ago(time.Minute), line)
+			b.lines[len(b.lines)-1] = strings.Replace(
+				b.lines[len(b.lines)-1], `"isSidechain":false`, `"isSidechain":true`, 1)
+		}
+		b.write(root, "-home-user-main")
+
+		got := onlySession(t, liveManager(root))
+		if got.Info.CWD != "/home/user/main" {
+			t.Errorf("cwd is %q — a subagent's own directory became the session's", got.Info.CWD)
+		}
+		if got.Info.GitBranch != "main" {
+			t.Errorf("branch is %q — a subagent's branch became the session's", got.Info.GitBranch)
+		}
+	})
+
+	// A subagent writing right now is this session being busy. The location
+	// rules ignore sidechain lines; the clock must not.
+	t.Run("a subagent still counts as activity", func(t *testing.T) {
+		root := t.TempDir()
+		b := newTranscript(t, "6a6a6a6a-6666-4666-8666-666666666666", "/home/user/main", "main").
+			prompt(ago(time.Hour), "go and scout").
+			text(ago(59*time.Minute), "spawning a subagent")
+		b.text(ago(time.Second), "still scouting")
+		b.lines[len(b.lines)-1] = strings.Replace(
+			b.lines[len(b.lines)-1], `"isSidechain":false`, `"isSidechain":true`, 1)
+		b.write(root, "-home-user-main")
+
+		got := onlySession(t, liveManager(root))
+		if want := ago(time.Second); !got.Info.LastEventAt.Equal(want) {
+			t.Errorf("last activity is %v, want the subagent's line at %v — a Task "+
+				"in flight is not a quiet session", got.Info.LastEventAt, want)
+		}
+	})
+}
+
+// onlySession refreshes a manager that should be watching exactly one session.
+func onlySession(t *testing.T, m *fleet.Manager) fleet.Session {
+	t.Helper()
+	sessions, err := m.Refresh(fleetNow)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want one session, got %d", len(sessions))
+	}
+	return sessions[0]
 }

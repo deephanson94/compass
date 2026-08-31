@@ -178,9 +178,10 @@ func peek(info *SessionInfo, size int64) {
 // tailState is what the last few kilobytes of a transcript say about a session
 // right now: when it last spoke, and where it was standing when it did.
 type tailState struct {
-	at     time.Time
-	cwd    string
-	branch string
+	at      time.Time
+	cwd     string
+	branch  string
+	located bool // a line of this session's own named a cwd
 }
 
 func peekHead(f *os.File, info *SessionInfo) {
@@ -230,40 +231,72 @@ func peekTailState(f *os.File, size int64) tailState {
 	if size <= 0 {
 		return out
 	}
-	start := size - peekTail
-	if start < 0 {
-		start = 0
+	// Widen backwards while the location is still unanswered. One window is
+	// enough for an ordinary transcript, but a Task's sidechain lines are
+	// skipped here and a single large tool result fills 64KB on its own — so a
+	// session mid-Task can have a whole window with nothing of its own in it.
+	// Falling back to the head there would file the session at a directory it
+	// left, which is exactly the failure this function exists to prevent.
+	for end := int64(1); end <= peekWindows; end++ {
+		start := size - end*peekTail
+		if start < 0 {
+			start = 0
+		}
+		scanTail(f, size, start, &out)
+		if out.located || start == 0 {
+			break
+		}
 	}
-	buf := make([]byte, size-start)
-	if _, err := f.ReadAt(buf, start); err != nil {
-		return out
+	return out
+}
+
+// peekWindows bounds the widening: a transcript whose last megabyte is all
+// subagent keeps the head's answer rather than reading the whole file on every
+// scan.
+const peekWindows = 16
+
+// scanTail walks one window backwards, filling whatever `out` still lacks.
+func scanTail(f *os.File, size, start int64, out *tailState) {
+	// Read one byte further back than the window needs. That byte decides
+	// whether the window opens mid-line or exactly at the start of one: with
+	// it included, the first slice of the split is the earlier line's tail in
+	// the first case and empty in the second, so dropping it is right either
+	// way. Splitting from the window's own first byte cannot tell the two
+	// apart, and drops a whole line whenever the window lands on a boundary.
+	from := start
+	if start > 0 {
+		from--
+	}
+	buf := make([]byte, size-from)
+	if _, err := f.ReadAt(buf, from); err != nil {
+		return
 	}
 
 	lines := strings.Split(string(buf), "\n")
 	if start > 0 && len(lines) > 0 {
-		lines = lines[1:] // the first slice is a fragment of an earlier line
+		lines = lines[1:]
 	}
-	located := false
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 		ev, err := transcript.ParseLine([]byte(line))
-		if err != nil || ev.IsSidechain {
+		if err != nil {
 			continue
 		}
+		// A subagent writing right now is this session being busy, so every
+		// line moves the clock — only the location is the session's alone.
 		if out.at.IsZero() && !ev.Timestamp.IsZero() {
 			out.at = ev.Timestamp
 		}
-		if !located && ev.CWD != "" {
-			out.cwd, out.branch, located = ev.CWD, ev.GitBranch, true
+		if !out.located && !ev.IsSidechain && ev.CWD != "" {
+			out.cwd, out.branch, out.located = ev.CWD, ev.GitBranch, true
 		}
-		if !out.at.IsZero() && located {
-			break
+		if !out.at.IsZero() && out.located {
+			return
 		}
 	}
-	return out
 }
 
 // promptTitle reduces a prompt to its first line, clipped to titleMax runes.

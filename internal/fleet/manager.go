@@ -48,6 +48,10 @@ type Manager struct {
 	paneMapped map[string]bool
 	liveWindow time.Duration
 
+	// resume, when set, lets a live session be picked up where an earlier
+	// process stopped reading rather than replayed from byte zero.
+	resume *ResumeCache
+
 	// cache is the last discovery scan, keyed by transcript path: 280 archived
 	// transcripts are stat'ed every second, not re-read.
 	cache map[string]cachedInfo
@@ -111,6 +115,16 @@ func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
 	return !info.LastEventAt.Before(now.Add(-m.liveWindow))
 }
 
+// UseResumeCache tells the Manager to pick live sessions up where an earlier
+// process left them, instead of replaying each one. Call Save on the returned
+// cache when the process is done with it; a Manager with no cache behaves
+// exactly as before.
+func (m *Manager) UseResumeCache(c *ResumeCache) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resume = c
+}
+
 // ExcludeCWD hides sessions whose CWD is path (the narrator's Dir): compass
 // must never watch itself narrate. Paths are compared cleaned and absolute, so
 // the caller can pass whatever form it has. An already-tracked session at that
@@ -161,11 +175,18 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// A fresh process starts from whatever the last one wrote down; a
+	// long-lived one is already warm and the seed is a no-op after the first
+	// pass.
+	if m.cache == nil {
+		m.cache = m.resume.seed()
+	}
 	infos, cache, err := scanProjects(m.root, m.cache)
 	if err != nil {
 		return nil, err
 	}
 	m.cache = cache
+	m.resume.keepScan(cache)
 
 	kept := make(map[string]bool, len(infos))
 	out := make([]Session, 0, len(infos))
@@ -188,7 +209,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			// Waking from the archive means a tailer from scratch: the whole
 			// file replays, exactly as it does at first sight.
 			if e.tailer == nil {
-				e.wake()
+				m.wake(key, e)
 			}
 			// A session whose file we cannot read keeps its last known state
 			// rather than vanishing from the fleet.
@@ -210,6 +231,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		}
 
 		if live {
+			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
 			out = append(out, Session{Info: e.info, Snap: e.machine.Evaluate(now), Live: true})
 		} else {
 			archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
@@ -221,17 +243,28 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			delete(m.sessions, key)
 		}
 	}
+	m.resume.retain(kept)
 
 	sortFleet(out)
 	sortArchive(archive)
 	return append(out, archive...), nil
 }
 
-// wake gives an entry what a live session needs. Both are built from scratch:
-// a session crossing archive→live replays its whole transcript rather than
-// resuming a fold it stopped keeping.
-func (e *entry) wake() {
+// wake gives an entry what a live session needs.
+//
+// Without a resume cache both are built from scratch, and the session replays
+// its whole transcript — correct, and on a long session the most expensive
+// thing compass does. With one, the tailer starts where the last process
+// stopped and the machine starts from what it had concluded there, so only the
+// appended bytes are read. The tailer refuses a mark that no longer fits the
+// file, and a refused mark simply means the replay happens after all.
+func (m *Manager) wake(key string, e *entry) {
 	e.tailer = transcript.NewTailer(e.info.TranscriptPath)
+	if p, ok := m.resume.point(key); ok && e.tailer.Resume(p.Mark) {
+		e.machine = state.RestoreMachine(p.Fold)
+		e.sawEvent = !p.Fold.LastEventAt.IsZero()
+		return
+	}
 	e.machine = state.NewMachine()
 }
 
@@ -281,12 +314,20 @@ func (e *entry) merge(info SessionInfo) {
 }
 
 // absorb folds an event's identity fields into what we know about the session.
+//
+// This is the live path's authority on where a session is — discovery only
+// speaks once, at first sight — so it answers the location question the same
+// way peekTailState does, and for the same reasons. A sidechain line is a
+// subagent's own conversation, so it moves nothing; and cwd and branch travel
+// together, because Claude Code writes an empty branch outside a git
+// repository and taking them separately would keep the branch of a directory
+// the session has left.
+//
+// Timestamps are a different question: a subagent writing right now is this
+// session being busy, so every line moves the clock.
 func (e *entry) absorb(ev transcript.Event) {
-	if ev.CWD != "" {
-		e.info.CWD = ev.CWD
-	}
-	if ev.GitBranch != "" {
-		e.info.GitBranch = ev.GitBranch
+	if !ev.IsSidechain && ev.CWD != "" {
+		e.info.CWD, e.info.GitBranch = ev.CWD, ev.GitBranch
 	}
 	if !ev.Timestamp.IsZero() {
 		if e.info.StartedAt.IsZero() || ev.Timestamp.Before(e.info.StartedAt) {

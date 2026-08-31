@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/deephanson94/compass/internal/fleet"
 )
@@ -91,7 +92,24 @@ func parsePane(line string) (Pane, bool) {
 	if f[0] == "" || f[1] == "" {
 		return Pane{}, false
 	}
-	return Pane{Target: f[0], ID: f[1], PID: pid, Command: f[3], Window: f[4]}, true
+	return Pane{Target: f[0], ID: f[1], PID: pid, Command: f[3], Window: safeLabel(f[4])}, true
+}
+
+// safeLabel strips control characters out of text tmux hands back. A window
+// name is whatever the user typed into `rename-window`, and ESC is a legal
+// character there — compass draws that name into a TUI, so an escape sequence
+// arriving from a pane title would repaint the deck. Nothing legible is lost:
+// the names people give windows are words.
+func safeLabel(s string) string {
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // MapSessions pairs sessions to panes: a session matches a pane whose claude
@@ -219,15 +237,27 @@ const procSlack = 2 * time.Second
 // must have spoken since that pane's claude started. An unreadable start time
 // says nothing, so it disqualifies nobody.
 //
-// A start time that is wrong rather than missing — a kernel whose USER_HZ is
-// not the 100 assumed in StartTime, say — lands in the future and makes every
-// session implausible for every pane. That is self-limiting: pass 1 then
-// assigns nothing, pass 2 assigns everything by recency, and the pairing is
-// exactly what it was before this rule existed. The rule can lose its power;
-// it cannot invent a wrong answer of its own.
+// A start time that is badly wrong — a kernel whose USER_HZ is not the 100
+// assumed in StartTime — scales with uptime, pushes every pane into the future
+// and makes every session implausible everywhere. That much is self-limiting:
+// pass 1 assigns nothing, pass 2 assigns by recency, and the pairing is what
+// it was before this rule existed.
+//
+// A uniform *offset* is not so kind. A btime that jumps — a clock step, a
+// resumed VM snapshot — inflates every `since` equally, which can push the
+// young panes past every session while leaving the old ones reachable, and
+// pass 1 will then pair the wrong way round. Nothing here detects that, and a
+// per-pane clamp would not help: the skew is in the anchor, not the pane.
 func couldBeIn(s fleet.SessionInfo, cp claudePane) bool {
-	if cp.since.IsZero() || s.LastEventAt.IsZero() {
+	if cp.since.IsZero() {
 		return true
 	}
+	// A session with no time at all is NOT treated as plausible with
+	// everything. It sorts last among contenders, so calling it plausible
+	// would let it take the only pane from a session ranked above it — and
+	// leave that one with nothing, which is the one thing this rule may never
+	// do. Ranked last and implausible, it waits for pass 2 instead.
+	// (Discovery seeds LastEventAt from the file's mtime, so in practice this
+	// is unreachable; it is the asymmetry that is worth not having.)
 	return !s.LastEventAt.Before(cp.since.Add(-procSlack))
 }
