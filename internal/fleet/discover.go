@@ -30,6 +30,12 @@ type SessionInfo struct {
 type Session struct {
 	Info SessionInfo
 	Snap state.Snapshot
+
+	// Live says this session can still need you: it sits in a tmux pane, or
+	// its transcript moved within the manager's live window. Everything else
+	// is the archive — real, readable, and never amber
+	// (docs/dev/M5-CONTRACT.md).
+	Live bool
 }
 
 // titleMax is how much of a first prompt survives into the fleet list.

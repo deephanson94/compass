@@ -40,6 +40,16 @@ func NewManager(root string) *Manager {
 // Root is the Claude home directory this Manager watches.
 func (m *Manager) Root() string { return m.root }
 
+// MarkPaneMapped tells the manager which sessions currently sit in a tmux
+// pane; the ui feeds it after every MapSessions. Implemented in M5
+// (docs/dev/M5-CONTRACT.md).
+func (m *Manager) MarkPaneMapped(ids map[string]bool) {}
+
+// SetLiveWindow sets the recency door: a paneless session still counts as
+// live while now−LastEventAt ≤ d; 0 closes the door (panes only). Implemented
+// in M5 (docs/dev/M5-CONTRACT.md).
+func (m *Manager) SetLiveWindow(d time.Duration) {}
+
 // ExcludeCWD hides sessions whose CWD is path (the narrator's Dir): compass
 // must never watch itself narrate. Paths are compared cleaned and absolute, so
 // the caller can pass whatever form it has. An already-tracked session at that
