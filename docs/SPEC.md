@@ -48,7 +48,11 @@ dashed strokes — the plan is simply further down the same road.
 ### 2.2 Legs: the Lv1 classification
 
 Every session's activity segments into **legs** — contiguous spans dominated by one
-class of work. Eight classes, fixed, each with one color and one verb:
+class of work. Seven classes, fixed, each with one verb — and the verb is written on
+the row, narrated or not: colour reinforces the class, it never carries it alone (§4).
+
+`WAIT` below is the odd one out and was never built as a leg: waiting is a session
+*state*, not a span of work, and it shows in the fleet column as `▲` or `○`.
 
 | Class | Verb | Detected from (heuristics) |
 |-------|-------|---------------------------|

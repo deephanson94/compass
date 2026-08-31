@@ -137,8 +137,10 @@ func TestT52BuildAsk(t *testing.T) {
 	}
 }
 
-// T53 — narrated labels replace the heuristic `verb label` on closed legs;
-// HEAD keeps its live heuristic (narration is for history).
+// T53 — a narrated label replaces the heuristic *label* on a closed leg. It
+// does not replace the class: narrated and heuristic legs share one row shape,
+// so the classification Lv1 exists to show survives in monochrome (SPEC §2.2,
+// §4). HEAD keeps its live heuristic — narration is for history.
 func TestT53NarratedOverlayGolden(t *testing.T) {
 	forceASCII(t)
 
@@ -158,9 +160,49 @@ func TestT53NarratedOverlayGolden(t *testing.T) {
 	if strings.Contains(got, "must never show on head") {
 		t.Error("HEAD rendered its narrated label; the open leg keeps its live heuristic")
 	}
-	for _, want := range []string{"maps the auth module", "wires the token refresh"} {
+	for _, want := range []string{
+		"scout  maps the auth module",    // the class keeps its column…
+		"build  wires the token refresh", // …on every narrated leg
+		"test   pytest",                  // and an un-narrated one is the same shape
+	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("narrated label %q did not render", want)
+			t.Errorf("trail is missing %q:\n%s", want, got)
+		}
+	}
+
+	// The proof that the class is not carried by colour alone: this frame was
+	// drawn with the colour profile off, and every class is still named.
+	for _, class := range []string{"scout", "build", "test", "fix"} {
+		if !strings.Contains(got, class) {
+			t.Errorf("class %q is invisible with colour off:\n%s", class, got)
+		}
+	}
+}
+
+// A narrated phrase that opens with the class's own name says it twice. Only
+// an exact word match is dropped — "push to main" under `ship` keeps its verb,
+// because "ship to main" is not what happened.
+//
+// Legs[0] of the fixture is a `scout` leg, so `scout` is the word in question.
+func TestNarratedPhraseDoesNotRepeatTheClass(t *testing.T) {
+	forceASCII(t)
+
+	tr := fixtureTrail(fixtureBase)
+	key := sessionKey("s-api")
+	for _, tc := range []struct{ phrase, want string }{
+		{"scout the payments module", "scout  the payments module"}, // dropped
+		{"scouting around", "scout  scouting around"},               // not the same word
+		{"rescout the module", "scout  rescout the module"},         // nor a suffix of one
+		{"fix probe6 exit", "scout  fix probe6 exit"},               // another class's verb stays
+		{"scout", "scout  scout"},                                   // nothing would be left
+	} {
+		got := RenderTrail(tr, TrailOpts{
+			Labels:     map[string]string{narrator.LegKey(key, tr.Legs[0]): tc.phrase},
+			SessionKey: key, Now: fixtureBase.Add(40 * time.Minute),
+			Width: 38, Height: 20, Level: 1, Cursor: -1,
+		})
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("phrase %q rendered without %q:\n%s", tc.phrase, tc.want, got)
 		}
 	}
 }
