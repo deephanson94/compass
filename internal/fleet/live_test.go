@@ -91,14 +91,30 @@ func mustRefresh(t *testing.T, m *fleet.Manager, now time.Time) []fleet.Session 
 }
 
 // pick returns the session with the given id, failing if the fleet dropped it.
+// pick finds the one session carrying an id. Identity is the transcript path
+// (M6), so an id CAN name two sessions; every fixture in this file gives each
+// session its own, and a duplicate here would mean the fixture — or the
+// manager — is not what the test thinks. Better loud than first-match.
 func pick(t *testing.T, sessions []fleet.Session, id string) fleet.Session {
 	t.Helper()
+	var found []fleet.Session
 	for _, s := range sessions {
 		if s.Info.ID == id {
-			return s
+			found = append(found, s)
 		}
 	}
-	t.Fatalf("session %s missing from fleet %v", id, sessionIDs(sessions))
+	switch len(found) {
+	case 1:
+		return found[0]
+	case 0:
+		t.Fatalf("session %s missing from fleet %v", id, sessionIDs(sessions))
+	default:
+		keys := make([]string, 0, len(found))
+		for _, s := range found {
+			keys = append(keys, s.Info.Key())
+		}
+		t.Fatalf("id %s names %d sessions (%v); pick needs exactly one", id, len(found), keys)
+	}
 	return fleet.Session{}
 }
 

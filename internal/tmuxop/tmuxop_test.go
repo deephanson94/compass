@@ -486,47 +486,6 @@ func TestT30CaptureReportsErrors(t *testing.T) {
 	r.assertCalls(t, []string{"capture-pane", "-p", "-e", "-J", "-t", "%5"})
 }
 
-// T30 — Reveal selects the window, then the pane, in that order.
-func TestT30RevealArgs(t *testing.T) {
-	tests := []struct {
-		target     string
-		paneID     string
-		wantWindow string
-	}{
-		{"dev:1.0", "%5", "dev:1"},
-		{"dev:12.3", "%7", "dev:12"},
-		{"work:0.0", "%1", "work:0"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.target, func(t *testing.T) {
-			r := &fakeRunner{}
-			if err := tmuxop.Reveal(r, tc.target, tc.paneID); err != nil {
-				t.Fatalf("Reveal: unexpected error %v", err)
-			}
-			r.assertCalls(t,
-				[]string{"select-window", "-t", tc.wantWindow},
-				[]string{"select-pane", "-t", tc.paneID},
-			)
-		})
-	}
-}
-
-func TestT30RevealReportsErrors(t *testing.T) {
-	t.Run("select-window fails", func(t *testing.T) {
-		r := &fakeRunner{errs: []error{errors.New("can't find window: dev:1")}}
-		if err := tmuxop.Reveal(r, "dev:1.0", "%5"); err == nil {
-			t.Errorf("Reveal err = nil, want the select-window failure reported")
-		}
-	})
-
-	t.Run("select-pane fails", func(t *testing.T) {
-		r := &fakeRunner{errs: []error{nil, errors.New("can't find pane: %5")}}
-		if err := tmuxop.Reveal(r, "dev:1.0", "%5"); err == nil {
-			t.Errorf("Reveal err = nil, want the select-pane failure reported")
-		}
-	})
-}
-
 // ---------------------------------------------------------------- seams
 
 // The fakes in this file must satisfy the contract's interfaces — if they stop

@@ -403,3 +403,41 @@ func TestAttachReturnsAFreshCommandEveryTime(t *testing.T) {
 	assertNotStarted(t, a)
 	assertNotStarted(t, b)
 }
+
+// A tmux session name may contain dots, so only a dot AFTER the colon can be
+// the pane separator. "my.app:2" is already a window target; trimming its last
+// dot would aim select-window at a session called "my". (Flagged as latent when
+// T65/T66 were written, fixed with the M6 cleanup.)
+func TestAttachWindowTargetRespectsDottedSessionNames(t *testing.T) {
+	cases := []struct {
+		target string
+		window string
+		sess   string
+	}{
+		{"my.app:2.1", "my.app:2", "my.app"},
+		{"my.app:2", "my.app:2", "my.app"}, // no pane index: nothing to trim
+		{"dev:1.0", "dev:1", "dev"},
+		{"dev:1", "dev:1", "dev"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.target, func(t *testing.T) {
+			args := tmuxop.Attach(tc.target, "%5", false).Args
+			if got := argAfter(args, "select-window"); got != tc.window {
+				t.Errorf("select-window -t %q, want %q", got, tc.window)
+			}
+			if got := argAfter(args, "attach-session"); got != tc.sess {
+				t.Errorf("attach-session -t %q, want %q", got, tc.sess)
+			}
+		})
+	}
+}
+
+// argAfter returns the value of the -t that follows the named tmux subcommand.
+func argAfter(args []string, verb string) string {
+	for i, a := range args {
+		if a == verb && i+2 < len(args) && args[i+1] == "-t" {
+			return args[i+2]
+		}
+	}
+	return ""
+}

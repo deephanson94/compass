@@ -244,20 +244,24 @@ func TestLegKeyFormat(t *testing.T) {
 		t.Errorf("LegKey = %q, want %q", got, want)
 	}
 
-	// And structurally, so the literal above cannot drift silently.
+	// And structurally, so the literal above cannot drift silently. The key is
+	// read from the RIGHT: since M6 the session part is a transcript path, which
+	// contains slashes of its own, so counting "/"-separated fields would only
+	// ever be true of the uuid this subtest happens to pass.
 	got := narrator.LegKey(sessAlpha, l)
-	parts := strings.Split(got, "/")
-	if len(parts) != 3 {
-		t.Fatalf("LegKey = %q, want three %q-separated parts", got, "/")
+	class := got[strings.LastIndexByte(got, '/')+1:]
+	rest := got[:strings.LastIndexByte(got, '/')]
+	nanos := rest[strings.LastIndexByte(rest, '/')+1:]
+	session := rest[:strings.LastIndexByte(rest, '/')]
+
+	if session != sessAlpha {
+		t.Errorf("LegKey session part = %q, want %q", session, sessAlpha)
 	}
-	if parts[0] != sessAlpha {
-		t.Errorf("LegKey session part = %q, want %q", parts[0], sessAlpha)
+	if nanos != strconv.FormatInt(l.Start.UnixNano(), 10) {
+		t.Errorf("LegKey time part = %q, want Start.UnixNano() base 10 (%d)", nanos, l.Start.UnixNano())
 	}
-	if parts[1] != strconv.FormatInt(l.Start.UnixNano(), 10) {
-		t.Errorf("LegKey time part = %q, want Start.UnixNano() base 10 (%d)", parts[1], l.Start.UnixNano())
-	}
-	if parts[2] != l.Class.String() {
-		t.Errorf("LegKey class part = %q, want %q", parts[2], l.Class.String())
+	if class != l.Class.String() {
+		t.Errorf("LegKey class part = %q, want %q", class, l.Class.String())
 	}
 }
 

@@ -443,8 +443,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case attachDoneMsg:
 		switch {
+		case msg.err != nil && msg.inside:
+			// Inside tmux the handover is one sequence — select-window,
+			// select-pane, switch-client — and tmux runs the rest even when a
+			// step fails, so the client may well have moved anyway (a detached
+			// server, for instance, has no client to switch and says so while
+			// the selects still land). Report what tmux said rather than
+			// claiming an outcome the deck cannot see.
+			m.note = "tmux: " + firstLine(msg.err.Error())
 		case msg.err != nil:
-			m.note = "attach failed: " + msg.err.Error()
+			m.note = "attach failed: " + firstLine(msg.err.Error())
 		case msg.inside:
 			// Nothing was suspended, so nothing announced its own return: the
 			// deck says where the client went instead.

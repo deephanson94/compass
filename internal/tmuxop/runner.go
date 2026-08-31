@@ -38,17 +38,6 @@ func Capture(r Runner, paneID string) (string, error) {
 	return string(out), nil
 }
 
-// Reveal focuses the pane in the user's own tmux: select-window on the pane's
-// window, then select-pane on the pane itself. This is one of the two writes
-// compass ever makes, and both are keypress-gated.
-func Reveal(r Runner, target, paneID string) error {
-	if _, err := r.Output("select-window", "-t", windowTarget(target)); err != nil {
-		return err
-	}
-	_, err := r.Output("select-pane", "-t", paneID)
-	return err
-}
-
 // Attach hands the terminal to a pane. Outside tmux that means attaching this
 // terminal to the pane's session; inside tmux it means switching this client to
 // it — the same intent, the shape the situation allows.
@@ -76,7 +65,11 @@ func Attach(target, paneID string, insideTmux bool) *exec.Cmd {
 // windowTarget drops the pane index from a pane target: "dev:1.0" → "dev:1".
 // A target without a pane index is already a window target.
 func windowTarget(target string) string {
-	if i := strings.LastIndexByte(target, '.'); i >= 0 {
+	// Only a dot AFTER the session's colon can be the pane separator: a tmux
+	// session name may itself contain dots, so "my.app:2" is a window target
+	// already and trimming its last dot would leave "my".
+	colon := strings.LastIndexByte(target, ':')
+	if i := strings.LastIndexByte(target, '.'); i > colon {
 		return target[:i]
 	}
 	return target
