@@ -44,6 +44,7 @@ func ListPanes(r Runner) ([]Pane, error) {
 	}
 
 	var panes []Pane
+	seen := map[string]bool{}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
@@ -53,6 +54,20 @@ func ListPanes(r Runner) ([]Pane, error) {
 		if !ok {
 			continue
 		}
+		// Sessions in a tmux group share their windows, so `list-panes -a`
+		// reports every pane once per session in the group — the same pane id,
+		// the same pid, under two or more targets. They are one pane holding
+		// one claude, and compass must see one: handed both, it pairs a second
+		// session to the second copy, and because winning a pane is what marks
+		// a session live (M5), a long-dead session is dragged into the live
+		// fleet wearing the mirror of a pane it is not in.
+		//
+		// The first address tmux gives wins, which keeps its own ordering — the
+		// order the fleet groups by.
+		if seen[pane.ID] {
+			continue
+		}
+		seen[pane.ID] = true
 		panes = append(panes, pane)
 	}
 	return panes, nil
