@@ -67,6 +67,8 @@ func main() {
 	switch sub {
 	case "status":
 		fmt.Println(mgr.StatusLine(time.Now()))
+	case "panes":
+		printPanes(os.Stdout, mgr, *root, time.Now())
 	case "help":
 		fs.Usage()
 	default:
@@ -131,6 +133,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "compass — a panel next to your agents")
 		fmt.Fprintln(fs.Output(), "\n  compass           the deck: every session, one glance")
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
+		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()
 	}

@@ -325,7 +325,9 @@ type fakeTmux struct{ out string }
 
 func (f fakeTmux) Output(args ...string) ([]byte, error) { return []byte(f.out), nil }
 
-// fakeProc puts one claude process in every pane, at a cwd keyed by its pid.
+// fakeProc models the usual pane: a shell you typed `claude` into. The map is
+// keyed by the pane's pid and holds the cwd its claude child reports; the child
+// is that pid + 1000.
 type fakeProc map[int]string
 
 func (p fakeProc) Children(pid int) []int {
@@ -334,8 +336,16 @@ func (p fakeProc) Children(pid int) []int {
 	}
 	return nil
 }
-func (p fakeProc) Comm(pid int) string { return "claude" }
-func (p fakeProc) Cwd(pid int) string  { return p[pid-1000] }
+
+func (p fakeProc) Comm(pid int) string {
+	if _, isPane := p[pid]; isPane {
+		return "zsh" // the pane's own process is the shell
+	}
+	return "claude"
+}
+
+func (p fakeProc) Cmdline(pid int) string { return "-" + p.Comm(pid) }
+func (p fakeProc) Cwd(pid int) string     { return p[pid-1000] }
 
 // T58 — the pane poll carries both shapes of the truth: the map the deck looks
 // panes up in, and tmux's own ordering the live view groups by. It runs with no

@@ -10,7 +10,8 @@ import (
 // Proc reads process relationships; RealProc walks /proc.
 type Proc interface {
 	Children(pid int) []int // direct children
-	Comm(pid int) string    // process name, e.g. "claude"
+	Comm(pid int) string    // process name, e.g. "claude" — or "node" for an npm install
+	Cmdline(pid int) string // argv, NUL-separators turned to spaces; "" if unreadable
 	Cwd(pid int) string     // "" if unreadable
 }
 
@@ -126,22 +127,79 @@ func statPPID(stat string) (int, bool) {
 	return ppid, true
 }
 
+// Cmdline reads a process's argv with its NUL separators turned into spaces.
+func (RealProc) Cmdline(pid int) string {
+	raw, err := os.ReadFile(procPath(pid, "cmdline"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.ReplaceAll(string(raw), "\x00", " "))
+}
+
 func procPath(pid int, name string) string {
 	return filepath.Join("/proc", strconv.Itoa(pid), name)
 }
 
-// claudeComm is the process name the CLI runs under.
+// claudeComm is the process name a natively-installed CLI runs under. An npm
+// install is a Node script, so it runs under the interpreter's name instead
+// and only its argv says what it is — see isClaude.
 const claudeComm = "claude"
+
+// interpreters are the runtimes a script-installed CLI hides behind.
+var interpreters = map[string]bool{"node": true, "bun": true, "deno": true}
+
+// isClaude decides whether a process is a Claude Code CLI. Two installs, two
+// shapes: the native binary answers to its own name, while `npm i -g
+// @anthropic-ai/claude-code` runs as `node …/claude-code/cli.js`, where the
+// name is the interpreter's and the evidence is in argv.
+//
+// The argv test is deliberately narrow — an editor holding claude-notes.md
+// must not look like a session — so it asks for an argument that is the CLI
+// itself: a path ending in /claude, or the package's own script.
+func isClaude(p Proc, pid int) bool {
+	comm := p.Comm(pid)
+	if comm == claudeComm {
+		return true
+	}
+	args := strings.Fields(p.Cmdline(pid))
+	if len(args) == 0 {
+		return false
+	}
+	if filepath.Base(args[0]) == claudeComm {
+		return true // a wrapper exec'd under another name
+	}
+	if !interpreters[comm] {
+		return false // only a runtime can be hiding a CLI in its argv
+	}
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if strings.Contains(arg, "claude-code") {
+			return true // the package's own script, whatever it is called
+		}
+		if strings.Contains(arg, "/") && filepath.Base(arg) == claudeComm {
+			return true // a path to the CLI, not somebody saying the word
+		}
+	}
+	return false
+}
 
 // claudeDepth bounds the descendant walk. A pane's shell wraps the CLI in a
 // handful of processes at most; anything deeper is somebody else's tree.
 const claudeDepth = 6
 
-// ClaudeCwd walks the descendants of pid (breadth-first, depth ≤ 6) for the
-// first process whose Comm is "claude" and returns its Cwd. The bool is false
-// when no claude runs under pid, or when its cwd is unreadable — either way
-// there is nothing to match a session against.
+// ClaudeCwd finds the Claude Code process a pane is running — the pane's own
+// process when tmux was handed the CLI directly (`tmux new-window claude`),
+// otherwise the first one among its descendants (breadth-first, depth ≤ 6),
+// which is the usual shape: a shell you typed `claude` into. The bool is false
+// when no claude runs there, or when its cwd is unreadable — either way there
+// is nothing to match a session against.
 func ClaudeCwd(p Proc, pid int) (string, bool) {
+	if isClaude(p, pid) {
+		cwd := p.Cwd(pid)
+		return cwd, cwd != ""
+	}
 	seen := map[int]bool{pid: true}
 	frontier := p.Children(pid)
 	for depth := 1; depth <= claudeDepth && len(frontier) > 0; depth++ {
@@ -151,7 +209,7 @@ func ClaudeCwd(p Proc, pid int) (string, bool) {
 				continue
 			}
 			seen[kid] = true
-			if p.Comm(kid) == claudeComm {
+			if isClaude(p, kid) {
 				cwd := p.Cwd(kid)
 				return cwd, cwd != ""
 			}

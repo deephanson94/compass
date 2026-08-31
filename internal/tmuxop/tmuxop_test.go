@@ -69,6 +69,7 @@ func (f *fakeRunner) dump() string {
 type fakeProc struct {
 	children map[int][]int
 	comm     map[int]string
+	cmdline  map[int]string
 	cwd      map[int]string
 }
 
@@ -78,8 +79,9 @@ func (p *fakeProc) Children(pid int) []int {
 	return append([]int(nil), p.children[pid]...)
 }
 
-func (p *fakeProc) Comm(pid int) string { return p.comm[pid] }
-func (p *fakeProc) Cwd(pid int) string  { return p.cwd[pid] }
+func (p *fakeProc) Comm(pid int) string    { return p.comm[pid] }
+func (p *fakeProc) Cmdline(pid int) string { return p.cmdline[pid] }
+func (p *fakeProc) Cwd(pid int) string     { return p.cwd[pid] }
 
 // chain builds pid → pid+1 → … depth links below root, naming the deepest one.
 func chain(root, depth int, leafComm, leafCwd string) *fakeProc {
@@ -523,3 +525,51 @@ var (
 	_ tmuxop.Runner = &tmuxop.RealRunner{}
 	_ tmuxop.Proc   = &tmuxop.RealProc{}
 )
+
+// ---------------------------------------------------------------- T28b
+
+// A natively-installed CLI answers to its own name; an npm install is a Node
+// script, so it runs as `node …/claude-code/cli.js` and only argv says what it
+// is. Both are sessions (found in the field: every session read "(no pane)" on
+// an npm install because only the native shape was recognised).
+func TestClaudeCwdFindsEveryInstallShape(t *testing.T) {
+	cases := []struct {
+		name    string
+		comm    string
+		cmdline string
+		want    bool
+	}{
+		{"native binary", "claude", "claude --resume", true},
+		{"npm global", "node",
+			"node /home/u/.nvm/versions/node/v22.4.0/lib/node_modules/@anthropic-ai/claude-code/cli.js", true},
+		{"npm local", "node", "node /w/node_modules/.bin/claude --model opus", true},
+		{"bun", "bun", "bun /w/node_modules/@anthropic-ai/claude-code/cli.js", true},
+		{"deno", "deno", "deno run -A /w/claude-code/cli.js", true},
+		{"exec'd wrapper", "sh", "/usr/local/bin/claude", true},
+
+		// Nothing that merely mentions the word is a session.
+		{"editor holding a note", "vim", "vim claude-notes.md", false},
+		{"unrelated node app", "node", "node server.js", false},
+		{"grep for the word", "grep", "grep -r claude .", false},
+		{"shell alone", "zsh", "-zsh", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakeProc{
+				children: map[int][]int{100: {101}},
+				comm:     map[int]string{100: "zsh", 101: tc.comm},
+				cmdline:  map[int]string{100: "-zsh", 101: tc.cmdline},
+				cwd:      map[int]string{101: "/w/api"},
+			}
+			cwd, ok := tmuxop.ClaudeCwd(p, 100)
+			if ok != tc.want {
+				t.Fatalf("ClaudeCwd found=%v (cwd %q), want found=%v — comm %q, argv %q",
+					ok, cwd, tc.want, tc.comm, tc.cmdline)
+			}
+			if tc.want && cwd != "/w/api" {
+				t.Errorf("cwd = %q, want /w/api", cwd)
+			}
+		})
+	}
+}
