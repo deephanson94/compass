@@ -58,6 +58,14 @@ func (b *transcriptBuilder) uuid() (id, parent string) {
 	return id, parent
 }
 
+// moveTo is a session changing directory: every line from here on carries the
+// new cwd and branch, exactly as Claude Code writes them. What the session was
+// when it started stays in the lines already laid down.
+func (b *transcriptBuilder) moveTo(cwd, branch string) *transcriptBuilder {
+	b.cwd, b.branch = cwd, branch
+	return b
+}
+
 func (b *transcriptBuilder) common(ts time.Time) map[string]any {
 	id, parent := b.uuid()
 	var p any
@@ -412,4 +420,57 @@ func TestT15StatusLine(t *testing.T) {
 			t.Errorf("StatusLine = %q, want %q — see the CONTRACT AMBIGUITY note above", got, want)
 		}
 	})
+}
+
+// A session's location is where it is *now*, not where it was opened. Claude
+// Code writes cwd and gitBranch on every line, and a session that changes
+// directory keeps writing the new one — but discovery read only the head of
+// the file and kept the first it saw, so a session that moved was filed at an
+// address it had left. That is how a pane gets paired with the wrong session:
+// the stale address matches a pane the session is not in, and the session that
+// *is* in it matches nothing (see TestDeadSessionCannotClaimALivePane).
+func TestSessionLocationIsWhereItIsNow(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, "11111111-1111-4111-8111-111111111111", "/home/user/alpha", "main").
+		prompt(ago(3*time.Hour), "start here").
+		text(ago(3*time.Hour), "working in alpha").
+		moveTo("/home/user/porter", "trial/gates-that-score-the-oracle").
+		prompt(ago(2*time.Minute), "now over here").
+		text(ago(time.Minute), "working in porter").
+		write(root, "-home-user-alpha")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("want one session, got %d", len(infos))
+	}
+	got := infos[0]
+	if got.CWD != "/home/user/porter" {
+		t.Errorf("cwd is %q, want where the session stands now (/home/user/porter)", got.CWD)
+	}
+	if got.GitBranch != "trial/gates-that-score-the-oracle" {
+		t.Errorf("branch is %q, want the branch it is on now", got.GitBranch)
+	}
+}
+
+// A transcript whose tail carries no cwd of its own still has to have one: the
+// head is the fallback, not dead weight.
+func TestLocationFallsBackToTheHead(t *testing.T) {
+	root := t.TempDir()
+	b := newTranscript(t, "22222222-2222-4222-8222-222222222222", "/home/user/beta", "main").
+		prompt(ago(time.Hour), "only line with a cwd")
+	// A bookkeeping tail: real transcripts end with lines that carry neither a
+	// cwd nor a branch, and those must not erase what the head knew.
+	b.lines = append(b.lines, `{"type":"queue-operation","op":"latch"}`+"\n")
+	b.write(root, "-home-user-beta")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(infos) != 1 || infos[0].CWD != "/home/user/beta" {
+		t.Fatalf("the head's cwd did not survive a tail without one: %+v", infos)
+	}
 }

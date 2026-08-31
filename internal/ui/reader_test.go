@@ -197,7 +197,7 @@ func followModel(w, h int) *Model {
 	m.SetSize(w, h)
 	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
 	m.SetPanes(map[string]tmuxop.Pane{
-		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
 	})
 	m.point(sessionKey("s-api"))
 	m.SetTrail(fixtureLv2Trail(fixtureBase))

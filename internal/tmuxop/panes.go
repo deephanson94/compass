@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
 )
@@ -14,13 +15,19 @@ type Pane struct {
 	Target  string // "dev:1.0" (session:window.pane)
 	ID      string // "%5"
 	PID     int
-	Path    string // pane_current_path
 	Command string // pane_current_command
+	Window  string // window_name — what the user called it, e.g. "porter-test"
 }
 
 // paneFormat is the -F string ListPanes asks tmux for. The separator is a tab
-// because working directories routinely contain spaces.
-const paneFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_id}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}"
+// because every field here may contain spaces.
+//
+// window_name comes last on purpose: it is the one field a user writes freely,
+// so it is the one allowed to contain the separator that the sanitized form
+// falls back to (see parsePane). pane_current_path is deliberately absent —
+// nothing reads it, and being an arbitrary string in the middle of the row it
+// was the thing that made the row ambiguous.
+const paneFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_id}\t#{pane_pid}\t#{pane_current_command}\t#{window_name}"
 
 // paneFields is how many tab-separated columns paneFormat produces.
 const paneFields = 5
@@ -52,11 +59,12 @@ func ListPanes(r Runner) ([]Pane, error) {
 
 // sanitizedRow matches a row whose separators tmux replaced with underscores
 // (see parsePane). It anchors on the two fields that cannot be mistaken for
-// anything else — the pane id "%5" and the numeric pid — and then splits the
-// tail at its last underscore, so a path containing underscores still lands in
-// Path. Only a command containing one can smudge that split, and Command is a
-// label; Target, ID and PID, which everything else hangs off, stay exact.
-var sanitizedRow = regexp.MustCompile(`^(.+?)_(%\d+)_(\d+)_(.*)_([^_]*)$`)
+// anything else — the pane id "%5" and the numeric pid — which lets a session
+// name contain underscores of its own. What follows is the command, which is a
+// process name and has none in practice, and then the window name, which takes
+// the whole rest of the line: "pixie_tuiZ" is a real window name and must
+// survive intact.
+var sanitizedRow = regexp.MustCompile(`^(.+?)_(%\d+)_(\d+)_([^_]*)_(.*)$`)
 
 // parsePane reads one -F row. Anything that does not have the shape tmux was
 // asked for is dropped: a half-written row must not become a half-true pane.
@@ -67,7 +75,7 @@ var sanitizedRow = regexp.MustCompile(`^(.+?)_(%\d+)_(\d+)_(.*)_([^_]*)$`)
 // underscores. Rows arrive tab-separated from inside tmux and underscored from
 // outside it, so both shapes are read here.
 func parsePane(line string) (Pane, bool) {
-	f := strings.Split(line, "\t")
+	f := strings.SplitN(line, "\t", paneFields)
 	if len(f) == 1 {
 		if m := sanitizedRow.FindStringSubmatch(line); m != nil {
 			f = m[1:]
@@ -83,13 +91,24 @@ func parsePane(line string) (Pane, bool) {
 	if f[0] == "" || f[1] == "" {
 		return Pane{}, false
 	}
-	return Pane{Target: f[0], ID: f[1], PID: pid, Path: f[3], Command: f[4]}, true
+	return Pane{Target: f[0], ID: f[1], PID: pid, Command: f[3], Window: f[4]}, true
 }
 
 // MapSessions pairs sessions to panes: a session matches a pane whose claude
-// descendant's cwd equals the session's CWD. When several sessions share a cwd,
-// they are paired to matching panes in order (sessions by LastEventAt desc,
-// panes by Target asc); leftovers stay unmapped.
+// descendant's cwd equals the session's CWD.
+//
+// A cwd is not an identity — people run many sessions from one directory over
+// time — so when several sessions claim one, the pane goes to the session that
+// can actually be *in* it. A session that stopped writing before that pane's
+// claude even started is not running in it, whatever its cwd says; it is only
+// considered once every session that could be in the pane has one. Without
+// that rule a long-dead session wins a live pane on a stale address, and —
+// because winning a pane is what marks a session live (M5) — it then stays in
+// the live fleet forever, wearing a mirror of somebody else's work.
+//
+// The rule ranks, it never vetoes: a session resumed a moment ago has not
+// written anything since its pane started, and it is still that pane's session
+// when nothing else competes for it.
 //
 // Returns SessionInfo.Key() → Pane. Keying by the transcript path rather than
 // the session id is what keeps two same-id sessions from sharing one pane —
@@ -104,37 +123,94 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Target < ordered[j].Target })
 
 	// One /proc walk per pane, not per session-pane pair.
-	byCwd := make(map[string][]Pane)
+	byCwd := make(map[string][]claudePane)
 	for _, pane := range ordered {
-		cwd, ok := ClaudeCwd(p, pane.PID)
+		cwd, pid, ok := ClaudeIn(p, pane.PID)
 		if !ok {
 			continue // a pane with no claude in it is not a location
 		}
-		byCwd[cwd] = append(byCwd[cwd], pane)
+		byCwd[cwd] = append(byCwd[cwd], claudePane{pane: pane, since: p.StartTime(pid)})
 	}
 	if len(byCwd) == 0 {
 		return out
 	}
 
-	ranked := append([]fleet.SessionInfo(nil), sessions...)
-	sort.SliceStable(ranked, func(i, j int) bool {
-		a, b := ranked[i], ranked[j]
-		if !a.LastEventAt.Equal(b.LastEventAt) {
-			return a.LastEventAt.After(b.LastEventAt)
-		}
-		return a.ID < b.ID
-	})
-
-	for _, s := range ranked {
+	byCwdSessions := make(map[string][]fleet.SessionInfo, len(byCwd))
+	for _, s := range sessions {
 		if s.CWD == "" {
 			continue
 		}
-		free := byCwd[s.CWD]
-		if len(free) == 0 {
-			continue // no pane left at this cwd: the session stays unmapped
+		if _, ok := byCwd[s.CWD]; !ok {
+			continue // no pane there at all: nothing to compete for
 		}
-		out[s.Key()] = free[0]
-		byCwd[s.CWD] = free[1:]
+		byCwdSessions[s.CWD] = append(byCwdSessions[s.CWD], s)
+	}
+
+	for cwd, contenders := range byCwdSessions {
+		sort.SliceStable(contenders, func(i, j int) bool {
+			a, b := contenders[i], contenders[j]
+			if !a.LastEventAt.Equal(b.LastEventAt) {
+				return a.LastEventAt.After(b.LastEventAt)
+			}
+			return a.Key() < b.Key()
+		})
+		for key, pane := range assign(byCwd[cwd], contenders) {
+			out[key] = pane
+		}
 	}
 	return out
+}
+
+// claudePane is a pane and the age of the claude running in it. A zero `since`
+// means /proc would not say, which is never held against anyone.
+type claudePane struct {
+	pane  Pane
+	since time.Time
+}
+
+// assign hands the panes at one cwd to the sessions that claim it, newest
+// first. Panes whose claude is younger than a session's last word go to a
+// session that could be in them; only then does anything else get a look.
+func assign(panes []claudePane, contenders []fleet.SessionInfo) map[string]Pane {
+	out := make(map[string]Pane, len(panes))
+	taken := make([]bool, len(contenders))
+
+	claim := func(cp claudePane, plausible bool) bool {
+		for i, s := range contenders {
+			if taken[i] {
+				continue
+			}
+			if plausible && !couldBeIn(s, cp) {
+				continue
+			}
+			out[s.Key()], taken[i] = cp.pane, true
+			return true
+		}
+		return false
+	}
+
+	free := make([]claudePane, 0, len(panes))
+	for _, cp := range panes {
+		if !claim(cp, true) {
+			free = append(free, cp)
+		}
+	}
+	for _, cp := range free {
+		claim(cp, false)
+	}
+	return out
+}
+
+// procSlack forgives the last tick of arithmetic between a transcript's own
+// clock and boot-time-plus-jiffies. The gap this decides is hours or days.
+const procSlack = 2 * time.Second
+
+// couldBeIn reports whether a session can be the one running in a pane: it
+// must have spoken since that pane's claude started. An unreadable start time
+// says nothing, so it disqualifies nobody.
+func couldBeIn(s fleet.SessionInfo, cp claudePane) bool {
+	if cp.since.IsZero() || s.LastEventAt.IsZero() {
+		return true
+	}
+	return !s.LastEventAt.Before(cp.since.Add(-procSlack))
 }

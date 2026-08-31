@@ -218,7 +218,7 @@ func TestT32DeckThreeColumnGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{
-		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
 	}, fixtureFrame)
 
 	got := m.View()
@@ -240,7 +240,7 @@ func TestT33DeckNarrowGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(80, 24, map[string]tmuxop.Pane{
-		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Path: "/home/user/api", Command: "claude"},
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
 	}, fixtureFrame)
 
 	got := m.View()

@@ -159,6 +159,8 @@ func (p *twinProc) Comm(pid int) string    { return p.comm[pid] }
 func (p *twinProc) Cmdline(pid int) string { return p.cmdline[pid] }
 func (p *twinProc) Cwd(pid int) string     { return p.cwd[pid] }
 
+func (p *twinProc) StartTime(int) time.Time { return time.Time{} }
+
 var _ tmuxop.Proc = (*twinProc)(nil)
 
 // paneProc builds a tree where each given pane pid owns a shell owning a claude
@@ -463,9 +465,11 @@ func t63Root(t *testing.T) (root, rootKey, workerKey string) {
 	return root, rootKey, workerKey
 }
 
-// paneAt is the pane the twin at `cwd` owns.
-func paneAt(target, id string, pid int, cwd string) tmuxop.Pane {
-	return tmuxop.Pane{Target: target, ID: id, PID: pid, Path: cwd, Command: "claude"}
+// paneAt is the pane the twin at `cwd` owns. The cwd itself reaches MapSessions
+// through /proc, never through the pane row, so it is the fake Proc that has to
+// agree with this — the pane only has to exist.
+func paneAt(target, id string, pid int, _ string) tmuxop.Pane {
+	return tmuxop.Pane{Target: target, ID: id, PID: pid, Command: "claude"}
 }
 
 // T63 — one pane, two same-id sessions: MapSessions keys the pane by the

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Proc reads process relationships; RealProc walks /proc.
@@ -13,6 +15,10 @@ type Proc interface {
 	Comm(pid int) string    // process name, e.g. "claude" — or "node" for an npm install
 	Cmdline(pid int) string // argv, NUL-separators turned to spaces; "" if unreadable
 	Cwd(pid int) string     // "" if unreadable
+
+	// StartTime is when the process began. Zero means unreadable — which is
+	// ordinary, and never a reason to disbelieve anything else about it.
+	StartTime(pid int) time.Time
 }
 
 // RealProc answers from /proc. Every read is best-effort: a process that exits
@@ -136,6 +142,65 @@ func (RealProc) Cmdline(pid int) string {
 	return strings.TrimSpace(strings.ReplaceAll(string(raw), "\x00", " "))
 }
 
+// StartTime reads field 22 of /proc/<pid>/stat — the process's start, in clock
+// ticks since boot — and anchors it to the boot time in /proc/stat.
+//
+// The comm field is the parenthesised second column and may itself contain
+// spaces and parentheses, so the split is on the LAST ")": everything after it
+// begins at field 3, which puts starttime at index 19.
+func (RealProc) StartTime(pid int) time.Time {
+	if pid <= 0 {
+		return time.Time{}
+	}
+	raw, err := os.ReadFile(procPath(pid, "stat"))
+	if err != nil {
+		return time.Time{}
+	}
+	i := strings.LastIndexByte(string(raw), ')')
+	if i < 0 {
+		return time.Time{}
+	}
+	fields := strings.Fields(string(raw)[i+1:])
+	if len(fields) < 20 {
+		return time.Time{}
+	}
+	ticks, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	boot := bootTime()
+	if boot.IsZero() {
+		return time.Time{}
+	}
+	return boot.Add(time.Duration(ticks) * time.Second / clockTicks)
+}
+
+// clockTicks is USER_HZ, which reading sysconf(_SC_CLK_TCK) would answer
+// exactly. It is 100 on every Linux build in practice, and the margin this
+// feeds — days, not milliseconds — does not turn on the difference.
+const clockTicks = 100
+
+// bootTime is read once: it does not change while compass runs, and every pane
+// on the machine anchors to the same one.
+var bootTime = sync.OnceValue(func() time.Time {
+	raw, err := os.ReadFile(filepath.Join("/proc", "stat"))
+	if err != nil {
+		return time.Time{}
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		rest, ok := strings.CutPrefix(line, "btime ")
+		if !ok {
+			continue
+		}
+		secs, err := strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
+		if err != nil {
+			return time.Time{}
+		}
+		return time.Unix(secs, 0)
+	}
+	return time.Time{}
+})
+
 func procPath(pid int, name string) string {
 	return filepath.Join("/proc", strconv.Itoa(pid), name)
 }
@@ -196,9 +261,17 @@ const claudeDepth = 6
 // when no claude runs there, or when its cwd is unreadable — either way there
 // is nothing to match a session against.
 func ClaudeCwd(p Proc, pid int) (string, bool) {
+	cwd, _, ok := ClaudeIn(p, pid)
+	return cwd, ok
+}
+
+// ClaudeIn is ClaudeCwd plus the pid it found the claude at, so a caller can
+// ask how long that claude has been running. A session cannot be the one
+// living in a pane if it stopped writing before that pane's claude started.
+func ClaudeIn(p Proc, pid int) (cwd string, claudePID int, ok bool) {
 	if isClaude(p, pid) {
 		cwd := p.Cwd(pid)
-		return cwd, cwd != ""
+		return cwd, pid, cwd != ""
 	}
 	seen := map[int]bool{pid: true}
 	frontier := p.Children(pid)
@@ -211,7 +284,7 @@ func ClaudeCwd(p Proc, pid int) (string, bool) {
 			seen[kid] = true
 			if isClaude(p, kid) {
 				cwd := p.Cwd(kid)
-				return cwd, cwd != ""
+				return cwd, kid, cwd != ""
 			}
 			if depth < claudeDepth {
 				next = append(next, p.Children(kid)...)
@@ -219,5 +292,5 @@ func ClaudeCwd(p Proc, pid int) (string, bool) {
 		}
 		frontier = next
 	}
-	return "", false
+	return "", 0, false
 }

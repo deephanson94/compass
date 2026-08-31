@@ -72,12 +72,12 @@ func fixtureGroupedFleet(base time.Time) []fleet.Session {
 // nothing in (misc). The list is the group order; the map is the pairing.
 func fixtureGroupedPanes() (map[string]tmuxop.Pane, []tmuxop.Pane) {
 	list := []tmuxop.Pane{
-		{Target: "dev:1.0", ID: "%1", PID: 4242, Path: "/home/user/api", Command: "claude"},
-		{Target: "dev:2.1", ID: "%2", PID: 4243, Path: "/home/user/webapp", Command: "claude"},
-		{Target: "dev:9.0", ID: "%3", PID: 4244, Path: "/home/user/api", Command: "nvim"},
-		{Target: "ops:0.0", ID: "%4", PID: 4245, Path: "/home/user/tfstate", Command: "claude"},
-		{Target: "ops:1.0", ID: "%5", PID: 4246, Path: "/home/user/infra", Command: "claude"},
-		{Target: "misc:0.0", ID: "%6", PID: 4247, Path: "/home/user", Command: "zsh"},
+		{Target: "dev:1.0", ID: "%1", PID: 4242, Command: "claude", Window: "auth-fix"},
+		{Target: "dev:2.1", ID: "%2", PID: 4243, Command: "claude", Window: "webapp"},
+		{Target: "dev:9.0", ID: "%3", PID: 4244, Command: "nvim", Window: "notes"},
+		{Target: "ops:0.0", ID: "%4", PID: 4245, Command: "claude", Window: "tf_state"},
+		{Target: "ops:1.0", ID: "%5", PID: 4246, Command: "claude", Window: "vpc"},
+		{Target: "misc:0.0", ID: "%6", PID: 4247, Command: "zsh", Window: "scratch"},
 	}
 	panes := map[string]tmuxop.Pane{
 		sessionKey("s-api"):     list[0],
@@ -138,13 +138,13 @@ func TestT58LiveFleetGolden(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		" dev",                   // the tmux session, unnumbered and dim
-		" ops",                   // …in the order the pane list names them
-		" elsewhere",             // …and the live sessions tmux cannot place
-		":1.0 · claude/auth-fx",  // the location line drops the redundant prefix
-		"no pane · main",         // and says so plainly when there is none
-		"5 archived · A browses", // the last fleet row
-		"FLEET · live",           // which fleet this is
+		" dev",                    // the tmux session, unnumbered and dim
+		" ops",                    // …in the order the pane list names them
+		" elsewhere",              // …and the live sessions tmux cannot place
+		":1.0 auth-fix · claude/", // coordinates, then the window's own name, then the branch
+		"no pane · main",          // and says so plainly when there is none
+		"5 archived · A browses",  // the last fleet row
+		"FLEET · live",            // which fleet this is
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("live view is missing %q", want)
@@ -364,13 +364,17 @@ func (p fakeProc) Comm(pid int) string {
 func (p fakeProc) Cmdline(pid int) string { return "-" + p.Comm(pid) }
 func (p fakeProc) Cwd(pid int) string     { return p[pid-1000] }
 
+// StartTime says nothing: these fixtures are about which pane holds which
+// session, not about how long anything has been running.
+func (p fakeProc) StartTime(int) time.Time { return time.Time{} }
+
 // The first pane poll happens before the fleet exists — Init fires both at
 // once — so it has nothing to pair. The fleet's arrival must re-pair, or every
 // session reads "no pane" (and the mirror falls back to the transcript) until
 // the 5s pane tick. Caught in a live tmux, not by a golden.
 func TestFirstFleetRepairsPanes(t *testing.T) {
 	m := New(nil)
-	m.runner = fakeTmux{out: "dev:1.0\t%2\t22\t/home/user/api\tclaude\n"}
+	m.runner = fakeTmux{out: "dev:1.0\t%2\t22\tclaude\tapi\n"}
 	m.proc = fakeProc{22: "/home/user/api"}
 
 	// Init's poll: tmux has the pane, but the deck has no sessions yet.
@@ -434,8 +438,8 @@ func drain(cmd tea.Cmd) []tea.Msg {
 // Manager at all (a harness), which must not panic where MarkPaneMapped is fed.
 func TestT58PanesMsgCarriesTmuxOrder(t *testing.T) {
 	m := New(nil) // no Manager: MarkPaneMapped has nobody to tell
-	m.runner = fakeTmux{out: "ops:0.0\t%1\t11\t/home/user/ops\tclaude\n" +
-		"dev:1.0\t%2\t22\t/home/user/api\tclaude\n"}
+	m.runner = fakeTmux{out: "ops:0.0\t%1\t11\tclaude\tops\n" +
+		"dev:1.0\t%2\t22\tclaude\tapi\n"}
 	m.proc = fakeProc{11: "/home/user/ops", 22: "/home/user/api"}
 	m.SetSessions([]fleet.Session{
 		{Info: fleet.SessionInfo{ID: "s-api", TranscriptPath: sessionKey("s-api"), CWD: "/home/user/api"}, Live: true},
@@ -485,9 +489,9 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 
 	// tmux mentions ops first, then dev — and dev's window 10 sits after its 9.
 	list := []tmuxop.Pane{
-		{Target: "ops:0.0", ID: "%1", PID: 1, Path: "/home/user/ops", Command: "claude"},
-		{Target: "dev:9.0", ID: "%2", PID: 2, Path: "/home/user/nine", Command: "claude"},
-		{Target: "dev:10.0", ID: "%3", PID: 3, Path: "/home/user/ten", Command: "claude"},
+		{Target: "ops:0.0", ID: "%1", PID: 1, Command: "claude"},
+		{Target: "dev:9.0", ID: "%2", PID: 2, Command: "claude"},
+		{Target: "dev:10.0", ID: "%3", PID: 3, Command: "claude"},
 	}
 	m.SetPaneOrder(list)
 	m.SetPanes(map[string]tmuxop.Pane{sessionKey("s-ops"): list[0], sessionKey("s-w9"): list[1], sessionKey("s-w10"): list[2]})
@@ -548,7 +552,7 @@ func TestT64DuplicateIDsAreTwoSessions(t *testing.T) {
 	if alpha.Info.Key() == beta.Info.Key() {
 		t.Fatal("the fixture must be two keys under one id")
 	}
-	pane := tmuxop.Pane{Target: "dev:1.0", ID: "%1", PID: 7, Path: "/home/user/alpha", Command: "claude"}
+	pane := tmuxop.Pane{Target: "dev:1.0", ID: "%1", PID: 7, Command: "claude"}
 
 	m := New(nil)
 	m.SetSize(120, 30)

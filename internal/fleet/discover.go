@@ -160,9 +160,30 @@ func peek(info *SessionInfo, size int64) {
 	defer f.Close()
 
 	peekHead(f, info)
-	if at := lastEventTime(f, size); !at.IsZero() {
-		info.LastEventAt = at // the mtime was only a stand-in
+
+	// The head only says where the session *began*. A session that changes
+	// directory — or that Claude Code records differently later — keeps
+	// writing its current cwd and branch on every event, so the tail is the
+	// only honest answer to "where is this session now". It overrides the
+	// head's, which stays as the fallback for a tail that carries neither.
+	tail := peekTailState(f, size)
+	if !tail.at.IsZero() {
+		info.LastEventAt = tail.at // the mtime was only a stand-in
 	}
+	if tail.cwd != "" {
+		info.CWD = tail.cwd
+	}
+	if tail.branch != "" {
+		info.GitBranch = tail.branch
+	}
+}
+
+// tailState is what the last few kilobytes of a transcript say about a session
+// right now: when it last spoke, and where it was standing when it did.
+type tailState struct {
+	at     time.Time
+	cwd    string
+	branch string
 }
 
 func peekHead(f *os.File, info *SessionInfo) {
@@ -192,12 +213,15 @@ func peekHead(f *os.File, info *SessionInfo) {
 }
 
 // lastEventTime walks the tail of a transcript backwards and returns the
-// newest timestamp it finds. Bookkeeping lines at the very end (mode latches,
-// last-prompt markers) carry none, so it keeps walking until a real event
-// answers. A zero time means "use the mtime".
-func lastEventTime(f *os.File, size int64) time.Time {
+// newest of each field it finds. Bookkeeping lines at the very end (mode
+// latches, last-prompt markers) carry none, so it keeps walking until a real
+// event answers — and it keeps walking past the newest timestamp for a cwd and
+// branch, which not every event line carries. A zero time means "use the
+// mtime"; empty strings mean "keep what the head said".
+func peekTailState(f *os.File, size int64) tailState {
+	var out tailState
 	if size <= 0 {
-		return time.Time{}
+		return out
 	}
 	start := size - peekTail
 	if start < 0 {
@@ -205,7 +229,7 @@ func lastEventTime(f *os.File, size int64) time.Time {
 	}
 	buf := make([]byte, size-start)
 	if _, err := f.ReadAt(buf, start); err != nil {
-		return time.Time{}
+		return out
 	}
 
 	lines := strings.Split(string(buf), "\n")
@@ -221,11 +245,20 @@ func lastEventTime(f *os.File, size int64) time.Time {
 		if err != nil {
 			continue
 		}
-		if !ev.Timestamp.IsZero() {
-			return ev.Timestamp
+		if out.at.IsZero() && !ev.Timestamp.IsZero() {
+			out.at = ev.Timestamp
+		}
+		if out.cwd == "" {
+			out.cwd = ev.CWD
+		}
+		if out.branch == "" {
+			out.branch = ev.GitBranch
+		}
+		if !out.at.IsZero() && out.cwd != "" && out.branch != "" {
+			break
 		}
 	}
-	return time.Time{}
+	return out
 }
 
 // promptTitle reduces a prompt to its first line, clipped to titleMax runes.
