@@ -13,9 +13,10 @@ import (
 // and anything unreadable is simply ignored: compass runs fine with no
 // configuration at all.
 type config struct {
-	Root     string // root = "~/.claude"
-	Narrator string // narrator = "haiku" | "off" | any claude model
-	Readonly bool   // readonly = true
+	Root       string // root = "~/.claude"
+	Narrator   string // narrator = "haiku" | "off" | any claude model
+	Readonly   bool   // readonly = true
+	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 }
 
 // loadConfig reads the config file if there is one. $COMPASS_CONFIG overrides
@@ -50,6 +51,8 @@ func loadConfig() config {
 			c.Narrator = value
 		case "readonly":
 			c.Readonly = value == "true"
+		case "live_within":
+			c.LiveWithin = value
 		}
 	}
 	return c

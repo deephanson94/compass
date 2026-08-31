@@ -64,8 +64,12 @@ type Narrator interface {
 	Request(sessionID string, tr journey.Trail, prompt string)
 }
 
+// panesMsg carries both shapes of the same truth: the sessionID → pane map the
+// deck looks things up in, and tmux's own ordering of the panes — which is the
+// order the live fleet groups itself in (M5 contract, package tmuxop).
 type panesMsg struct {
 	panes map[string]tmuxop.Pane
+	list  []tmuxop.Pane
 }
 
 type captureMsg struct {
@@ -90,6 +94,7 @@ type Model struct {
 
 	sessions []fleet.Session
 	panes    map[string]tmuxop.Pane
+	paneList []tmuxop.Pane // tmux's own order: the live view's group order
 	trail    journey.Trail
 	events   []transcript.Event
 	todos    []todo.Item
@@ -118,6 +123,13 @@ type Model struct {
 	selectedID string
 	width      int
 	height     int
+
+	// The fleet column's own state: which of the two fleets is on screen, the
+	// selection the other one is holding for when you come back, and how far the
+	// column is scrolled (in rendered lines).
+	archiveView bool
+	restSelID   string
+	fleetScroll int
 
 	showHelp  bool
 	searching bool
@@ -203,6 +215,13 @@ func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
 	m.panes = panes
 }
 
+// SetPaneOrder hands the model tmux's own pane ordering — the list ListPanes
+// returns, session by session, in index order. The live view groups itself in
+// the order this list first mentions each tmux session.
+func (m *Model) SetPaneOrder(list []tmuxop.Pane) {
+	m.paneList = list
+}
+
 // SetTrail hands the model the selected session's trail for the right panel.
 func (m *Model) SetTrail(tr journey.Trail) {
 	m.trail = tr
@@ -278,9 +297,12 @@ func (m *Model) refresh() tea.Cmd {
 	}
 }
 
-// relistPanes re-reads the tmux server and re-pairs it with the fleet.
+// relistPanes re-reads the tmux server and re-pairs it with the fleet. The
+// ordered pane list travels with the map — the ui is the only thing that knows
+// tmux's order, and the fleet's liveness is the only thing that knows what the
+// pairing means, so each MapSessions is reported straight back to the Manager.
 func (m *Model) relistPanes() tea.Cmd {
-	runner, proc := m.runner, m.proc
+	runner, proc, mgr := m.runner, m.proc, m.mgr
 	infos := make([]fleet.SessionInfo, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		infos = append(infos, s.Info)
@@ -288,10 +310,27 @@ func (m *Model) relistPanes() tea.Cmd {
 	return func() tea.Msg {
 		panes, err := tmuxop.ListPanes(runner)
 		if err != nil || len(panes) == 0 {
+			markMapped(mgr, nil)
 			return panesMsg{panes: map[string]tmuxop.Pane{}}
 		}
-		return panesMsg{panes: tmuxop.MapSessions(infos, panes, proc)}
+		mapped := tmuxop.MapSessions(infos, panes, proc)
+		markMapped(mgr, mapped)
+		return panesMsg{panes: mapped, list: panes}
 	}
+}
+
+// markMapped tells the fleet which sessions currently sit in a pane — the other
+// half of liveness (M5 contract, fleet rule 1). A harness drives the deck with
+// no Manager at all, so a nil one is simply nothing to tell.
+func markMapped(mgr *fleet.Manager, mapped map[string]tmuxop.Pane) {
+	if mgr == nil {
+		return
+	}
+	ids := make(map[string]bool, len(mapped))
+	for id := range mapped {
+		ids[id] = true
+	}
+	mgr.MarkPaneMapped(ids)
 }
 
 // capture mirrors the selected pane, and only it: 200ms of one capture-pane is
@@ -361,7 +400,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case panesMsg:
-		m.panes = msg.panes
+		m.panes, m.paneList = msg.panes, msg.list
+		m.clampSelection()
 		return m, nil
 
 	case captureMsg:
@@ -429,6 +469,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "a":
 		return m, m.ask()
+	case "A":
+		// The archive is a view of the same fleet, at any depth: what is selected
+		// stays selected, per view, so coming back lands where you left.
+		m.toggleArchive()
+		return m, m.refresh()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.selectIndex(int(key[0] - '1'))
 		return m, m.refresh()
@@ -604,15 +649,38 @@ func (m *Model) selectedIndex() int {
 
 func (m *Model) clampSelection() {
 	if len(m.sessions) == 0 {
-		m.selectedID = ""
+		m.selectedID, m.restSelID = "", ""
 		return
 	}
-	for _, s := range m.sessions {
-		if s.Info.ID == m.selectedID {
+	order := m.fleetOrder()
+	if len(order) == 0 {
+		return // an empty view keeps whatever it had; the column says it is empty
+	}
+	for _, i := range order {
+		if m.sessions[i].Info.ID == m.selectedID {
 			return
 		}
 	}
-	m.point(m.sessions[0].Info.ID)
+	m.point(m.sessions[order[0]].Info.ID)
+}
+
+// toggleArchive swaps the two fleets, and their selections with them: the live
+// view remembers where you were standing while you read an old journey.
+func (m *Model) toggleArchive() {
+	if !m.archiveView && m.archivedCount() == 0 {
+		m.note = "nothing archived yet"
+		return
+	}
+	m.archiveView = !m.archiveView
+	m.selectedID, m.restSelID = m.restSelID, m.selectedID
+	m.fleetScroll = 0
+	if m.selectedID != "" {
+		// A remembered id is a fresh selection for everything downstream.
+		id := m.selectedID
+		m.selectedID = ""
+		m.point(id)
+	}
+	m.clampSelection()
 }
 
 // point moves the selection. Trail and mirror belong to the session that was
@@ -634,32 +702,50 @@ func (m *Model) point(id string) {
 	m.query, m.draft, m.searching = "", "", false
 }
 
+// selectIndex is the `1`–`9` keys: an index into the rendered order, groups
+// and their headers ignored.
 func (m *Model) selectIndex(i int) {
-	if i < 0 || i >= len(m.sessions) {
+	order := m.fleetOrder()
+	if i < 0 || i >= len(order) {
 		return
 	}
-	m.point(m.sessions[i].Info.ID)
+	m.point(m.sessions[order[i]].Info.ID)
 }
 
+// move is j/k: one session down or up the rendered order, skipping headers —
+// they name a group, they are not a place to stand.
 func (m *Model) move(delta int) {
-	if len(m.sessions) == 0 {
+	order := m.fleetOrder()
+	if len(order) == 0 {
 		return
 	}
-	i := m.selectedIndex() + delta
-	if i < 0 {
-		i = 0
+	pos := 0
+	for p, i := range order {
+		if m.sessions[i].Info.ID == m.selectedID {
+			pos = p
+			break
+		}
 	}
-	if i >= len(m.sessions) {
-		i = len(m.sessions) - 1
+	pos += delta
+	if pos < 0 {
+		pos = 0
 	}
-	m.point(m.sessions[i].Info.ID)
+	if pos >= len(order) {
+		pos = len(order) - 1
+	}
+	m.point(m.sessions[order[pos]].Info.ID)
 }
 
 // selectOldestNeedsYou grabs the session that has been waiting longest — the
-// fleet is already sorted that way.
+// fleet is already sorted that way. Only a live session can be waiting on you
+// (an archived one is idle by construction), so the archive is never searched;
+// pressing `g` while browsing it comes back to the live fleet first.
 func (m *Model) selectOldestNeedsYou() bool {
 	for _, s := range m.sessions {
-		if s.Snap.State == state.NeedsYou {
+		if s.Live && s.Snap.State == state.NeedsYou {
+			if m.archiveView {
+				m.toggleArchive()
+			}
 			m.point(s.Info.ID)
 			return true
 		}
@@ -670,7 +756,7 @@ func (m *Model) selectOldestNeedsYou() bool {
 func (m *Model) needsYouCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if s.Snap.State == state.NeedsYou {
+		if s.Live && s.Snap.State == state.NeedsYou {
 			n++
 		}
 	}
@@ -754,13 +840,18 @@ func (m *Model) headerLine(w int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-// statusChips renders the same counts `compass status` prints.
+// statusChips renders the same counts `compass status` prints — the live ones
+// only (M5 contract, fleet rule 5). The archive is history: it cannot be
+// working, and counting its idle hundreds would drown the pulse.
 func (m *Model) statusChips() string {
 	if !m.loaded {
 		return dimStyle.Render("scanning…")
 	}
 	counts := map[state.State]int{}
 	for _, s := range m.sessions {
+		if !s.Live {
+			continue
+		}
 		counts[s.Snap.State]++
 	}
 	var parts []string
@@ -779,6 +870,12 @@ func (m *Model) statusChips() string {
 // last keypress did.
 func (m *Model) footerLine(w int) string {
 	keys := "1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit"
+	if m.archiveView {
+		// In the archive `g` has nothing to grab and `A` is the way home, so the
+		// keymap says that instead. In the live view the archive announces itself
+		// on the fleet's own last row: "N archived · A browses".
+		keys = "1-9 select · j/k move · enter reveal · A live fleet · ? help · q quit"
+	}
 	switch {
 	case m.showHelp:
 		keys = "? or esc closes help"

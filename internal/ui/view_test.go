@@ -78,7 +78,9 @@ func forceASCII(t *testing.T) {
 var fixtureBase = time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 
 // fixtureSessions is the three-session fleet the deck goldens share: one
-// waiting on the human, one working, one idle.
+// waiting on the human, one working, one idle. All three are live and none of
+// them is in a tmux session compass can see, so the M5 live view renders them
+// as the degenerate one-group list the M1–M3 goldens were drawn from.
 func fixtureSessions(base time.Time) []fleet.Session {
 	return []fleet.Session{
 		{
@@ -88,6 +90,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 				Title: "tighten the vpc security groups", StartedAt: base, LastEventAt: base.Add(38 * time.Minute),
 			},
 			Snap: state.Snapshot{State: state.NeedsYou, Since: base.Add(38 * time.Minute), Reason: "waiting on your answer", Activity: "AskUserQuestion"},
+			Live: true,
 		},
 		{
 			Info: fleet.SessionInfo{
@@ -96,6 +99,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 				Title: "fix the 401 bug", StartedAt: base, LastEventAt: base.Add(39 * time.Minute),
 			},
 			Snap: state.Snapshot{State: state.Working, Since: base.Add(37 * time.Minute), Reason: "tool call in flight", Activity: "Bash: pytest tests/auth -x"},
+			Live: true,
 		},
 		{
 			Info: fleet.SessionInfo{
@@ -104,6 +108,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 				Title: "update the readme", StartedAt: base, LastEventAt: base.Add(18 * time.Minute),
 			},
 			Snap: state.Snapshot{State: state.Idle, Since: base.Add(18 * time.Minute), Reason: "turn complete", Activity: "idle"},
+			Live: true,
 		},
 	}
 }
@@ -150,7 +155,7 @@ func deckModel(w, h int, panes map[string]tmuxop.Pane, frame string) *Model {
 	m.SetSize(w, h)
 	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
 	m.SetPanes(panes)
-	m.selectIndex(1) // s-api — the session the SPEC mockup follows
+	m.point("s-api") // the session the SPEC mockup follows
 	m.SetTrail(fixtureTrail(fixtureBase))
 	m.SetMirror(frame)
 	return m
@@ -216,7 +221,9 @@ func TestT33DeckNarrowGolden(t *testing.T) {
 	got := m.View()
 	compareGolden(t, "deck-80x24-narrow.txt", got)
 
-	if strings.Contains(got, "· live") || strings.Contains(got, "Churning") {
+	// "· live" alone is now the fleet's own title; the mirror's claim is the
+	// pane target beside the mirror mark.
+	if strings.Contains(got, "dev:1.0 · live") || strings.Contains(got, "Churning") {
 		t.Error("the mirror should be hidden below 110 columns")
 	}
 	if !strings.Contains(got, "TRAIL · api") {
@@ -239,13 +246,13 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 		`"fix the 401 bug"`,           // title
 		"tool call in flight",         // reason
 		"Bash: pytest tests/auth -x",  // activity
-		"(no pane) · claude/auth-fx",  // and the fleet agrees
+		"no pane · claude/auth-fx",    // and the fleet agrees
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no-pane mirror is missing %q", want)
 		}
 	}
-	if strings.Contains(got, "· live") {
+	if strings.Contains(got, mirrorMark+" dev:1.0 · live") {
 		t.Error("a session with no pane must not claim a live mirror")
 	}
 }

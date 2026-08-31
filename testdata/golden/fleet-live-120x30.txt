@@ -1,4 +1,4 @@
- ⌂ compass                                                                                                   ▲1  ●1  ○1
+ ⌂ compass                                                                                                   ▲1  ●2  ○2
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
  FLEET · live                   │ ⌁ dev:1.0 · live                             │ TRAIL · api                      [Lv1]
@@ -7,21 +7,21 @@
  ▸1 ● api       Bash: pyt…   3m │                                              │ │
      :1.0 · claude/auth-fx      │                                              │ ◆ test   pytest                    12m
                                 │                                              │ ├─◈ scout the payments module        ✓
-  elsewhere                   ▲ │                                              │ ◆ build  tokens.py                 25m
-  2 ▲ infra     needs you    2m │                                              │ │
-     no pane · tf/vpc           │                                              │ ◆ scout  middleware.py             31m
-                                │                                              │ ╵
-  3 ○ docs      turn comp…  22m │                                              │ ◉ "fix the 401 bug"                38m
+  2 ● webapp    tests 18✓…  40s │                                              │ ◆ build  tokens.py                 25m
+     :2.1 · main                │                                              │ │
+                                │                                              │ ◆ scout  middleware.py             31m
+  ops                         ▲ │                                              │ ╵
+  3 ▲ infra     needs you    2m │                                              │ ◉ "fix the 401 bug"                38m
+     :1.0 · tf/vpc              │                                              │
+                                │                                              │
+  4 ○ tfstate   turn comp…  15m │                                              │
+     :0.0 · main                │                                              │
+                                │                                              │
+  elsewhere                     │                                              │
+  5 ○ scratch   turn comp…  22m │                                              │
      no pane · main             │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
                                 │ [38;5;39m⏺ Read(src/auth/middleware.py)[0m               │
-                                │   ⎿ read 214 lines                           │
+ 5 archived · A browses         │   ⎿ read 214 lines                           │
                                 │                                              │
                                 │ [31m✗ test_refresh_expired_token — AssertionErro[0m │
                                 │                                              │

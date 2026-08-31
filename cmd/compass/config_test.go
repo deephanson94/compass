@@ -13,6 +13,7 @@ func TestLoadConfig(t *testing.T) {
 root = "~/claude-home"
 narrator = 'off'
 readonly = true
+live_within = "90s"
 mystery = "ignored"
 this line is not a setting
 `
@@ -30,6 +31,9 @@ this line is not a setting
 	}
 	if !c.Readonly {
 		t.Error("Readonly = false, want true")
+	}
+	if c.LiveWithin != "90s" {
+		t.Errorf("LiveWithin = %q", c.LiveWithin)
 	}
 }
 

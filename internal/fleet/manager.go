@@ -12,7 +12,8 @@ import (
 )
 
 // entry is one tracked session: what we know, where we are in its file, and the
-// machine folding its events.
+// machine folding its events. An archived entry keeps only what we know — the
+// tailer and the machine are what a live session needs.
 type entry struct {
 	info     SessionInfo
 	tailer   *transcript.Tailer
@@ -20,7 +21,13 @@ type entry struct {
 	sawEvent bool // once events carry timestamps, they beat the file's mtime
 }
 
-// Manager owns the fleet: discovery, one tailer and one state machine per
+// DefaultLiveWindow is the recency door a new Manager opens: a session with no
+// pane still counts as live while its transcript moved this recently. Pane
+// matching is a heuristic, and a session writing its transcript right now must
+// never be hidden by a matching miss.
+const DefaultLiveWindow = 5 * time.Minute
+
+// Manager owns the fleet: discovery, one tailer and one state machine per live
 // session, and the display ordering. It is safe for concurrent use.
 type Manager struct {
 	mu       sync.Mutex
@@ -30,15 +37,72 @@ type Manager struct {
 	// excluded are cleaned absolute CWDs whose sessions the fleet refuses to
 	// show — compass's own narration dir, so it never watches itself narrate.
 	excluded map[string]bool
+
+	// paneMapped are the session ids the ui last found in a tmux pane, and
+	// liveWindow is the recency door for the rest (docs/dev/M5-CONTRACT.md).
+	paneMapped map[string]bool
+	liveWindow time.Duration
+
+	// cache is the last discovery scan, keyed by transcript path: 280 archived
+	// transcripts are stat'ed every second, not re-read.
+	cache map[string]cachedInfo
 }
 
 // NewManager returns a Manager watching the given Claude home directory.
 func NewManager(root string) *Manager {
-	return &Manager{root: root, sessions: make(map[string]*entry)}
+	return &Manager{
+		root:       root,
+		sessions:   make(map[string]*entry),
+		liveWindow: DefaultLiveWindow,
+	}
 }
 
 // Root is the Claude home directory this Manager watches.
 func (m *Manager) Root() string { return m.root }
+
+// MarkPaneMapped tells the manager which sessions currently sit in a tmux
+// pane; the ui feeds it after every MapSessions. A pane makes a session live
+// however long it has been quiet. The zero state — never called, or an empty
+// map — means no panes are known, and only the recency door admits anyone.
+func (m *Manager) MarkPaneMapped(ids map[string]bool) {
+	// Copied, not kept: the ui's map is the ui's to reuse.
+	mapped := make(map[string]bool, len(ids))
+	for id, ok := range ids {
+		if ok && id != "" {
+			mapped[id] = true
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(mapped) == 0 {
+		m.paneMapped = nil
+		return
+	}
+	m.paneMapped = mapped
+}
+
+// SetLiveWindow sets the recency door: a paneless session still counts as live
+// while now−LastEventAt ≤ d; 0 closes the door (panes only).
+func (m *Manager) SetLiveWindow(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.liveWindow = d
+}
+
+// isLive answers rule 1: a session is live if tmux has it, or if its
+// transcript moved inside the window. Caller holds the mutex.
+func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
+	if m.paneMapped[info.ID] {
+		return true
+	}
+	if m.liveWindow <= 0 || info.LastEventAt.IsZero() {
+		return false // the door is shut, or there is nothing to hold it open
+	}
+	return !info.LastEventAt.Before(now.Add(-m.liveWindow))
+}
 
 // ExcludeCWD hides sessions whose CWD is path (the narrator's Dir): compass
 // must never watch itself narrate. Paths are compared cleaned and absolute, so
@@ -78,64 +142,110 @@ func normalizeDir(path string) string {
 	return filepath.Clean(path)
 }
 
-// Refresh re-discovers sessions, polls each tailer, feeds the machines and
-// returns the fleet in display order: needs-you (longest waiting first), stuck
-// (longest first), working (most recent activity first), idle (most recent
-// first).
+// Refresh re-discovers sessions, polls each live tailer, feeds the machines and
+// returns the fleet in display order: the live block first — needs-you (longest
+// waiting first), stuck (longest first), working (most recent activity first),
+// idle (most recent first) — then the archive, newest last event first.
+//
+// Only live sessions are tailed and state-machined. The archive is real and
+// readable but it can never be amber, which is what keeps `g` and the attention
+// chips truthful by construction (docs/dev/M5-CONTRACT.md).
 func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	infos, err := Discover(m.root)
+	infos, cache, err := scanProjects(m.root, m.cache)
 	if err != nil {
 		return nil, err
 	}
+	m.cache = cache
 
-	live := make(map[string]bool, len(infos))
+	kept := make(map[string]bool, len(infos))
 	out := make([]Session, 0, len(infos))
+	archive := make([]Session, 0, len(infos))
 	for _, info := range infos {
 		if m.isExcluded(info.CWD) {
 			continue // never tracked, so the next sweep also forgets it
 		}
-		live[info.ID] = true
+		kept[info.ID] = true
 		e := m.sessions[info.ID]
-		if e == nil || e.tailer.Path() != info.TranscriptPath {
-			e = &entry{
-				info:    info,
-				tailer:  transcript.NewTailer(info.TranscriptPath),
-				machine: state.NewMachine(),
-			}
+		if e == nil || e.info.TranscriptPath != info.TranscriptPath {
+			e = &entry{}
 			m.sessions[info.ID] = e
 		}
 		e.merge(info)
 
-		// A session whose file we cannot read keeps its last known state rather
-		// than vanishing from the fleet.
-		if events, err := e.tailer.Poll(); err == nil {
-			for _, ev := range events {
-				e.machine.Observe(ev)
-				e.absorb(ev)
+		live := m.isLive(e.info, now)
+		if live {
+			// Waking from the archive means a tailer from scratch: the whole
+			// file replays, exactly as it does at first sight.
+			if e.tailer == nil {
+				e.wake()
 			}
+			// A session whose file we cannot read keeps its last known state
+			// rather than vanishing from the fleet.
+			if events, err := e.tailer.Poll(); err == nil {
+				for _, ev := range events {
+					e.machine.Observe(ev)
+					e.absorb(ev)
+				}
+			}
+		} else {
+			e.sleep()
 		}
 
 		// Discovery reads the head of the file; the events may name a different
 		// cwd, and an excluded one only has to be seen once to disqualify.
 		if m.isExcluded(e.info.CWD) {
-			delete(live, info.ID)
+			delete(kept, info.ID)
 			continue
 		}
 
-		out = append(out, Session{Info: e.info, Snap: e.machine.Evaluate(now)})
+		if live {
+			out = append(out, Session{Info: e.info, Snap: e.machine.Evaluate(now), Live: true})
+		} else {
+			archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
+		}
 	}
 
 	for id := range m.sessions {
-		if !live[id] {
+		if !kept[id] {
 			delete(m.sessions, id)
 		}
 	}
 
 	sortFleet(out)
-	return out, nil
+	sortArchive(archive)
+	return append(out, archive...), nil
+}
+
+// wake gives an entry what a live session needs. Both are built from scratch:
+// a session crossing archive→live replays its whole transcript rather than
+// resuming a fold it stopped keeping.
+func (e *entry) wake() {
+	e.tailer = transcript.NewTailer(e.info.TranscriptPath)
+	e.machine = state.NewMachine()
+}
+
+// sleep drops the tailer's offset and the machine's fold — memory an archived
+// session has no use for — and keeps everything we know about it. Losing
+// sawEvent is the point too: with nothing tailing, the file's own clock is the
+// only clock, and it is the one that will wake this session up again.
+func (e *entry) sleep() {
+	e.tailer = nil
+	e.machine = nil
+	e.sawEvent = false
+}
+
+// archivedSnap is the whole verdict an archived session gets: it did something
+// once, and it is not doing anything now.
+func archivedSnap(info SessionInfo) state.Snapshot {
+	return state.Snapshot{
+		State:    state.Idle,
+		Since:    info.LastEventAt,
+		Reason:   "archived",
+		Activity: "idle",
+	}
 }
 
 // merge folds a fresh Discover result into what the entry already knows.
@@ -223,6 +333,18 @@ func sortFleet(ss []Session) {
 	})
 }
 
+// sortArchive orders what nothing is waiting on: most recently touched first,
+// which is the order you would go looking through it.
+func sortArchive(ss []Session) {
+	sort.SliceStable(ss, func(i, j int) bool {
+		a, b := ss[i], ss[j]
+		if !a.Info.LastEventAt.Equal(b.Info.LastEventAt) {
+			return a.Info.LastEventAt.After(b.Info.LastEventAt)
+		}
+		return a.Info.ID < b.Info.ID
+	})
+}
+
 // Glyphs carry state on their own, so the panel reads in pure monochrome.
 const (
 	GlyphWorking  = "●"
@@ -249,6 +371,9 @@ func Glyph(s state.State) string {
 // status-right: counts in fleet order, zero counts omitted, e.g. "▲1 ◍1 ●3".
 // A fleet with nothing waiting or working reads "○ all quiet" — the point of
 // the line is attention, and an all-idle machine wants none.
+//
+// Only live sessions are counted. An archive of 280 transcripts is not a
+// status.
 func (m *Manager) StatusLine(now time.Time) string {
 	sessions, err := m.Refresh(now)
 	if err != nil {
@@ -257,6 +382,9 @@ func (m *Manager) StatusLine(now time.Time) string {
 
 	counts := map[state.State]int{}
 	for _, s := range sessions {
+		if !s.Live {
+			continue
+		}
 		counts[s.Snap.State]++
 	}
 	if counts[state.NeedsYou]+counts[state.Stuck]+counts[state.Working] == 0 {
