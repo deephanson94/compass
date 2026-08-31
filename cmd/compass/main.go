@@ -15,6 +15,10 @@ import (
 	"github.com/deephanson94/compass/internal/ui"
 )
 
+// defaultLiveWithin is the recency door's default width: a session with no
+// tmux pane still counts as live while it spoke this recently (M5 contract).
+const defaultLiveWithin = "5m"
+
 func main() {
 	args := os.Args[1:]
 
@@ -33,17 +37,31 @@ func main() {
 	if cfg.Narrator != "" {
 		narratorDefault = cfg.Narrator
 	}
+	// An unreadable live_within is ignored like any other bad config line; a bad
+	// -live-within on the command line is a typo worth stopping for.
+	liveDefault := defaultLiveWithin
+	if _, err := time.ParseDuration(cfg.LiveWithin); err == nil {
+		liveDefault = cfg.LiveWithin
+	}
 
 	fs := flag.NewFlagSet("compass", flag.ExitOnError)
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
 	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: reveal is disabled")
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
+	liveWithin := fs.String("live-within", liveDefault,
+		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only)`)
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
+	window, err := time.ParseDuration(*liveWithin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compass: -live-within %q is not a duration (try 5m, 90s, 0)\n", *liveWithin)
+		os.Exit(2)
+	}
 
 	mgr := fleet.NewManager(*root)
+	mgr.SetLiveWindow(window)
 	build := buildNarrator(mgr, *root, *model)
 
 	switch sub {

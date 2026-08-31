@@ -1,18 +1,18 @@
  ⌂ compass                                                           ▲1  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────
 
- FLEET                          │ TRAIL · api                             [Lv1]
+ FLEET · live                   │ TRAIL · api                             [Lv1]
                                 │
-  1 ▲ infra     needs you    2m │ ● fix    tokens.py                       ← 3m
-     (no pane) · tf/vpc         │ │
-                                │ ◆ test   pytest                           12m
- ▸2 ● api       Bash: pyt…   3m │ ├─◈ scout the payments module               ✓
-     dev:1.0 · claude/auth-fx   │ ◆ build  tokens.py                        25m
-                                │ │
-  3 ○ docs      turn comp…  22m │ ◆ scout  middleware.py                    31m
-     (no pane) · main           │ ╵
-                                │ ◉ "fix the 401 bug"                       38m
-
+  dev                           │ ● fix    tokens.py                       ← 3m
+ ▸1 ● api       Bash: pyt…   3m │ │
+     :1.0 · claude/auth-fx      │ ◆ test   pytest                           12m
+                                │ ├─◈ scout the payments module               ✓
+  elsewhere                   ▲ │ ◆ build  tokens.py                        25m
+  2 ▲ infra     needs you    2m │ │
+     no pane · tf/vpc           │ ◆ scout  middleware.py                    31m
+                                │ ╵
+  3 ○ docs      turn comp…  22m │ ◉ "fix the 401 bug"                       38m
+     no pane · main             │
 
 
 

@@ -7,6 +7,7 @@ var helpKeys = [][2]string{
 	{"j / k", "move down / up (↓ ↑ too)"},
 	{"enter", "reveal its pane in your tmux"},
 	{"g", "grab the session waiting longest, and reveal it"},
+	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: unfold each leg's waypoints (Lv2)"},
 	{"⇧ tab", "zoom back out to the trail (esc too)"},
 	{"?", "this help"},

@@ -1,16 +1,16 @@
  ⌂ compass                                                           ▲1  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────
 
- FLEET                          │ TRAIL · infra                           [Lv1]
+ FLEET · live                   │ TRAIL · infra                           [Lv1]
                                 │
  ▸1 ▲ infra     needs you    2m │ ◌ nothing yet
-     (no pane) · tf/vpc         │
+     no pane · tf/vpc           │
                                 │ scouting will appear here
   2 ● api       Bash: pyt…   3m │
-     (no pane) · claude/auth-fx │
+     no pane · claude/auth-fx   │
                                 │
   3 ○ docs      turn comp…  22m │
-     (no pane) · main           │
+     no pane · main             │
 
 
 
