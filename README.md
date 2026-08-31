@@ -117,7 +117,8 @@ set -g status-right '#(compass status) · %H:%M'
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
-| `ctrl+d`/`ctrl+u` · `G` | scroll the trail · snap back to the newest |
+| `ctrl+d`/`ctrl+u` | half a page: the trail at Lv1, the reader at Lv3 |
+| `G` | back to the present — the newest row, at any level |
 | `Space` `/` `n`/`N` | Lv3: unfold a result · search · walk the matches |
 | `?` | help |
 
