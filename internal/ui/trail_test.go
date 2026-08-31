@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/todo"
@@ -533,5 +535,77 @@ func TestT74TrailCursorRow(t *testing.T) {
 	line := TrailCursorRow(tr, last)
 	if top := len(doc) - o.Height; line < top || line >= top+o.Height {
 		t.Errorf("the newest row (%d) is not in the pinned screenful [%d,%d)", line, top, top+o.Height)
+	}
+}
+
+// The Lv2 cursor is a bar the width of the panel, not a highlight cut to each
+// row's own text. Trail rows run from three characters to thirty — a ragged
+// cursor is debris to follow down a column, a full-width one is a place.
+func TestLv2CursorBarSpansThePanel(t *testing.T) {
+	forceASCII(t)
+
+	tr := fixtureLv2Trail(fixtureBase)
+	rows := TrailRows(tr, levelWaypoints)
+	if len(rows) < 4 {
+		t.Fatalf("the fixture has only %d selectable rows; too thin to judge", len(rows))
+	}
+
+	// The ASCII profile drops the inversion itself, so what is measured here is
+	// the shape underneath it: the row the cursor stands on, padded out to the
+	// panel. Every other row keeps its own length.
+	const width = 34
+	widest := 0 // the most padding any row needed, so a no-op cannot pass
+	for i := range rows {
+		o := TrailOpts{
+			Now: fixtureBase.Add(40 * time.Minute), Width: width, Height: 200,
+			Level: levelWaypoints, Cursor: i,
+		}
+		doc := TrailLines(tr, o)
+		at := TrailCursorRow(tr, o)
+		if at < 0 {
+			t.Fatalf("row %d (%s %q) has no row in the document", i, rows[i].Kind, rows[i].Text)
+		}
+		if got := lipgloss.Width(doc[at]); got != width {
+			t.Errorf("row %d (%s %q) draws a %d-column bar, want the panel's %d: %q",
+				i, rows[i].Kind, rows[i].Text, got, width, doc[at])
+		}
+		// The same row drawn without a cursor is its natural length; the gap
+		// between the two is the padding this row actually needed.
+		plain := TrailOpts{
+			Now: fixtureBase.Add(40 * time.Minute), Width: width, Height: 200,
+			Level: levelWaypoints, Cursor: -1,
+		}
+		if pad := width - lipgloss.Width(TrailLines(tr, plain)[at]); pad > widest {
+			widest = pad
+		}
+	}
+	if widest < 4 {
+		t.Errorf("every row already filled the panel (widest gap %d columns); "+
+			"the padding was never exercised", widest)
+	}
+}
+
+// And the bar is really an inversion when the terminal has one to give: the
+// goldens are drawn in ASCII, which drops the attribute, so nothing else in
+// this package would notice the cursor losing its mark entirely (SPEC §4).
+func TestLv2CursorIsInverted(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	tr := fixtureLv2Trail(fixtureBase)
+	o := TrailOpts{
+		Now: fixtureBase.Add(40 * time.Minute), Width: 34, Height: 200,
+		Level: levelWaypoints, Cursor: 0,
+	}
+	doc := TrailLines(tr, o)
+	at := TrailCursorRow(tr, o)
+	if !strings.Contains(doc[at], "\x1b[7m") {
+		t.Errorf("the cursor row carries no inversion: %q", doc[at])
+	}
+	for i, line := range doc {
+		if i != at && strings.Contains(line, "\x1b[7m") {
+			t.Errorf("row %d is inverted too; only the cursor's row may be: %q", i, ansi.Strip(line))
+		}
 	}
 }

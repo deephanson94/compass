@@ -289,6 +289,39 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 	}
 }
 
+// G means one thing at every depth: back to the present. At Lv1 it re-pins the
+// panel; at Lv2 the cursor is what the viewport follows, so the cursor travels
+// — and the reader comes with it. Help promises this unconditionally.
+func TestGReturnsToThePresentAtLv2(t *testing.T) {
+	forceASCII(t)
+
+	m := followModel(120, 30)
+	pressTab(m)
+	rows := TrailRows(m.trail, levelWaypoints)
+	newest := m.scroll // Tab opens on the present, so this is its moment
+
+	for i := 0; i < len(rows); i++ {
+		press(m, "k")
+	}
+	if m.cursor != 0 {
+		t.Fatalf("the cursor is at %d, want the oldest row; nothing to come back from", m.cursor)
+	}
+	if m.scroll == newest {
+		t.Fatal("the reader never left the present; G would prove nothing")
+	}
+
+	press(m, "G")
+	if m.cursor != len(rows)-1 {
+		t.Errorf("G left the cursor on row %d, want the newest at %d", m.cursor, len(rows)-1)
+	}
+	if !m.trailPinned {
+		t.Error("standing on the newest row must re-pin the trail")
+	}
+	if m.scroll != newest {
+		t.Errorf("the reader is at line %d, want the present at %d", m.scroll, newest)
+	}
+}
+
 // T75 — the Lv2 cursor drags the trail's viewport with it, and no further:
 // a row already on screen scrolls nothing, and the last row re-pins the panel
 // to the present (M7 contract, scrolling).

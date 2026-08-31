@@ -10,8 +10,8 @@ var helpKeys = [][2]string{
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: unfold each leg's waypoints (Lv2), then read it (Lv3)"},
 	{"⇧ tab", "zoom back out to the trail (esc too)"},
-	{"ctrl+d/u", "half a page: the trail, or the reader at Lv3"},
-	{"G", "re-pin the trail to the newest row"},
+	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
+	{"G", "back to the present: the newest row"},
 	{"?", "this help"},
 	{"q", "quit"},
 }

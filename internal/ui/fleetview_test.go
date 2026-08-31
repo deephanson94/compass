@@ -364,6 +364,71 @@ func (p fakeProc) Comm(pid int) string {
 func (p fakeProc) Cmdline(pid int) string { return "-" + p.Comm(pid) }
 func (p fakeProc) Cwd(pid int) string     { return p[pid-1000] }
 
+// The first pane poll happens before the fleet exists — Init fires both at
+// once — so it has nothing to pair. The fleet's arrival must re-pair, or every
+// session reads "no pane" (and the mirror falls back to the transcript) until
+// the 5s pane tick. Caught in a live tmux, not by a golden.
+func TestFirstFleetRepairsPanes(t *testing.T) {
+	m := New(nil)
+	m.runner = fakeTmux{out: "dev:1.0\t%2\t22\t/home/user/api\tclaude\n"}
+	m.proc = fakeProc{22: "/home/user/api"}
+
+	// Init's poll: tmux has the pane, but the deck has no sessions yet.
+	if msg := m.relistPanes()().(panesMsg); len(msg.panes) != 0 {
+		t.Fatalf("a fleetless deck paired something: %+v", msg.panes)
+	}
+
+	sessions := []fleet.Session{{
+		Info: fleet.SessionInfo{ID: "s-api", TranscriptPath: sessionKey("s-api"), CWD: "/home/user/api"},
+		Live: true,
+	}}
+	_, cmd := m.Update(fleetMsg{sessions: sessions, at: fixtureBase})
+	if cmd == nil {
+		t.Fatal("the first fleet issued no follow-up command; the panes stay unpaired")
+	}
+	if !producesPanes(t, cmd, sessionKey("s-api"), "dev:1.0") {
+		t.Error("the first fleet did not re-list panes; sessions read \"no pane\" until the pane tick")
+	}
+
+	// A later fleet is not a first one: the pane tick owns the cadence from here.
+	_, cmd = m.Update(fleetMsg{sessions: sessions, at: fixtureBase.Add(time.Second)})
+	if cmd != nil && producesPanes(t, cmd, sessionKey("s-api"), "dev:1.0") {
+		t.Error("every fleet refresh re-lists panes; that is the pane tick's job, once per 5s")
+	}
+}
+
+// producesPanes runs cmd (and any batch it stands for) and reports whether a
+// panesMsg came back pairing key with target.
+func producesPanes(t *testing.T, cmd tea.Cmd, key, target string) bool {
+	t.Helper()
+	for _, msg := range drain(cmd) {
+		if p, ok := msg.(panesMsg); ok && p.panes[key].Target == target {
+			return true
+		}
+	}
+	return false
+}
+
+// drain flattens a command into the messages it yields, one level of
+// tea.Batch deep — which is as deep as the deck ever nests them.
+func drain(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		var out []tea.Msg
+		for _, c := range msg {
+			out = append(out, drain(c)...)
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		return []tea.Msg{msg}
+	}
+}
+
 // T58 — the pane poll carries both shapes of the truth: the map the deck looks
 // panes up in, and tmux's own ordering the live view groups by. It runs with no
 // Manager at all (a harness), which must not panic where MarkPaneMapped is fed.

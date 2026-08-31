@@ -420,8 +420,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, breathTick()
 
 	case fleetMsg:
+		// Init lists panes against a fleet that has not arrived yet, so the
+		// first pairing has nothing to pair. Re-list the moment there is
+		// something to pair with: otherwise every session reads "no pane" —
+		// and the mirror falls back to the transcript — until the 5s pane tick.
+		first := !m.loaded
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
 		m.clampSelection()
+		if first && len(m.sessions) > 0 {
+			return m, tea.Batch(m.titleCmd(), m.relistPanes())
+		}
 		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
 			if msg.hasTrail {
 				m.trail = msg.trail
@@ -545,6 +553,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.cursorMove(-1)
 			return m, nil
+		case "G":
+			// G means the same thing at every depth: back to the present. At
+			// Lv2 the cursor is what the viewport follows, so it is the cursor
+			// that travels — and landing on the newest row re-pins the panel.
+			m.cursorToPresent()
+			return m, nil
 		case "enter":
 			// The reader is already open on this row (the middle panel follows
 			// the cursor), so Enter has only ever meant one thing: go there.
@@ -647,6 +661,12 @@ func (m *Model) cursorMove(delta int) {
 	}
 	m.keepCursorVisible()
 	m.anchorReader()
+}
+
+// cursorToPresent puts the Lv2 cursor on the newest row, wherever it stood.
+// cursorMove clamps, so the whole journey in one delta is simply the end of it.
+func (m *Model) cursorToPresent() {
+	m.cursorMove(len(TrailRows(m.trail, m.level)))
 }
 
 // trailBox is the block the trail column is currently drawn into: the same

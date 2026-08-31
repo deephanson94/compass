@@ -166,7 +166,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		return rows, noSel(len(rows))
 	}
 
-	b := trailBuilder{cursor: trailCursor(o)}
+	b := trailBuilder{cursor: trailCursor(o), width: width}
 	b.journey(tr, nodes, o)
 	if len(tr.Legs) == 0 {
 		// A journey that has only been asked for: say what comes next rather
@@ -220,6 +220,7 @@ type trailBuilder struct {
 
 	cursor int // the selectable row to invert; -1 for none
 	picked int // how many selectable rows have been handed out so far
+	width  int // the panel's columns, so the cursor's bar spans all of them
 }
 
 // pick hands out the next selectable row index. It is called wherever a
@@ -275,11 +276,20 @@ func (b *trailBuilder) render() ([]string, []int) {
 // to its plain text first: a reset left over from the class tint would cancel
 // the inversion halfway across the line. Inversion is the whole mark — it costs
 // no colour and it survives NO_COLOR (SPEC §4).
+//
+// The bar spans the whole panel rather than the row's own text. Trail rows run
+// from three characters to thirty, and a cursor cut to each one's length reads
+// as ragged debris; a full-width bar is one shape the eye can follow down the
+// column.
 func (b *trailBuilder) cursored(l trailLine, text string) string {
 	if b.cursor < 0 || l.sel != b.cursor {
 		return text
 	}
-	return cursorStyle.Render(strings.TrimRight(ansi.Strip(text), " "))
+	plain := strings.TrimRight(ansi.Strip(text), " ")
+	if pad := b.width - lipgloss.Width(plain); pad > 0 {
+		plain += strings.Repeat(" ", pad)
+	}
+	return cursorStyle.Render(plain)
 }
 
 // lastOfGroup reports whether row i is the last row of its group. A group's
