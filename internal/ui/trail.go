@@ -659,10 +659,16 @@ func (m *Model) trailTitle(w int) string {
 	case m.level >= levelWaypoints:
 		level = "[Lv2]"
 	}
-	left := dimStyle.Render(clip("TRAIL · "+name, w-len(level)-1))
-	gap := w - lipgloss.Width(left) - len(level)
+	// Scrolled off the present, the title says so: the trail is no longer
+	// showing the newest work, and `G` is the way back to it.
+	right := level
+	if !m.trailPinned {
+		right = "↓ G  " + level
+	}
+	left := dimStyle.Render(clip("TRAIL · "+name, w-lipgloss.Width(right)-1))
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
-	return left + strings.Repeat(" ", gap) + dimStyle.Render(level)
+	return left + strings.Repeat(" ", gap) + dimStyle.Render(right)
 }

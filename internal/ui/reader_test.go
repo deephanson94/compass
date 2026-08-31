@@ -248,8 +248,13 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 		t.Error("the mirror outlived Lv1; the middle panel is the reader there")
 	}
 
-	// Every row the cursor lands on re-anchors the reader to that row's moment.
+	// Tab opens on the present: the newest row, where the pinned trail already was.
 	rows := TrailRows(m.trail, levelWaypoints)
+	if m.cursor != len(rows)-1 {
+		t.Errorf("tab landed the cursor on row %d, want the newest at %d", m.cursor, len(rows)-1)
+	}
+
+	// Every row the cursor lands on re-anchors the reader to that row's moment.
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
 	anchors := map[int]bool{}
 	for step := 0; step <= len(rows); step++ {
@@ -262,7 +267,7 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 				row.Kind, row.Text, m.scroll, want)
 		}
 		anchors[m.scroll] = true
-		press(m, "j")
+		press(m, "k") // the cursor enters at the present, so it walks backwards
 	}
 	if len(anchors) < 3 {
 		t.Errorf("the conversation barely moved: %d anchors over %d rows", len(anchors), len(rows))

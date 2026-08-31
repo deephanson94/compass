@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/state"
@@ -667,6 +668,37 @@ func indexOfLine(lines []string, sub string) int {
 		}
 	}
 	return -1
+}
+
+// A trail scrolled off the present says so in its title, and names the key
+// back: without it, a scrolled panel is indistinguishable from a short journey
+// (M7 contract, scrolling).
+func TestScrolledTrailSaysItIsBehind(t *testing.T) {
+	forceASCII(t)
+
+	m := followModel(120, 14)
+	if strings.Contains(m.trailTitle(30), "G") {
+		t.Error("a pinned trail must not advertise the way back to where it already is")
+	}
+
+	pressCtrl(m, tea.KeyCtrlU)
+	if m.trailPinned {
+		t.Fatal("ctrl+u did not unpin the panel; nothing to announce")
+	}
+	title := m.trailTitle(30)
+	for _, want := range []string{"G", "[Lv1]"} {
+		if !strings.Contains(title, want) {
+			t.Errorf("a scrolled trail's title %q is missing %q", title, want)
+		}
+	}
+	if got := lipgloss.Width(title); got != 30 {
+		t.Errorf("the cue broke the title's width: %d columns, want 30", got)
+	}
+
+	press(m, "G")
+	if strings.Contains(m.trailTitle(30), "G") {
+		t.Error("G re-pinned the trail; the cue must go with it")
+	}
 }
 
 // The Lv1 trail scrolls without ever becoming the object: ctrl+d and ctrl+u

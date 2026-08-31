@@ -628,7 +628,10 @@ func (m *Model) cursorMove(delta int) {
 	}
 	c := m.cursor + delta
 	if m.cursor < 0 {
-		c = 0
+		// A cursor that has not been placed yet starts at the present: Tab into
+		// Lv2 — and switching sessions inside it — opens on the newest row, the
+		// same place the pinned trail is already showing.
+		c = len(rows) - 1
 	}
 	if c < 0 {
 		c = 0
