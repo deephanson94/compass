@@ -1016,3 +1016,68 @@ func TestAResumedSessionMatchesWhereItIsNow(t *testing.T) {
 		t.Errorf("a session resumed in a new directory found no pane: %+v", got)
 	}
 }
+
+// Sessions in a tmux group share their windows — `tmux new-session -t tinker
+// -s tinker-sub1` — so `list-panes -a` reports every pane once per session in
+// the group: the same pane id, the same pid, under two targets. These rows are
+// verbatim tmux 3.4 output from such a group.
+//
+// One pane holding one claude must reach the fleet once. Handed both copies,
+// MapSessions pairs a second session to the second copy, and because winning a
+// pane is what marks a session live, a session quiet for days is dragged into
+// the live fleet wearing the mirror of a pane it is not in.
+func TestGroupedSessionsShareOnePane(t *testing.T) {
+	r := &fakeRunner{outputs: [][]byte{[]byte(strings.Join([]string{
+		"tinker:0.0\t%0\t8952\tclaude\tclaude",
+		"tinker:1.0\t%1\t8958\tclaude\tts_feasibility",
+		"tinker-sub1:0.0\t%0\t8952\tclaude\tclaude",
+		"tinker-sub1:1.0\t%1\t8958\tclaude\tts_feasibility",
+	}, "\n"))}}
+
+	got, err := tmuxop.ListPanes(r)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListPanes returned %d panes for 2 real ones: %+v", len(got), got)
+	}
+	for i, want := range []string{"tinker:0.0", "tinker:1.0"} {
+		if got[i].Target != want {
+			t.Errorf("pane %d is %q, want %q — the first address tmux gives", i, got[i].Target, want)
+		}
+	}
+}
+
+// And end to end: two panes shared by a group, two sessions at that cwd — one
+// live, one quiet for two days. The live one takes its pane; the dead one must
+// not be handed the group's copy of it.
+func TestAGroupsCopyDoesNotResurrectADeadSession(t *testing.T) {
+	r := &fakeRunner{outputs: [][]byte{[]byte(strings.Join([]string{
+		"tinker:0.0\t%0\t700\tclaude\tclaude",
+		"tinker-sub1:0.0\t%0\t700\tclaude\tclaude",
+	}, "\n"))}}
+	panes, err := tmuxop.ListPanes(r)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+
+	p := &fakeProc{
+		children: map[int][]int{700: {701}},
+		comm:     map[int]string{700: "zsh", 701: "claude"},
+		cwd:      map[int]string{701: "/hdd4/agentic"},
+		started:  map[int]time.Time{701: at(ago(2 * time.Hour))},
+	}
+	sessions := []fleet.SessionInfo{
+		sessionAt("s-dead", "/hdd4/agentic", ago(48*time.Hour)),
+		sessionAt("s-live", "/hdd4/agentic", ago(30*time.Second)),
+	}
+
+	got := tmuxop.MapSessions(sessions, panes, p)
+	if _, ok := got[keyOf("s-dead")]; ok {
+		t.Errorf("a session quiet for two days was paired with the group's second "+
+			"copy of one pane: %+v", got[keyOf("s-dead")])
+	}
+	if got[keyOf("s-live")].Target != "tinker:0.0" {
+		t.Errorf("the live session got %+v, want tinker:0.0", got[keyOf("s-live")])
+	}
+}
