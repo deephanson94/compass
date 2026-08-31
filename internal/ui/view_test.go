@@ -340,3 +340,83 @@ func countNonBlank(lines []string) int {
 	}
 	return n
 }
+
+// The help legend has to name every class the segmenter can actually produce.
+// Lv1's whole job is the classification, and until now `?` said only "◆ leg" —
+// there was nowhere to look up what the seven tints meant, which is how it was
+// reported ("I don't remember all glyphs meaning").
+//
+// The loop walks the real enum rather than a copy of it, so adding a class
+// fails here until the legend learns about it.
+func TestHelpNamesEveryLegClass(t *testing.T) {
+	forceASCII(t)
+
+	got := strings.Join(helpLines(60, 40), "\n")
+
+	var classes []journey.Class
+	for c := journey.Class(0); ; c++ {
+		if c.String() == "unknown" {
+			break
+		}
+		classes = append(classes, c)
+	}
+	if len(classes) < 7 {
+		t.Fatalf("only %d classes found; the enum walk is wrong", len(classes))
+	}
+	for _, c := range classes {
+		if !strings.Contains(got, c.String()) {
+			t.Errorf("help never names the %q class:\n%s", c, got)
+		}
+	}
+	if len(legClasses) != len(classes) {
+		t.Errorf("the legend lists %d classes, the segmenter produces %d",
+			len(legClasses), len(classes))
+	}
+	// And it says how many there are, so the prose cannot drift from the list.
+	if !strings.Contains(got, "seven classes") {
+		t.Errorf("help does not say how many classes there are:\n%s", got)
+	}
+	if len(classes) != 7 {
+		t.Errorf("there are now %d classes; the help text still says seven", len(classes))
+	}
+}
+
+// The help overlay has to fit the body it is drawn into, and the keys are the
+// half that must never be the part cut. Adding the class legend is what made
+// this reachable — it pushed the top of the key list off a 26-row terminal.
+func TestHelpFitsAndKeepsItsKeys(t *testing.T) {
+	forceASCII(t)
+
+	for _, tc := range []struct {
+		w, h         int
+		wantLegend   bool
+		wantEveryKey bool
+	}{
+		{120, 22, true, true},   // two columns, everything
+		{76, 24, true, true},    // one column, everything
+		{120, 12, false, false}, // too short for the keys: they get the whole width
+		{60, 8, false, false},   // barely anything
+	} {
+		lines := helpLines(tc.w, tc.h)
+		if len(lines) > tc.h {
+			t.Errorf("%dx%d: help drew %d lines into %d", tc.w, tc.h, len(lines), tc.h)
+		}
+		got := strings.Join(lines, "\n")
+
+		// The keys always start first, whatever else is dropped.
+		if !strings.Contains(got, "select a session") {
+			t.Errorf("%dx%d: the keys were cut before the legend was:\n%s", tc.w, tc.h, got)
+		}
+		if tc.wantEveryKey && !strings.Contains(got, "quit") {
+			t.Errorf("%dx%d: the key list is incomplete:\n%s", tc.w, tc.h, got)
+		}
+		if tc.wantLegend && !strings.Contains(got, "scout") {
+			t.Errorf("%dx%d: the class legend is missing:\n%s", tc.w, tc.h, got)
+		}
+		// A body too short for the keys must spend its width on them, not on a
+		// legend it has no room to finish.
+		if !tc.wantLegend && strings.Contains(got, "one of seven classes") {
+			t.Errorf("%dx%d: the legend crowded out the keys:\n%s", tc.w, tc.h, got)
+		}
+	}
+}

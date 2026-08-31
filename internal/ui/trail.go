@@ -489,14 +489,14 @@ func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int
 	}
 	head := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
 
+	// One row shape, narrated or not. A narrated phrase is a better label than
+	// the heuristic one, so it goes in the label column — it does not replace
+	// the class. The class is what Lv1 classifies by (SPEC §2.2), and dropping
+	// its word left colour as the only thing carrying it: seven tints on one
+	// glyph, which says nothing at all in monochrome, over NO_COLOR, or to
+	// anyone who does not separate teal from cyan (SPEC §4).
 	if narrated {
-		// Narrated: one phrase across the verb and label columns.
-		textWidth := width - 2 - 1 - len([]rune(age))
-		if textWidth < trailMinLabel {
-			return classStyle(l.Class).Render(glyph) + padLeft(dimStyle.Render(age), width-1)
-		}
-		return classStyle(l.Class).Render(glyph) + " " +
-			textStyle.Render(pad(clip(label, textWidth), textWidth)) + " " + dimStyle.Render(age)
+		label = withoutClassVerb(label, l.Class.String())
 	}
 
 	labelWidth := width - trailPrefixWidth - 1 - len([]rune(age))
@@ -506,6 +506,18 @@ func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int
 	}
 	labelText := textStyle.Render(pad(clip(label, labelWidth), labelWidth))
 	return head + " " + labelText + " " + dimStyle.Render(age)
+}
+
+// withoutClassVerb drops a narrated phrase's first word when it is the class's
+// own name, so "fix probe6 exit" under `fix` reads "fix    probe6 exit" rather
+// than saying it twice. Only an exact match goes: "push to main" under `ship`
+// keeps its verb, because "ship  to main" is not what happened.
+func withoutClassVerb(label, class string) string {
+	rest, ok := strings.CutPrefix(label, class+" ")
+	if !ok || strings.TrimSpace(rest) == "" {
+		return label
+	}
+	return strings.TrimSpace(rest)
 }
 
 // promptRow quotes the human turn — the only words on the trail that are not
