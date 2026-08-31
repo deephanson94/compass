@@ -361,14 +361,17 @@ func TestManagerRefreshIsRepeatableAndPicksUpNewLines(t *testing.T) {
 
 // T15 — the one-shot status line for `compass status` / tmux status-right.
 func TestT15StatusLine(t *testing.T) {
+	// The StatusLine subtests pin the SHIPPED status line, so their fixtures
+	// sit inside the default live window and the Manager runs stock — unlike
+	// the ordering tests above, which predate liveness and run wide open.
 	t.Run("mixed fleet", func(t *testing.T) {
 		root := t.TempDir()
-		needsYouAt(t, root, "-home-user-alpha", idNeedsYou, 8*time.Minute)
-		stuckAt(t, root, "-home-user-alpha", idStuck, 5*time.Minute)
+		needsYouAt(t, root, "-home-user-alpha", idNeedsYou, 2*time.Minute)
+		stuckAt(t, root, "-home-user-alpha", idStuck, 4*time.Minute)
 		workingAt(t, root, "-home-user-beta", idWorking, 10*time.Second)
 		workingAt(t, root, "-home-user-beta", "cc000009-0000-4000-8000-000000000009", 40*time.Second)
 
-		got := liveManager(root).StatusLine(fleetNow)
+		got := fleet.NewManager(root).StatusLine(fleetNow)
 		if want := "▲1 ◍1 ●2"; got != want {
 			t.Errorf("StatusLine = %q, want %q", got, want)
 		}
@@ -394,8 +397,8 @@ func TestT15StatusLine(t *testing.T) {
 
 	t.Run("idle counted alongside active sessions", func(t *testing.T) {
 		root := t.TempDir()
-		needsYouAt(t, root, "-home-user-alpha", idNeedsYou, 8*time.Minute)
-		idleAt(t, root, "-home-user-beta", idIdle, 14*time.Minute)
+		needsYouAt(t, root, "-home-user-alpha", idNeedsYou, 2*time.Minute)
+		idleAt(t, root, "-home-user-beta", idIdle, 3*time.Minute)
 
 		// CONTRACT AMBIGUITY (M0-CONTRACT.md, Manager.StatusLine): the rule is
 		// "counts in fleet-sort order, zero counts omitted", which reads as

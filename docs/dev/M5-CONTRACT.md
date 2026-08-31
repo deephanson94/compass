@@ -136,3 +136,25 @@ config file, threaded to `SetLiveWindow`.
 | T61 | Group order = first-occurrence order of the pane list; window.pane numeric order inside (10 > 9 proves numeric, not lexical) | ui section |
 
 Goldens under `testdata/golden/`, ASCII profile forced. All offline.
+
+## Addendum — resolved during implementation (pinned by tests)
+
+- The recency door is **inclusive**: exactly `now − LastEventAt == d` is live.
+- `SetLiveWindow` clamps a negative duration to 0 (panes only) — it is user
+  input via `-live-within` and `live_within`.
+- `MarkPaneMapped` copies; the Manager never retains the caller's map. A later
+  call **replaces** (no union); nil or empty clears the mapping. Unknown ids
+  are harmless.
+- Archive ties (equal `LastEventAt`) break on ID ascending, matching Discover.
+- A zero `LastEventAt` never holds the door open.
+- Exclusion beats liveness: an excluded session is absent, not archived, even
+  when pane-mapped.
+- `sleep()` (live→archive) clears the tailer's event-beats-mtime latch, so an
+  archived session's `LastEventAt` can subsequently be raised by file mtime
+  until it wakes and replays; `LastEventAt` never moves backwards.
+- The pre-M5 ordering and exclusion tests run behind a wide-open live window
+  (`liveManager` helper) — liveness is not their subject; the StatusLine tests
+  run STOCK with in-window fixtures, because they pin the shipped status line.
+- Discovery caching is pinned behaviorally plus one deliberate white-box probe
+  (same size+mtime, changed bytes → old info retained) that documents the
+  (size, mtime) key; rewrite that probe if the key ever legitimately changes.

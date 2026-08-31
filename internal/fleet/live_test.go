@@ -691,7 +691,7 @@ func TestMarkPaneMappedNilOrEmptyClearsTheMapping(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			idleAt(t, root, slugBeta, idStalePane, 3*time.Hour)      // only a pane can keep it live
+			idleAt(t, root, slugBeta, idStalePane, 3*time.Hour)            // only a pane can keep it live
 			needsYouAt(t, root, slugAlpha, idFreshUnmapped, 1*time.Minute) // the door keeps it live
 
 			m := fleet.NewManager(root)
@@ -728,4 +728,28 @@ func TestLiveIsTheUnionOfPanesAndTheRecencyDoor(t *testing.T) {
 		t.Fatalf("fleet = %v, want two sessions and no duplicates", sessionIDs(sessions))
 	}
 	assertLiveFlags(t, sessions, true, true)
+}
+
+// BEYOND THE CONTRACT LETTER, and deliberately so: the ui builds its pane map
+// once per tick and is entitled to reuse the same map. If the Manager retained
+// the caller's map rather than a copy, the next MapSessions would silently
+// rewrite the fleet's idea of what is live. The contract does not say "copied";
+// it says the ui feeds this after every MapSessions, which only works if the
+// map stops being shared the moment it is handed over.
+func TestMarkPaneMappedDoesNotRetainTheCallersMap(t *testing.T) {
+	root := t.TempDir()
+	idleAt(t, root, slugBeta, idStalePane, 3*time.Hour)
+	idleAt(t, root, slugBeta, idArchived5h, 5*time.Hour)
+
+	m := fleet.NewManager(root)
+	mapping := paneMap(idStalePane)
+	m.MarkPaneMapped(mapping)
+
+	// The caller reuses its map for the next tick, before Refresh runs.
+	delete(mapping, idStalePane)
+	mapping[idArchived5h] = true
+
+	if got, want := joined(liveIDs(mustRefresh(t, m, fleetNow))), idStalePane; got != want {
+		t.Errorf("live = %v, want %v — the Manager followed the caller's later edits", got, want)
+	}
 }

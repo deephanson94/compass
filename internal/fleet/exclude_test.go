@@ -152,19 +152,23 @@ func TestT49ExcludingEverythingIsAnEmptyFleetNotAnError(t *testing.T) {
 // T49 — the status line is a Refresh underneath, so it has to agree with it:
 // an excluded session is not counted anywhere.
 func TestT49StatusLineReflectsTheExclusion(t *testing.T) {
-	root := twoCWDs(t)
+	// Pins the SHIPPED status line, so the fixtures sit inside the default
+	// live window and the Manager runs stock (see manager_test.go's note).
+	root := t.TempDir()
+	needsYouAt(t, root, "-home-user-alpha", idNeedsYou, 2*time.Minute)
+	workingAt(t, root, "-home-user-beta", idWorking, 10*time.Second)
 
-	if got, want := liveManager(root).StatusLine(fleetNow), "▲1 ●1"; got != want {
+	if got, want := fleet.NewManager(root).StatusLine(fleetNow), "▲1 ●1"; got != want {
 		t.Fatalf("baseline StatusLine = %q, want %q", got, want)
 	}
 
-	hidAlpha := liveManager(root)
+	hidAlpha := fleet.NewManager(root)
 	hidAlpha.ExcludeCWD("/home/user/alpha")
 	if got, want := hidAlpha.StatusLine(fleetNow), "●1"; got != want {
 		t.Errorf("StatusLine with /home/user/alpha excluded = %q, want %q", got, want)
 	}
 
-	hidBeta := liveManager(root)
+	hidBeta := fleet.NewManager(root)
 	hidBeta.ExcludeCWD("/home/user/beta")
 	if got, want := hidBeta.StatusLine(fleetNow), "▲1"; got != want {
 		t.Errorf("StatusLine with /home/user/beta excluded = %q, want %q", got, want)
