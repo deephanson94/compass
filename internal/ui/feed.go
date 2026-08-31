@@ -29,8 +29,10 @@ type feed struct {
 // costs tens of megabytes at worst on the one session that hits it.
 const feedEventCap = 20000
 
-// feedStore keeps one feed per session. The deck's commands run off the render
-// loop and can overlap, so the store carries its own lock.
+// feedStore keeps one feed per session, keyed by SessionInfo.Key() — two
+// sessions sharing an id are two journeys and may never share a tailer (M6
+// contract). The deck's commands run off the render loop and can overlap, so
+// the store carries its own lock.
 type feedStore struct {
 	mu    sync.Mutex
 	feeds map[string]*feed
@@ -45,17 +47,17 @@ func newFeedStore() *feedStore {
 // document for the Lv3 reader. The first call replays the whole transcript — a
 // session's journey starts at its first line, not at the moment compass looked
 // at it.
-func (fs *feedStore) poll(id, path string) (journey.Trail, []transcript.Event) {
-	if fs == nil || id == "" || path == "" {
+func (fs *feedStore) poll(key, path string) (journey.Trail, []transcript.Event) {
+	if fs == nil || key == "" || path == "" {
 		return journey.Trail{}, nil
 	}
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	f := fs.feeds[id]
+	f := fs.feeds[key]
 	if f == nil || f.tailer.Path() != path {
 		f = &feed{tailer: transcript.NewTailer(path), seg: journey.NewSegmenter()}
-		fs.feeds[id] = f
+		fs.feeds[key] = f
 	}
 
 	events, err := f.tailer.Poll()
@@ -92,11 +94,11 @@ func (fs *feedStore) retain(sessions []fleet.Session) {
 
 	live := make(map[string]bool, len(sessions))
 	for _, s := range sessions {
-		live[s.Info.ID] = true
+		live[s.Info.Key()] = true
 	}
-	for id := range fs.feeds {
-		if !live[id] {
-			delete(fs.feeds, id)
+	for key := range fs.feeds {
+		if !live[key] {
+			delete(fs.feeds, key)
 		}
 	}
 }

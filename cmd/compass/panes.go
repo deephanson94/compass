@@ -35,11 +35,17 @@ func printPanes(w io.Writer, mgr *fleet.Manager, root string, now time.Time) {
 	}
 	mapped := tmuxop.MapSessions(infos, panes, proc)
 
-	// sessionID → pane, inverted: the report reads pane-first, the way tmux
-	// lists them and the way the fleet groups them.
+	// The pairing is keyed by transcript path (M6 contract); the report names
+	// each session by its id, which is the label a human recognises and what
+	// `claude --resume` takes. Inverted to pane-first: the way tmux lists them
+	// and the way the fleet groups them.
+	ids := make(map[string]string, len(infos))
+	for _, info := range infos {
+		ids[info.Key()] = info.ID
+	}
 	byPane := make(map[string]string, len(mapped))
-	for id, pane := range mapped {
-		byPane[pane.ID] = id
+	for key, pane := range mapped {
+		byPane[pane.ID] = ids[key]
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

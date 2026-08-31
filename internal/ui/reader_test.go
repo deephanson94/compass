@@ -110,7 +110,7 @@ func TestT51TrailRowsAndAnchor(t *testing.T) {
 // briefed on whose journey it is reading, in that session's own directory.
 func TestT52BuildAsk(t *testing.T) {
 	info := fleet.SessionInfo{
-		ID: "s-api", TranscriptPath: "/x/api.jsonl", CWD: "/home/user/api",
+		ID: "s-api", TranscriptPath: sessionKey("s-api"), CWD: "/home/user/api",
 		GitBranch: "claude/auth-fx", Title: "fix the 401 bug",
 		StartedAt: fixtureBase, LastEventAt: fixtureBase.Add(30 * time.Minute),
 	}
@@ -126,7 +126,7 @@ func TestT52BuildAsk(t *testing.T) {
 		t.Fatalf("Args = %v, want [claude --append-system-prompt <preamble>]", cmd.Args)
 	}
 	preamble := cmd.Args[2]
-	for _, want := range []string{"/x/api.jsonl", "fix the 401 bug", "claude/auth-fx", "historian"} {
+	for _, want := range []string{sessionKey("s-api"), "fix the 401 bug", "claude/auth-fx", "historian"} {
 		if !strings.Contains(preamble, want) {
 			t.Errorf("preamble is missing %q", want)
 		}
@@ -140,13 +140,13 @@ func TestT53NarratedOverlayGolden(t *testing.T) {
 
 	tr := fixtureTrail(fixtureBase)
 	labels := map[string]string{
-		narrator.LegKey("s-api", tr.Legs[0]): "maps the auth module",
-		narrator.LegKey("s-api", tr.Legs[1]): "wires the token refresh",
+		narrator.LegKey(sessionKey("s-api"), tr.Legs[0]): "maps the auth module",
+		narrator.LegKey(sessionKey("s-api"), tr.Legs[1]): "wires the token refresh",
 		// Legs[2] (test) stays heuristic; Legs[3] is HEAD and must not change.
-		narrator.LegKey("s-api", tr.Legs[3]): "must never show on head",
+		narrator.LegKey(sessionKey("s-api"), tr.Legs[3]): "must never show on head",
 	}
 	got := RenderTrail(tr, TrailOpts{
-		Labels: labels, SessionID: "s-api",
+		Labels: labels, SessionKey: sessionKey("s-api"),
 		Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1,
 	})
 	compareGolden(t, "trail-narrated-38x20.txt", got)

@@ -4,7 +4,10 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -59,26 +62,34 @@ type fleetMsg struct {
 // Narrator is the deck's view of the narration service (internal/narrator):
 // ask for labels, read the ones that have landed. An interface, so the panel
 // stays renderable — and testable — without the CLI behind it.
+//
+// The string it is handed is the session's Key(), not its id: LegKey's
+// signature did not change, but what compass passes into it did (M6 contract).
 type Narrator interface {
-	Labels(sessionID string, tr journey.Trail) map[string]string
-	Request(sessionID string, tr journey.Trail, prompt string)
+	Labels(key string, tr journey.Trail) map[string]string
+	Request(key string, tr journey.Trail, prompt string)
 }
 
-// panesMsg carries both shapes of the same truth: the sessionID → pane map the
-// deck looks things up in, and tmux's own ordering of the panes — which is the
-// order the live fleet groups itself in (M5 contract, package tmuxop).
+// panesMsg carries both shapes of the same truth: the key → pane map the deck
+// looks things up in — keyed by SessionInfo.Key(), never by the session id
+// (M6 contract) — and tmux's own ordering of the panes, which is the order the
+// live fleet groups itself in (M5 contract, package tmuxop).
 type panesMsg struct {
 	panes map[string]tmuxop.Pane
 	list  []tmuxop.Pane
 }
 
 type captureMsg struct {
-	id    string // the session the frame was captured for
+	key   string // the session the frame was captured for
 	frame string
 }
 
-type revealMsg struct {
+// attachDoneMsg comes back when compass has its terminal again — or, inside
+// tmux, when the client has finished moving. It names the pane, so the deck
+// can say where the user just went.
+type attachDoneMsg struct {
 	target string
+	inside bool // the client switched; compass never gave up its terminal
 	err    error
 }
 
@@ -93,8 +104,8 @@ type Model struct {
 	narrator Narrator
 
 	sessions []fleet.Session
-	panes    map[string]tmuxop.Pane
-	paneList []tmuxop.Pane // tmux's own order: the live view's group order
+	panes    map[string]tmuxop.Pane // keyed by SessionInfo.Key(), like everything else
+	paneList []tmuxop.Pane          // tmux's own order: the live view's group order
 	trail    journey.Trail
 	events   []transcript.Event
 	todos    []todo.Item
@@ -120,22 +131,32 @@ type Model struct {
 	docVer   int    // bumped whenever a fold changes, to retire the cache
 	docCache readerCache
 
-	selectedID string
-	width      int
-	height     int
+	// selectedKey is the session the deck is pointed at, held by its Key() —
+	// its transcript path. The session id is a label two sessions can share
+	// (M6 contract); the path is the one thing that never repeats.
+	selectedKey string
+
+	width  int
+	height int
 
 	// The fleet column's own state: which of the two fleets is on screen, the
 	// selection the other one is holding for when you come back, and how far the
 	// column is scrolled (in rendered lines).
 	archiveView bool
-	restSelID   string
+	restSelKey  string // the other view's selection, also a Key()
 	fleetScroll int
 
 	showHelp  bool
 	searching bool
 	pulse     bool // HEAD's breath is on its off-beat
 	readonly  bool
+	inTmux    bool   // $TMUX was set: Enter switches the client instead of suspending
 	note      string // one line of consequence, cleared by the next keypress
+
+	// spawn is how a built command reaches the world. The deck leaves it nil
+	// and runs the command itself; a harness installs one to read the command
+	// Enter built, with no tmux server anywhere near the test.
+	spawn func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd
 
 	lastNeedsYou int
 }
@@ -167,7 +188,11 @@ func New(mgr *fleet.Manager) *Model {
 }
 
 // Run starts the full-screen deck. In readonly mode compass keeps its one write
-// action — reveal — to itself.
+// action — attach — to itself.
+//
+// $TMUX is read once, here: whether compass is already inside the user's tmux
+// decides both what Enter does and what the footer promises. New() leaves it
+// false, so a harness renders one deterministic deck.
 //
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
@@ -175,6 +200,7 @@ func New(mgr *fleet.Manager) *Model {
 func Run(mgr *fleet.Manager, readonly bool, build func(notify func()) Narrator) error {
 	m := New(mgr)
 	m.readonly = readonly
+	m.inTmux = os.Getenv("TMUX") != ""
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if build != nil {
 		m.narrator = build(func() { p.Send(narratedMsg{}) })
@@ -209,8 +235,8 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 	m.clampSelection()
 }
 
-// SetPanes gives the model the sessionID → pane mapping: the location line in
-// the fleet, the source of the mirror, and the target of a reveal.
+// SetPanes gives the model the key → pane mapping: the location line in the
+// fleet, the source of the mirror, and the pane Enter attaches to.
 func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
 	m.panes = panes
 }
@@ -271,10 +297,13 @@ func (m *Model) refresh() tea.Cmd {
 		// poll and nothing it would want overwritten.
 		return nil
 	}
-	selected, root := m.selectedID, mgr.Root()
-	path := ""
+	selected, root := m.selectedKey, mgr.Root()
+	// The todo file on disk is named after the session id, not the key: the id
+	// is what claude itself writes under. Two sessions sharing an id share that
+	// plan, which is the truth on disk — not something compass may invent.
+	path, sessionID := "", ""
 	if s, ok := m.selected(); ok {
-		path = s.Info.TranscriptPath
+		path, sessionID = s.Info.TranscriptPath, s.Info.ID
 	}
 	return func() tea.Msg {
 		now := time.Now()
@@ -283,7 +312,7 @@ func (m *Model) refresh() tea.Cmd {
 		if selected != "" {
 			// The plan the session keeps for itself. A missing or unreadable
 			// todo file is not news: the trail simply has no future to draw.
-			msg.todos, _ = todo.Read(root, selected)
+			msg.todos, _ = todo.Read(root, sessionID)
 			msg.trailFor = selected
 		}
 		if feeds != nil {
@@ -320,17 +349,19 @@ func (m *Model) relistPanes() tea.Cmd {
 }
 
 // markMapped tells the fleet which sessions currently sit in a pane — the other
-// half of liveness (M5 contract, fleet rule 1). A harness drives the deck with
-// no Manager at all, so a nil one is simply nothing to tell.
+// half of liveness (M5 contract, fleet rule 1). The set it passes is a set of
+// keys, so a twin sharing an id does not inherit its sibling's pane (M6
+// contract). A harness drives the deck with no Manager at all, so a nil one is
+// simply nothing to tell.
 func markMapped(mgr *fleet.Manager, mapped map[string]tmuxop.Pane) {
 	if mgr == nil {
 		return
 	}
-	ids := make(map[string]bool, len(mapped))
-	for id := range mapped {
-		ids[id] = true
+	keys := make(map[string]bool, len(mapped))
+	for key := range mapped {
+		keys[key] = true
 	}
-	mgr.MarkPaneMapped(ids)
+	mgr.MarkPaneMapped(keys)
 }
 
 // capture mirrors the selected pane, and only it: 200ms of one capture-pane is
@@ -340,13 +371,13 @@ func (m *Model) capture() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	runner, id := m.runner, m.selectedID
+	runner, key := m.runner, m.selectedKey
 	return func() tea.Msg {
 		frame, err := tmuxop.Capture(runner, pane.ID)
 		if err != nil {
-			return captureMsg{id: id}
+			return captureMsg{key: key}
 		}
-		return captureMsg{id: id, frame: frame}
+		return captureMsg{key: key, frame: frame}
 	}
 }
 
@@ -379,7 +410,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fleetMsg:
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
 		m.clampSelection()
-		if msg.trailFor != "" && msg.trailFor == m.selectedID {
+		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
 			if msg.hasTrail {
 				m.trail = msg.trail
 				m.SetEvents(msg.events)
@@ -405,16 +436,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case captureMsg:
-		if msg.id == m.selectedID {
+		if msg.key == m.selectedKey {
 			m.mirror = msg.frame
 		}
 		return m, nil
 
-	case revealMsg:
-		if msg.err != nil {
-			m.note = "reveal failed"
-		} else {
-			m.note = "revealed " + msg.target
+	case attachDoneMsg:
+		switch {
+		case msg.err != nil:
+			m.note = "attach failed: " + msg.err.Error()
+		case msg.inside:
+			// Nothing was suspended, so nothing announced its own return: the
+			// deck says where the client went instead.
+			m.note = "switched to " + msg.target
 		}
 		return m, nil
 
@@ -499,7 +533,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.note = "nothing is waiting on you"
 				return m, nil
 			}
-			return m, tea.Batch(m.refresh(), m.reveal())
+			return m, tea.Batch(m.refresh(), m.attach())
 		}
 	default: // levelTrail
 		switch key {
@@ -510,13 +544,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.move(-1)
 			return m, m.refresh()
 		case "enter":
-			return m, m.reveal()
+			return m, m.attach()
 		case "g":
 			if !m.selectOldestNeedsYou() {
 				m.note = "nothing is waiting on you"
 				return m, nil
 			}
-			return m, tea.Batch(m.refresh(), m.reveal())
+			return m, tea.Batch(m.refresh(), m.attach())
 		}
 	}
 	return m, nil
@@ -599,11 +633,16 @@ func (m *Model) zoomOut() {
 	}
 }
 
-// reveal moves the user's tmux focus onto the selected pane — compass's only
-// write, and only ever from a keypress.
-func (m *Model) reveal() tea.Cmd {
+// attach hands the terminal to the selected session — Enter's whole job (M6
+// contract). Outside tmux compass suspends itself the way `ask` does: the pane
+// owns the terminal until the user detaches with their own prefix `d`, and the
+// deck comes back exactly as it was. Inside tmux there is nothing to suspend —
+// the command moves the client and returns at once.
+//
+// It is compass's only write, and only ever from a keypress.
+func (m *Model) attach() tea.Cmd {
 	if m.readonly {
-		m.note = "read-only · reveal is off"
+		m.note = "read-only · attach is off"
 		return nil
 	}
 	pane, ok := m.selectedPane()
@@ -611,10 +650,27 @@ func (m *Model) reveal() tea.Cmd {
 		m.note = "no tmux pane for this session"
 		return nil
 	}
-	runner := m.runner
-	return func() tea.Msg {
-		return revealMsg{target: pane.Target, err: tmuxop.Reveal(runner, pane.Target, pane.ID)}
+	cmd := tmuxop.Attach(pane.Target, pane.ID, m.inTmux)
+	done := func(err error) tea.Msg {
+		return attachDoneMsg{target: pane.Target, inside: m.inTmux, err: err}
 	}
+	if m.spawn != nil {
+		return m.spawn(cmd, m.inTmux, done)
+	}
+	if m.inTmux {
+		// Nothing is suspended, so the command runs off the render loop like any
+		// other — and tmux's own words are worth more than "exit status 1".
+		return func() tea.Msg {
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				if said := strings.TrimSpace(string(out)); said != "" {
+					err = errors.New(said)
+				}
+			}
+			return done(err)
+		}
+	}
+	return tea.ExecProcess(cmd, done)
 }
 
 // selected is the session the deck is pointed at.
@@ -631,16 +687,16 @@ func (m *Model) selectedPane() (tmuxop.Pane, bool) {
 	if !ok {
 		return tmuxop.Pane{}, false
 	}
-	pane, ok := m.panes[s.Info.ID]
+	pane, ok := m.panes[s.Info.Key()]
 	return pane, ok
 }
 
-// selectedIndex resolves the sticky selection (by session id) to a row. The
-// fleet re-sorts every second; the cursor must stay on the session, not on the
-// line number.
+// selectedIndex resolves the sticky selection (by key) to a row. The fleet
+// re-sorts every second; the cursor must stay on the session, not on the line
+// number — and never on its twin.
 func (m *Model) selectedIndex() int {
 	for i, s := range m.sessions {
-		if s.Info.ID == m.selectedID {
+		if s.Info.Key() == m.selectedKey {
 			return i
 		}
 	}
@@ -649,7 +705,7 @@ func (m *Model) selectedIndex() int {
 
 func (m *Model) clampSelection() {
 	if len(m.sessions) == 0 {
-		m.selectedID, m.restSelID = "", ""
+		m.selectedKey, m.restSelKey = "", ""
 		return
 	}
 	order := m.fleetOrder()
@@ -657,11 +713,11 @@ func (m *Model) clampSelection() {
 		return // an empty view keeps whatever it had; the column says it is empty
 	}
 	for _, i := range order {
-		if m.sessions[i].Info.ID == m.selectedID {
+		if m.sessions[i].Info.Key() == m.selectedKey {
 			return
 		}
 	}
-	m.point(m.sessions[order[0]].Info.ID)
+	m.point(m.sessions[order[0]].Info.Key())
 }
 
 // toggleArchive swaps the two fleets, and their selections with them: the live
@@ -672,24 +728,24 @@ func (m *Model) toggleArchive() {
 		return
 	}
 	m.archiveView = !m.archiveView
-	m.selectedID, m.restSelID = m.restSelID, m.selectedID
+	m.selectedKey, m.restSelKey = m.restSelKey, m.selectedKey
 	m.fleetScroll = 0
-	if m.selectedID != "" {
-		// A remembered id is a fresh selection for everything downstream.
-		id := m.selectedID
-		m.selectedID = ""
-		m.point(id)
+	if m.selectedKey != "" {
+		// A remembered key is a fresh selection for everything downstream.
+		key := m.selectedKey
+		m.selectedKey = ""
+		m.point(key)
 	}
 	m.clampSelection()
 }
 
 // point moves the selection. Trail and mirror belong to the session that was
 // selected, so they leave with it rather than lingering as somebody else's.
-func (m *Model) point(id string) {
-	if id == m.selectedID {
+func (m *Model) point(key string) {
+	if key == m.selectedKey {
 		return
 	}
-	m.selectedID = id
+	m.selectedKey = key
 	m.trail = journey.Trail{}
 	m.todos = nil
 	m.mirror = ""
@@ -709,7 +765,7 @@ func (m *Model) selectIndex(i int) {
 	if i < 0 || i >= len(order) {
 		return
 	}
-	m.point(m.sessions[order[i]].Info.ID)
+	m.point(m.sessions[order[i]].Info.Key())
 }
 
 // move is j/k: one session down or up the rendered order, skipping headers —
@@ -721,7 +777,7 @@ func (m *Model) move(delta int) {
 	}
 	pos := 0
 	for p, i := range order {
-		if m.sessions[i].Info.ID == m.selectedID {
+		if m.sessions[i].Info.Key() == m.selectedKey {
 			pos = p
 			break
 		}
@@ -733,7 +789,7 @@ func (m *Model) move(delta int) {
 	if pos >= len(order) {
 		pos = len(order) - 1
 	}
-	m.point(m.sessions[order[pos]].Info.ID)
+	m.point(m.sessions[order[pos]].Info.Key())
 }
 
 // selectOldestNeedsYou grabs the session that has been waiting longest — the
@@ -746,7 +802,7 @@ func (m *Model) selectOldestNeedsYou() bool {
 			if m.archiveView {
 				m.toggleArchive()
 			}
-			m.point(s.Info.ID)
+			m.point(s.Info.Key())
 			return true
 		}
 	}
@@ -869,12 +925,12 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "1-9 select · j/k move · enter reveal · g needs-you · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
 		// on the fleet's own last row: "N archived · A browses".
-		keys = "1-9 select · j/k move · enter reveal · A live fleet · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · A live fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -896,6 +952,20 @@ func (m *Model) footerLine(w int) string {
 		return note // the note is the news; the keymap is always there
 	}
 	return left + strings.Repeat(" ", gap) + note
+}
+
+// enterKeymap is what Enter promises, and — outside tmux, where compass hands
+// its whole terminal over — how to come back (M6 contract). `prefix d` is the
+// user's own detach key, because the terminal is genuinely theirs by then.
+//
+// The number keys are not in this line: the fleet column prints its own 1–9
+// beside each session, and the parenthetical is what the footer owes an
+// 80-column deck instead.
+func (m *Model) enterKeymap() string {
+	if m.inTmux {
+		return "enter attach"
+	}
+	return "enter attach (prefix d returns)"
 }
 
 // column is one vertical panel of the deck.

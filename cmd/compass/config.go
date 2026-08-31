@@ -15,7 +15,7 @@ import (
 type config struct {
 	Root       string // root = "~/.claude"
 	Narrator   string // narrator = "haiku" | "off" | any claude model
-	Readonly   bool   // readonly = true
+	Readonly   bool   // readonly = true (enter no longer attaches)
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 }
 

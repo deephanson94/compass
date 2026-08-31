@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func fixtureGroupedFleet(base time.Time) []fleet.Session {
 	live := func(id, cwd, branch, title string, snap state.Snapshot) fleet.Session {
 		return fleet.Session{
 			Info: fleet.SessionInfo{
-				ID: id, TranscriptPath: "/x/" + id + ".jsonl", ProjectSlug: "-home-user-" + id,
+				ID: id, TranscriptPath: sessionKey(id), ProjectSlug: "-home-user-" + id,
 				CWD: cwd, GitBranch: branch, Title: title, StartedAt: base, LastEventAt: snap.Since,
 			},
 			Snap: snap,
@@ -36,7 +37,7 @@ func fixtureGroupedFleet(base time.Time) []fleet.Session {
 	gone := func(id, cwd, branch, title string, at time.Time) fleet.Session {
 		return fleet.Session{
 			Info: fleet.SessionInfo{
-				ID: id, TranscriptPath: "/x/" + id + ".jsonl", ProjectSlug: "-home-user-" + id,
+				ID: id, TranscriptPath: sessionKey(id), ProjectSlug: "-home-user-" + id,
 				CWD: cwd, GitBranch: branch, Title: title, StartedAt: at.Add(-time.Hour), LastEventAt: at,
 			},
 			Snap: archivedSnap(at),
@@ -78,10 +79,10 @@ func fixtureGroupedPanes() (map[string]tmuxop.Pane, []tmuxop.Pane) {
 		{Target: "misc:0.0", ID: "%6", PID: 4247, Path: "/home/user", Command: "zsh"},
 	}
 	panes := map[string]tmuxop.Pane{
-		"s-api":     list[0],
-		"s-webapp":  list[1],
-		"s-tfstate": list[3],
-		"s-infra":   list[4],
+		sessionKey("s-api"):     list[0],
+		sessionKey("s-webapp"):  list[1],
+		sessionKey("s-tfstate"): list[3],
+		sessionKey("s-infra"):   list[4],
 	}
 	return panes, list
 }
@@ -95,7 +96,7 @@ func groupedModel(w, h int) *Model {
 	panes, list := fixtureGroupedPanes()
 	m.SetPanes(panes)
 	m.SetPaneOrder(list)
-	m.point("s-api")
+	m.point(sessionKey("s-api"))
 	m.SetTrail(fixtureTrail(fixtureBase))
 	m.SetMirror(fixtureFrame)
 	return m
@@ -104,6 +105,11 @@ func groupedModel(w, h int) *Model {
 // press sends one key the way a terminal would.
 func press(m *Model, key string) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+}
+
+// pressEnter sends Enter, which no rune stands for.
+func pressEnter(m *Model) {
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 }
 
 // T58 — the live view at 120x30: two named tmux groups and `elsewhere`, the
@@ -194,23 +200,23 @@ func TestT59ArchiveViewGolden(t *testing.T) {
 
 	// The selection is remembered per view, and it is an id — so the trail, the
 	// reader and everything else downstream simply follow it.
-	if m.selectedID != "a-docs" {
-		t.Errorf("the archive opens on its first entry, got %q", m.selectedID)
+	if m.selectedKey != sessionKey("a-docs") {
+		t.Errorf("the archive opens on its first entry, got %q", m.selectedKey)
 	}
 	press(m, "3") // third rendered archive entry: the api group's newest
-	if m.selectedID != "a-api" {
-		t.Errorf("3 selects the third rendered archive session, got %q", m.selectedID)
+	if m.selectedKey != sessionKey("a-api") {
+		t.Errorf("3 selects the third rendered archive session, got %q", m.selectedKey)
 	}
 	press(m, "A")
 	if m.archiveView {
 		t.Fatal("A must return to the live fleet")
 	}
-	if m.selectedID != "s-api" {
-		t.Errorf("returning to the live fleet must restore its selection, got %q", m.selectedID)
+	if m.selectedKey != sessionKey("s-api") {
+		t.Errorf("returning to the live fleet must restore its selection, got %q", m.selectedKey)
 	}
 	press(m, "A")
-	if !m.archiveView || m.selectedID != "a-api" {
-		t.Errorf("the archive must restore its own selection, got archive=%v id=%q", m.archiveView, m.selectedID)
+	if !m.archiveView || m.selectedKey != sessionKey("a-api") {
+		t.Errorf("the archive must restore its own selection, got archive=%v id=%q", m.archiveView, m.selectedKey)
 	}
 
 	// A fleet with no history behind it has nothing to browse, and says so
@@ -356,8 +362,8 @@ func TestT58PanesMsgCarriesTmuxOrder(t *testing.T) {
 		"dev:1.0\t%2\t22\t/home/user/api\tclaude\n"}
 	m.proc = fakeProc{11: "/home/user/ops", 22: "/home/user/api"}
 	m.SetSessions([]fleet.Session{
-		{Info: fleet.SessionInfo{ID: "s-api", CWD: "/home/user/api"}, Live: true},
-		{Info: fleet.SessionInfo{ID: "s-ops", CWD: "/home/user/ops"}, Live: true},
+		{Info: fleet.SessionInfo{ID: "s-api", TranscriptPath: sessionKey("s-api"), CWD: "/home/user/api"}, Live: true},
+		{Info: fleet.SessionInfo{ID: "s-ops", TranscriptPath: sessionKey("s-ops"), CWD: "/home/user/ops"}, Live: true},
 	}, fixtureBase)
 
 	msg, ok := m.relistPanes()().(panesMsg)
@@ -367,7 +373,7 @@ func TestT58PanesMsgCarriesTmuxOrder(t *testing.T) {
 	if len(msg.list) != 2 || msg.list[0].Target != "ops:0.0" || msg.list[1].Target != "dev:1.0" {
 		t.Fatalf("the ordered pane list did not survive the poll: %+v", msg.list)
 	}
-	if msg.panes["s-api"].Target != "dev:1.0" || msg.panes["s-ops"].Target != "ops:0.0" {
+	if msg.panes[sessionKey("s-api")].Target != "dev:1.0" || msg.panes[sessionKey("s-ops")].Target != "ops:0.0" {
 		t.Fatalf("the pairing did not survive the poll: %+v", msg.panes)
 	}
 
@@ -387,7 +393,7 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 	base := fixtureBase
 	sess := func(id, cwd string, at time.Time) fleet.Session {
 		return fleet.Session{
-			Info: fleet.SessionInfo{ID: id, CWD: cwd, GitBranch: "main", LastEventAt: at},
+			Info: fleet.SessionInfo{ID: id, TranscriptPath: sessionKey(id), CWD: cwd, GitBranch: "main", LastEventAt: at},
 			Snap: state.Snapshot{State: state.Idle, Since: at, Reason: "turn complete"},
 			Live: true,
 		}
@@ -408,7 +414,7 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 		{Target: "dev:10.0", ID: "%3", PID: 3, Path: "/home/user/ten", Command: "claude"},
 	}
 	m.SetPaneOrder(list)
-	m.SetPanes(map[string]tmuxop.Pane{"s-ops": list[0], "s-w9": list[1], "s-w10": list[2]})
+	m.SetPanes(map[string]tmuxop.Pane{sessionKey("s-ops"): list[0], sessionKey("s-w9"): list[1], sessionKey("s-w10"): list[2]})
 
 	rows := m.fleetRows()
 	var got []string
@@ -437,9 +443,205 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 		}
 	}
 	m.selectIndex(2) // the third rendered session
-	if m.selectedID != "s-w10" {
-		t.Errorf("3 selected %q, want s-w10", m.selectedID)
+	if m.selectedKey != sessionKey("s-w10") {
+		t.Errorf("3 selected %q, want s-w10", m.selectedKey)
 	}
+}
+
+// T64 — two sessions sharing one id are two sessions. The deck keys identity by
+// the transcript path (M6 contract), so the twin draws its own row, borrows
+// nobody's pane, and selecting one leaves the other standing where it was.
+func TestT64DuplicateIDsAreTwoSessions(t *testing.T) {
+	forceASCII(t)
+
+	// The dogfood machine's own case: one id, two transcripts under two project
+	// slugs, because the session changed directory and kept writing.
+	twin := func(path, cwd, slug string, at time.Time) fleet.Session {
+		return fleet.Session{
+			Info: fleet.SessionInfo{
+				ID: "5f0cd1ed", TranscriptPath: path, ProjectSlug: slug,
+				CWD: cwd, GitBranch: "main", Title: "one id, two journeys",
+				StartedAt: fixtureBase, LastEventAt: at,
+			},
+			Snap: state.Snapshot{State: state.Idle, Since: at, Reason: "turn complete", Activity: "idle"},
+			Live: true,
+		}
+	}
+	alpha := twin("/x/alpha.jsonl", "/home/user/alpha", "-home-user-alpha", fixtureBase.Add(30*time.Minute))
+	beta := twin("/x/beta.jsonl", "/home/user/beta", "-home-user-beta", fixtureBase.Add(20*time.Minute))
+	if alpha.Info.Key() == beta.Info.Key() {
+		t.Fatal("the fixture must be two keys under one id")
+	}
+	pane := tmuxop.Pane{Target: "dev:1.0", ID: "%1", PID: 7, Path: "/home/user/alpha", Command: "claude"}
+
+	m := New(nil)
+	m.SetSize(120, 30)
+	m.SetSessions([]fleet.Session{alpha, beta}, fixtureBase.Add(40*time.Minute))
+	m.SetPanes(map[string]tmuxop.Pane{alpha.Info.Key(): pane})
+	m.SetPaneOrder([]tmuxop.Pane{pane})
+	m.point(alpha.Info.Key())
+
+	col := fleetText(m, 120, 30)
+	if got := countLines(col, "▸"); got != 1 {
+		t.Errorf("%d selection markers on screen, want exactly 1", got)
+	}
+	if got := countLines(col, ":1.0"); got != 1 {
+		t.Errorf("%d rows claim the pane, want exactly 1", got)
+	}
+	if got := countLines(col, "no pane"); got != 1 {
+		t.Errorf("%d rows say they have no pane, want exactly 1", got)
+	}
+	if row := markedRow(col); !strings.Contains(row, "alpha") {
+		t.Errorf("the marker sits on %q, want the alpha twin", row)
+	}
+
+	// Selecting the twin moves everything the selection owns — and only it.
+	m.point(beta.Info.Key())
+	if s, _ := m.selected(); s.Info.CWD != beta.Info.CWD {
+		t.Errorf("selected %q, want the beta twin", s.Info.CWD)
+	}
+	if _, ok := m.selectedPane(); ok {
+		t.Error("the paneless twin borrowed its sibling's pane")
+	}
+	col = fleetText(m, 120, 30)
+	if got := countLines(col, "▸"); got != 1 {
+		t.Errorf("%d selection markers after moving, want exactly 1", got)
+	}
+	if row := markedRow(col); !strings.Contains(row, "beta") {
+		t.Errorf("the marker sits on %q, want the beta twin", row)
+	}
+}
+
+// T67 — Enter hands the terminal to the session (M6 contract). A mapped session
+// builds the attach command; an unmapped one gets the note it has always had
+// and no command; -readonly refuses, because compass issues no tmux command
+// that changes state.
+func TestT67EnterAttaches(t *testing.T) {
+	// spawned is what the deck was about to run. Standing in for both ways a
+	// command reaches the world lets the test read exactly what Enter built,
+	// with no tmux server in sight.
+	type spawned struct {
+		cmd    *exec.Cmd
+		inside bool
+	}
+	record := func(m *Model) **spawned {
+		got := new(*spawned)
+		m.spawn = func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd {
+			*got = &spawned{cmd: cmd, inside: inside}
+			return nil
+		}
+		return got
+	}
+
+	t.Run("mapped", func(t *testing.T) {
+		m := groupedModel(120, 30)
+		got := record(m)
+		pressEnter(m)
+
+		if *got == nil {
+			t.Fatal("enter on a mapped session built no command")
+		}
+		args := strings.Join((*got).cmd.Args, " ")
+		for _, want := range []string{"tmux", "select-window", "dev:1", "select-pane", "%1", "attach-session"} {
+			if !strings.Contains(args, want) {
+				t.Errorf("the attach command is missing %q: %v", want, (*got).cmd.Args)
+			}
+		}
+		if (*got).inside {
+			t.Error("outside tmux the deck suspends itself; it does not switch a client")
+		}
+		if m.note != "" {
+			t.Errorf("an attach that worked says nothing: %q", m.note)
+		}
+	})
+
+	t.Run("inside tmux", func(t *testing.T) {
+		m := groupedModel(120, 30)
+		m.inTmux = true
+		got := record(m)
+		pressEnter(m)
+
+		if *got == nil {
+			t.Fatal("enter inside tmux built no command")
+		}
+		args := strings.Join((*got).cmd.Args, " ")
+		if !strings.Contains(args, "switch-client") || strings.Contains(args, "attach-session") {
+			t.Errorf("inside tmux the client switches: %v", (*got).cmd.Args)
+		}
+		if !(*got).inside {
+			t.Error("inside tmux there is nothing to suspend")
+		}
+		// Nothing was suspended, so the deck says where the client went.
+		m.Update(attachDoneMsg{target: "dev:1.0", inside: true})
+		if m.note != "switched to dev:1.0" {
+			t.Errorf("note = %q, want the switch named", m.note)
+		}
+	})
+
+	t.Run("unmapped", func(t *testing.T) {
+		m := groupedModel(120, 30)
+		got := record(m)
+		m.point(sessionKey("s-scratch")) // live, and in no pane at all
+		pressEnter(m)
+
+		if *got != nil {
+			t.Fatalf("a session with no pane must build no command: %v", (*got).cmd.Args)
+		}
+		if m.note != "no tmux pane for this session" {
+			t.Errorf("note = %q, want the no-pane note", m.note)
+		}
+	})
+
+	t.Run("readonly", func(t *testing.T) {
+		m := groupedModel(120, 30)
+		m.readonly = true
+		got := record(m)
+		pressEnter(m)
+
+		if *got != nil {
+			t.Fatalf("-readonly must issue no tmux command: %v", (*got).cmd.Args)
+		}
+		if !strings.Contains(m.note, "read-only") {
+			t.Errorf("note = %q, want the read-only refusal", m.note)
+		}
+	})
+
+	t.Run("g grabs and attaches", func(t *testing.T) {
+		m := groupedModel(120, 30)
+		got := record(m)
+		press(m, "g")
+
+		if m.selectedKey != sessionKey("s-infra") {
+			t.Fatalf("g selected %q, want the session waiting longest", m.selectedKey)
+		}
+		if *got == nil {
+			t.Fatal("g grabbed the session but did not attach to it")
+		}
+		if args := strings.Join((*got).cmd.Args, " "); !strings.Contains(args, "%5") {
+			t.Errorf("g attached to %v, want the infra pane", (*got).cmd.Args)
+		}
+	})
+}
+
+// countLines is how many of lines contain sub.
+func countLines(lines []string, sub string) int {
+	n := 0
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			n++
+		}
+	}
+	return n
+}
+
+// markedRow is the line carrying the selection marker, or "".
+func markedRow(lines []string) string {
+	for _, l := range lines {
+		if strings.HasPrefix(l, "▸") {
+			return l
+		}
+	}
+	return ""
 }
 
 // fleetText renders just the fleet column, unpadded, for order assertions.

@@ -46,7 +46,7 @@ func main() {
 
 	fs := flag.NewFlagSet("compass", flag.ExitOnError)
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
-	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: reveal is disabled")
+	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: enter no longer attaches")
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
 		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only)`)

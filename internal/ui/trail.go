@@ -54,10 +54,11 @@ type TrailOpts struct {
 	Todos  []todo.Item
 	Labels map[string]string // narrated overlay, keyed by narrator LegKey; nil ok
 
-	// SessionID names whose journey this is. The Labels map is keyed by the
+	// SessionKey names whose journey this is — the session's Key(), the same
+	// string the narrator was asked under. The Labels map is keyed by the
 	// narrator's LegKey — session, leg start and class — so the renderer needs
 	// the session to look a leg up. "" simply finds nothing.
-	SessionID string
+	SessionKey string
 
 	Now           time.Time
 	Width, Height int
@@ -376,8 +377,8 @@ func trailNodes(tr journey.Trail) []trailNode {
 // start and its class (M3 contract, narrator.LegKey). The renderer forms it
 // itself so the ui package stays free of the narrator's plumbing — the format
 // is contract, not implementation detail.
-func legKey(sessionID string, l journey.Leg) string {
-	return sessionID + "/" + strconv.FormatInt(l.Start.UnixNano(), 10) + "/" + l.Class.String()
+func legKey(key string, l journey.Leg) string {
+	return key + "/" + strconv.FormatInt(l.Start.UnixNano(), 10) + "/" + l.Class.String()
 }
 
 // legLabel resolves what a leg says: the narrated line when one has landed for
@@ -387,7 +388,7 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	if l.Current || len(o.Labels) == 0 {
 		return l.Label, false
 	}
-	if text := strings.TrimSpace(o.Labels[legKey(o.SessionID, l)]); text != "" {
+	if text := strings.TrimSpace(o.Labels[legKey(o.SessionKey, l)]); text != "" {
 		return text, true
 	}
 	return l.Label, false
@@ -570,15 +571,15 @@ func (m *Model) trailColumn(w, h int) []string {
 // trailOpts is the model's state as the renderer wants it.
 func (m *Model) trailOpts(w, h int) TrailOpts {
 	return TrailOpts{
-		Todos:     m.todos,
-		Labels:    m.labels,
-		SessionID: m.selectedID,
-		Now:       m.now,
-		Width:     w,
-		Height:    h,
-		Level:     m.level,
-		Cursor:    m.cursor,
-		Pulse:     m.pulse,
+		Todos:      m.todos,
+		Labels:     m.labels,
+		SessionKey: m.selectedKey,
+		Now:        m.now,
+		Width:      w,
+		Height:     h,
+		Level:      m.level,
+		Cursor:     m.cursor,
+		Pulse:      m.pulse,
 	}
 }
 
