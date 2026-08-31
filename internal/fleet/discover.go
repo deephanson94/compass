@@ -171,10 +171,7 @@ func peek(info *SessionInfo, size int64) {
 		info.LastEventAt = tail.at // the mtime was only a stand-in
 	}
 	if tail.cwd != "" {
-		info.CWD = tail.cwd
-	}
-	if tail.branch != "" {
-		info.GitBranch = tail.branch
+		info.CWD, info.GitBranch = tail.cwd, tail.branch
 	}
 }
 
@@ -213,11 +210,21 @@ func peekHead(f *os.File, info *SessionInfo) {
 }
 
 // lastEventTime walks the tail of a transcript backwards and returns the
-// newest of each field it finds. Bookkeeping lines at the very end (mode
-// latches, last-prompt markers) carry none, so it keeps walking until a real
-// event answers — and it keeps walking past the newest timestamp for a cwd and
-// branch, which not every event line carries. A zero time means "use the
-// mtime"; empty strings mean "keep what the head said".
+// newest timestamp it carries, and the session's current location.
+//
+// Bookkeeping lines at the very end (mode latches, last-prompt markers) carry
+// no timestamp, so it keeps walking until a real event answers.
+//
+// cwd and branch are taken together, from one line. Reading them independently
+// looks harmless until a session leaves a git repository: Claude Code then
+// writes an empty gitBranch, which is indistinguishable from "this line does
+// not carry one", so the branch of the directory the session *left* would
+// survive and be printed beside the directory it is now in. A line that names
+// a cwd is a real event line, and its branch — empty or not — is the answer.
+//
+// Sidechain lines are a subagent's own conversation, not this session
+// speaking, and while a Task is running they are the newest lines in the file.
+// Everything else that reads transcripts skips them; so does this.
 func peekTailState(f *os.File, size int64) tailState {
 	var out tailState
 	if size <= 0 {
@@ -236,25 +243,23 @@ func peekTailState(f *os.File, size int64) tailState {
 	if start > 0 && len(lines) > 0 {
 		lines = lines[1:] // the first slice is a fragment of an earlier line
 	}
+	located := false
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 		ev, err := transcript.ParseLine([]byte(line))
-		if err != nil {
+		if err != nil || ev.IsSidechain {
 			continue
 		}
 		if out.at.IsZero() && !ev.Timestamp.IsZero() {
 			out.at = ev.Timestamp
 		}
-		if out.cwd == "" {
-			out.cwd = ev.CWD
+		if !located && ev.CWD != "" {
+			out.cwd, out.branch, located = ev.CWD, ev.GitBranch, true
 		}
-		if out.branch == "" {
-			out.branch = ev.GitBranch
-		}
-		if !out.at.IsZero() && out.cwd != "" && out.branch != "" {
+		if !out.at.IsZero() && located {
 			break
 		}
 	}

@@ -189,8 +189,18 @@ func assign(panes []claudePane, contenders []fleet.SessionInfo) map[string]Pane 
 		return false
 	}
 
+	// Youngest claude first. Offering panes in Target order instead lets an old
+	// pane eat the one live session before a young pane — which competes for
+	// the same session and has far fewer candidates — ever gets asked, and the
+	// dead session then lands on the young pane: exactly the weld this rule
+	// exists to prevent. The youngest pane is the most constrained, so it
+	// chooses first. A pane whose claude age is unknown constrains nothing and
+	// sorts last, which leaves the all-unknown case in Target order.
+	byAge := append([]claudePane(nil), panes...)
+	sort.SliceStable(byAge, func(i, j int) bool { return byAge[j].since.Before(byAge[i].since) })
+
 	free := make([]claudePane, 0, len(panes))
-	for _, cp := range panes {
+	for _, cp := range byAge {
 		if !claim(cp, true) {
 			free = append(free, cp)
 		}
@@ -208,6 +218,13 @@ const procSlack = 2 * time.Second
 // couldBeIn reports whether a session can be the one running in a pane: it
 // must have spoken since that pane's claude started. An unreadable start time
 // says nothing, so it disqualifies nobody.
+//
+// A start time that is wrong rather than missing — a kernel whose USER_HZ is
+// not the 100 assumed in StartTime, say — lands in the future and makes every
+// session implausible for every pane. That is self-limiting: pass 1 then
+// assigns nothing, pass 2 assigns everything by recency, and the pairing is
+// exactly what it was before this rule existed. The rule can lose its power;
+// it cannot invent a wrong answer of its own.
 func couldBeIn(s fleet.SessionInfo, cp claudePane) bool {
 	if cp.since.IsZero() || s.LastEventAt.IsZero() {
 		return true

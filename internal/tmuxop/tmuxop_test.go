@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -612,34 +613,107 @@ func TestResumedSessionKeepsItsPane(t *testing.T) {
 	}
 }
 
-// Two panes at one cwd, one live session and one long dead: the live session
-// takes the pane it could be in, and the dead one may have the other. What it
-// must never do is take the live one.
+// Two panes at one cwd, one live session and one long dead. The live session
+// must take the pane whose claude is young — the only one it can be in — and
+// the dead one may have the other.
+//
+// The young pane is deliberately at the HIGHER Target. Offering panes in
+// Target order lets the old pane take the live session first, leaving the
+// 48-hour-dead one welded to a claude that started ten minutes ago: the very
+// weld this rule exists to prevent. Both orders are tested because the first
+// version of this test only had the easy one, and it passed against a build
+// with the rule deleted entirely.
 func TestPlausibleSessionGetsFirstPick(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		youngTarget string
+		oldTarget   string
+	}{
+		{"young pane first", "tinker:0.0", "tinker:1.0"},
+		{"young pane last", "tinker:1.0", "tinker:0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakeProc{
+				children: map[int][]int{700: {701}, 800: {801}},
+				comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
+				cwd:      map[int]string{701: "/w/app", 801: "/w/app"},
+				started: map[int]time.Time{
+					701: at(ago(10 * time.Minute)), // young
+					801: at(ago(72 * time.Hour)),   // older than either session
+				},
+			}
+			panes := []tmuxop.Pane{
+				{Target: tc.youngTarget, ID: "%1", PID: 700, Command: "claude"},
+				{Target: tc.oldTarget, ID: "%2", PID: 800, Command: "claude"},
+			}
+			sessions := []fleet.SessionInfo{
+				sessionAt("s-dead", "/w/app", ago(48*time.Hour)),
+				sessionAt("s-live", "/w/app", ago(25*time.Second)),
+			}
+
+			got := tmuxop.MapSessions(sessions, panes, p)
+			if got[keyOf("s-live")].Target != tc.youngTarget {
+				t.Errorf("the live session got %q, want the young pane %q",
+					got[keyOf("s-live")].Target, tc.youngTarget)
+			}
+			if got[keyOf("s-dead")].Target != tc.oldTarget {
+				t.Errorf("a session quiet for 48h got %q, want the pane it could be in (%q)",
+					got[keyOf("s-dead")].Target, tc.oldTarget)
+			}
+		})
+	}
+}
+
+// One session, two panes of different ages: it belongs to the pane it could be
+// in. This is the case where the rule itself decides rather than merely
+// agreeing with recency — a claude launched a minute ago cannot be running a
+// session that last spoke two hours back, however new that pane is, so the
+// session goes to the older pane instead.
+func TestSessionGoesToThePaneItCouldBeIn(t *testing.T) {
 	p := &fakeProc{
 		children: map[int][]int{700: {701}, 800: {801}},
 		comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
 		cwd:      map[int]string{701: "/w/app", 801: "/w/app"},
 		started: map[int]time.Time{
-			701: at(ago(10 * time.Minute)), // tinker:0.0 — young
-			801: at(ago(72 * time.Hour)),   // tinker:1.0 — older than both sessions
+			701: at(ago(time.Minute)), // dev:0.0 — a claude launched a minute ago
+			801: at(ago(3 * time.Hour)),
 		},
 	}
 	panes := []tmuxop.Pane{
-		{Target: "tinker:0.0", ID: "%1", PID: 700, Command: "claude"},
-		{Target: "tinker:1.0", ID: "%2", PID: 800, Command: "claude"},
+		{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"},
+		{Target: "dev:1.0", ID: "%2", PID: 800, Command: "claude"},
 	}
-	sessions := []fleet.SessionInfo{
-		sessionAt("s-dead", "/w/app", ago(48*time.Hour)),
-		sessionAt("s-live", "/w/app", ago(25*time.Second)),
-	}
+	sessions := []fleet.SessionInfo{sessionAt("s-idle", "/w/app", ago(2*time.Hour))}
 
 	got := tmuxop.MapSessions(sessions, panes, p)
-	if got[keyOf("s-live")].Target != "tinker:0.0" {
-		t.Errorf("the live session got %q, want the young pane tinker:0.0", got[keyOf("s-live")].Target)
+	if to := got[keyOf("s-idle")].Target; to != "dev:1.0" {
+		t.Errorf("a session last heard from 2h ago went to %q; it cannot be in a "+
+			"claude that started a minute ago, so it belongs to dev:1.0", to)
 	}
-	if got[keyOf("s-dead")].Target != "tinker:1.0" {
-		t.Errorf("the dead session got %q, want the pane it could be in", got[keyOf("s-dead")].Target)
+}
+
+// With nothing to tell them apart — no claude age readable anywhere — the
+// pairing must stay exactly what it was: newest session, lowest Target.
+func TestUnknownClaudeAgeChangesNothing(t *testing.T) {
+	p := &fakeProc{
+		children: map[int][]int{700: {701}, 800: {801}},
+		comm:     map[int]string{700: "zsh", 701: "claude", 800: "zsh", 801: "claude"},
+		cwd:      map[int]string{701: "/w/app", 801: "/w/app"},
+		// started is nil: /proc said nothing about either.
+	}
+	panes := []tmuxop.Pane{
+		{Target: "dev:1.0", ID: "%2", PID: 800, Command: "claude"},
+		{Target: "dev:0.0", ID: "%1", PID: 700, Command: "claude"},
+	}
+	sessions := []fleet.SessionInfo{
+		sessionAt("s-old", "/w/app", ago(time.Hour)),
+		sessionAt("s-new", "/w/app", ago(time.Minute)),
+	}
+	for i := 0; i < 30; i++ {
+		got := tmuxop.MapSessions(sessions, panes, p)
+		if got[keyOf("s-new")].Target != "dev:0.0" || got[keyOf("s-old")].Target != "dev:1.0" {
+			t.Fatalf("run %d: newest session must take the lowest Target, got %+v", i, got)
+		}
 	}
 }
 
@@ -677,10 +751,15 @@ func TestPanesSurviveTheOutsideTmuxSanitizer(t *testing.T) {
 	}
 }
 
-// StartTime is read from real /proc, so it gets a real test: the process
-// running this test started moments ago, and pid 1 no later than it did.
+// StartTime is read from real /proc, so it gets a real test — and one that can
+// tell field 22 from its neighbours. Asserting only "this process is younger
+// than an hour" cannot: field 21 is zero on every modern kernel, so reading it
+// by mistake returns the boot time, which is also younger than an hour on the
+// short-lived containers CI runs in. A freshly spawned child pins it: it must
+// have started at or after this process did, and both after boot.
 func TestStartTimeReadsProc(t *testing.T) {
 	p := tmuxop.RealProc{}
+
 	self := p.StartTime(os.Getpid())
 	if self.IsZero() {
 		t.Fatal("could not read this process's own start time from /proc")
@@ -688,8 +767,32 @@ func TestStartTimeReadsProc(t *testing.T) {
 	if age := time.Since(self); age < 0 || age > time.Hour {
 		t.Errorf("this test process claims to be %v old", age)
 	}
-	if init := p.StartTime(1); !init.IsZero() && init.After(self) {
-		t.Errorf("pid 1 started at %v, after this process at %v", init, self)
+
+	cmd := exec.Command("/bin/sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot spawn a child to compare against: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+
+	child := p.StartTime(cmd.Process.Pid)
+	if child.IsZero() {
+		t.Fatal("could not read a just-spawned child's start time")
+	}
+	if child.Before(self) {
+		t.Errorf("a child spawned now started at %v, before its parent at %v — "+
+			"that is the wrong field of /proc/<pid>/stat", child, self)
+	}
+	if boot := p.StartTime(1); !boot.IsZero() {
+		if !boot.Before(child) {
+			t.Errorf("pid 1 started at %v, not before a child spawned just now (%v)", boot, child)
+		}
+		if boot.Equal(self) {
+			t.Errorf("pid 1 and this process share a start time (%v); every pid is "+
+				"reading the boot time rather than its own start", boot)
+		}
 	}
 	if got := p.StartTime(0); !got.IsZero() {
 		t.Errorf("StartTime(0) = %v, want the zero time", got)

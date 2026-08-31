@@ -172,7 +172,11 @@ func (RealProc) StartTime(pid int) time.Time {
 	if boot.IsZero() {
 		return time.Time{}
 	}
-	return boot.Add(time.Duration(ticks) * time.Second / clockTicks)
+	// Whole seconds first: ticks*time.Second overflows int64 nanoseconds at
+	// about 2.9 years of uptime, and servers reach that.
+	d := time.Duration(ticks/clockTicks)*time.Second +
+		time.Duration(ticks%clockTicks)*time.Second/clockTicks
+	return boot.Add(d)
 }
 
 // clockTicks is USER_HZ, which reading sysconf(_SC_CLK_TCK) would answer
@@ -180,9 +184,22 @@ func (RealProc) StartTime(pid int) time.Time {
 // feeds — days, not milliseconds — does not turn on the difference.
 const clockTicks = 100
 
-// bootTime is read once: it does not change while compass runs, and every pane
-// on the machine anchors to the same one.
-var bootTime = sync.OnceValue(func() time.Time {
+// bootTime is read once — it does not change while compass runs, and every
+// pane on the machine anchors to the same one. Only a *successful* read is
+// remembered: a single unlucky moment (fd exhaustion, a sandboxed /proc) must
+// not disable the age rule for the rest of the session with nothing to show
+// for it.
+var boot struct {
+	sync.Mutex
+	at time.Time
+}
+
+func bootTime() time.Time {
+	boot.Lock()
+	defer boot.Unlock()
+	if !boot.at.IsZero() {
+		return boot.at
+	}
 	raw, err := os.ReadFile(filepath.Join("/proc", "stat"))
 	if err != nil {
 		return time.Time{}
@@ -193,13 +210,14 @@ var bootTime = sync.OnceValue(func() time.Time {
 			continue
 		}
 		secs, err := strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
-		if err != nil {
+		if err != nil || secs <= 0 {
 			return time.Time{}
 		}
-		return time.Unix(secs, 0)
+		boot.at = time.Unix(secs, 0)
+		return boot.at
 	}
 	return time.Time{}
-})
+}
 
 func procPath(pid int, name string) string {
 	return filepath.Join("/proc", strconv.Itoa(pid), name)

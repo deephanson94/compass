@@ -455,22 +455,87 @@ func TestSessionLocationIsWhereItIsNow(t *testing.T) {
 	}
 }
 
-// A transcript whose tail carries no cwd of its own still has to have one: the
-// head is the fallback, not dead weight.
+// A transcript whose current location has scrolled out of the tail window
+// still has one: the head is the fallback, not dead weight. The filler has to
+// be long enough to push the only cwd-bearing line past the window, or the
+// tail answers and the fallback is never reached — which is what the first
+// version of this test did.
 func TestLocationFallsBackToTheHead(t *testing.T) {
 	root := t.TempDir()
 	b := newTranscript(t, "22222222-2222-4222-8222-222222222222", "/home/user/beta", "main").
-		prompt(ago(time.Hour), "only line with a cwd")
-	// A bookkeeping tail: real transcripts end with lines that carry neither a
-	// cwd nor a branch, and those must not erase what the head knew.
-	b.lines = append(b.lines, `{"type":"queue-operation","op":"latch"}`+"\n")
+		prompt(ago(time.Hour), "the only line that carries a cwd")
+	for len(strings.Join(b.lines, "")) < 96*1024 {
+		b.lines = append(b.lines, `{"type":"queue-operation","op":"latch"}`+"\n")
+	}
 	b.write(root, "-home-user-beta")
 
 	infos, err := fleet.Discover(root)
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
-	if len(infos) != 1 || infos[0].CWD != "/home/user/beta" {
-		t.Fatalf("the head's cwd did not survive a tail without one: %+v", infos)
+	if len(infos) != 1 {
+		t.Fatalf("want one session, got %d", len(infos))
+	}
+	if infos[0].CWD != "/home/user/beta" {
+		t.Errorf("cwd is %q; with nothing in the tail the head has to answer", infos[0].CWD)
+	}
+	if infos[0].GitBranch != "main" {
+		t.Errorf("branch is %q, want the head's", infos[0].GitBranch)
+	}
+}
+
+// cwd and branch are one answer, read off one line. Taken independently, a
+// session leaving a git repository keeps the branch of the directory it left:
+// Claude Code writes an empty gitBranch there, and "empty" is indistinguishable
+// from "this line does not carry one", so the old branch would survive and be
+// printed beside the new directory.
+func TestBranchTravelsWithTheDirectory(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, "33333333-3333-4333-8333-333333333333", "/home/user/repo", "feature-x").
+		prompt(ago(time.Hour), "in the repo").
+		text(ago(time.Hour), "on feature-x").
+		moveTo("/tmp/scratch", ""). // not a git repository at all
+		prompt(ago(time.Minute), "now in scratch").
+		text(ago(30*time.Second), "no branch here").
+		write(root, "-home-user-repo")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if got := infos[0].CWD; got != "/tmp/scratch" {
+		t.Fatalf("cwd is %q, want /tmp/scratch", got)
+	}
+	if got := infos[0].GitBranch; got != "" {
+		t.Errorf("branch is %q, but the session is in a directory git knows nothing about", got)
+	}
+}
+
+// A subagent's lines sit inline in the main transcript, and while a Task runs
+// they are the newest lines in the file. They are not this session speaking —
+// every other reader skips them — so they must not set its location either.
+func TestSubagentLinesDoNotMoveTheSession(t *testing.T) {
+	root := t.TempDir()
+	b := newTranscript(t, "44444444-4444-4444-8444-444444444444", "/home/user/main", "main").
+		prompt(ago(time.Hour), "go and scout").
+		text(ago(59*time.Minute), "spawning a subagent")
+	// The subagent works somewhere else, and is the last thing in the file.
+	b.moveTo("/home/user/subagent-dir", "detached")
+	for _, o := range []string{"scouting over here", "found it"} {
+		b.text(ago(time.Minute), o)
+		b.lines[len(b.lines)-1] = strings.Replace(
+			b.lines[len(b.lines)-1], `"isSidechain":false`, `"isSidechain":true`, 1)
+	}
+	b.write(root, "-home-user-main")
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if got := infos[0].CWD; got != "/home/user/main" {
+		t.Errorf("cwd is %q — a subagent's own directory became the session's", got)
+	}
+	if got := infos[0].GitBranch; got != "main" {
+		t.Errorf("branch is %q — a subagent's branch became the session's", got)
 	}
 }
