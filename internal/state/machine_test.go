@@ -469,3 +469,145 @@ func TestStateString(t *testing.T) {
 		}
 	}
 }
+
+// quotaLine has the shape of a real transcript line — a session that died when its
+// gateway refused the call. Claude Code writes a failed API call as a
+// synthetic assistant message carrying the error's own text, which is why it
+// used to reach the fleet looking exactly like a finished turn.
+const quotaLine = `{"type":"assistant","uuid":"8eb5faf2","timestamp":"2026-09-01T07:08:51.279Z",` +
+	`"message":{"id":"9d03c5cf","model":"<synthetic>","role":"assistant",` +
+	`"stop_reason":"stop_sequence","type":"message","content":[{"type":"text",` +
+	`"text":"Please run /login · API Error: 403 your daily quota is exhausted, ` +
+	`contact your administrator to increase quota."}],` +
+	`"error":"authentication_failed","isApiErrorMessage":true,"apiErrorStatus":403},` +
+	`"sessionId":"7cbf7d5c","cwd":"/hdd4/porter","version":"2.1.251","gitBranch":"HEAD"}`
+
+// A call that failed is not a turn that finished. Before this, the synthetic
+// message parsed as ordinary assistant text, so rule 4 called it "turn
+// complete" and a session dead until tomorrow's quota window sat in the fleet
+// wearing the same ○ as one that had done what you asked.
+func TestAnAPIErrorIsNotAFinishedTurn(t *testing.T) {
+	ev, err := transcript.ParseLine([]byte(quotaLine))
+	if err != nil {
+		t.Fatalf("the line does not parse: %v", err)
+	}
+	if !ev.APIError || ev.Status != 403 || ev.ErrorKey != "authentication_failed" {
+		t.Fatalf("the error's own fields did not survive parsing: %+v", ev)
+	}
+
+	m := state.NewMachine()
+	m.Observe(userPrompt(1*time.Minute, "carry on"))
+	m.Observe(assistantText(2*time.Minute, "on it — checking the gate"))
+	m.Observe(ev)
+
+	got := m.Evaluate(ev.Timestamp.Add(9 * time.Hour))
+	if got.State != state.NeedsYou {
+		t.Errorf("state is %v, want needs-you: only a person can clear a 403", got.State)
+	}
+	if !strings.Contains(got.Reason, "403") || !strings.Contains(got.Reason, "authentication_failed") {
+		t.Errorf("reason is %q; it should name the API's own status and key", got.Reason)
+	}
+	if !strings.Contains(got.Activity, "quota is exhausted") {
+		t.Errorf("activity is %q; it should carry the words a person recognises", got.Activity)
+	}
+	// Nine hours on, and still not idle: the verdict does not decay into one.
+	if got.State == state.Idle {
+		t.Error("the session went idle; nothing about it finished")
+	}
+}
+
+// The verdict belongs to the beat it came from. A session whose person logs in
+// again and gets a real answer is not blocked any more.
+func TestARealTurnClearsTheAPIError(t *testing.T) {
+	ev, err := transcript.ParseLine([]byte(quotaLine))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := state.NewMachine()
+	m.Observe(userPrompt(1*time.Minute, "carry on"))
+	m.Observe(ev)
+	if got := m.Evaluate(at(5 * time.Minute)); got.State != state.NeedsYou {
+		t.Fatalf("state is %v, want needs-you while the call is still refused", got.State)
+	}
+
+	m.Observe(userPrompt(10*time.Minute, "logged in, try again"))
+	m.Observe(assistantText(11*time.Minute, "back — the gate is clean"))
+
+	got := m.Evaluate(at(12 * time.Minute))
+	if got.State != state.Idle {
+		t.Errorf("state is %v, want idle: the model answered", got.State)
+	}
+	if strings.Contains(got.Reason, "403") {
+		t.Errorf("reason is %q; the old refusal outlived the turn that replaced it", got.Reason)
+	}
+}
+
+// An error with no status and no key still says something, and never claims a
+// number it does not have.
+func TestAnUnlabelledAPIErrorStillReports(t *testing.T) {
+	m := state.NewMachine()
+	m.Observe(userPrompt(1*time.Minute, "go"))
+	m.Observe(transcript.Event{
+		Type: transcript.EventAssistant, UUID: "a", SessionID: "s",
+		Timestamp: at(2 * time.Minute), Text: "the connection dropped",
+		APIError: true,
+	})
+
+	got := m.Evaluate(at(3 * time.Minute))
+	if got.State != state.NeedsYou {
+		t.Errorf("state is %v, want needs-you", got.State)
+	}
+	if strings.Contains(got.Reason, "0") {
+		t.Errorf("reason is %q; it invented a status the line did not carry", got.Reason)
+	}
+	if got.Activity != "the connection dropped" {
+		t.Errorf("activity is %q", got.Activity)
+	}
+}
+
+// The status is in the reason; spending the first thirty columns of the
+// activity restating it costs the words a person recognises, which come last.
+func TestTheAPIErrorMarkerIsNotRepeatedInTheActivity(t *testing.T) {
+	ev, err := transcript.ParseLine([]byte(quotaLine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := state.NewMachine()
+	m.Observe(userPrompt(1*time.Minute, "carry on"))
+	m.Observe(ev)
+	got := m.Evaluate(at(5 * time.Minute))
+
+	if strings.Contains(got.Activity, "API Error:") || strings.Contains(got.Activity, "403") {
+		t.Errorf("activity %q repeats what the reason %q already says", got.Activity, got.Reason)
+	}
+	// Both halves survive: Claude Code's own hint, and the gateway's words.
+	for _, want := range []string{"Please run /login", "your daily quota is exhausted"} {
+		if !strings.Contains(got.Activity, want) {
+			t.Errorf("activity %q lost %q", got.Activity, want)
+		}
+	}
+}
+
+// A gateway that says nothing but "API Error: 500" would otherwise be trimmed
+// down to nothing at all, leaving the row with an empty second line.
+func TestAnAPIErrorWithNoWordsKeepsWhatItHas(t *testing.T) {
+	const bare = `{"type":"assistant","uuid":"u1","timestamp":"2026-09-01T07:08:51.279Z",` +
+		`"message":{"role":"assistant","content":[{"type":"text","text":"API Error: 500"}],` +
+		`"isApiErrorMessage":true,"apiErrorStatus":500},"sessionId":"s1"}`
+	ev, err := transcript.ParseLine([]byte(bare))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := state.NewMachine()
+	m.Observe(userPrompt(1*time.Minute, "carry on"))
+	m.Observe(ev)
+	got := m.Evaluate(at(5 * time.Minute))
+
+	if strings.TrimSpace(got.Activity) == "" {
+		t.Error("the activity is empty; the row would have nothing to say")
+	}
+	if !got.APIError {
+		t.Error("the snapshot does not admit it is an api error")
+	}
+}
