@@ -226,7 +226,7 @@ func peekHead(f *os.File, info *SessionInfo) {
 			info.StartedAt = ev.Timestamp
 		}
 		if info.Title == "" && ev.Type == transcript.EventUser {
-			info.Title = promptTitle(ev.Text)
+			info.Title = promptTitle(ev)
 		}
 		if info.CWD != "" && info.GitBranch != "" && info.Title != "" && !info.StartedAt.IsZero() {
 			return
@@ -323,8 +323,24 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 	}
 }
 
-// promptTitle reduces a prompt to its first line, clipped to titleMax runes.
-func promptTitle(text string) string {
+// promptTitle reduces a user turn to the one line worth showing, clipped to
+// titleMax runes. It returns "" for anything that is not a person talking:
+// the fleet asks its rows what you asked for, and the harness's own turns are
+// not an answer to that.
+func promptTitle(ev transcript.Event) string {
+	if ev.Machinery() {
+		return ""
+	}
+	text := ev.Text
+	// A slash command is a real thing you typed; only its expansion is noise.
+	if cmd, ok := transcript.SlashCommand(text); ok {
+		text = cmd
+	}
+	return clipTitle(text)
+}
+
+// clipTitle reduces text to its first line, clipped to titleMax runes.
+func clipTitle(text string) string {
 	line := strings.TrimSpace(text)
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]

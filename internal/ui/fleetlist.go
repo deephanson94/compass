@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/state"
@@ -39,6 +40,7 @@ type fleetGroup struct {
 type fleetRow struct {
 	header bool
 	label  string // header text
+	age    string // header: how long since the freshest session in the group spoke
 	echo   string // right-aligned ▲/◍ when the group holds one
 	sess   int    // index into m.sessions
 	num    int    // 1–9, or 0 for the rows past the ninth
@@ -167,7 +169,7 @@ func (m *Model) fleetRows() []fleetRow {
 	n := 0
 	for _, g := range groups {
 		if headers {
-			rows = append(rows, fleetRow{header: true, label: g.name, echo: m.groupEcho(g)})
+			rows = append(rows, fleetRow{header: true, label: g.name, age: m.groupAge(g), echo: m.groupEcho(g)})
 		}
 		for _, i := range g.entries {
 			n++
@@ -332,18 +334,50 @@ func (m *Model) groupEcho(g fleetGroup) string {
 	return echo
 }
 
+// groupAge is how long since the freshest session in a group last spoke. Inside
+// a group the rows are in window.pane order, so the list mirrors the screen
+// `enter` takes you to — which means their ages do not descend and you cannot
+// scan for the recent one. Hoisting the freshest to the header restores that
+// without disturbing the order underneath it.
+func (m *Model) groupAge(g fleetGroup) string {
+	var newest time.Time
+	for _, i := range g.entries {
+		if at := m.sessions[i].Info.LastEventAt; at.After(newest) {
+			newest = at
+		}
+	}
+	if newest.IsZero() {
+		return ""
+	}
+	return m.age(newest)
+}
+
 // groupHeaderLine draws a header: dim, unnumbered, unselectable, sitting in the
-// index column so the group name lines up with the numbers beneath it.
+// index column so the group name lines up with the numbers beneath it. Its
+// right edge carries the same two facts a session row's does, in the same
+// columns: how long since anything happened, and whether anything wants you.
 func (m *Model) groupHeaderLine(r fleetRow, w int) string {
-	label := " " + clip(r.label, w-1-echoWidth(r.echo))
+	// The age sits in the same column the session rows put theirs, so the two
+	// read as one column; the echo floats just left of it rather than taking
+	// the edge, which is what made "2m▲" out of two separate facts.
+	tail := ""
+	if r.age != "" {
+		tail = padLeft(r.age, ageWidth)
+	}
+	right := len(tail) + echoWidth(r.echo)
+	if right == 0 {
+		return dimStyle.Render(" " + clip(r.label, w-1))
+	}
+	label := " " + clip(r.label, w-1-right)
+	head := dimStyle.Render(pad(label, w-right))
 	if r.echo == "" {
-		return dimStyle.Render(label)
+		return head + dimStyle.Render(tail)
 	}
 	accent := needsYouStyle
 	if r.echo == fleet.Glyph(state.Stuck) {
 		accent = stuckStyle
 	}
-	return dimStyle.Render(pad(label, w-echoWidth(r.echo))) + accent.Render(r.echo)
+	return head + accent.Render(r.echo) + dimStyle.Render(tail)
 }
 
 // echoWidth is the room a header echo takes, air included.

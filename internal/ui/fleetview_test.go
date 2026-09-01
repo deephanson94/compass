@@ -167,8 +167,14 @@ func TestT58LiveFleetGolden(t *testing.T) {
 		t.Errorf("needs-you must float to the top of its own group only: ops=%d infra=%d tfstate=%d elsewhere=%d",
 			ops, infra, tfstate, elsewhere)
 	}
-	if !strings.HasSuffix(strings.TrimRight(fleetCol[ops], " "), fleet.Glyph(state.NeedsYou)) {
-		t.Errorf("the ops header should echo its needs-you session: %q", fleetCol[ops])
+	// The header's right edge is the age, in the column the session rows put
+	// theirs; the echo sits just left of it. Both facts, neither displaced.
+	opsHeader := strings.TrimRight(fleetCol[ops], " ")
+	if !strings.HasSuffix(opsHeader, "2m") {
+		t.Errorf("the ops header should end with its freshest age: %q", opsHeader)
+	}
+	if !strings.Contains(opsHeader, fleet.Glyph(state.NeedsYou)) {
+		t.Errorf("the ops header should echo its needs-you session: %q", opsHeader)
 	}
 	if strings.Contains(fleetCol[indexOfLine(fleetCol, " dev")], fleet.Glyph(state.NeedsYou)) {
 		t.Error("a group with nothing waiting must carry no echo")
@@ -1102,5 +1108,71 @@ func TestTheFleetShowsTheAPIErrorRatherThanTheStaleOutcome(t *testing.T) {
 	}
 	if !strings.Contains(got, "needs you") {
 		t.Errorf("the row does not read needs-you:\n%s", got)
+	}
+}
+
+// Inside a group the rows are in window.pane order, so the list mirrors the
+// screen `enter` takes you to. That order has nothing to do with time: a fleet
+// of nine dormant sessions reads 2d, 9h, 4d, 9h, 7d — and there is no way to
+// find the one you touched this morning. The header carries the freshest, so
+// the groups can be scanned by recency without reordering anything inside them.
+func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
+	forceASCII(t)
+
+	base := fixtureBase
+	now := base.Add(8 * 24 * time.Hour)
+	sess := func(id string, at time.Time) fleet.Session {
+		return fleet.Session{
+			Info: fleet.SessionInfo{ID: id, TranscriptPath: sessionKey(id), CWD: "/home/user/" + id,
+				GitBranch: "main", LastEventAt: at},
+			Snap: state.Snapshot{State: state.Idle, Since: at, Reason: "turn complete"},
+			Live: true,
+		}
+	}
+	m := New(nil)
+	m.SetSize(120, 30)
+	// Pane order puts the stalest first, exactly as tmux would.
+	m.SetSessions([]fleet.Session{
+		sess("s-old", now.Add(-7*24*time.Hour)),
+		sess("s-new", now.Add(-9*time.Hour)),
+	}, now)
+	list := []tmuxop.Pane{
+		{Target: "tinker:0.0", ID: "%1", PID: 1, Command: "claude"},
+		{Target: "tinker:1.0", ID: "%2", PID: 2, Command: "claude"},
+	}
+	m.SetPaneOrder(list)
+	m.SetPanes(map[string]tmuxop.Pane{sessionKey("s-old"): list[0], sessionKey("s-new"): list[1]})
+
+	var header fleetRow
+	for _, r := range m.fleetRows() {
+		if r.header {
+			header = r
+			break
+		}
+	}
+	if header.label != "tinker" {
+		t.Fatalf("first header is %q, want the tmux session", header.label)
+	}
+	if want := "9h"; header.age != want {
+		t.Errorf("header age = %q, want %q — the freshest in the group, not the first pane's", header.age, want)
+	}
+
+	// And it reaches the frame, in the column the session rows put their own
+	// age in, so the two read as one column rather than two.
+	frame := m.View()
+	var headerLine string
+	for _, line := range strings.Split(frame, "\n") {
+		// The fleet column only — the mirror's own header names the pane too.
+		col, _, _ := strings.Cut(line, "│")
+		if strings.Contains(col, "tinker") {
+			headerLine = col
+			break
+		}
+	}
+	if !strings.Contains(headerLine, "9h") {
+		t.Errorf("the rendered header does not carry the age:\n%q", headerLine)
+	}
+	if strings.Contains(headerLine, "7d") {
+		t.Errorf("the header carries the stalest age instead of the freshest:\n%q", headerLine)
 	}
 }
