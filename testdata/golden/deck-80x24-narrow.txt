@@ -1,7 +1,7 @@
  ⌂ compass                                                           ▲1  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────
 
- FLEET · live                   │ TRAIL · api                             [Lv1]
+ ▌FLEET · live                  │  TRAIL · api                            [Lv1]
                                 │
   dev                           │ ◉ "fix the 401 bug"                       38m
  ▸1 ● api       working      3m │ ╷

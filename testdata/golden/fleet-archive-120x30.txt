@@ -1,7 +1,7 @@
  ⌂ compass                                                                                                   ▲1  ●2  ○2
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- FLEET · archive                │ ⌁ no pane · from transcript                  │ TRAIL · docs                     [Lv1]
+ ▌FLEET · archive               │  ⌁ no pane · from transcript                 │  TRAIL · docs                    [Lv1]
                                 │                                              │
   docs                          │                                              │ ◌ nothing yet
  ▸1 ○ update the readme      1h │                                              │

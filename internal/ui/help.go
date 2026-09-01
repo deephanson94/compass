@@ -68,6 +68,7 @@ func helpLegendLines(w int, roomy bool) []string {
 	lines := []string{
 		dimStyle.Render(clip("compass observes; enter hands you the session.", w)),
 		"",
+		dimStyle.Render(clip(focusMark+" marks the panel your keys are in — tab moves it", w)),
 		dimStyle.Render(clip("fleet:  ● working  ▲ needs you  ◍ stuck  ○ idle", w)),
 		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now  ◈ subagent", w)),
 		dimStyle.Render(clip("        ◌ planned — Claude's own next moves", w)),

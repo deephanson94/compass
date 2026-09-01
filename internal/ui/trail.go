@@ -687,10 +687,12 @@ func (m *Model) trailTitle(w int) string {
 	if !m.trailPinned {
 		right = "↓ G  " + level
 	}
-	left := dimStyle.Render(clip("TRAIL · "+name, w-lipgloss.Width(right)-1))
-	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	mark := m.titleMark(panelTrail)
+	body := w - 1
+	left := m.titleStyleFor(panelTrail).Render(clip("TRAIL · "+name, body-lipgloss.Width(right)-1))
+	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
-	return left + strings.Repeat(" ", gap) + dimStyle.Render(right)
+	return mark + left + strings.Repeat(" ", gap) + dimStyle.Render(right)
 }

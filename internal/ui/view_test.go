@@ -427,3 +427,66 @@ func TestHelpFitsAndKeepsItsKeys(t *testing.T) {
 		}
 	}
 }
+
+// Tab moves the keys from one panel to another, and the deck has to say which
+// one has them. Lv2 and Lv3 draw an identical trail — Lv3 is not a different
+// view of the journey, it is the same view with the focus moved off it — so
+// without a marker, zooming in looked like nothing had happened.
+func TestFocusMarkerFollowsTheKeys(t *testing.T) {
+	forceASCII(t)
+
+	m := deckModel(120, 20, map[string]tmuxop.Pane{
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
+	}, fixtureFrame)
+
+	for _, want := range []struct {
+		level  int
+		marked string
+	}{
+		{1, "FLEET · live"}, // j/k walk the fleet
+		{2, "TRAIL · api"},  // …the trail's rows
+		{3, "READER · api"}, // …and then the conversation
+	} {
+		for m.level < want.level {
+			pressTab(m)
+		}
+		if m.level != want.level {
+			t.Fatalf("could not reach Lv%d (at Lv%d)", want.level, m.level)
+		}
+		got := m.View()
+		if !strings.Contains(got, focusMark+want.marked) {
+			t.Errorf("Lv%d: %q is not marked as focused:\n%s", want.level, want.marked, got)
+		}
+		// Exactly one panel holds the keys.
+		if n := strings.Count(got, focusMark); n != 1 {
+			t.Errorf("Lv%d: %d panels marked, want exactly 1:\n%s", want.level, n, got)
+		}
+	}
+
+	// Zooming back out hands them back.
+	for m.level > levelTrail {
+		m.zoomOut()
+	}
+	if got := m.View(); !strings.Contains(got, focusMark+"FLEET · live") {
+		t.Errorf("shift+tab did not return the keys to the fleet:\n%s", got)
+	}
+}
+
+// The panel marker must not be the fleet's row marker: at Lv1 both sit in the
+// same column of the same panel, and one names a session while the other names
+// a panel.
+func TestFocusMarkerIsNotTheSelectionMarker(t *testing.T) {
+	if focusMark == "▸" {
+		t.Fatal("the focus marker is the fleet's selection marker")
+	}
+	forceASCII(t)
+	m := deckModel(120, 20, map[string]tmuxop.Pane{}, "")
+	got := m.View()
+	if !strings.Contains(got, focusMark+"FLEET") {
+		t.Fatalf("the fleet is not marked at Lv1:\n%s", got)
+	}
+	// The selected session still carries its own marker, unchanged.
+	if !strings.Contains(got, "▸2 ● api") {
+		t.Errorf("the selected row lost its marker:\n%s", got)
+	}
+}

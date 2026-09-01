@@ -1,7 +1,7 @@
  ⌂ compass                                                                                                   ▲1  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- FLEET · live                   │ ⌁ no pane · from transcript                  │ TRAIL · api                      [Lv1]
+ ▌FLEET · live                  │  ⌁ no pane · from transcript                 │  TRAIL · api                     [Lv1]
                                 │                                              │
   1 ▲ infra     needs you    2m │ moment26 eighteen passed and two failed,     │ ◉ "fix the 401 bug"                38m
      ◆ design AskUserQuestion   │ both of them in the refresh path and both    │ ╷

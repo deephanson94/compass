@@ -33,7 +33,7 @@ func (m *Model) mirrorColumn(w, h int) []string {
 		header = mirrorMark + " " + pane.Target + " · live"
 	}
 
-	rows := []string{dimStyle.Render(clip(header, w)), ""}
+	rows := []string{" " + dimStyle.Render(clip(header, w-1)), ""}
 	body := h - mirrorChrome
 	if body < 1 {
 		return rows
