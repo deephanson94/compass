@@ -4,6 +4,6 @@
 │
 ◆ build  wires the token refresh   25m
 │
-◆ test   pytest                    12m
+◆ test   pytest             18✓ 2✗ 12m
 ├─◈ scout the payments module        ✓
 ● fix    tokens.py                ← 3m

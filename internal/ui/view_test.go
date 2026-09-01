@@ -107,7 +107,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 			},
 			Snap:  state.Snapshot{State: state.Working, Since: base.Add(37 * time.Minute), Reason: "tool call in flight", Activity: "Bash: pytest tests/auth -x"},
 			Live:  true,
-			Class: journey.Test, HasClass: true,
+			Class: journey.Test, HasClass: true, Outcome: "1216✓ 2✗",
 		},
 		{
 			Info: fleet.SessionInfo{
@@ -117,7 +117,7 @@ func fixtureSessions(base time.Time) []fleet.Session {
 			},
 			Snap:  state.Snapshot{State: state.Idle, Since: base.Add(18 * time.Minute), Reason: "turn complete", Activity: "idle"},
 			Live:  true,
-			Class: journey.Docs, HasClass: true,
+			Class: journey.Docs, HasClass: true, Outcome: "46✓",
 		},
 	}
 }
@@ -135,7 +135,13 @@ func fixtureTrail(base time.Time) journey.Trail {
 				Files: []string{"middleware.py", "tokens.py"}},
 			{Class: journey.Build, Label: "tokens.py", Start: base.Add(15 * time.Minute), End: base.Add(27 * time.Minute), Votes: 11,
 				Files: []string{"tokens.py", "middleware.py"}},
-			{Class: journey.Test, Label: "pytest", Start: base.Add(28 * time.Minute), End: base.Add(36 * time.Minute), Votes: 4},
+			// A real test leg always comes back with a run summary. This fixture
+			// had none, which is why no golden noticed Lv1 was dropping it.
+			{Class: journey.Test, Label: "pytest", Start: base.Add(28 * time.Minute), End: base.Add(36 * time.Minute), Votes: 4,
+				Waypoints: []journey.Waypoint{
+					{Kind: journey.WaypointTestRun, Text: "18 passed · 2 failed", Short: "18✓ 2✗", At: base.Add(35 * time.Minute)},
+					{Kind: journey.WaypointTestFail, Text: "test_refresh_expired_token", At: base.Add(35 * time.Minute)},
+				}},
 			{Class: journey.Fix, Label: "tokens.py", Start: base.Add(37 * time.Minute), End: base.Add(39 * time.Minute), Votes: 5,
 				Files: []string{"tokens.py"}, Current: true},
 		},
@@ -282,7 +288,7 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	for _, want := range []string{
 		"⌁ no pane · from transcript", // the header names the source
 		"moment30",                    // and the newest turn is on screen
-		"◆ test   Bash: pyt",          // and says what the session is doing
+		"◆ test   1216✓ 2✗",           // and says how its last run went
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no-pane mirror is missing %q", want)

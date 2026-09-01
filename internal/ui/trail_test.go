@@ -27,7 +27,7 @@ func fixtureLv2Trail(base time.Time) journey.Trail {
 				Files: []string{"middleware.py", "tokens.py"}},
 			{Class: journey.Test, Label: "pytest", Start: base.Add(15 * time.Minute), End: base.Add(27 * time.Minute), Votes: 6,
 				Waypoints: []journey.Waypoint{
-					{Kind: journey.WaypointTestRun, Text: "18 passed · 2 failed", At: base.Add(26 * time.Minute)},
+					{Kind: journey.WaypointTestRun, Text: "18 passed · 2 failed", Short: "18✓ 2✗", At: base.Add(26 * time.Minute)},
 					{Kind: journey.WaypointTestFail, Text: "test_refresh_expired_token", At: base.Add(26 * time.Minute)},
 					{Kind: journey.WaypointTestFail, Text: "test_refresh_revoked_token", At: base.Add(26 * time.Minute)},
 				}},

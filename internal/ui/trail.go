@@ -499,14 +499,56 @@ func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int
 		label = withoutClassVerb(label, l.Class.String())
 	}
 
-	labelWidth := width - trailPrefixWidth - 1 - len([]rune(age))
+	// The leg's own result, at badge size, held between the label and the age:
+	// "◆ test  pytest  18✓ 2✗  12m". SPEC §2.2's mockup has always shown this,
+	// and the leg has always carried it — Lv1 rendered the label and dropped
+	// the waypoints, so the one number that says whether the leg went well was
+	// two keypresses away.
+	badge := legBadge(l)
+	badgeW := lipgloss.Width(badge)
+	if badgeW > 0 {
+		badgeW++ // a column of air before it
+	}
+
+	labelWidth := width - trailPrefixWidth - 1 - len([]rune(age)) - badgeW
+	if labelWidth < trailMinLabel {
+		badge, badgeW = "", 0
+		labelWidth = width - trailPrefixWidth - 1 - len([]rune(age))
+	}
 	if labelWidth < trailMinLabel {
 		// Too narrow for a label: the verb and the age still answer "what, when".
 		return head + padLeft(dimStyle.Render(age), width-(trailPrefixWidth-1))
 	}
 	labelText := textStyle.Render(pad(clip(label, labelWidth), labelWidth))
-	return head + " " + labelText + " " + dimStyle.Render(age)
+	return head + " " + labelText + badgeStyle(badge).Render(padLeft(badge, badgeW)) +
+		" " + dimStyle.Render(age)
 }
+
+func badgeStyle(badge string) lipgloss.Style {
+	if strings.Contains(badge, "✗") {
+		return textStyle
+	}
+	return dimStyle
+}
+
+// legBadge is the leg's newest run summary at badge size, or "" for a leg that
+// produced no countable result. Only test runs get one: a commit's subject is
+// already the leg's label, and repeating it in a narrower column would say the
+// same thing worse.
+func legBadge(l journey.Leg) string {
+	for i := len(l.Waypoints) - 1; i >= 0; i-- {
+		if w := l.Waypoints[i]; w.Kind == journey.WaypointTestRun && w.Short != "" {
+			return w.Short
+		}
+	}
+	return ""
+}
+
+// badgeStyle lifts a badge that carries a failure out of the greys. Not into
+// red: the palette reserves warm colour for "needs you" and "stuck" alone, so
+// that a healthy fleet holds none, and a failing test is not the session
+// asking for you — it is still working on it. The ✗ is the fact; this only
+// stops it reading as quietly as an age.
 
 // withoutClassVerb drops a narrated phrase's first word when it is the class's
 // own name, so "fix probe6 exit" under `fix` reads "fix    probe6 exit" rather
