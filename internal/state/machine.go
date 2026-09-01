@@ -50,6 +50,12 @@ type Snapshot struct {
 	Since    time.Time // timestamp of the event that established this condition
 	Reason   string    // short human phrase, e.g. "turn ended with a question"
 	Activity string    // hint, e.g. `Bash: pytest tests/auth -x`, `reading middleware.py`
+
+	// APIError says the session is waiting on a call the API refused, not on
+	// anything it did. A reader needs the error's own words here more than the
+	// session's last good result, so the fleet lets this override its usual
+	// preference for outcome over activity.
+	APIError bool
 }
 
 // askUserQuestion is the tool whose pending call means "the model is literally
@@ -74,6 +80,13 @@ type Machine struct {
 	substantiveKind transcript.EventType
 	substantiveAt   time.Time
 	substantiveText string
+
+	// The substantive beat was the API refusing rather than the model
+	// answering. It is folded with the beat it belongs to, so a later real
+	// turn clears it without any separate bookkeeping.
+	substantiveAPIError bool
+	substantiveStatus   int
+	substantiveErrorKey string
 
 	lastUse    transcript.ToolUse // most recent tool_use seen, pending or not
 	hasLastUse bool
@@ -119,6 +132,8 @@ func (m *Machine) Observe(ev transcript.Event) {
 		m.substantiveKind = ev.Type
 		m.substantiveAt = ev.Timestamp
 		m.substantiveText = ev.Text
+		m.substantiveAPIError = ev.APIError
+		m.substantiveStatus, m.substantiveErrorKey = ev.Status, ev.ErrorKey
 	}
 }
 
@@ -179,6 +194,26 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 			return Snapshot{State: Stuck, Since: since, Reason: stuckReason(quiet), Activity: "thinking…"}
 		}
 		since := m.since(m.substantiveAt)
+
+		// The call failed rather than the model answering. Claude Code writes
+		// that as a synthetic assistant message, so it reaches here looking
+		// exactly like a finished turn — which is how a session dead on quota
+		// reported "turn complete" and sat in the fleet indistinguishable from
+		// one that had succeeded.
+		//
+		// It is needs-you rather than stuck: stuck is a symptom of an unknown
+		// cause, and this is a known one that only a person can clear — log in
+		// again, wait for the quota window, raise the limit. Needs-you also
+		// puts it where `g` can reach it, which is the whole point of knowing.
+		if m.substantiveAPIError {
+			return Snapshot{
+				State: NeedsYou, Since: since, APIError: true,
+				Reason: apiErrorReason(m.substantiveStatus, m.substantiveErrorKey),
+				// The error's own words are what a person recognises; the
+				// status and key above are what a program should key on.
+				Activity: apiErrorText(firstLine(m.substantiveText)),
+			}
+		}
 		if endsWithQuestion(m.substantiveText) {
 			return Snapshot{State: NeedsYou, Since: since, Reason: "turn ended with a question", Activity: "awaiting your reply"}
 		}
@@ -229,6 +264,51 @@ func (m *Machine) oldestPending() (pendingUse, bool) {
 	}
 	return best, found
 }
+
+// apiErrorReason names the failure from the API's own fields, never from the
+// message text: the status and the error key are Claude Code's, while the
+// wording belongs to whichever gateway refused the call and is different for
+// every organisation.
+func apiErrorReason(status int, key string) string {
+	switch {
+	case status != 0 && key != "":
+		return fmt.Sprintf("api error %d · %s", status, key)
+	case status != 0:
+		return fmt.Sprintf("api error %d", status)
+	case key != "":
+		return "api error · " + key
+	}
+	return "the api call failed"
+}
+
+// apiErrorText drops Claude Code's own "API Error: 403" marker from the message
+// it wrote around the gateway's words. The status is already in the reason, and
+// every column the marker spends is a column the words a person actually
+// recognises — "your daily quota is exhausted" — does not get, because those
+// come last and the fleet row is two dozen columns wide.
+func apiErrorText(s string) string {
+	i := strings.Index(s, apiErrorMarker)
+	if i < 0 {
+		return s
+	}
+	rest := s[i+len(apiErrorMarker):]
+	rest = strings.TrimLeft(rest, " ")
+	// Drop the status digits too, and the punctuation the marker was holding
+	// together, so the two halves rejoin as one sentence.
+	rest = strings.TrimLeft(rest, "0123456789")
+	rest = strings.TrimLeft(rest, " ·:-")
+	if strings.TrimSpace(rest) == "" {
+		return s
+	}
+	head := strings.TrimRight(s[:i], " ·:-")
+	if head == "" {
+		return rest
+	}
+	return head + " · " + rest
+}
+
+// apiErrorMarker is the phrase Claude Code writes before the status it got.
+const apiErrorMarker = "API Error:"
 
 func stuckReason(quiet time.Duration) string {
 	return fmt.Sprintf("no output for %s mid-turn", ShortDuration(quiet))

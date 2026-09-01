@@ -442,6 +442,21 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	// quiet one, the prompt it was given, because "idle" is what the first line
 	// already told you.
 	act := s.Outcome
+	// Unless the last thing that happened was the API refusing the call. Then
+	// the session's earlier "1216✓" is true and useless: it describes work that
+	// finished before the wall went up, and showing it puts a green tick on a
+	// row whose session is dead until someone logs in again.
+	//
+	// The reason leads and the error's own words follow, because the row has
+	// about two dozen columns and the gateway spends the first thirty on
+	// "Please run /login · API Error: 403". "api error 403" fits; the words a
+	// person recognises get whatever is left, and the mirror carries them whole.
+	if s.Snap.APIError {
+		act = s.Snap.Reason
+		if txt := strings.TrimSpace(s.Snap.Activity); txt != "" {
+			act += " · " + txt
+		}
+	}
 	if strings.TrimSpace(act) == "" {
 		act = s.Snap.Activity
 	}

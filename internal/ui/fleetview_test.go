@@ -1056,3 +1056,51 @@ func columnWidths(t *testing.T, frame string) []int {
 	t.Fatal("no fleet header in the frame")
 	return nil
 }
+
+// A session the API refused still carries whatever it last finished. That
+// result is true and useless: it describes work that landed before the wall
+// went up. Showing it puts a green tick on a row whose session is dead until
+// someone logs in again — which is the row this whole feature exists to fix.
+func TestTheFleetShowsTheAPIErrorRatherThanTheStaleOutcome(t *testing.T) {
+	forceASCII(t)
+
+	base := fixtureBase
+	blocked := fleet.Session{
+		Info: fleet.SessionInfo{
+			ID: "s-porter", TranscriptPath: sessionKey("s-porter"), ProjectSlug: "-home-user-porter",
+			CWD: "/home/user/porter", GitBranch: "main", Title: "port the client",
+			StartedAt: base, LastEventAt: base.Add(30 * time.Minute),
+		},
+		Snap: state.Snapshot{
+			State: state.NeedsYou, Since: base.Add(30 * time.Minute), APIError: true,
+			Reason: "api error 403 · authentication_failed",
+			// What the machine hands over: its own "API Error: 403" marker
+			// already spent, so the gateway's words start as early as they can.
+			Activity: "Please run /login · your daily quota is exhausted",
+		},
+		Live:  true,
+		Class: journey.Test, HasClass: true,
+		// The session ran a green suite an hour before the quota ran out.
+		Outcome: "1216✓",
+	}
+
+	m := New(nil)
+	m.SetSize(120, 24)
+	m.SetSessions([]fleet.Session{blocked}, base.Add(40*time.Minute))
+
+	got := m.View()
+	if !strings.Contains(got, "api error 403") {
+		t.Errorf("the fleet row does not say why the session is blocked:\n%s", got)
+	}
+	// The words a person recognises are too long for a fleet row but must
+	// still reach the panel beside it, whole.
+	if !strings.Contains(got, "daily quota") {
+		t.Errorf("the error's own words never reach the reader:\n%s", got)
+	}
+	if strings.Contains(got, "1216") {
+		t.Errorf("the fleet row still shows the result from before the wall went up:\n%s", got)
+	}
+	if !strings.Contains(got, "needs you") {
+		t.Errorf("the row does not read needs-you:\n%s", got)
+	}
+}

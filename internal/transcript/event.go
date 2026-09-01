@@ -52,7 +52,15 @@ type Event struct {
 	GitBranch   string
 	Version     string
 	IsSidechain bool
-	Text        string       // assistant: all text blocks joined "\n"; user: string content (empty if content is a block array)
+	Text        string // assistant: all text blocks joined "\n"; user: string content (empty if content is a block array)
+
+	// APIError marks an assistant event that is not the model speaking but the
+	// call to it failing: a quota refusal, an expired login, a 5xx. Status and
+	// ErrorKey are the API's own, e.g. 403 and "authentication_failed"; Text
+	// carries whatever the gateway said about it.
+	APIError    bool
+	Status      int
+	ErrorKey    string
 	ToolUses    []ToolUse    // assistant tool_use blocks, in order
 	ToolResults []ToolResult // tool_result blocks inside user-type lines
 }
@@ -76,6 +84,18 @@ type rawLine struct {
 type rawMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"` // string OR array of blocks
+
+	// Claude Code writes a failed API call as a synthetic assistant message —
+	// model "<synthetic>", the error's own text as its only content block —
+	// and flags it. Without these three fields it is indistinguishable from
+	// the model having answered, which is how a session dead on quota reads as
+	// a turn completed successfully.
+	//
+	// The flags are Claude Code's; only the text belongs to whatever gateway
+	// refused the call, so nothing here matches on wording.
+	IsAPIError  bool   `json:"isApiErrorMessage"`
+	APIStatus   int    `json:"apiErrorStatus"`
+	APIErrorKey string `json:"error"`
 }
 
 type rawBlock struct {
@@ -125,6 +145,8 @@ func ParseLine(line []byte) (Event, error) {
 	if len(raw.Message) > 0 {
 		var msg rawMessage
 		if err := json.Unmarshal(raw.Message, &msg); err == nil {
+			ev.APIError = msg.IsAPIError
+			ev.Status, ev.ErrorKey = msg.APIStatus, msg.APIErrorKey
 			parseContent(&ev, msg.Content)
 		}
 	}
