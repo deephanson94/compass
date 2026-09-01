@@ -27,6 +27,10 @@ type entry struct {
 	// archived session is not doing anything.
 	class    journey.Class
 	hasClass bool
+
+	// outcomes is the last thing this session *finished* — a test run's counts,
+	// a commit — which is what a fleet row says about it. Live sessions only.
+	outcomes *journey.Outcomes
 }
 
 // DefaultLiveWindow is the recency door a new Manager opens: a session with no
@@ -243,6 +247,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			out = append(out, Session{
 				Info: e.info, Snap: e.machine.Evaluate(now), Live: true,
 				Class: e.class, HasClass: e.hasClass,
+				Outcome: e.outcome(),
 			})
 		} else {
 			archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
@@ -261,6 +266,20 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	return append(out, archive...), nil
 }
 
+// outcome is the last result this session produced, if any.
+func (e *entry) outcome() string {
+	o, ok := e.outcomes.Latest()
+	if !ok {
+		return ""
+	}
+	// The badge form where there is one: a fleet row has a column, not a
+	// sentence, and "1216✓ 2✗" leaves room beside it for the class.
+	if o.Short != "" {
+		return o.Short
+	}
+	return o.Text
+}
+
 // wake gives an entry what a live session needs.
 //
 // Without a resume cache both are built from scratch, and the session replays
@@ -271,6 +290,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 // file, and a refused mark simply means the replay happens after all.
 func (m *Manager) wake(key string, e *entry) {
 	e.tailer = transcript.NewTailer(e.info.TranscriptPath)
+	e.outcomes = journey.NewOutcomes()
 	if p, ok := m.resume.point(key); ok && e.tailer.Resume(p.Mark) {
 		e.machine = state.RestoreMachine(p.Fold)
 		e.sawEvent = !p.Fold.LastEventAt.IsZero()
@@ -288,6 +308,7 @@ func (e *entry) sleep() {
 	e.machine = nil
 	e.sawEvent = false
 	e.hasClass = false
+	e.outcomes = nil
 }
 
 // archivedSnap is the whole verdict an archived session gets: it did something
@@ -350,6 +371,7 @@ func (e *entry) absorb(ev transcript.Event) {
 			e.class, e.hasClass = c, true
 		}
 	}
+	e.outcomes.Observe(ev)
 	if !ev.IsSidechain && ev.CWD != "" {
 		e.info.CWD, e.info.GitBranch = ev.CWD, ev.GitBranch
 		if e.info.OriginCWD == "" {

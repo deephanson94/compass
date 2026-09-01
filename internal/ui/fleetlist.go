@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"math"
 	"path/filepath"
 	"sort"
@@ -379,28 +380,44 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		nameStyle = textStyle
 	}
 
-	midWidth := w - 5 - nameWidth - 1 - 1 - ageWidth
-	text, since := headline(s), s.Snap.Since
-	name := nameStyle.Render(pad(clip(sessionName(s.Info), nameWidth), nameWidth)) + " "
+	age := padLeft(m.age(s.Snap.Since), ageWidth)
+	head := headline(s)
 	if m.archiveView {
 		// The group header already names the project, and an archived session is
 		// named after its project: the row spends that width on the one thing the
 		// header cannot say — what you asked for.
-		text, since = archiveHeadline(s), s.Info.LastEventAt
-		midWidth, name = w-5-1-ageWidth, ""
+		age, head = padLeft(m.age(s.Info.LastEventAt), ageWidth), archiveHeadline(s)
 	}
-	if midWidth < 6 {
-		midWidth = 6
+
+	// Everything between the state glyph and the age. The name takes it, less
+	// whatever the state word needs — and the state word is held against the
+	// age, so the words that matter line up on their right edge however long
+	// the names beside them are. Freeing this width is the point of not
+	// spelling "working": a name is what you are looking for, and "agentic_…"
+	// was costing ten columns to say "● " a second time.
+	avail := w - 5 - 1 - ageWidth
+	headW := lipgloss.Width(head)
+	if headW > 0 {
+		headW++ // a column of air before it
 	}
-	mid := pad(clip(text, midWidth), midWidth)
-	age := padLeft(m.age(since), ageWidth)
+	nameW := avail - headW
+	if nameW < 6 {
+		nameW, headW = 6, max(avail-6, 0)
+	}
 
 	midStyle := dimStyle
 	if selected {
 		midStyle = textStyle
 	}
+	body := nameStyle.Render(pad(clip(sessionName(s.Info), nameW), nameW)) +
+		midStyle.Render(padLeft(clip(head, headW), headW))
+	if m.archiveView {
+		// No name: the whole line is the prompt the session was given.
+		body = midStyle.Render(pad(clip(head, avail), avail))
+	}
+
 	first := marker + indexStyled + " " + accent.Render(fleet.Glyph(st)) + " " +
-		name + midStyle.Render(mid) + " " + dimStyle.Render(age)
+		body + " " + dimStyle.Render(age)
 
 	return []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
 }
@@ -418,10 +435,16 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	if m.archiveView {
 		return dimStyle.Render(clip(branchOf(s.Info), w))
 	}
-	// What it is doing, or — when it is not doing anything — what it is about.
-	// "idle" is what the first line already said; the prompt behind the session
-	// is the thing a reader still wants from a quiet row.
-	act := s.Snap.Activity
+	// Result before process. "1216✓ 2✗" answers whether the session is going
+	// well; "Bash: pytest tests/auth -x" only answers whether it is busy, which
+	// the glyph beside the name already said. The call in flight is the
+	// fallback for a session that has not finished anything yet — and for a
+	// quiet one, the prompt it was given, because "idle" is what the first line
+	// already told you.
+	act := s.Outcome
+	if strings.TrimSpace(act) == "" {
+		act = s.Snap.Activity
+	}
 	if strings.TrimSpace(act) == "" || act == "idle" {
 		act = s.Info.Title
 	}
@@ -449,8 +472,17 @@ func wantsAttention(s state.State) bool {
 
 // headline is the one thing worth saying about a session on its own line. The
 // list answers "who wants me"; the card next to it answers "why".
+// headline is the state, spelled — but only when spelling it adds something.
+// The glyph already carries the state in shape and colour, so "● api working"
+// says "working" twice and spends ten columns doing it. `needs you` and
+// `stuck` earn their words: they are the two a reader must not miss, and the
+// space is better spent on them than on the two that are simply fine.
 func headline(s fleet.Session) string {
-	return stateLabel(s.Snap.State)
+	switch s.Snap.State {
+	case state.NeedsYou, state.Stuck:
+		return stateLabel(s.Snap.State)
+	}
+	return ""
 }
 
 // archiveHeadline is what an archived session is remembered for: what you asked

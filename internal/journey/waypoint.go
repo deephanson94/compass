@@ -28,6 +28,14 @@ type Waypoint struct {
 	Kind WaypointKind
 	Text string // ≤60 runes, undecorated
 	At   time.Time
+
+	// Short is the same fact at badge size — "18✓ 2✗" beside "18 passed · 2
+	// failed" — for the places that have a column rather than a row: a leg's
+	// Lv1 badge and a fleet row. Recorded here, at the one place the long form
+	// is composed, rather than parsed back out of it downstream: the two can
+	// then only ever disagree by someone editing both. Empty for kinds that
+	// have no useful short form.
+	Short string
 }
 
 // maxWaypoints caps how many waypoints a leg keeps; overflow drops silently.
@@ -70,7 +78,7 @@ func testWaypoints(text, keyword string, isErr bool, at time.Time) []Waypoint {
 		}
 	}
 	if isErr {
-		return []Waypoint{{Kind: WaypointTestRun, Text: "failed", At: at}}
+		return []Waypoint{{Kind: WaypointTestRun, Text: "failed", Short: failMark, At: at}}
 	}
 	return nil
 }
@@ -132,13 +140,14 @@ var (
 // as failures: a test that could not run did not pass.
 func parsePytest(lines []string, at time.Time) ([]Waypoint, bool) {
 	matched := false
-	summary := ""
+	summary, short := "", ""
 	var fails []string
 	for _, line := range lines {
 		l := strings.TrimSpace(line)
 		if summary == "" && pytestSummary.MatchString(l) {
 			matched = true
-			summary = composeCounts(pytestCounts(l))
+			passed, failed := pytestCounts(l)
+			summary, short = composeCounts(passed, failed), shortCounts(passed, failed)
 			continue
 		}
 		if m := pytestFailed.FindStringSubmatch(l); m != nil {
@@ -149,7 +158,7 @@ func parsePytest(lines []string, at time.Time) ([]Waypoint, bool) {
 	if !matched {
 		return nil, false
 	}
-	return runWaypoints(summary, fails, at), true
+	return runWaypoints(summary, short, fails, at), true
 }
 
 func pytestCounts(line string) (passed, failed int) {
@@ -188,9 +197,9 @@ func parseGoTest(lines []string, at time.Time) ([]Waypoint, bool) {
 	fails = dedupe(fails)
 	switch {
 	case len(fails) > 0:
-		return runWaypoints(strconv.Itoa(len(fails))+" failing", fails, at), true
+		return runWaypoints(strconv.Itoa(len(fails))+" failing", strconv.Itoa(len(fails))+failMark, fails, at), true
 	case ok:
-		return runWaypoints("ok", nil, at), true
+		return runWaypoints("ok", passMark, nil, at), true
 	}
 	return nil, false
 }
@@ -210,12 +219,13 @@ var (
 // test rows.
 func parseJest(lines []string, at time.Time) ([]Waypoint, bool) {
 	matched := false
-	summary := ""
+	summary, short := "", ""
 	var fails []string
 	for _, line := range lines {
 		if summary == "" && jestTests.MatchString(line) {
 			matched = true
-			summary = composeCounts(jestCounts(line))
+			passed, failed := jestCounts(line)
+			summary, short = composeCounts(passed, failed), shortCounts(passed, failed)
 			continue
 		}
 		if m := jestFail.FindStringSubmatch(line); m != nil {
@@ -226,7 +236,7 @@ func parseJest(lines []string, at time.Time) ([]Waypoint, bool) {
 	if !matched {
 		return nil, false
 	}
-	return runWaypoints(summary, fails, at), true
+	return runWaypoints(summary, short, fails, at), true
 }
 
 func jestCounts(line string) (passed, failed int) {
@@ -254,14 +264,14 @@ var (
 // parseCargo reads cargo test's result line and its FAILED rows.
 func parseCargo(lines []string, at time.Time) ([]Waypoint, bool) {
 	matched := false
-	summary := ""
+	summary, short := "", ""
 	var fails []string
 	for _, line := range lines {
 		if m := cargoResult.FindStringSubmatch(line); summary == "" && m != nil {
 			matched = true
 			passed, _ := strconv.Atoi(m[1])
 			failed, _ := strconv.Atoi(m[2])
-			summary = composeCounts(passed, failed)
+			summary, short = composeCounts(passed, failed), shortCounts(passed, failed)
 			continue
 		}
 		if m := cargoFail.FindStringSubmatch(line); m != nil {
@@ -272,15 +282,17 @@ func parseCargo(lines []string, at time.Time) ([]Waypoint, bool) {
 	if !matched {
 		return nil, false
 	}
-	return runWaypoints(summary, fails, at), true
+	return runWaypoints(summary, short, fails, at), true
 }
 
 // runWaypoints assembles one family's findings: the run summary first, then the
 // tests that failed — deduped and capped, because a leg is a glance.
-func runWaypoints(summary string, fails []string, at time.Time) []Waypoint {
+func runWaypoints(summary, short string, fails []string, at time.Time) []Waypoint {
 	var wps []Waypoint
 	if summary != "" {
-		wps = append(wps, Waypoint{Kind: WaypointTestRun, Text: clip(summary, waypointText), At: at})
+		wps = append(wps, Waypoint{
+			Kind: WaypointTestRun, Text: clip(summary, waypointText), Short: short, At: at,
+		})
 	}
 	for i, name := range dedupe(fails) {
 		if i >= maxTestFails {
@@ -289,6 +301,28 @@ func runWaypoints(summary string, fails []string, at time.Time) []Waypoint {
 		wps = append(wps, Waypoint{Kind: WaypointTestFail, Text: clip(name, waypointText), At: at})
 	}
 	return wps
+}
+
+// passMark and failMark are the badge's whole vocabulary. They are the two
+// glyphs a developer already reads without being told, which is the bar for
+// putting anything in a column this narrow.
+const (
+	passMark = "✓"
+	failMark = "✗"
+)
+
+// shortCounts is composeCounts at badge size: "18✓ 2✗", "18✓", "2✗". A run
+// that reported neither number gets nothing rather than a bare mark, because
+// "✓" with no count would claim more than the parser found.
+func shortCounts(passed, failed int) string {
+	var parts []string
+	if passed > 0 {
+		parts = append(parts, strconv.Itoa(passed)+passMark)
+	}
+	if failed > 0 {
+		parts = append(parts, strconv.Itoa(failed)+failMark)
+	}
+	return strings.Join(parts, " ")
 }
 
 // composeCounts writes the run summary the panel shows, omitting whichever

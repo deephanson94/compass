@@ -65,6 +65,11 @@ type Session struct {
 	// every archived session, which is not doing anything.
 	Class    journey.Class
 	HasClass bool
+
+	// Outcome is the last thing the session finished — "1216 passed · 2 failed",
+	// a commit subject — as opposed to the tool call it currently has in
+	// flight. Empty when it has not finished anything worth reporting.
+	Outcome string
 }
 
 // titleMax is how much of a first prompt survives into the fleet list.

@@ -3,14 +3,14 @@
 
  ▌FLEET · live                  │  TRAIL · infra                          [Lv1]
                                 │
- ▸1 ▲ infra     needs you    2m │ ◌ nothing yet
+ ▸1 ▲ infra      needs you   2m │ ◌ nothing yet
      ◆ design AskUserQuestion   │
                                 │ scouting will appear here
-  2 ● api       working      3m │
-     ◆ test   Bash: pytest tes… │
+  2 ● api                    3m │
+     ◆ test   1216✓ 2✗          │
                                 │
-  3 ○ docs      idle        22m │
-     ◆ docs   update the readme │
+  3 ○ docs                  22m │
+     ◆ docs   46✓               │
 
 
 

@@ -4,15 +4,15 @@
  ▌FLEET · live                  │  TRAIL · api                            [Lv1]
                                 │
   dev                           │ ◉ "fix the 401 bug"                       38m
- ▸1 ● api       working      3m │ ╷
-     ◆ test   Bash: pytest tes… │ ◆ scout  middleware.py                    31m
+ ▸1 ● api                    3m │ ╷
+     ◆ test   1216✓ 2✗          │ ◆ scout  middleware.py                    31m
                                 │ │
   elsewhere                   ▲ │ ◆ build  tokens.py                        25m
-  2 ▲ infra     needs you    2m │ │
-     ◆ design AskUserQuestion   │ ◆ test   pytest                           12m
+  2 ▲ infra      needs you   2m │ │
+     ◆ design AskUserQuestion   │ ◆ test   pytest                    18✓ 2✗ 12m
                                 │ ├─◈ scout the payments module               ✓
-  3 ○ docs      idle        22m │ ● fix    tokens.py                       ← 3m
-     ◆ docs   update the readme │
+  3 ○ docs                  22m │ ● fix    tokens.py                       ← 3m
+     ◆ docs   46✓               │
 
 
 

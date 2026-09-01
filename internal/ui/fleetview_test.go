@@ -26,7 +26,7 @@ func archivedSnap(at time.Time) state.Snapshot {
 // four projects. It is the same fixture for both views — the live fleet and the
 // archive are two readings of one Refresh.
 func fixtureGroupedFleet(base time.Time) []fleet.Session {
-	live := func(id, cwd, branch, title string, class journey.Class, snap state.Snapshot) fleet.Session {
+	live := func(id, cwd, branch, title string, class journey.Class, outcome string, snap state.Snapshot) fleet.Session {
 		return fleet.Session{
 			Info: fleet.SessionInfo{
 				ID: id, TranscriptPath: sessionKey(id), ProjectSlug: "-home-user-" + id,
@@ -35,6 +35,7 @@ func fixtureGroupedFleet(base time.Time) []fleet.Session {
 			Snap:  snap,
 			Live:  true,
 			Class: class, HasClass: true,
+			Outcome: outcome,
 		}
 	}
 	gone := func(id, cwd, branch, title string, at time.Time) fleet.Session {
@@ -50,15 +51,15 @@ func fixtureGroupedFleet(base time.Time) []fleet.Session {
 	// Fleet order, as the Manager hands it over: needs-you longest-wait, stuck,
 	// working, idle — then the archive, newest first.
 	return []fleet.Session{
-		live("s-infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", journey.Design,
+		live("s-infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", journey.Design, "",
 			state.Snapshot{State: state.NeedsYou, Since: base.Add(38 * time.Minute), Reason: "waiting on your answer", Activity: "AskUserQuestion"}),
-		live("s-api", "/home/user/api", "claude/auth-fx", "fix the 401 bug", journey.Test,
+		live("s-api", "/home/user/api", "claude/auth-fx", "fix the 401 bug", journey.Test, "1216✓ 2✗",
 			state.Snapshot{State: state.Working, Since: base.Add(37 * time.Minute), Reason: "tool call in flight", Activity: "Bash: pytest tests/auth -x"}),
-		live("s-webapp", "/home/user/webapp", "main", "flake in the checkout suite", journey.Test,
+		live("s-webapp", "/home/user/webapp", "main", "flake in the checkout suite", journey.Test, "18✓ 2✗",
 			state.Snapshot{State: state.Working, Since: base.Add(39*time.Minute + 20*time.Second), Reason: "tool call in flight", Activity: "tests 18✓ 2✗"}),
-		live("s-tfstate", "/home/user/tfstate", "main", "reconcile the state file", journey.Build,
+		live("s-tfstate", "/home/user/tfstate", "main", "reconcile the state file", journey.Build, "1190✓",
 			state.Snapshot{State: state.Idle, Since: base.Add(25 * time.Minute), Reason: "turn complete", Activity: "idle"}),
-		live("s-scratch", "/home/user/scratch", "main", "try the streaming api", journey.Scout,
+		live("s-scratch", "/home/user/scratch", "main", "try the streaming api", journey.Scout, "",
 			state.Snapshot{State: state.Idle, Since: base.Add(18 * time.Minute), Reason: "turn complete", Activity: "idle"}),
 
 		gone("a-docs", "/home/user/docs", "main", "update the readme", base.Add(-time.Hour)),
@@ -140,14 +141,14 @@ func TestT58LiveFleetGolden(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		" dev",                      // the tmux session, unnumbered and dim
-		" ops",                      // …in the order the pane list names them
-		" elsewhere",                // …and the live sessions tmux cannot place
-		"◆ test   Bash: pytest",     // what the session is doing, in the trail's words
-		"◆ design AskUserQuestion",  // …whatever the state
-		"◆ build  reconcile the st", // and a quiet row says what it was about
-		"5 archived · A browses",    // the last fleet row
-		"FLEET · live",              // which fleet this is
+		" dev",                     // the tmux session, unnumbered and dim
+		" ops",                     // …in the order the pane list names them
+		" elsewhere",               // …and the live sessions tmux cannot place
+		"◆ test   1216✓ 2✗",        // the result, in the trail's own words
+		"◆ design AskUserQuestion", // the call in flight, when nothing has finished
+		"◆ build  1190✓",           // and a quiet row still says how it went
+		"5 archived · A browses",   // the last fleet row
+		"FLEET · live",             // which fleet this is
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("live view is missing %q", want)
@@ -907,20 +908,25 @@ func TestFleetRowSaysWhatTheSessionIsDoing(t *testing.T) {
 	col := strings.Join(fleetText(m, 120, 30), "\n")
 
 	for _, want := range []string{
-		"● api       working",       // the state is the first line's whole job…
-		"◆ test   Bash: pytest",     // …and the second says what it is doing
-		"▲ infra     needs you",     //
-		"◆ design AskUserQuestion",  //
-		"○ tfstate   idle",          // a quiet row still names its class…
-		"◆ build  reconcile the st", // …and says what it was about
+		"● api ",            // the glyph is the state; the word would repeat it
+		"◆ test   1216✓ 2✗", // the second line carries the result
+		"▲ infra",           // …but the two states worth catching keep their words
+		"needs you",         //
+		"◆ build  1190✓",    // a quiet row still says how its last run went
 	} {
 		if !strings.Contains(col, want) {
 			t.Errorf("fleet is missing %q:\n%s", want, col)
 		}
 	}
-	// The address is gone from every row.
+	// The address is gone from every row, and so is the state word on the two
+	// states the glyph already tells you about.
 	if strings.Contains(col, ":1.0") || strings.Contains(col, "no pane") {
 		t.Errorf("a fleet row is still spending a line on the tmux address:\n%s", col)
+	}
+	for _, spelled := range []string{"working", "idle"} {
+		if strings.Contains(col, spelled) {
+			t.Errorf("a row spells %q, which its glyph already said:\n%s", spelled, col)
+		}
 	}
 }
 
