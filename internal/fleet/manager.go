@@ -388,7 +388,7 @@ func (e *entry) absorb(ev transcript.Event) {
 		e.sawEvent = true
 	}
 	if e.info.Title == "" && ev.Type == transcript.EventUser {
-		if title := promptTitle(ev.Text); title != "" {
+		if title := promptTitle(ev); title != "" {
 			e.info.Title = title
 		}
 	}

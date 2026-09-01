@@ -3,11 +3,11 @@
 
  ▌FLEET · live                  │  TRAIL · api                            [Lv1]
                                 │
-  dev                           │ ◉ "fix the 401 bug"                       38m
+  dev                        1m │ ◉ "fix the 401 bug"                       38m
  ▸1 ● api                    3m │ ╷
      ◆ test   1216✓ 2✗          │ ◆ scout  middleware.py                    31m
                                 │ │
-  elsewhere                   ▲ │ ◆ build  tokens.py                        25m
+  elsewhere               ▲  2m │ ◆ build  tokens.py                        25m
   2 ▲ infra      needs you   2m │ │
      ◆ design AskUserQuestion   │ ◆ test   pytest                    18✓ 2✗ 12m
                                 │ ├─◈ scout the payments module               ✓

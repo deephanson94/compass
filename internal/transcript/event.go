@@ -58,9 +58,15 @@ type Event struct {
 	// call to it failing: a quota refusal, an expired login, a 5xx. Status and
 	// ErrorKey are the API's own, e.g. 403 and "authentication_failed"; Text
 	// carries whatever the gateway said about it.
-	APIError    bool
-	Status      int
-	ErrorKey    string
+	APIError bool
+	Status   int
+	ErrorKey string
+
+	// IsMeta marks a user line the harness wrote rather than the person:
+	// stop-hook feedback, a skill's base directory, "Continue from where you
+	// left off.", the caveat that precedes a local command's output.
+	IsMeta bool
+
 	ToolUses    []ToolUse    // assistant tool_use blocks, in order
 	ToolResults []ToolResult // tool_result blocks inside user-type lines
 }
@@ -79,6 +85,7 @@ type rawLine struct {
 	IsSidechain bool            `json:"isSidechain"`
 	Message     json.RawMessage `json:"message"`
 	Content     json.RawMessage `json:"content"` // queue-operation: a plain string
+	IsMeta      bool            `json:"isMeta"`
 }
 
 type rawMessage struct {
@@ -127,6 +134,7 @@ func ParseLine(line []byte) (Event, error) {
 		GitBranch:   raw.GitBranch,
 		Version:     raw.Version,
 		IsSidechain: raw.IsSidechain,
+		IsMeta:      raw.IsMeta,
 	}
 	if raw.Timestamp != "" {
 		if ts, err := time.Parse(time.RFC3339, raw.Timestamp); err == nil {

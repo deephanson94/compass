@@ -201,18 +201,7 @@ func substantivePrompt(ev transcript.Event) bool {
 	if text == "" {
 		return false
 	}
-	return !envelopeTurn(text)
-}
-
-// envelopeTurn recognises the harness's automated user turns by their opening
-// tag: "<system-reminder>", "<task-notification>", "<wake …>".
-func envelopeTurn(text string) bool {
-	for _, tag := range []string{"<system-reminder", "<task-notification", "<wake"} {
-		if strings.HasPrefix(text, tag) {
-			return true
-		}
-	}
-	return false
+	return !ev.Machinery()
 }
 
 // observeResult merges a returning branch, records failure against the open
