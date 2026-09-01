@@ -51,7 +51,7 @@ func (m *Model) fleetColumn(w, h int) []string {
 	if m.archiveView {
 		title = "FLEET · archive"
 	}
-	rows := []string{dimStyle.Render(clip(title, w)), ""}
+	rows := []string{m.titleMark(panelFleet) + m.titleStyleFor(panelFleet).Render(clip(title, w-1)), ""}
 	if h > 2 {
 		rows = append(rows, m.fleetLines(w, h-2)...)
 	}

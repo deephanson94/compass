@@ -75,12 +75,14 @@ func (m *Model) readerTitle(w int) string {
 	case m.query != "":
 		right = "/" + m.query
 	}
-	left := dimStyle.Render(clip("READER · "+name, w-lipgloss.Width(right)-1))
-	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	mark := m.titleMark(panelReader)
+	body := w - 1
+	left := m.titleStyleFor(panelReader).Render(clip("READER · "+name, body-lipgloss.Width(right)-1))
+	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
-	return left + strings.Repeat(" ", gap) + dimStyle.Render(right)
+	return mark + left + strings.Repeat(" ", gap) + dimStyle.Render(right)
 }
 
 // enterReader is Tab on a Lv2 row: the reader is already open on that moment —
