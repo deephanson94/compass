@@ -55,6 +55,7 @@ func (m *Model) readerColumn(w, h int) []string {
 			Scroll:   m.scroll,
 			Unfolded: m.unfolded,
 			Query:    m.query,
+			Anchor:   m.anchor,
 		})
 		rows = append(rows, strings.Split(frame, "\n")...)
 	}
@@ -98,6 +99,7 @@ func (m *Model) enterReader() {
 // cursor move (M7 contract). A row the document does not reach yet leaves the
 // reader where it is rather than jumping it somewhere arbitrary.
 func (m *Model) anchorReader() {
+	m.anchor = -1
 	if m.cursor < 0 {
 		return
 	}
@@ -107,7 +109,7 @@ func (m *Model) anchorReader() {
 	}
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
-		m.scroll = line
+		m.scroll, m.anchor = line, line
 	}
 }
 

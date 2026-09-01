@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
@@ -35,6 +36,16 @@ type ReaderOpts struct {
 	Scroll        int          // top line index into the flattened document
 	Unfolded      map[int]bool // event indices whose tool output is unfolded
 	Query         string       // current search ("" = none); matches highlighted
+
+	// Anchor is the document line the trail's cursor stands on, marked the same
+	// way the trail marks that cursor: one inverse bar in each panel, saying
+	// literally that this row and this line are the same moment. -1 for none.
+	//
+	// Scrolling the anchor to the top would say it on its own, except that near
+	// the end of a document the scroll clamps and the anchor lands mid-panel
+	// with nothing naming it — which is exactly where a reader is looking when
+	// they walk the newest legs.
+	Anchor int
 }
 
 // RenderReader renders the Lv3 conversation panel: the session's events as one
@@ -58,9 +69,24 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 
 	rows := make([]string, 0, h)
 	for i := top; i < len(doc) && len(rows) < h; i++ {
-		rows = append(rows, doc[i].render(o.Query))
+		line := doc[i].render(o.Query)
+		if i == o.Anchor {
+			line = markAnchor(line, o.Width)
+		}
+		rows = append(rows, line)
 	}
 	return strings.Join(fit(rows, h), "\n")
+}
+
+// markAnchor inverts the anchored line across the panel, the way the trail
+// inverts its cursor row. The line is stripped back to its plain text first: a
+// reset left over from a tint would cancel the inversion halfway across.
+func markAnchor(line string, w int) string {
+	plain := strings.TrimRight(ansi.Strip(line), " ")
+	if pad := w - lipgloss.Width(plain); pad > 0 {
+		plain += strings.Repeat(" ", pad)
+	}
+	return cursorStyle.Render(plain)
 }
 
 // ReaderAnchor maps a moment on the trail to a line in the reader: the first

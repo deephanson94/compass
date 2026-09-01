@@ -7,8 +7,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/narrator"
 	"github.com/deephanson94/compass/internal/tmuxop"
 	"github.com/deephanson94/compass/internal/transcript"
@@ -464,4 +467,141 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 
 	press(m, " ")
 	still(t, "space")
+}
+
+// Your own prompt is a row the cursor stops on. It is a boundary rather than a
+// span of work, which is why it was skipped — but it is also the one row you
+// wrote yourself, and "show me what happened after I asked this" is the most
+// natural way into a session.
+func TestPromptsAreSelectable(t *testing.T) {
+	forceASCII(t)
+
+	tr := fixtureLv2Trail(fixtureBase)
+	if len(tr.Prompts) == 0 {
+		t.Fatal("the fixture has no prompts to select")
+	}
+	rows := TrailRows(tr, levelWaypoints)
+
+	var prompts int
+	for _, r := range rows {
+		if r.Kind == "prompt" {
+			prompts++
+			if r.Leg != -1 {
+				t.Errorf("a prompt row claims leg %d; it belongs to none", r.Leg)
+			}
+			if r.Time.IsZero() {
+				t.Error("a prompt row has no moment, so the reader cannot anchor to it")
+			}
+		}
+	}
+	if prompts != len(tr.Prompts) {
+		t.Errorf("%d prompt rows for %d prompts", prompts, len(tr.Prompts))
+	}
+
+	// The renderer hands out exactly as many cursor slots as TrailRows counts,
+	// or the cursor and the frame drift apart.
+	o := TrailOpts{Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 200,
+		Level: levelWaypoints, Cursor: 0}
+	if got := TrailCursorRow(tr, o); got < 0 {
+		t.Fatal("cursor 0 has no row in the document")
+	}
+	for i := range rows {
+		o.Cursor = i
+		if TrailCursorRow(tr, o) < 0 {
+			t.Errorf("row %d (%s %q) has no drawn line", i, rows[i].Kind, rows[i].Text)
+		}
+	}
+}
+
+// The reader marks the line the trail's cursor stands on, the same way the
+// trail marks that cursor. Scrolling it to the top says it only until the
+// scroll clamps near the end of a document — which is where a reader walking
+// the newest legs actually is.
+func TestTheReaderMarksTheAnchoredLine(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	m := followModel(120, 30)
+	pressTab(m) // Lv2: the cursor lands on the newest row
+	if m.anchor < 0 {
+		t.Fatal("entering Lv2 anchored nothing")
+	}
+
+	countMarks := func(frame string) int {
+		n := 0
+		for _, line := range strings.Split(frame, "\n") {
+			if strings.Contains(line, "\x1b[7m") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// Walk every row: each one marks exactly one line, and it is the anchor.
+	rows := TrailRows(m.trail, levelWaypoints)
+	marked := map[int]bool{}
+	for i := 0; i < len(rows); i++ {
+		frame := RenderReader(m.events, ReaderOpts{
+			Width: m.readerWidth(), Height: 20, Scroll: m.scroll,
+			Unfolded: m.unfolded, Anchor: m.anchor,
+		})
+		if got := countMarks(frame); got != 1 {
+			t.Fatalf("row %d (%s %q): %d lines marked, want exactly 1",
+				i, rows[i].Kind, rows[i].Text, got)
+		}
+		marked[m.anchor] = true
+		press(m, "k")
+	}
+	if len(marked) < 3 {
+		t.Errorf("the mark barely moved: %d distinct lines over %d rows", len(marked), len(rows))
+	}
+}
+
+// Without a cursor there is nothing to mark, and the reader must not invent a
+// line: Lv1 has no trail cursor at all.
+func TestNoCursorMarksNothing(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	m := followModel(120, 30)
+	if m.anchor != -1 {
+		t.Errorf("Lv1 anchored line %d; there is no cursor to follow", m.anchor)
+	}
+	frame := RenderReader(m.events, ReaderOpts{
+		Width: m.readerWidth(), Height: 20, Unfolded: m.unfolded, Anchor: m.anchor,
+	})
+	if strings.Contains(frame, "\x1b[7m") {
+		t.Error("the reader marked a line with no cursor to follow")
+	}
+
+	// And zooming back out drops it again.
+	pressTab(m)
+	if m.anchor < 0 {
+		t.Fatal("Lv2 anchored nothing")
+	}
+	m.zoomOut()
+	if m.anchor != -1 {
+		t.Errorf("leaving Lv2 left the anchor at %d", m.anchor)
+	}
+}
+
+// A trail that shrinks under the cursor — a session whose legs re-segment as
+// events arrive — leaves the cursor past the end. The anchor must go with it
+// rather than keep marking a line that no longer answers to any row.
+func TestAnAnchorDoesNotOutliveItsRow(t *testing.T) {
+	forceASCII(t)
+
+	m := followModel(120, 30)
+	pressTab(m)
+	if m.anchor < 0 {
+		t.Fatal("entering Lv2 anchored nothing")
+	}
+
+	m.SetTrail(journey.Trail{}) // the trail has nothing to stand on
+	m.anchorReader()
+	if m.anchor != -1 {
+		t.Errorf("the anchor is still %d, marking a line no row points at", m.anchor)
+	}
 }
