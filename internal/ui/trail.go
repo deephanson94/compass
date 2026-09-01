@@ -373,7 +373,9 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			}
 			forked = b.branches(tr, n.leg, o) > 0
 		} else {
-			b.node(promptRow(tr.Prompts[n.prompt], o.Now, o.Width))
+			// Selectable from Lv2, like a leg: it is the row you wrote, and the
+			// reader anchors to it as readily as to any leg's first line.
+			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width))
 			forked = false
 		}
 	}
@@ -411,6 +413,12 @@ func TrailRows(tr journey.Trail, level int) []TrailRow {
 
 	for _, n := range trailNodes(tr) {
 		if n.leg < 0 {
+			// Your own prompt. It is a boundary rather than a span of work, but
+			// it is also the row you wrote yourself, and "show me what happened
+			// after I asked this" is the most natural way into a session — so
+			// the cursor stops on it. Leg -1 says it belongs to no leg.
+			out = append(out, TrailRow{Time: tr.Prompts[n.prompt].At, Kind: "prompt",
+				Text: tr.Prompts[n.prompt].Text, Leg: -1})
 			continue
 		}
 		leg := tr.Legs[n.leg]

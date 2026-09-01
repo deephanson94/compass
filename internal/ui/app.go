@@ -142,6 +142,11 @@ type Model struct {
 	trailScroll int
 	trailPinned bool
 
+	// anchor is the reader line the Lv2 cursor's row lands on — marked, so the
+	// two panels say they are showing the same moment. -1 when there is no
+	// cursor to follow.
+	anchor int
+
 	// selectedKey is the session the deck is pointed at, held by its Key() —
 	// its transcript path. The session id is a label two sessions can share
 	// (M6 contract); the path is the one thing that never repeats.
@@ -194,6 +199,7 @@ func New(mgr *fleet.Manager) *Model {
 		level:        levelTrail,
 		cursor:       -1,
 		trailPinned:  true,
+		anchor:       -1,
 		unfolded:     map[int]bool{},
 		lastNeedsYou: -1,
 	}
@@ -792,7 +798,7 @@ func (m *Model) zoomOut() {
 		m.anchorReader()
 	case m.level > levelTrail:
 		m.level = levelTrail
-		m.cursor = -1
+		m.cursor, m.anchor = -1, -1
 	}
 }
 
@@ -917,7 +923,7 @@ func (m *Model) point(key string) {
 	m.docCache.valid = false
 	m.unfolded = map[int]bool{}
 	m.scroll = 0
-	m.cursor = -1
+	m.cursor, m.anchor = -1, -1
 	m.trailScroll, m.trailPinned = 0, true
 	m.query, m.draft, m.searching = "", "", false
 }
