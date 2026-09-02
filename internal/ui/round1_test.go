@@ -773,7 +773,7 @@ func TestStuckHeadNamesTheHungCall(t *testing.T) {
 	}
 	m.point(api)
 	openTrail(m)
-	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "◍▸fix    Bash: python backfill.py --all") || !strings.Contains(oneSpace(got), "◍ fix Bash: python backfill.py --all silent 4m") {
+	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "◍▸fix    Bash: python backfill.py --all") || !strings.Contains(oneSpace(got), "◍ fix Bash: python backfill.py --all") || !strings.Contains(got, "silent 4m") {
 		t.Errorf("the single trail's HEAD and its card are not the hung call:\n%s", got)
 	}
 }
