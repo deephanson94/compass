@@ -60,6 +60,9 @@ func TestBoardVerdictReadsTheTrailsTail(t *testing.T) {
 		{"red then fixed, not rerun", journey.Trail{Legs: []journey.Leg{red, fix}}, []string{"✗ red 18✓ 2✗ · edited since"}, nil},
 		{"red then rerun green", journey.Trail{Legs: []journey.Leg{red, fix, green}}, []string{"✓ green 312✓"}, []string{"✗ red", "edited since"}},
 		{"shipped", journey.Trail{Legs: []journey.Leg{green, ship}}, []string{"✓ shipped 19m ago", "✓ green 312✓"}, nil},
+		{"shipped on red", journey.Trail{Legs: []journey.Leg{red, fix, ship}}, []string{"✗ red 18✓ 2✗ · shipped on red"}, []string{"✓ shipped", "edited since"}},
+		{"rerunning", journey.Trail{Legs: []journey.Leg{red, fix, {Class: journey.Test, Label: "pytest", Start: base.Add(50 * time.Minute), Current: true}}},
+			[]string{"✗ red 18✓ 2✗ · rerunning for 10m"}, []string{"edited since"}},
 		{"agents out", journey.Trail{Legs: []journey.Leg{green}, Branches: []journey.Branch{
 			{Label: "a", Start: base.Add(50 * time.Minute)}, {Label: "b", Start: base.Add(55 * time.Minute)}, {Label: "c", Start: base, Done: true, End: base}}},
 			[]string{"◈2 out · oldest 10m"}, nil},
@@ -487,5 +490,31 @@ func TestFixturePanesNameInfra(t *testing.T) {
 	panes, _ := fixtureGroupedPanes()
 	if p, ok := panes[sessionKey("s-infra")]; !ok || p.Target == "" {
 		t.Fatalf("fixture: infra has no pane: %+v", tmuxop.Pane{})
+	}
+}
+
+// A tick row's figure ends where every other row's does.
+func TestTickRowIsFlushWithTheEdge(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{
+		{Class: journey.Build, Label: "a.go", Start: base, End: base.Add(5 * time.Minute), Files: []string{"a.go"}},
+		{Class: journey.Test, Label: "pytest", Start: base.Add(10 * time.Minute), End: base.Add(21 * time.Minute)},
+		{Class: journey.Scout, Label: "b.go", Start: base.Add(30 * time.Minute), Current: true},
+	}}
+	var tick, leg string
+	for _, line := range strings.Split(renderLv(tr, base.Add(40*time.Minute), 1, 44, 20), "\n") {
+		switch {
+		case strings.Contains(line, "?  11m"):
+			tick = line
+		case strings.HasPrefix(line, "◆ build"):
+			leg = line
+		}
+	}
+	if tick == "" || leg == "" {
+		t.Fatalf("fixture rows missing: tick %q, leg %q", tick, leg)
+	}
+	if strings.TrimRight(tick, " ") != tick || len([]rune(tick)) != len([]rune(leg)) {
+		t.Errorf("the tick's figure is not flush with the leg's:\n%q\n%q", leg, tick)
 	}
 }

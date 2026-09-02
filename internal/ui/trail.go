@@ -582,8 +582,9 @@ func tickRow(l journey.Leg, stroke string, width int) string {
 	if l.Class == journey.Test {
 		tail = "?  " + tail
 	}
-	room := width - lipgloss.Width(head) - 1
-	if room < len([]rune(tail)) {
+	// The figure ends where every other row's does: flush with the edge.
+	room := width - lipgloss.Width(head)
+	if room < len([]rune(tail))+1 {
 		return pad(head, width)
 	}
 	return head + padLeft(dimStyle.Render(tail), room)

@@ -368,32 +368,54 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 			break
 		}
 	}
+	shipped := ""
 	if last != nil && last.Class == journey.Ship {
-		parts = append(parts, "✓ shipped "+relAge(now, last.End)+" ago")
+		shipped = "✓ shipped " + relAge(now, last.End) + " ago"
 	}
 
-	// The newest test verdict, and whether anything has been changed since.
+	// The newest test verdict, and what has happened to it since: edits it
+	// has not been rerun over, a rerun in progress, or — the one to catch —
+	// a commit made on top of a red run.
+	verdict := ""
 	for i := len(tr.Legs) - 1; i >= 0; i-- {
 		l := tr.Legs[i]
 		badge := legBadge(l)
 		if badge == "" {
 			continue
 		}
+		red := strings.Contains(badge, "✗")
 		word := "✓ green"
-		if strings.Contains(badge, "✗") {
+		if red {
 			word = "✗ red"
 		}
-		verdict := word + " " + badge
-		// A red run with a fix or build after it is a verdict the session has
-		// since acted on: say so, or the row reads as the fix's own result.
+		verdict = word + " " + badge
+		edited, shippedSince, rerunning := false, false, time.Time{}
 		for j := i + 1; j < len(tr.Legs); j++ {
-			if c := tr.Legs[j].Class; c == journey.Fix || c == journey.Build {
-				verdict += " · edited since"
-				break
+			switch c := tr.Legs[j]; {
+			case c.Class == journey.Fix || c.Class == journey.Build:
+				edited = true
+			case c.Class == journey.Ship:
+				shippedSince = true
+			case c.Class == journey.Test && c.Current:
+				rerunning = c.Start
 			}
 		}
-		parts = append(parts, verdict)
+		switch {
+		case red && shippedSince:
+			verdict += " · shipped on red"
+			shipped = "" // the same fact, and this is the way to say it
+		case !rerunning.IsZero():
+			verdict += " · rerunning for " + relAge(now, rerunning)
+		case edited:
+			verdict += " · edited since"
+		}
 		break
+	}
+	if shipped != "" {
+		parts = append(parts, shipped)
+	}
+	if verdict != "" {
+		parts = append(parts, verdict)
 	}
 
 	if len(parts) == 0 && last != nil {
