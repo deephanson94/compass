@@ -563,7 +563,9 @@ func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int
 		if pulse {
 			glyph = glyphBreath
 		}
-		age = "← " + age
+		// HEAD is still moving: its figure is how long it has been, measured
+		// from its start to now rather than to an end it does not have yet.
+		age = "← " + relAge(now, l.Start)
 	}
 	head := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
 

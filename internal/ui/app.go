@@ -36,6 +36,7 @@ const trailChrome = 2
 
 // The zoom levels Tab moves between (SPEC §2.3).
 const (
+	levelBoard     = 0 // every trail that fits, side by side (decision #16)
 	levelTrail     = 1 // the graph of legs
 	levelWaypoints = 2 // every leg unfolded
 	levelReader    = 3 // the conversation itself
@@ -61,6 +62,11 @@ type fleetMsg struct {
 	events   []transcript.Event
 	todos    []todo.Item
 	trailFor string // the session the payload belongs to; "" if none was polled
+
+	// trails is every board column's journey, keyed by session; nil when the
+	// board was not polled (a narrow terminal). The selected session's is in
+	// here and in trail both.
+	trails map[string]journey.Trail
 }
 
 // Narrator is the deck's view of the narration service (internal/narrator):
@@ -167,6 +173,11 @@ type Model struct {
 	pulse     bool // HEAD's breath is on its off-beat
 	readonly  bool
 
+	// The board's data: one trail per column, and each column's narrated
+	// labels. The selected session's trail is here as well as in trail.
+	trails      map[string]journey.Trail
+	boardLabels map[string]map[string]string
+
 	// showMirror opens the live mirror of the selected pane in the middle of
 	// the deck at Lv1. Off by default (decision #15): the CLI it mirrors is
 	// one Enter away, and the columns are worth more to the trail. `m` flips
@@ -202,7 +213,7 @@ func New(mgr *fleet.Manager) *Model {
 		runner:       tmuxop.RealRunner{},
 		proc:         tmuxop.RealProc{},
 		now:          time.Now(),
-		level:        levelTrail,
+		level:        levelBoard,
 		cursor:       -1,
 		trailPinned:  true,
 		anchor:       -1,
@@ -263,6 +274,12 @@ func (m *Model) SetEvents(events []transcript.Event) {
 // exported so a harness can render a fixed-size view).
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
+	// The board needs width. A deck that opened on it and then found itself
+	// in a narrow terminal is a single trail from here on, so the first Tab
+	// does something visible.
+	if m.level == levelBoard && !m.boardShown() {
+		m.level = levelTrail
+	}
 }
 
 // SetSessions installs a fleet snapshot as of now, without polling.
@@ -343,6 +360,7 @@ func (m *Model) refresh() tea.Cmd {
 	if s, ok := m.selected(); ok {
 		path, sessionID = s.Info.TranscriptPath, s.Info.ID
 	}
+	targets := m.boardTargets()
 	return func() tea.Msg {
 		now := time.Now()
 		sessions, err := mgr.Refresh(now)
@@ -358,6 +376,20 @@ func (m *Model) refresh() tea.Cmd {
 			if selected != "" && path != "" {
 				msg.trail, msg.events = feeds.poll(selected, path)
 				msg.hasTrail = true
+			}
+			// The board's columns. Each feed reads only what its transcript
+			// has grown since the last poll; the first poll of a new column
+			// replays its whole journey once, the same as selecting it does.
+			if len(targets) > 0 {
+				msg.trails = make(map[string]journey.Trail, len(targets))
+				for _, t := range targets {
+					if t.key == selected && msg.hasTrail {
+						msg.trails[t.key] = msg.trail
+						continue
+					}
+					tr, _ := feeds.poll(t.key, t.path)
+					msg.trails[t.key] = tr
+				}
 			}
 		}
 		return msg
@@ -442,8 +474,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(captureTick(), m.capture())
 
 	case breathTickMsg:
-		// Only a working HEAD breathes; everything else redraws on data.
-		if s, ok := m.selected(); ok && s.Snap.State == state.Working {
+		// Only a working HEAD breathes; everything else redraws on data. On
+		// the board every working column has one.
+		if m.anyWorking() {
 			m.pulse = !m.pulse
 		} else {
 			m.pulse = false
@@ -461,6 +494,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if first && len(m.sessions) > 0 {
 			return m, tea.Batch(m.titleCmd(), m.relistPanes())
 		}
+		m.refreshBoard(msg.trails)
 		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
 			items := msg.todos
 			if msg.hasTrail {
@@ -580,6 +614,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case !m.showMirror:
 		case m.width < deckWideCols:
 			m.note = fmt.Sprintf("the mirror needs %d columns; this terminal has %d", deckWideCols, m.width)
+		case m.level == levelBoard:
+			m.note = "the mirror shows on one trail (tab)"
 		case m.level != levelTrail:
 			m.note = "the mirror shows at Lv1 (esc to zoom out)"
 		}
@@ -809,6 +845,13 @@ func (m *Model) keepCursorVisible() {
 // itself. At the bottom the key says so rather than doing nothing.
 func (m *Model) zoomIn() {
 	switch {
+	case m.level < levelTrail:
+		m.level = levelTrail
+		// The column's trail is already in hand: the single trail opens on it
+		// rather than empty until the next poll.
+		if tr, ok := m.trails[m.selectedKey]; ok {
+			m.trail = tr
+		}
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
 		// Lv2 is the trail with a cursor on it, and the middle panel reading
@@ -821,8 +864,9 @@ func (m *Model) zoomIn() {
 	}
 }
 
-// zoomOut is Shift+Tab: one level back up. At Lv1 it is a no-op — zooming out
-// of the trail would be zooming out of compass.
+// zoomOut is Shift+Tab: one level back up. From the single trail it is the
+// board, on a terminal wide enough for one; on a narrow terminal Lv1 is the
+// top, and zooming out of the trail would be zooming out of compass.
 func (m *Model) zoomOut() {
 	switch {
 	case m.level > levelWaypoints:
@@ -832,6 +876,8 @@ func (m *Model) zoomOut() {
 	case m.level > levelTrail:
 		m.level = levelTrail
 		m.cursor, m.anchor = -1, -1
+	case m.level > levelBoard && m.boardShown():
+		m.level = levelBoard
 	}
 }
 
@@ -876,6 +922,22 @@ func (m *Model) attach() tea.Cmd {
 }
 
 // selected is the session the deck is pointed at.
+// anyWorking says whether a HEAD on screen is moving: the selected session's
+// on a single trail, any column's on the board.
+func (m *Model) anyWorking() bool {
+	if m.level == levelBoard && m.boardShown() {
+		n, _ := boardColumns(m.width - 2*edgePad)
+		for _, key := range m.boardKeys(n) {
+			if s, ok := m.session(key); ok && s.Snap.State == state.Working {
+				return true
+			}
+		}
+		return false
+	}
+	s, ok := m.selected()
+	return ok && s.Snap.State == state.Working
+}
+
 func (m *Model) selected() (fleet.Session, bool) {
 	if len(m.sessions) == 0 {
 		return fleet.Session{}, false
@@ -1140,6 +1202,8 @@ func (m *Model) footerLine(w int) string {
 		keys = "? or esc closes help"
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
+	case m.level == levelBoard && m.boardShown():
+		keys = "j/k move · " + m.enterKeymap() + " · tab one trail · g grab · ? help · q quit"
 	case m.level >= levelReader:
 		keys = "j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints:
@@ -1237,6 +1301,9 @@ func twoColumnFleet(inner int) int {
 // the header carries the fleet's alarm and the trail's title names the
 // selected session.
 func (m *Model) deckLines(w, h int) []string {
+	if m.level == levelBoard && m.boardShown() {
+		return m.boardLines(w, h)
+	}
 	fw, mw, tw := m.layout(w)
 	if fw == 0 {
 		one := m.trailColumn

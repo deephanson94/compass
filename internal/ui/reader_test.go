@@ -252,6 +252,7 @@ func followModel(w, h int) *Model {
 	m.SetTrail(fixtureLv2Trail(fixtureBase))
 	m.SetEvents(followEvents(fixtureBase))
 	m.SetMirror(fixtureFrame)
+	openTrail(m)
 	return m
 }
 

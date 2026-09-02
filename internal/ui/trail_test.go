@@ -724,6 +724,7 @@ func TestThePlanFromTheTranscriptFeedsTheGhosts(t *testing.T) {
 	m.SetSize(120, 30)
 	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
 	m.point(sessionKey("s-api"))
+	openTrail(m)
 
 	tr := fixtureTrail(fixtureBase)
 	tr.Tasks = []journey.Task{

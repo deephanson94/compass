@@ -103,6 +103,7 @@ func groupedModel(w, h int) *Model {
 	m.point(sessionKey("s-api"))
 	m.SetTrail(fixtureTrail(fixtureBase))
 	m.SetMirror(fixtureFrame)
+	openTrail(m)
 	return m
 }
 
@@ -119,6 +120,15 @@ func pressEnter(m *Model) {
 // pressTab sends Tab, which deepens the zoom.
 func pressTab(m *Model) {
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+}
+
+// openTrail takes a deck that opened on the board (the default on a wide
+// terminal, decision #16) to the single trail, the level the M1–M7 goldens
+// and contracts were written against. A narrow deck is already there.
+func openTrail(m *Model) {
+	if m.level == levelBoard {
+		pressTab(m)
+	}
 }
 
 // pressCtrl sends a control key — ctrl+d and ctrl+u are no runes either.
@@ -1030,6 +1040,7 @@ func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
 		m.SetPaneOrder(list)
 		m.point(sessionKey("s-api"))
 		m.SetTrail(fixtureTrail(fixtureBase))
+		openTrail(m)
 		return m
 	}
 
@@ -1107,6 +1118,7 @@ func TestTheFleetShowsTheAPIErrorRatherThanTheStaleOutcome(t *testing.T) {
 	m := New(nil)
 	m.SetSize(120, 24)
 	m.SetSessions([]fleet.Session{blocked}, base.Add(40*time.Minute))
+	openTrail(m)
 	press(m, "m") // the mirror's no-pane fallback is where the words are read
 
 	got := m.View()

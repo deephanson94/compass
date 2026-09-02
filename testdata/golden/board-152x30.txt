@@ -1,0 +1,30 @@
+ ⌂ compass                                                                                                                                   ▲1  ●2  ○2
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ ▌FLEET · live                  │  3 ▲ infra             needs you   2m │ ▸1 ● api                           3m │  2 ● webapp                       40s
+                                │                                       │                                       │
+  dev                       40s │ ◉ "tighten the vpc security grou… 39m │ ◉ "fix the 401 bug"               38m │ ◉ "flake in the checkout suite"   35m
+ ▸1 ● api                    3m │ ╷                                     │ ╷                                     │ ╷
+     ◆ test   1216✓ 2✗          │ ◆ scout  main.tf                  18m │ ◆ scout  middleware.py             5m │ ◆ test   pytest             18✓ 2✗ 3m
+                                │ │                                     │ │                                     │ │
+  2 ● webapp                40s │ ● design AskUserQuestion        ← 19m │ ◆ build  tokens.py                12m │ ● fix    checkout.py            ← 30m
+     ◆ test   18✓ 2✗            │                                       │ │                                     │
+                                │                                       │ ◆ test   pytest             18✓ 2✗ 8m │
+  ops                     ▲  2m │                                       │ ├─◈ scout the payments module       ✓ │
+  3 ▲ infra      needs you   2m │                                       │ ● fix    tokens.py               ← 3m │
+     ◆ design AskUserQuestion   │                                       │                                       │
+                                │                                       │                                       │
+  4 ○ tfstate               15m │                                       │                                       │
+     ◆ build  1190✓             │                                       │                                       │
+                                │                                       │                                       │
+  elsewhere                 22m │                                       │                                       │
+  5 ○ scratch               22m │                                       │                                       │
+     ◆ scout  try the streamin… │                                       │                                       │
+                                │                                       │                                       │
+ 5 archived · A browses         │                                       │                                       │
+                                │                                       │                                       │
+                                │                                       │                                       │
+                                │                                       │                                       │
+                                │                                       │                                       │
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ j/k move · enter attach (prefix d returns) · tab one trail · g grab · ? help · q quit

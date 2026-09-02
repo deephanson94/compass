@@ -177,6 +177,7 @@ func deckModel(w, h int, panes map[string]tmuxop.Pane, frame string) *Model {
 	// had nothing to put in it.
 	m.SetEvents(followEvents(fixtureBase))
 	m.SetMirror(frame)
+	openTrail(m)
 	return m
 }
 

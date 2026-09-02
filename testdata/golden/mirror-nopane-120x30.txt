@@ -11,7 +11,7 @@
                                 │ the expiry comparison the failing tests      │ │
   3 ○ docs                  22m │ object to actually lives                     │ ◆ test   pytest              18✓ 2✗ 8m
      ◆ docs   46✓               │                                              │ ├─◈ scout the payments module        ✓
-                                │ moment30 a syntax error at tokens.py line 88 │ ● fix    tokens.py                ← 2m
+                                │ moment30 a syntax error at tokens.py line 88 │ ● fix    tokens.py                ← 3m
                                 │ was hiding the real fault; fixing that first │
                                 │ and rerunning                                │
                                 │                                              │
