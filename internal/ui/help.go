@@ -19,6 +19,10 @@ var helpKeys = [][2]string{
 	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
 	{"G", "back to the present: the newest row"},
 	{"m", "show / hide the live mirror (on one trail)"},
+	{"a", "ask: a claude grounded in this session's transcript"},
+	{"space", "reader: fold / unfold a tool output"},
+	{"/ n N", "reader: search, next, previous"},
+	{"esc", "one level out (a standing search clears first)"},
 	{"?", "this help"},
 	{"q", "quit"},
 }
@@ -45,13 +49,36 @@ func helpLines(w, h int) []string {
 		})
 	}
 	lines := append(helpKeyLines(w), "")
-	lines = append(lines, helpLegendLines(w, false)...)
+	legend := helpLegendLines(w, false)
+	if h > 0 && len(lines)+len(legend) > h {
+		// Too short for the whole legend: keep what a reader cannot infer —
+		// the glyphs and the class names — and drop the sentences around
+		// them, before any key is cut. A reader who cannot reach the keys
+		// cannot leave the overlay.
+		legend = helpLegendCore(legend)
+	}
+	lines = append(lines, legend...)
 	if h > 0 && len(lines) > h {
-		// Cut from the bottom, which is the legend. A reader who cannot reach
-		// the keys cannot leave the overlay.
 		lines = lines[:h]
 	}
 	return lines
+}
+
+// helpLegendCore is the legend with its prose removed: the fleet and trail
+// glyph lines and the class names, which are the lines nothing else on screen
+// explains. Everything else in the legend is a sentence a reader can live
+// without on a short terminal.
+func helpLegendCore(legend []string) []string {
+	var core []string
+	for _, l := range legend {
+		for _, keep := range []string{"fleet:", "trail:  ", "seven classes", "scout"} {
+			if strings.Contains(l, keep) {
+				core = append(core, l)
+				break
+			}
+		}
+	}
+	return core
 }
 
 func helpKeyLines(w int) []string {
@@ -71,8 +98,10 @@ func helpLegendLines(w int, roomy bool) []string {
 		"",
 		dimStyle.Render(clip(focusMark+" marks the panel your keys are in — tab moves it", w)),
 		dimStyle.Render(clip("fleet:  ● working  ▲ needs you  ◍ stuck  ○ idle", w)),
-		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now  ◈ subagent", w)),
+		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent", w)),
+		dimStyle.Render(clip("        ◈ ⋯ still out · ✓ back, with its finding", w)),
 		dimStyle.Render(clip("        ◌ planned — Claude's own next moves", w)),
+		dimStyle.Render(clip("board:  bright = something unread · dim = read, or a day old", w)),
 		"",
 		dimStyle.Render(clip("every leg is one of seven classes, named on its row:", w)),
 	}

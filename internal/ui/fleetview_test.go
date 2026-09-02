@@ -309,15 +309,32 @@ func TestT60FleetScrolling(t *testing.T) {
 				if visible > h-tail || visible < 1 {
 					t.Fatalf("step %d: column rendered %d list lines in a height of %d", step, visible, h)
 				}
-				for i := 0; i < visible; i++ {
-					if lines[i] != full[off+i] {
+				// A cut list frames itself: "▴ N more above" on its first
+				// row when it is scrolled, "▾ N more below" on its last when
+				// it does not reach the end. Neither is a row of the list.
+				first, last := 0, visible
+				if strings.HasPrefix(lines[0], "▴") {
+					if off == 0 {
+						t.Fatalf("step %d: a list at its top claims rows above: %q", step, lines[0])
+					}
+					first = 1
+				} else if off > 0 {
+					t.Fatalf("step %d: a scrolled list does not say what is above it: %q", step, lines[0])
+				}
+				if strings.HasPrefix(lines[visible-1], "▾") {
+					last = visible - 1
+				} else if off+visible-first < len(full) {
+					t.Fatalf("step %d: a cut list does not say what is below it: %q", step, lines[visible-1])
+				}
+				for i := first; i < last; i++ {
+					if lines[i] != full[off+i-first] {
 						t.Fatalf("step %d line %d: window is not the list at offset %d\n got %q\nwant %q",
-							step, i, off, lines[i], full[off+i])
+							step, i, off, lines[i], full[off+i-first])
 					}
 				}
-				if selStart < off || selEnd >= off+visible {
+				if selStart < off || selEnd >= off+last-first {
 					t.Fatalf("step %d: selected rows %d-%d fall outside the window %d-%d",
-						step, selStart, selEnd, off, off+visible-1)
+						step, selStart, selEnd, off, off+last-first-1)
 				}
 				marked := 0
 				for _, l := range lines[:visible] {
@@ -530,21 +547,23 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 		t.Errorf("rendered order = %v, want %v", got, want)
 	}
 
-	// Numbering runs flat down the sessions, groups ignored.
+	// Numbering is the board's — the view order, which is the fleet's own
+	// priority order — not the pane order the groups draw in. `3` has to mean
+	// the same session at every level, and the board has no groups.
 	nums := map[string]int{}
 	for _, r := range rows {
 		if !r.header {
 			nums[m.sessions[r.sess].Info.ID] = r.num
 		}
 	}
-	for id, want := range map[string]int{"s-ops": 1, "s-w9": 2, "s-w10": 3} {
+	for id, want := range map[string]int{"s-w10": 1, "s-w9": 2, "s-ops": 3} {
 		if nums[id] != want {
 			t.Errorf("%s is numbered %d, want %d", id, nums[id], want)
 		}
 	}
-	m.selectIndex(2) // the third rendered session
-	if m.selectedKey != sessionKey("s-w10") {
-		t.Errorf("3 selected %q, want s-w10", m.selectedKey)
+	m.selectIndex(2) // the third in view order, drawn first under [ops]
+	if m.selectedKey != sessionKey("s-ops") {
+		t.Errorf("3 selected %q, want s-ops", m.selectedKey)
 	}
 }
 

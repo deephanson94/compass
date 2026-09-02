@@ -643,8 +643,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.ask()
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
-		// stays selected, per view, so coming back lands where you left.
+		// stays selected, per view, so coming back lands where you left. It is
+		// a list, not a board: three hundred columns of "reading its
+		// transcript…" answered nothing, and the list has the prompts.
 		m.toggleArchive()
+		if m.level == levelBoard {
+			m.level = levelTrail
+		}
 		return m, m.refresh()
 	case "m":
 		m.showMirror = !m.showMirror
@@ -660,11 +665,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.capture()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		i := int(key[0] - '1')
-		if m.level == levelBoard && m.boardShown() {
-			if !m.boardSelect(i) {
-				m.note = fmt.Sprintf("no session %d on the board", i+1)
-			}
-		} else if !m.selectIndex(i) {
+		if !m.selectIndex(i) {
 			m.note = fmt.Sprintf("no session %d", i+1)
 		}
 		return m, m.refresh()
@@ -682,6 +683,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.cursorMove(-1)
 			return m, nil
+		case "ctrl+d":
+			// Half a page of rows: the cursor is what the viewport follows
+			// here, so the cursor is what moves (SPEC §3).
+			m.cursorMove(m.trailHalfPage())
+			return m, nil
+		case "ctrl+u":
+			m.cursorMove(-m.trailHalfPage())
+			return m, nil
 		case "G":
 			// G means the same thing at every depth: back to the present. At
 			// Lv2 the cursor is what the viewport follows, so it is the cursor
@@ -697,6 +706,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.note = "nothing is waiting on you"
 				return m, nil
 			}
+			m.note = "→ " + m.selectedLocation()
 			return m, tea.Batch(m.refresh(), m.attach())
 		}
 	default: // levelTrail, and the board
@@ -744,6 +754,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.note = "nothing is waiting on you"
 				return m, nil
 			}
+			m.note = "→ " + m.selectedLocation()
 			return m, tea.Batch(m.refresh(), m.attach())
 		}
 	}
@@ -780,6 +791,21 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		m.jumpMatch(-1)
 	}
 	return m, nil
+}
+
+// firstRowInView is the first selectable row at or below the trail
+// viewport's top, or -1 when none is.
+func (m *Model) firstRowInView() int {
+	w, h := m.trailBox()
+	o := m.trailOpts(w, h)
+	doc, sel := trailDoc(m.trail, o)
+	top := trailTop(len(doc), o)
+	for i := top; i < len(sel); i++ {
+		if sel[i] >= 0 {
+			return sel[i]
+		}
+	}
+	return -1
 }
 
 // cursorMove walks the Lv2 selection over the trail's selectable rows.
@@ -926,8 +952,13 @@ func (m *Model) zoomIn() {
 		}
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
-		// Lv2 is the trail with a cursor on it, and the middle panel reading
-		// whatever that cursor stands on: cursorMove(0) settles both.
+		// Lv2 is the trail with a cursor on it. A trail scrolled back to
+		// some earlier hour puts the cursor there — on the first row in
+		// view — rather than at the present: ten presses of ctrl+u are a
+		// place, and Tab used to throw it away.
+		if !m.trailPinned {
+			m.cursor = m.firstRowInView()
+		}
 		m.cursorMove(0)
 	case m.level < levelReader:
 		m.enterReader()
@@ -1083,10 +1114,19 @@ func (m *Model) point(key string) {
 		return
 	}
 	m.selectedKey = key
-	m.trail = journey.Trail{}
-	m.todos = nil
+	// The board already holds this session's trail, plan and labels: use
+	// them, rather than blanking the panel until the next poll — which, on a
+	// terminal too narrow for the board, made every j/k show "nothing yet"
+	// over a session with a hundred legs, for a second or for good.
+	m.trail, m.todos, m.labels = journey.Trail{}, nil, nil
+	if tr, ok := m.trails[key]; ok {
+		m.trail = tr
+		m.todos = planItems(tr.Tasks)
+		if l := m.boardLabels[key]; l != nil {
+			m.labels = l
+		}
+	}
 	m.mirror = ""
-	m.labels = nil
 	m.events = nil
 	m.docCache.valid = false
 	m.unfolded = map[int]bool{}
@@ -1098,13 +1138,27 @@ func (m *Model) point(key string) {
 
 // selectIndex is the `1`–`9` keys: an index into the rendered order, groups
 // and their headers ignored.
-func (m *Model) selectIndex(i int) bool {
-	order := m.fleetOrder()
-	if i < 0 || i >= len(order) {
-		return false
+//
+// The numbers are the view's order — urgent first — at every level: the
+// board prints them on its columns and the fleet list prints the same ones
+// beside its rows, however it groups them. A number that meant one session
+// on the board and another one Tab later was how you attach to the wrong
+// pane.
+// selectedLocation names the selected session and, when it has one, its pane:
+// "infra · ops:0.0". It is what `g` says as it goes.
+func (m *Model) selectedLocation() string {
+	s, ok := m.selected()
+	if !ok {
+		return "—"
 	}
-	m.point(m.sessions[order[i]].Info.Key())
-	return true
+	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
+		return sessionName(s.Info) + " · " + pane.Target
+	}
+	return sessionName(s.Info)
+}
+
+func (m *Model) selectIndex(i int) bool {
+	return m.boardSelect(i)
 }
 
 // move is j/k: one session down or up the rendered order, skipping headers —
@@ -1246,20 +1300,42 @@ func (m *Model) statusChips() string {
 		return dimStyle.Render("scanning…")
 	}
 	counts := map[state.State]int{}
+	oldest := map[state.State]time.Time{}
 	for _, s := range m.sessions {
 		if !s.Live {
 			continue
 		}
 		counts[s.Snap.State]++
+		if st := s.Snap.State; st == state.NeedsYou || st == state.Stuck {
+			if at, ok := oldest[st]; !ok || s.Snap.Since.Before(at) {
+				oldest[st] = s.Snap.Since
+			}
+		}
 	}
 	var parts []string
 	for _, st := range []state.State{state.NeedsYou, state.Stuck, state.Working, state.Idle} {
-		if n := counts[st]; n > 0 {
-			parts = append(parts, stateStyle(st).Render(fmt.Sprintf("%s%d", fleet.Glyph(st), n)))
+		n := counts[st]
+		if n == 0 {
+			continue
 		}
+		chip := fmt.Sprintf("%s%d", fleet.Glyph(st), n)
+		// The two states you must not miss carry their wait: "▲1 4m" is a
+		// change you can read from across the room, where a census is not.
+		if at, ok := oldest[st]; ok {
+			chip += " " + m.age(at)
+		}
+		parts = append(parts, stateStyle(st).Render(chip))
+	}
+	if m.archiveView {
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("archive %d", m.archivedCount())))
 	}
 	if len(parts) == 0 {
 		return dimStyle.Render("○ all quiet")
+	}
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && !m.archiveView {
+		// Calm, said aloud: the absence of a warm glyph is the design, and
+		// in monochrome an absence is also what a clipped header looks like.
+		parts = append(parts, dimStyle.Render("all calm"))
 	}
 	return strings.Join(parts, "  ")
 }

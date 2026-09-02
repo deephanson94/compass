@@ -1,18 +1,18 @@
- ⌂ compass                                                                                                   ▲1  ●2  ○2
+ ⌂ compass                                                                                                ▲1 2m  ●2  ○2
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
  ▌FLEET · live                              │  TRAIL · api                                                        [Lv1]
                                             │
   dev                                   40s │ ◉ "fix the 401 bug"                                                   38m
- ▸1 ● api                                3m │ ╷
+ ▸2 ● api                                3m │ ╷
      ◆ test   1216✓ 2✗                      │ ◆ scout  middleware.py                                                 5m
                                             │ │
-  2 ● webapp                            40s │ ◆ build  tokens.py                                                    12m
+  3 ● webapp                            40s │ ◆ build  tokens.py                                                    12m
      ◆ test   18✓ 2✗                        │ │
                                             │ ◆ test   pytest                                                 18✓ 2✗ 8m
-  ops                                 ▲  2m │ ├─◈ scout the payments module                                           ✓
-  3 ▲ infra                  needs you   2m │ ● fix    tokens.py                                                   ← 3m
-     ◆ design AskUserQuestion               │
+  ops                                 ▲  2m │ ├─◈ scout the payments module                                        ✓ 7m
+  1 ▲ infra                  needs you   2m │ │  └ came back with no report
+     ◆ design AskUserQuestion               │ ● fix    tokens.py                                                 for 3m
                                             │
   4 ○ tfstate                           15m │
      ◆ build  1190✓                         │

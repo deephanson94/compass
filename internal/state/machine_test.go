@@ -629,3 +629,24 @@ func TestTheHarnessDoesNotStartATurn(t *testing.T) {
 		t.Errorf("state is %v after ten quiet minutes, want idle: nobody asked for anything", got.State)
 	}
 }
+
+// An open AskUserQuestion is the question itself, with its options, not the
+// tool's name: "AskUserQuestion" on a needs-you row told the person they had
+// to go and look; the question tells them what to decide.
+func TestAskedQuestionIsTheActivity(t *testing.T) {
+	input := `{"questions":[{"question":"Open port 22 to the office CIDR only, or keep the bastion?\nSecond line nobody sees","header":"SSH","options":[{"label":"office CIDR","description":"x"},{"label":"keep bastion","description":"y"}]}]}`
+	m := machineWith(
+		userPrompt(0, "tighten the security groups"),
+		assistantTool(time.Second, "toolu_q", "AskUserQuestion", input),
+	)
+	snap := m.Evaluate(at(5 * time.Second))
+	assertState(t, snap, state.NeedsYou)
+	assertActivity(t, snap, "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]")
+
+	// A malformed or empty input falls back to the tool's name.
+	m = machineWith(
+		userPrompt(0, "go"),
+		assistantTool(time.Second, "toolu_q", "AskUserQuestion", `{"questions":[]}`),
+	)
+	assertActivity(t, m.Evaluate(at(5*time.Second)), "AskUserQuestion")
+}

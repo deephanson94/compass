@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // Scenarios are whole fleets, built to be lived in rather than asserted on:
@@ -58,7 +60,7 @@ func trailOf(start time.Time, prompt string, current bool, legs ...legSpec) jour
 	for i, l := range legs {
 		leg := journey.Leg{Class: l.class, Label: l.label, Start: at, End: at.Add(l.dur), Files: l.files, Votes: 3}
 		if l.tests != "" {
-			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestRun, Text: strings.ReplaceAll(l.tests, "✓", " passed ·"), Short: l.tests, At: leg.End})
+			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestRun, Text: runSummary(l.tests), Short: l.tests, At: leg.End})
 		}
 		for _, f := range l.fails {
 			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestFail, Text: f, At: leg.End})
@@ -70,6 +72,43 @@ func trailOf(start time.Time, prompt string, current bool, legs ...legSpec) jour
 		at = leg.End.Add(30 * time.Second)
 	}
 	return tr
+}
+
+// runSummary spells a badge the way the parser would: "18✓ 2✗" → "18 passed · 2 failed".
+func runSummary(short string) string {
+	var parts []string
+	for _, f := range strings.Fields(short) {
+		switch {
+		case strings.HasSuffix(f, "✓"):
+			parts = append(parts, strings.TrimSuffix(f, "✓")+" passed")
+		case strings.HasSuffix(f, "✗"):
+			parts = append(parts, strings.TrimSuffix(f, "✗")+" failed")
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// eventsFor writes a plausible conversation behind a trail, so Lv3 has a
+// document to open: the prompts as user turns, and for every leg an
+// assistant line saying what it did — enough to anchor on, not a transcript.
+func eventsFor(tr journey.Trail) []transcript.Event {
+	var evs []transcript.Event
+	n := 0
+	add := func(t transcript.EventType, at time.Time, text string) {
+		n++
+		evs = append(evs, transcript.Event{Type: t, UUID: fmt.Sprintf("e%d", n), SessionID: "s", Timestamp: at, Text: text})
+	}
+	for _, p := range tr.Prompts {
+		add(transcript.EventUser, p.At, p.Text)
+	}
+	for _, l := range tr.Legs {
+		add(transcript.EventAssistant, l.Start, fmt.Sprintf("%s: %s", l.Class, l.Label))
+		for _, w := range l.Waypoints {
+			add(transcript.EventAssistant, w.At, w.Text)
+		}
+	}
+	sort.Slice(evs, func(i, j int) bool { return evs[i].Timestamp.Before(evs[j].Timestamp) })
+	return evs
 }
 
 func withPrompt(tr journey.Trail, at time.Time, text string) journey.Trail {
@@ -211,12 +250,19 @@ func sceneFewOngoing() scene {
 	tr := map[string]journey.Trail{}
 	var ss []fleet.Session
 
-	ss = append(ss, sess("infra", "infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", state.NeedsYou, n.Add(-4*time.Minute), journey.Design, "", "waiting on your answer", "AskUserQuestion"))
+	ss = append(ss, sess("infra", "infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", state.NeedsYou, n.Add(-4*time.Minute), journey.Design, "", "waiting on your answer", "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]"))
 	tr[sessionKey("infra")] = trailOf(n.Add(-35*time.Minute), "tighten the vpc security groups without breaking the bastion", true,
 		legSpec{journey.Scout, "main.tf and the bastion rules", 14 * time.Minute, []string{"main.tf", "bastion.tf"}, "", nil},
 		legSpec{journey.Design, "AskUserQuestion", 4 * time.Minute, nil, "", nil},
 	)
 	ss = append(ss, sess("api", "api", "/home/user/api", "claude/auth-fx", "fix the 401 bug", state.Working, n.Add(-3*time.Minute), journey.Fix, "1214✓ 2✗", "tool call in flight", "Edit: tokens.py"))
+	defer func() {
+		tr[sessionKey("api")] = withTasks(tr[sessionKey("api")],
+			journey.Task{ID: "1", Subject: "Find why refresh returns 401", Status: "completed"},
+			journey.Task{ID: "2", Subject: "Fix the expiry comparison", Active: "Fixing the expiry comparison", Status: "in_progress"},
+			journey.Task{ID: "3", Subject: "Re-run the auth suite", Status: "pending"},
+			journey.Task{ID: "4", Subject: "Commit and open the PR", Status: "pending"})
+	}()
 	tr[sessionKey("api")] = trailOf(n.Add(-50*time.Minute), "fix the 401 on token refresh", true,
 		legSpec{journey.Scout, "middleware.py", 8 * time.Minute, []string{"middleware.py"}, "", nil},
 		legSpec{journey.Build, "tokens.py", 22 * time.Minute, []string{"tokens.py"}, "", nil},
@@ -380,6 +426,7 @@ func allScenes() []scene {
 
 // sceneModel opens the deck on a scene as the first refresh would leave it.
 func sceneModel(sc scene, w, h int) *Model {
+	fleet.SortFleet(sc.sessions) // the order Refresh would hand over
 	m := New(nil)
 	m.SetSize(w, h)
 	m.SetSessions(sc.sessions, sceneNow)
@@ -393,7 +440,8 @@ func sceneModel(sc scene, w, h int) *Model {
 		}
 	}
 	m.point(first)
-	m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: true, trail: sc.trails[first], trails: sc.trails})
+	m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: true,
+		trail: sc.trails[first], events: eventsFor(sc.trails[first]), trails: sc.trails})
 	return m
 }
 

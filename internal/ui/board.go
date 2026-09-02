@@ -248,7 +248,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		if m.archiveView {
 			st = state.Idle
 		}
-		name := fleet.Glyph(st) + " " + sessionName(s.Info)
+		name := fleet.Glyph(st) + " " + sessionName(s.Info) + " " + m.age(s.Info.LastEventAt)
 		if r, ok := rowOf[key]; ok && r.num > 0 {
 			name = fmt.Sprintf("%d %s", r.num, name)
 		}
@@ -273,7 +273,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
 	entry := m.entryLines(r, w)
-	rows := []string{entry[0], m.boardSecondLine(s, entry[1], w), m.boardDelta(key, s, w)}
+	rows := []string{entry[0], m.boardSecondLine(s, m.verdictLine(key, s, entry[1], w), w), m.boardDelta(key, s, w)}
 	if h <= 3 {
 		return fit(rows, h)
 	}
@@ -286,7 +286,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		return append(rows, dimStyle.Render(clip(glyphGhost+" reading its transcript…", w)))
 	}
 	working := s.Snap.State == state.Working && !m.archiveView
-	frame := RenderTrail(tr, TrailOpts{
+	opts := TrailOpts{
 		Todos:      planItems(tr.Tasks),
 		Labels:     m.boardLabels[key],
 		SessionKey: key,
@@ -297,14 +297,113 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Cursor:     -1,
 		Pulse:      m.pulse && working,
 		Pinned:     true,
-	})
+	}
+	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
+	// A column pinned to the present with a day above it says so on its
+	// first row — the rail row that would otherwise be a bare stroke — so a
+	// column that begins with ◉ and one that begins ten hours in are not
+	// one character apart.
+	if hidden := hiddenAbove(tr, opts); hidden > 0 && len(lines) > 0 {
+		began := ""
+		if len(tr.Prompts) > 0 {
+			began = " · began " + relAge(m.now, tr.Prompts[0].At) + " ago"
+		}
+		lines[0] = dimStyle.Render(clip(fmt.Sprintf("↑ %d legs above%s", hidden, began), w))
+	}
 	if m.boardMuted(s) {
 		for i, line := range lines {
 			lines[i] = dimStyle.Render(ansi.Strip(line))
 		}
 	}
 	return append(rows, lines...)
+}
+
+// verdictLine is the column header's second row: for a session you must not
+// miss, the sentence that explains it (the fleet row already says that); for
+// the rest, how it came out, read off the trail itself rather than the fleet
+// feed — which on a day-long session had the header saying "ship" over a
+// column that ended on a design leg.
+func (m *Model) verdictLine(key string, s fleet.Session, fleetLine string, w int) string {
+	if wantsAttention(s.Snap.State) || s.Snap.APIError || m.archiveView {
+		return fleetLine
+	}
+	tr, ok := m.trails[key]
+	if !ok {
+		return fleetLine
+	}
+	v := boardVerdict(s, tr, m.now)
+	if v == "" {
+		return fleetLine
+	}
+	return dimStyle.Render(clip("    "+v, w))
+}
+
+// boardVerdict is how a journey came out, in words, from its own tail: what
+// shipped, whether the suite is green, what is still out. It is the answer to
+// "did it work" with zero keys and zero inference, which for eleven of twelve
+// sessions on an afternoon board is the only thing anyone needed.
+func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
+	var parts []string
+
+	// Agents still out, oldest first: the number that changes what you do.
+	out, oldest := 0, time.Time{}
+	for _, b := range tr.Branches {
+		if !b.Done {
+			out++
+			if oldest.IsZero() || b.Start.Before(oldest) {
+				oldest = b.Start
+			}
+		}
+	}
+	if out > 0 {
+		parts = append(parts, fmt.Sprintf("◈%d out · oldest %s", out, relAge(now, oldest)))
+	}
+
+	// The newest completed leg: shipped, or what it was.
+	var last *journey.Leg
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		if !tr.Legs[i].Current {
+			last = &tr.Legs[i]
+			break
+		}
+	}
+	if last != nil && last.Class == journey.Ship {
+		parts = append(parts, "✓ shipped "+relAge(now, last.End)+" ago")
+	}
+
+	// The newest test verdict, and whether anything has been changed since.
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		l := tr.Legs[i]
+		badge := legBadge(l)
+		if badge == "" {
+			continue
+		}
+		word := "✓ green"
+		if strings.Contains(badge, "✗") {
+			word = "✗ red"
+		}
+		verdict := word + " " + badge
+		// A red run with a fix or build after it is a verdict the session has
+		// since acted on: say so, or the row reads as the fix's own result.
+		for j := i + 1; j < len(tr.Legs); j++ {
+			if c := tr.Legs[j].Class; c == journey.Fix || c == journey.Build {
+				verdict += " · edited since"
+				break
+			}
+		}
+		parts = append(parts, verdict)
+		break
+	}
+
+	if len(parts) == 0 && last != nil {
+		label := last.Label
+		if label == "" {
+			label = last.Class.String()
+		}
+		parts = append(parts, last.Class.String()+" "+label)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // boardSecondLine is the fleet's second row for the session with, where the
@@ -315,10 +414,14 @@ func (m *Model) boardSecondLine(s fleet.Session, line string, w int) string {
 	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
 		group = tmuxSessionName(pane.Target)
 	}
-	if group == "" || lipgloss.Width(line)+2+len(group) > w {
+	if group == "" {
 		return line
 	}
-	return pad(line, w-len(group)) + dimStyle.Render(group)
+	group = "⌁ " + group // the pane mark, so "work" does not read as a state word
+	if lipgloss.Width(line)+2+lipgloss.Width(group) > w {
+		return line
+	}
+	return pad(line, w-lipgloss.Width(group)) + dimStyle.Render(group)
 }
 
 // boardDelta is the header's third row: how much a column has grown since the
@@ -332,7 +435,20 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		return ""
 	}
 	seen, ok := m.seen[key]
-	if !ok || !seen.Before(s.Info.LastEventAt) {
+	if !ok {
+		// No baseline, but a bright column that was never opened should
+		// say so rather than keep the row as air: "never opened" is the
+		// value the brightness stands for, and on a fresh launch it is the
+		// only one that prints.
+		if m.boardMuted(s) {
+			return ""
+		}
+		if n := len(m.trails[key].Legs); n > 0 {
+			return dimStyle.Render(clip(fmt.Sprintf("↳ %s · never opened", plural(n, "leg")), w))
+		}
+		return ""
+	}
+	if !seen.Before(s.Info.LastEventAt) {
 		return ""
 	}
 	n := 0
@@ -350,6 +466,12 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	}
 	line := fmt.Sprintf("↳ %d new %s · looked %s ago", n, word, state.ShortDuration(m.now.Sub(seen)))
 	return dimStyle.Render(clip(line, w))
+}
+
+// hiddenAbove counts the legs a pinned column keeps above its first row.
+func hiddenAbove(tr journey.Trail, o TrailOpts) int {
+	doc, sel := trailDoc(tr, o)
+	return legsHiddenAbove(tr, o.Level, sel, trailTop(len(doc), o))
 }
 
 // boardMuted says whether a column is drawn dim. Bright means there is

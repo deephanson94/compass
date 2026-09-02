@@ -78,7 +78,10 @@ func TestT43TrailLv2Golden(t *testing.T) {
 
 	// The same journey at Lv1 is the M1 graph: no waypoint carries into it.
 	lv1 := RenderTrail(fixtureLv2Trail(fixtureBase), TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 1, Cursor: -1})
-	for _, gone := range []string{"18 passed", "bug1", "touched", "payments never"} {
+	// A returned subagent's report is on both levels now — a ✓ that kept its
+	// finding two keypresses down created an obligation without discharging
+	// it — so only the leg waypoints and the touched row are Lv2's.
+	for _, gone := range []string{"18 passed", "bug1", "touched"} {
 		if strings.Contains(lv1, gone) {
 			t.Errorf("Lv1 frame leaked the Lv2 detail %q", gone)
 		}
@@ -649,8 +652,9 @@ func TestALegWithNothingToSayIsATickOnTheRail(t *testing.T) {
 	if len(doc) != 7 {
 		t.Fatalf("the trail is %d rows, want 7:\n%s", len(doc), strings.Join(doc, "\n"))
 	}
-	if got := strings.TrimSpace(doc[3]); got != "│ test" {
-		t.Errorf("row 3 = %q, want the tick %q", got, "│ test")
+	// The tick carries its duration, and "?" for a test run with no verdict.
+	if got := strings.TrimSpace(doc[3]); !strings.HasPrefix(got, "│ test") || !strings.HasSuffix(got, "?  1m") {
+		t.Errorf("row 3 = %q, want the tick %q", got, "│ test … ?  1m")
 	}
 	if strings.HasPrefix(strings.TrimSpace(doc[4]), "◆ build") == false {
 		t.Errorf("the leg after the tick should follow it directly, got %q", doc[4])

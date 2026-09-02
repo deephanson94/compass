@@ -283,7 +283,7 @@ func TestT80bBoardThreeColumnsGolden(t *testing.T) {
 	if *update {
 		return
 	}
-	for _, want := range []string{"fix the 401 bug", "tighten the vpc", "flake in the checkout", "+2 more · 4 ○ tfstate · 5 ○ scratch"} {
+	for _, want := range []string{"fix the 401 bug", "tighten the vpc", "flake in the checkout", "+2 more · 4 ○ tfstate 15m · 5 ○ scratch 22m"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the board is missing %q:\n%s", want, got)
 		}
@@ -677,7 +677,7 @@ func TestAMovingHeadIsAgedFromItsStart(t *testing.T) {
 	l := journey.Leg{Class: journey.Fix, Label: "checkout.py",
 		Start: fixtureBase.Add(10 * time.Minute), End: fixtureBase.Add(11 * time.Minute), Current: true}
 	got := legRow(l, l.Label, false, now, 40, false)
-	if !strings.Contains(got, "← 30m") {
+	if !strings.Contains(got, "for 30m") {
 		t.Errorf("HEAD is not aged from its start: %q", got)
 	}
 }
@@ -716,8 +716,9 @@ func (r *refusingNarrator) Request(string, journey.Trail, string) bool {
 
 // A bright column that has grown since the last look says by how much: the
 // header's third row carries the count and how far back "since" reaches. A
-// column never opened has no baseline and says nothing; one with nothing new
-// keeps the row as air; the archive never counts.
+// column never opened has no baseline and counts its legs instead (see
+// TestNeverOpenedColumnCountsItsLegs); one with nothing new keeps the row as
+// air; the archive never counts.
 func TestABrightColumnSaysWhatIsNewSinceTheLastLook(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)

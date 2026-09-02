@@ -330,6 +330,38 @@ func endsWithQuestion(text string) bool {
 }
 
 // activityFor renders the one-line hint for a tool call.
+// askedQuestion reads the first question out of an AskUserQuestion call's
+// input — {"questions":[{"question":"…","options":[{"label":"…"},…]}]} —
+// with its options after it, so the row says what is being decided.
+func askedQuestion(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var in struct {
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil || len(in.Questions) == 0 {
+		return ""
+	}
+	q := in.Questions[0]
+	text := firstLine(q.Question)
+	var labels []string
+	for _, o := range q.Options {
+		if l := strings.TrimSpace(o.Label); l != "" {
+			labels = append(labels, l)
+		}
+	}
+	if len(labels) > 0 {
+		text += " [" + strings.Join(labels, " / ") + "]"
+	}
+	return text
+}
+
 func activityFor(use transcript.ToolUse) string {
 	switch use.Name {
 	case "Bash":
@@ -342,6 +374,14 @@ func activityFor(use transcript.ToolUse) string {
 			return verbOf(use.Name) + " " + filepath.Base(path)
 		}
 		return verbOf(use.Name)
+	case askUserQuestion:
+		// The question itself, not the tool's name: "needs you" is the whole
+		// game, and a row that said "AskUserQuestion" at every level left the
+		// person unable to triage what was being asked without attaching.
+		if q := askedQuestion(use.Input); q != "" {
+			return q
+		}
+		return use.Name
 	case "":
 		return "working"
 	default:

@@ -286,6 +286,15 @@ func (b *trailBuilder) cursored(l trailLine, text string) string {
 		return text
 	}
 	plain := strings.TrimRight(ansi.Strip(text), " ")
+	// A shape as well as the inversion: the first cell of the row becomes
+	// the cursor mark, so the cursor exists in a capture, over NO_COLOR, and
+	// to anyone whose terminal renders reverse video faintly. Every row
+	// opens with a glyph or a rail stroke whose meaning the rest of the row
+	// repeats in words, so the cell is the cheapest one to spend.
+	if r := []rune(plain); len(r) > 0 {
+		r[0] = '▸'
+		plain = string(r)
+	}
 	if pad := b.width - lipgloss.Width(plain); pad > 0 {
 		plain += strings.Repeat(" ", pad)
 	}
@@ -324,8 +333,20 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 		return
 	}
 
+	// The first dashed rail carries the denominator: three ghosts are three
+	// of four or three of seven, and the difference is how far along it is.
+	total := 0
+	for _, it := range items {
+		if it.Status != "deleted" {
+			total++
+		}
+	}
 	for i := 0; i < show; i++ {
-		b.node(ruleStyle.Render(railGhost))
+		rail := ruleStyle.Render(railGhost)
+		if i == 0 && total > 0 {
+			rail += " " + dimStyle.Render(clip(fmt.Sprintf("%d of %d to go", len(pending), total), body))
+		}
+		b.node(rail)
 		b.node(dimStyle.Render(glyphGhost + " " + clip(pending[i], body)))
 	}
 	if more := len(pending) - show; more > 0 {
@@ -352,6 +373,7 @@ func ghostCost(show, total int) int {
 func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts) {
 	forked := false
 	ticked := false
+	long := len(nodes) > 1 && nodes[len(nodes)-1].at.Sub(nodes[0].at) > longTrailSpan
 	for i, n := range nodes {
 		// A leg that produced nothing countable — no result, no files, no
 		// narrated phrase — is drawn as its own rail segment with the class
@@ -385,6 +407,12 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// The tick above is a rail segment of its own too.
 		case i == 1:
 			b.node(ruleStyle.Render(railHead))
+		case long && hourTurned(nodes[i-1].at, n.at):
+			// A day-long trail has no clock in it otherwise: every leg's
+			// figure is a duration and every one looks alike. The rail row
+			// the hour turns on carries the hour, so "when" is readable by
+			// eye down a long column (a rule every hour, no extra rows).
+			b.node(hourRule(n.at, o.Width))
 		default:
 			b.node(ruleStyle.Render(railStroke))
 		}
@@ -407,6 +435,25 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 	}
 	// Branches that forked before any leg opened hang off the end of the rail.
 	b.branches(tr, -1, o)
+}
+
+// longTrailSpan is the span past which a trail gets hour rules on its rail.
+const longTrailSpan = 2 * time.Hour
+
+// hourTurned reports whether the clock crossed an hour between two moments.
+func hourTurned(a, b time.Time) bool {
+	a, b = a.Local(), b.Local()
+	return a.Truncate(time.Hour) != b.Truncate(time.Hour)
+}
+
+// hourRule is the rail row an hour turns on: "│ 14:00 ────".
+func hourRule(at time.Time, width int) string {
+	stamp := at.Local().Format("15:04")
+	row := railStroke + " " + stamp + " "
+	if rest := width - len([]rune(row)); rest > 0 {
+		row += strings.Repeat("─", rest)
+	}
+	return ruleStyle.Render(clip(row, width))
 }
 
 // TrailRow is one selectable row of the trail: what it is, what it says, and
@@ -513,6 +560,13 @@ func tickLeg(l journey.Leg, o TrailOpts) bool {
 	if l.Current || len(l.Waypoints) > 0 || len(l.Files) > 0 {
 		return false
 	}
+	if l.Class == journey.Ship {
+		// A ship leg is the landing: the row that answers "is it done?".
+		// Demoting it to a word on the rail read as debris under the last
+		// test run, and the answer to the question the trail exists for was
+		// the one row nobody noticed.
+		return false
+	}
 	_, narrated := legLabel(l, o)
 	return !narrated
 }
@@ -520,8 +574,19 @@ func tickLeg(l journey.Leg, o TrailOpts) bool {
 // tickRow is a tick leg's whole appearance: the rail stroke and the class
 // word, dim, in the verb column where the leg's own row would have put it.
 func tickRow(l journey.Leg, stroke string, width int) string {
-	row := ruleStyle.Render(stroke) + " " + dimStyle.Render(l.Class.String())
-	return pad(row, width)
+	head := ruleStyle.Render(stroke) + " " + dimStyle.Render(l.Class.String())
+	// A test leg that reported nothing is a run with no verdict, which is a
+	// fact, not an absence: "?" says so, where a bare word between a red run
+	// and a green one read as if the tests had simply skipped a beat.
+	tail := legSpan(l)
+	if l.Class == journey.Test {
+		tail = "?  " + tail
+	}
+	room := width - lipgloss.Width(head) - 1
+	if room < len([]rune(tail)) {
+		return pad(head, width)
+	}
+	return head + padLeft(dimStyle.Render(tail), room)
 }
 
 // legLabel resolves what a leg says: the narrated line when one has landed for
@@ -537,6 +602,14 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 			return doing, false
 		}
 		return l.Label, false
+	}
+	if l.Class == journey.Ship {
+		// What shipped, in the commit's own words, beats "git commit".
+		for i := len(l.Waypoints) - 1; i >= 0; i-- {
+			if w := l.Waypoints[i]; w.Kind == journey.WaypointCommit && strings.TrimSpace(w.Text) != "" {
+				return w.Text, false
+			}
+		}
 	}
 	if len(o.Labels) == 0 {
 		return l.Label, false
@@ -563,9 +636,11 @@ func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int
 		if pulse {
 			glyph = glyphBreath
 		}
-		// HEAD is still moving: its figure is how long it has been, measured
-		// from its start to now rather than to an end it does not have yet.
-		age = "← " + relAge(now, l.Start)
+		// HEAD is still moving: its figure is how long it has been at this,
+		// measured from its start to now. "for 2h" — read beside the finished
+		// legs' durations it is the same kind of number, where "← 2h" was
+		// read by everyone who tried it as "two hours ago".
+		age = "for " + relAge(now, l.Start)
 	}
 	head := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
 
@@ -720,7 +795,7 @@ func touchedBody(l journey.Leg, width int) string {
 	default:
 		return ""
 	}
-	if len(l.Files) < 2 {
+	if len(l.Files) == 0 {
 		return ""
 	}
 	return dimStyle.Render(clip("touched "+strings.Join(l.Files, " · "), width))
@@ -742,18 +817,35 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		if br.Done {
 			mark = branchDone
 		}
-		labelWidth := width - trailForkWidth - 2
+		// The lane's clock: how long the agent has been out, or how long ago
+		// it came back. An agent that never returns is the silent failure of
+		// delegated work, and a lane without a clock could not show it.
+		age := relAge(o.Now, br.Start)
+		if br.Done && !br.End.IsZero() {
+			age = relAge(o.Now, br.End)
+		}
+		tail := mark + " " + age
+		labelWidth := width - trailForkWidth - 1 - len([]rune(tail))
 		if labelWidth < trailMinLabel {
 			continue
 		}
 		label := dimStyle.Render(pad(clip(branchName(br.Label), labelWidth), labelWidth))
 		b.selNode(sel, ruleStyle.Render(railFork)+textStyle.Render(glyphBranch)+" "+
-			label+" "+dimStyle.Render(mark))
+			label+" "+dimStyle.Render(tail))
 		drawn++
 
-		if o.Level >= levelWaypoints && strings.TrimSpace(br.Report) != "" {
+		// A returned agent says what it found, at every level: a ✓ that
+		// keeps its finding two keypresses down creates an obligation without
+		// discharging it. And a ✓ with nothing to say says that, because
+		// "came back empty", "report lost" and "not parsed" want three
+		// different reactions and silence looks like all of them.
+		if br.Done {
+			report := strings.TrimSpace(br.Report)
+			if report == "" {
+				report = "came back with no report"
+			}
 			if body := width - trailWayWidth; body >= trailMinLabel {
-				b.details([]detailRow{{text: dimStyle.Render(clip(br.Report, body)), sel: -1}})
+				b.details([]detailRow{{text: dimStyle.Render(clip(report, body)), sel: -1}})
 			}
 		}
 	}
@@ -803,6 +895,28 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 	}
 }
 
+// legsAbove counts the legs the trail's viewport currently hides above its
+// first row: zero when the whole journey is on screen.
+func (m *Model) legsAbove() int {
+	w, h := m.trailBox()
+	o := m.trailOpts(w, h)
+	doc, sel := trailDoc(m.trail, o)
+	top := trailTop(len(doc), o)
+	return legsHiddenAbove(m.trail, o.Level, sel, top)
+}
+
+// legsHiddenAbove counts leg rows among the document's first top lines.
+func legsHiddenAbove(tr journey.Trail, level int, sel []int, top int) int {
+	rows := TrailRows(tr, level)
+	n := 0
+	for i := 0; i < top && i < len(sel); i++ {
+		if j := sel[i]; j >= 0 && j < len(rows) && rows[j].Kind == "leg" {
+			n++
+		}
+	}
+	return n
+}
+
 // trailTitle: whose trail this is, and how deep we are in it.
 func (m *Model) trailTitle(w int) string {
 	name := "—"
@@ -819,8 +933,14 @@ func (m *Model) trailTitle(w int) string {
 	// Scrolled off the present, the title says so: the trail is no longer
 	// showing the newest work, and `G` is the way back to it.
 	right := level
-	if !m.trailPinned {
+	switch {
+	case !m.trailPinned:
 		right = "↓ G  " + level
+	case m.legsAbove() > 0:
+		// Pinned to the present with a day above it: the title says so,
+		// because a trail cut at the fold and a trail that begins there
+		// were one rail stroke apart.
+		right = fmt.Sprintf("↑ %d legs  %s", m.legsAbove(), level)
 	}
 	mark := m.titleMark(panelTrail)
 	body := w - 1

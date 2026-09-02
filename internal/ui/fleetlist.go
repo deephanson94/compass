@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"math"
 	"path/filepath"
 	"sort"
@@ -119,38 +120,73 @@ func (m *Model) fleetBlock(rows []fleetRow, w int) (lines []string, selStart, se
 // scrollFleet windows the column onto h lines, following the selection: the
 // offset moves as little as it can, so headers travel with their groups and
 // the list only slides when the selection would otherwise fall off the edge.
+//
+// A list cut at the panel's edge says so — "▾ 5 more below" — on a row of
+// its own, never over a session's: seven sessions with five more below them
+// read as a fleet of seven, and nothing on the screen said otherwise.
 func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 	if len(lines) <= h {
 		m.fleetScroll = 0
 		return lines
 	}
 	off := m.fleetScroll
-	if selEnd >= 0 {
-		if selStart < off {
-			off = selStart
+	top, bottom, body := 0, 0, h
+	// The notices take rows from the body, and a smaller body can move the
+	// offset, which can change which notices are due: settle it in a few
+	// passes — each one only moves the offset toward the selection.
+	for pass := 0; pass < 4; pass++ {
+		top, bottom = 0, 0
+		if off > 0 {
+			top = 1
 		}
-		if selEnd >= off+h {
-			off = selEnd - h + 1
+		if off+h-top < len(lines) {
+			bottom = 1
 		}
-	}
-	if off > len(lines)-h {
-		off = len(lines) - h
-	}
-	if off < 0 {
-		off = 0
-	}
-	// Never open the column on a line of air: the air between two entries reads
-	// as a gap under the title. Losing it at the top costs nothing — the row it
-	// would have pushed out is a blank at the bottom, where nobody sees it.
-	if off > 0 && lines[off] == "" {
-		off++
+		body = h - top - bottom
+		if body < 1 {
+			body = 1
+		}
+		next := off
+		if selEnd >= 0 {
+			if selStart < next {
+				next = selStart
+			}
+			if selEnd >= next+body {
+				next = selEnd - body + 1
+			}
+		}
+		if next > len(lines)-body {
+			next = len(lines) - body
+		}
+		if next < 0 {
+			next = 0
+		}
+		// Never open the column on a line of air: the air between two
+		// entries reads as a gap under the title. Losing it at the top costs
+		// nothing — the row it would have pushed out is a blank at the
+		// bottom, where nobody sees it.
+		if next > 0 && lines[next] == "" && (selEnd < 0 || next+1 <= selStart) {
+			next++
+		}
+		if next == off {
+			break
+		}
+		off = next
 	}
 	m.fleetScroll = off
-	end := off + h
+	end := off + body
 	if end > len(lines) {
 		end = len(lines)
 	}
-	return lines[off:end]
+	var out []string
+	if top > 0 {
+		out = append(out, dimStyle.Render(fmt.Sprintf("▴ %d more above · k", countEntries(lines[:off]))))
+	}
+	out = append(out, lines[off:end]...)
+	if bottom > 0 {
+		out = append(out, dimStyle.Render(fmt.Sprintf("▾ %d more below · j", countEntries(lines[end:]))))
+	}
+	return out
 }
 
 // fleetRows groups the sessions of the current view and flattens them into the
@@ -165,19 +201,16 @@ func (m *Model) fleetRows() []fleetRow {
 	// one unnamed branch is just a list, so the header goes.
 	headers := !(!m.archiveView && len(groups) == 1 && groups[0].name == elsewhereGroup)
 
+	// The numbers are the view's order, not the list's: a session wears the
+	// same digit here as on the board, however the list groups it.
+	numbers := m.boardRows()
 	rows := make([]fleetRow, 0, len(m.sessions)+len(groups))
-	n := 0
 	for _, g := range groups {
 		if headers {
 			rows = append(rows, fleetRow{header: true, label: g.name, age: m.groupAge(g), echo: m.groupEcho(g)})
 		}
 		for _, i := range g.entries {
-			n++
-			num := 0
-			if n <= 9 {
-				num = n
-			}
-			rows = append(rows, fleetRow{sess: i, num: num})
+			rows = append(rows, fleetRow{sess: i, num: numbers[m.sessions[i].Info.Key()].num})
 		}
 	}
 	return rows
@@ -334,6 +367,21 @@ func (m *Model) groupEcho(g fleetGroup) string {
 	return echo
 }
 
+// countEntries counts the session rows among rendered fleet lines: the
+// first line of each entry is the one that opens, past its cursor mark and
+// number, with a state glyph. Headers open with a name and second lines
+// with a class or an activity.
+func countEntries(lines []string) int {
+	n := 0
+	for _, l := range lines {
+		plain := []rune(strings.TrimLeft(ansi.Strip(l), " ▸0123456789"))
+		if len(plain) > 0 && strings.ContainsRune("●▲◍○", plain[0]) {
+			n++
+		}
+	}
+	return n
+}
+
 // groupAge is how long since the freshest session in a group last spoke. Inside
 // a group the rows are in window.pane order, so the list mirrors the screen
 // `enter` takes you to — which means their ages do not descend and you cannot
@@ -476,19 +524,23 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	// quiet one, the prompt it was given, because "idle" is what the first line
 	// already told you.
 	act := s.Outcome
-	// Unless the last thing that happened was the API refusing the call. Then
-	// the session's earlier "1216✓" is true and useless: it describes work that
-	// finished before the wall went up, and showing it puts a green tick on a
-	// row whose session is dead until someone logs in again.
-	//
-	// The reason leads and the error's own words follow, because the row has
-	// about two dozen columns and the gateway spends the first thirty on
-	// "Please run /login · API Error: 403". "api error 403" fits; the words a
-	// person recognises get whatever is left, and the mirror carries them whole.
-	if s.Snap.APIError {
+	// Unless the session is one you must not miss. Then the sentence that
+	// explains it owns the line: "waiting on your answer · open 22 to the
+	// office CIDR?", "no output for 4m mid-turn · Bash: python backfill.py
+	// --all", "api error 403 · your daily quota is exhausted". The state
+	// machine had every one of these and the row was showing "1216✓" over
+	// them — work that finished before the wall went up.
+	if wantsAttention(s.Snap.State) || s.Snap.APIError {
 		act = s.Snap.Reason
-		if txt := strings.TrimSpace(s.Snap.Activity); txt != "" {
+		if txt := strings.TrimSpace(s.Snap.Activity); txt != "" && txt != "idle" {
 			act += " · " + txt
+			// A question is the whole line. The first line already said
+			// "needs you", and "waiting on your answer" only repeats it;
+			// "open 22 to the office CIDR?" is what the person has to read,
+			// and a narrow column must not clip it for the repeat.
+			if s.Snap.State == state.NeedsYou {
+				act = txt
+			}
 		}
 	}
 	if strings.TrimSpace(act) == "" {

@@ -53,6 +53,12 @@ func (m *Model) readerWidth() int {
 // search when one is live, and the document.
 func (m *Model) readerColumn(w, h int) []string {
 	rows := []string{m.readerTitle(w), ""}
+	if h > 2 && len(m.events) == 0 && len(m.trail.Legs) > 0 {
+		// The trail is in hand and the conversation is not yet: it is being
+		// read, not absent. "nothing to read yet … as it happens" claimed a
+		// session with a day of legs had not started.
+		return append(rows, dimStyle.Render(clip(glyphSaid+" reading the transcript…", w)))
+	}
 	if h > 2 {
 		frame := RenderReader(m.events, ReaderOpts{
 			Width:    w,

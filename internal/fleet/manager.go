@@ -413,6 +413,11 @@ func rank(s state.State) int {
 	}
 }
 
+// SortFleet orders sessions the way the fleet shows them — needs-you longest
+// wait first, then stuck, working, and idle newest first — for a harness that
+// builds a fleet by hand and wants it in the order Refresh would return.
+func SortFleet(ss []Session) { sortFleet(ss) }
+
 func sortFleet(ss []Session) {
 	sort.SliceStable(ss, func(i, j int) bool {
 		a, b := ss[i], ss[j]
