@@ -130,14 +130,19 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string
 - **Narrated labels** overlay heuristic ones at render time (all levels):
   `label · file.go` becomes the narrated text alone. HEAD (open leg) always
   keeps its live heuristic label — narration is for history.
-- **Lv3 layout**: fleet | reader (flex, min 46) | trail 38; the mirror is
-  hidden at Lv3. Below 110 cols: fleet | reader (trail hidden).
+- **Lv3 layout**: the session view (SPEC #18, #19): trail (45%, 38–96) on
+  the left | reader (the rest) on the right; the mirror gives way to the
+  reader at Lv3. Below 110 cols the reader has the whole width.
 - **Reader document**, newest LAST (chronological, like the CLI itself):
   prompts as `❯ <text>` header rows (accent), assistant text wrapped to width,
   tool calls as one-liners `⏺ Bash(pytest -x)` (input summary like the M0
-  Activity derivation), each result folded to `  ⎿ <n> lines · space unfolds`
-  (dim; errors `⎿ ✗ first error line` in red accent, still folded); unfolding
-  shows up to 20 result lines. Sidechain events are skipped. Thinking is
+  Activity derivation, paths relative to the session's cwd, the argument dim),
+  each result folded to `  ⎿ <first line that says something> · +<n> lines`
+  (dim; a Read or a listing is counted, `⎿ 120 lines`; errors `⎿ ✗ first error
+  line` in red accent, still folded); unfolding shows up to 20 result lines
+  under a `⎿ <n> lines` row. Prose wraps at 100 columns however wide the panel
+  is; headings bold, fenced code dim, `**` dropped; a `❯` turn carries its
+  clock on the right. Sidechain events are skipped. Thinking is
   already absent from Event.Text.
 - **Keys by level** — j/k: Lv1 fleet · Lv2 trail cursor (selectable rows =
   legs, waypoints, branches; cursor row inverted) · Lv3 reader scroll (plus

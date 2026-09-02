@@ -1117,18 +1117,42 @@ func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
 // them — what is actually on screen, not what the arithmetic intended.
 func columnWidths(t *testing.T, frame string) []int {
 	t.Helper()
-	for _, line := range strings.Split(frame, "\n") {
-		if !strings.Contains(line, "FLEET") && !strings.Contains(line, "READER") && !strings.Contains(line, mirrorMark+" ") {
-			continue // the panels' title row, whichever left panel this deck has
+	lines := strings.Split(frame, "\n")
+	n := 0
+	for _, line := range lines {
+		if strings.Contains(line, "FLEET") || strings.Contains(line, "READER") || strings.Contains(line, mirrorMark+" ") {
+			n = len(strings.Split(line, "│")) // the panels' title row says how many there are
+			break
 		}
-		var out []int
-		for _, part := range strings.Split(line, "│") {
-			out = append(out, lipgloss.Width(part))
-		}
-		return out
 	}
-	t.Fatal("no panel header in the frame")
-	return nil
+	if n == 0 {
+		t.Fatal("no panel header in the frame")
+	}
+	// Every column but the last is padded to its width; the last is as wide
+	// as its content, so its width is whatever the deck's full row leaves
+	// after the others and the hairlines between them.
+	out := make([]int, n)
+	total := 0
+	for _, line := range lines {
+		parts := strings.Split(line, "│")
+		if w := lipgloss.Width(line); w > total {
+			total = w // the header's rule runs the whole width
+		}
+		if len(parts) != n {
+			continue
+		}
+		for i, part := range parts[:n-1] {
+			if w := lipgloss.Width(part); w > out[i] {
+				out[i] = w
+			}
+		}
+	}
+	last := total - (n - 1)
+	for _, w := range out[:n-1] {
+		last -= w
+	}
+	out[n-1] = last
+	return out
 }
 
 // A session the API refused still carries whatever it last finished. That

@@ -26,6 +26,13 @@ const (
 	bodyIndent    = "    " // an unfolded result's own lines, under the elbow
 	unfoldCap     = 20     // how many result lines an unfold is allowed to spend
 	readerMinBody = 24     // below this the document says nothing worth reading
+
+	// readerMeasure is the widest a line of prose is allowed to run. A panel
+	// three-quarters of a wide monitor is 150 columns, and a paragraph
+	// wrapped to 150 columns is a wall: the eye loses the line on the way
+	// back. Calls and results still take the whole width — a path or a
+	// command is read once, not along.
+	readerMeasure = 100
 )
 
 // ReaderOpts is everything the reader needs beyond the events themselves.
@@ -46,6 +53,12 @@ type ReaderOpts struct {
 	// with nothing naming it — which is exactly where a reader is looking when
 	// they walk the newest legs.
 	Anchor int
+
+	// CWD is the session's working directory: a tool call's path is shown
+	// relative to it, the way the CLI shows it, so a column of
+	// `Edit(/home/user/compass/internal/ui/reader.go)` reads as
+	// `Edit(internal/ui/reader.go)`. An event carrying its own cwd wins.
+	CWD string
 }
 
 // RenderReader renders the Lv3 conversation panel: the session's events as one
@@ -61,7 +74,7 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 		return strings.Join(fit(nil, h), "\n")
 	}
 
-	doc := readerDoc(events, o.Width, o.Unfolded)
+	doc := readerDoc(events, o)
 	if len(doc) == 0 {
 		doc = readerEmptyDoc(o.Width)
 	}
@@ -94,7 +107,7 @@ func markAnchor(line string, w int) string {
 // (SPEC §3) — a waypoint names a time, and the reader opens there. -1 means the
 // document has nothing at or after that moment.
 func ReaderAnchor(events []transcript.Event, o ReaderOpts, at time.Time) int {
-	doc := readerDoc(events, o.Width, o.Unfolded)
+	doc := readerDoc(events, o)
 	for i, l := range doc {
 		if l.event < 0 || l.at.IsZero() {
 			continue
@@ -134,6 +147,8 @@ const (
 	readerFold               // a folded result — Space's target
 	readerFoldErr            // …one that failed
 	readerBody               // an unfolded result's lines
+	readerHead               // a heading in the model's own words
+	readerCode               // a fenced block in the model's own words
 )
 
 // readerLine is one row of the flattened document: plain text, the accent it
@@ -143,6 +158,11 @@ type readerLine struct {
 	kind  readerKind
 	event int       // index into the events slice; -1 for filler
 	at    time.Time // the event's timestamp, for ReaderAnchor
+
+	// dim is the rune offset where the row's dim tail begins — a call's
+	// argument, a turn's clock — or 0 for a row of one accent. The text is
+	// one string so a search still matches across the seam.
+	dim int
 }
 
 // foldable reports whether Space can act on this row.
@@ -152,6 +172,10 @@ func (l readerLine) foldable() bool {
 
 // render applies the row's accent, inverting whatever the search matched.
 func (l readerLine) render(query string) string {
+	if r := []rune(l.text); l.dim > 0 && l.dim < len(r) {
+		return highlight(string(r[:l.dim]), query, readerStyle(l.kind)) +
+			highlight(string(r[l.dim:]), query, dimStyle)
+	}
 	return highlight(l.text, query, readerStyle(l.kind))
 }
 
@@ -159,7 +183,7 @@ func (l readerLine) render(query string) string {
 // warm thing the reader may draw — the same rule the fleet lives by (SPEC §4).
 func readerStyle(k readerKind) lipgloss.Style {
 	switch k {
-	case readerSaid:
+	case readerSaid, readerHead:
 		return promptStyle
 	case readerText:
 		return textStyle
@@ -177,10 +201,24 @@ func readerStyle(k readerKind) lipgloss.Style {
 type docBuilder struct {
 	lines []readerLine
 	width int
+	cwd   string
 }
 
 func (d *docBuilder) push(text string, kind readerKind, event int, at time.Time) {
 	d.lines = append(d.lines, readerLine{text: text, kind: kind, event: event, at: at})
+}
+
+// pushDim is push with the row's tail dim from rune offset dim on.
+func (d *docBuilder) pushDim(text string, dim int, kind readerKind, event int, at time.Time) {
+	d.lines = append(d.lines, readerLine{text: text, kind: kind, event: event, at: at, dim: dim})
+}
+
+// measure is the width prose wraps to: the panel's, up to readerMeasure.
+func (d *docBuilder) measure() int {
+	if d.width > readerMeasure {
+		return readerMeasure
+	}
+	return d.width
 }
 
 // gap opens one line of air, never two, never at the top.
@@ -200,8 +238,9 @@ func (d *docBuilder) last() readerKind {
 
 // readerDoc flattens the events into rows. Sidechains are skipped: a subagent's
 // own conversation is the trail's branch lane, not this document's business.
-func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []readerLine {
-	d := &docBuilder{width: width}
+func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
+	d := &docBuilder{width: o.Width, cwd: o.CWD}
+	unfolded := o.Unfolded
 	answered := map[string]bool{}
 	for _, ev := range events {
 		for _, res := range ev.ToolResults {
@@ -225,10 +264,10 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 					// agent's, back long after other calls — says whose it
 					// is, or it reads as the call above it answering twice.
 					if use, ok := calls[res.ToolUseID]; ok {
-						d.push(resultIndent+glyphResult+" "+clip("↩ "+use.Name+"("+toolSummary(use)+")", d.width-len(resultIndent)-2), readerBody, i, ev.Timestamp)
+						d.push(resultIndent+glyphResult+" "+clip("↩ "+use.Name+"("+d.argument(use, ev.CWD)+")", d.width-len(resultIndent)-2), readerBody, i, ev.Timestamp)
 					}
 				}
-				d.result(i, ev.Timestamp, res, unfolded[i])
+				d.result(i, ev.Timestamp, calls[res.ToolUseID], res, unfolded[i], ev.CWD)
 			}
 		case transcript.EventAssistant:
 			if text := strings.TrimSpace(ev.Text); text != "" {
@@ -237,7 +276,7 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 			for _, use := range ev.ToolUses {
 				calls[use.ID] = use
 				lastCall = use.ID
-				d.call(i, ev.Timestamp, use)
+				d.call(i, ev.Timestamp, use, ev.CWD)
 				if !answered[use.ID] {
 					// Dispatched and not back, or hung: the reader said
 					// nothing, and an agent still out looked exactly like
@@ -251,37 +290,98 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 }
 
 // said draws a human turn: the chevron leads it, the rest hangs under it.
+// The first row carries the turn's clock on the right, dim, so the turns
+// read as the chapters they are and `[ ]` lands on a moment with a name.
 func (d *docBuilder) said(event int, at time.Time, text string) {
 	d.gap()
-	for _, row := range wrapPrefix(text, glyphSaid+" ", "  ", d.width) {
+	rows := wrapPrefix(text, glyphSaid+" ", "  ", d.measure())
+	for i, row := range rows {
+		if i == 0 && !at.IsZero() {
+			clock := at.Local().Format("15:04")
+			if room := d.width - len([]rune(row)) - 2; room >= len(clock) {
+				d.pushDim(row+strings.Repeat(" ", room-len(clock)+2)+clock, len([]rune(row))+1, readerSaid, event, at)
+				continue
+			}
+		}
 		d.push(row, readerSaid, event, at)
 	}
 }
 
 // text draws the model's own words, wrapped — the one place in compass that
-// wraps rather than truncates, because a document is meant to be read.
+// wraps rather than truncates, because a document is meant to be read. The
+// words are markdown, more often than not, and the reader owes them the
+// little that a terminal can honour: a heading in bold, a fenced block set
+// off and left alone, a bullet as a bullet, the ** around an emphasis
+// dropped rather than printed.
 func (d *docBuilder) text(event int, at time.Time, text string) {
 	d.gap()
-	for _, row := range wrapPrefix(text, "", "", d.width) {
-		d.push(row, readerText, event, at)
+	for _, row := range proseRows(text, d.measure(), d.width) {
+		d.push(row.text, row.kind, event, at)
 	}
+}
+
+// proseRows lays the model's words out: prose wrapped to measure, fenced
+// code clipped at width and indented, headings and bullets marked.
+func proseRows(text string, measure, width int) []readerLine {
+	var out []readerLine
+	fenced := false
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			fenced = !fenced
+			continue // the fence itself is punctuation nobody reads
+		}
+		if fenced {
+			out = append(out, readerLine{text: clip(resultIndent+strings.TrimRight(strings.ReplaceAll(line, "\t", "    "), " "), width), kind: readerCode})
+			continue
+		}
+		if trimmed == "" {
+			out = append(out, readerLine{kind: readerBlank})
+			continue
+		}
+		kind, first, cont := readerText, "", ""
+		if head := strings.TrimLeft(trimmed, "#"); len(head) < len(trimmed) && strings.HasPrefix(head, " ") {
+			kind, trimmed = readerHead, strings.TrimSpace(head)
+		} else if indent := len(line) - len(strings.TrimLeft(line, " \t")); strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			first = strings.Repeat(" ", indent) + "• "
+			cont = strings.Repeat(" ", indent+2)
+			trimmed = strings.TrimSpace(trimmed[2:])
+		}
+		trimmed = strings.ReplaceAll(trimmed, "**", "")
+		for _, row := range wrapPrefix(trimmed, first, cont, measure) {
+			out = append(out, readerLine{text: row, kind: kind})
+			first = cont
+		}
+	}
+	// The air the text ends with is not the document's to keep.
+	for len(out) > 0 && out[len(out)-1].kind == readerBlank {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
 // call draws a tool call as one line — `⏺ Bash(pytest -x)` — the M0 Activity
 // derivation's input summary in the parentheses.
-func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse) {
-	if k := d.last(); k == readerSaid || k == readerText {
+//
+// The name is the row's accent and the argument is dim: a stretch of calls
+// reads as "Read, Read, Edit, Bash" at a glance, and the prose between them
+// is the only thing on the page in the page's own colour. The two calls
+// whose argument is the point — a question to you, an agent's assignment —
+// keep it plain.
+func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse, cwd string) {
+	if k := d.last(); k == readerSaid || k == readerText || k == readerHead || k == readerCode {
 		d.gap()
 	}
 	name := use.Name
 	if name == "" {
 		name = "tool"
 	}
-	line := glyphCall + " " + name
-	if summary := toolSummary(use); summary != "" {
-		line += "(" + summary + ")"
-	} else {
-		line += "()"
+	head := glyphCall + " " + name
+	line := head + "(" + d.argument(use, cwd) + ")"
+	dim := len([]rune(head))
+	switch use.Name {
+	case "AskUserQuestion", "Agent", "Task":
+		dim = 0
 	}
 	// A call line wraps rather than clips: the question on an
 	// AskUserQuestion is the one line the session is waiting on, and the
@@ -290,8 +390,56 @@ func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse) {
 		if i >= 3 {
 			break
 		}
+		if i == 0 {
+			d.pushDim(row, dim, readerCall, event, at)
+			continue
+		}
+		if dim > 0 {
+			d.push(row, readerBody, event, at) // the argument's overflow, dim like the argument
+			continue
+		}
 		d.push(row, readerCall, event, at)
 	}
+}
+
+// argument is what a call is about, with the session's directory taken off
+// the front of a path: the CLI shows `Read(internal/ui/reader.go)`, and a
+// column of absolute paths was the widest thing on the page.
+func (d *docBuilder) argument(use transcript.ToolUse, cwd string) string {
+	summary := toolSummary(use)
+	if cwd == "" {
+		cwd = d.cwd
+	}
+	switch use.Name {
+	case "Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep":
+		return relPath(summary, cwd)
+	}
+	return summary
+}
+
+// shorten takes the session's directory out of a line of a tool's own
+// wording — "The file /home/user/api/src/auth.py has been updated." — so a
+// preview names the file the way the call above it did.
+func (d *docBuilder) shorten(line, cwd string) string {
+	if cwd == "" {
+		cwd = d.cwd
+	}
+	if cwd = strings.TrimRight(cwd, "/"); cwd == "" {
+		return line
+	}
+	return strings.ReplaceAll(line, cwd+"/", "")
+}
+
+// relPath strips cwd (and its trailing slash) off the front of path.
+func relPath(path, cwd string) string {
+	cwd = strings.TrimRight(cwd, "/")
+	if cwd == "" || path == cwd {
+		return path
+	}
+	if rest, ok := strings.CutPrefix(path, cwd+"/"); ok && rest != "" {
+		return rest
+	}
+	return path
 }
 
 // pending draws the stub under a call nothing has answered yet.
@@ -306,19 +454,39 @@ func (d *docBuilder) pending(event int, at time.Time, use transcript.ToolUse) {
 	d.push(resultIndent+glyphResult+" "+clip(word, d.width-len(resultIndent)-2), readerBody, event, at)
 }
 
-// result draws what a call returned: one folded row saying how much there is,
-// or — when it failed — the first line of the failure, which is the only part
-// anybody reads first. Unfolding spends up to unfoldCap rows on the rest.
-func (d *docBuilder) result(event int, at time.Time, res transcript.ToolResult, open bool) {
+// result draws what a call returned: one folded row leading with the first
+// line of the output and how much follows it ("collected 20 items · +5
+// lines"), or — when it failed — the first line of the failure, which is the
+// only part anybody reads first. A file's contents (Read, and the listing
+// tools) are counted, not quoted: their first line is the file's, not a
+// message. Unfolding spends up to unfoldCap rows on the rest, and the folded
+// row says only how many there are, so the first line is not read twice.
+// "space unfolds" is the footer's to say, not every row's.
+func (d *docBuilder) result(event int, at time.Time, use transcript.ToolUse, res transcript.ToolResult, open bool, cwd string) {
 	lines := resultBody(res.Text)
 	if len(lines) == 0 {
 		d.push(resultIndent+glyphResult+" "+clip("no output", d.width-len(resultIndent)-2), readerBody, event, at)
 		return
 	}
 
-	kind, head := readerFold, fmt.Sprintf("%s · space %s", plural(len(lines), "line"), foldWord(open))
-	if res.IsError {
+	kind, head := readerFold, plural(len(lines), "line")
+	switch {
+	case res.IsError:
 		kind, head = readerFoldErr, glyphErrRes+" "+lines[0]
+	case open, countsOnly(use.Name):
+	default:
+		// The first line that says something, and how much more there is:
+		// "+5 lines" when it was the first line, the whole count when it
+		// was not — pytest's row of dots is not what the run said.
+		at, preview := previewLine(lines)
+		head = d.shorten(preview, cwd)
+		switch {
+		case len(lines) == 1:
+		case at == 0:
+			head += " · +" + plural(len(lines)-1, "line")
+		default:
+			head += " · " + plural(len(lines), "line")
+		}
 	}
 	d.push(resultIndent+glyphResult+" "+clip(head, d.width-len(resultIndent)-2), kind, event, at)
 	if !open {
@@ -349,11 +517,48 @@ func resultBody(text string) []string {
 	return lines
 }
 
-func foldWord(open bool) string {
-	if open {
-		return "folds"
+// countsOnly names the tools whose result is a file or a listing: the first
+// line of one says nothing about how the call went.
+func countsOnly(tool string) bool {
+	switch tool {
+	case "Read", "Glob", "Grep", "NotebookEdit":
+		return true
 	}
-	return "unfolds"
+	return false
+}
+
+// previewLine is the first line with words on it, and its index — a row of
+// dots or dashes is not a preview of anything. Failing that, the first line
+// with anything on it.
+func previewLine(lines []string) (int, string) {
+	first := -1
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == "" {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		if letters(t) >= 3 {
+			return i, t
+		}
+	}
+	if first < 0 {
+		return 0, ""
+	}
+	return first, strings.TrimSpace(lines[first])
+}
+
+// letters counts the letters in s.
+func letters(s string) int {
+	n := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			n++
+		}
+	}
+	return n
 }
 
 func plural(n int, word string) string {

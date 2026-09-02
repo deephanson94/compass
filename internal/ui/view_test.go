@@ -363,7 +363,7 @@ func TestMirrorWithoutATranscriptStillSaysWho(t *testing.T) {
 // middleColumn pulls the mirror's column out of a rendered deck frame.
 func middleColumn(frame string) []string {
 	// The companion panel: between the fleet and the trail on a narrow
-	// deck, the left of two in the session view.
+	// deck, the right of two in the session view, where the trail leads.
 	var out []string
 	for _, line := range strings.Split(frame, "\n") {
 		parts := strings.Split(line, "│")
@@ -371,7 +371,7 @@ func middleColumn(frame string) []string {
 		case len(parts) >= 3:
 			out = append(out, parts[1])
 		case len(parts) == 2:
-			out = append(out, parts[0])
+			out = append(out, parts[1])
 		}
 	}
 	return out

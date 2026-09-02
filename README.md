@@ -61,11 +61,12 @@ just switches. `g` grabs whichever session has been waiting on you longest and
 attaches to it. Nothing to manage: compass never creates or owns tmux sessions,
 windows, or panes.
 
-The trail on the right reads like the conversation does — oldest at the top, the
-newest work at the bottom, and it stays pinned there so the latest is always on
-screen. `Tab` (Lv2) unfolds each leg; `Tab` again (Lv3) opens the conversation
-itself, anchored to whatever trail row your cursor is on: the trail is a minimap,
-the transcript is the code.
+The trail reads like the conversation does — oldest at the top, the newest work
+at the bottom, and it stays pinned there so the latest is always on screen.
+`Tab` opens one session: the trail on the left with a cursor on the present,
+and to its right the conversation itself, anchored to whatever trail row the
+cursor is on — the trail is a minimap, the transcript is the code. `Tab` again
+hands the keys to the conversation.
 
 ## Principles
 

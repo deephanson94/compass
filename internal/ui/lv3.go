@@ -15,12 +15,27 @@ import (
 // once per change, not once per key.
 func (m *Model) doc(width int) []readerLine {
 	c := &m.docCache
-	if c.valid && c.n == len(m.events) && c.w == width && c.ver == m.docVer {
+	cwd := m.readerCWD()
+	if c.valid && c.n == len(m.events) && c.w == width && c.ver == m.docVer && c.cwd == cwd {
 		return c.lines
 	}
-	lines := readerDoc(m.events, width, m.unfolded)
-	m.docCache = readerCache{lines: lines, valid: true, n: len(m.events), w: width, ver: m.docVer}
+	lines := readerDoc(m.events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd})
+	m.docCache = readerCache{lines: lines, valid: true, n: len(m.events), w: width, ver: m.docVer, cwd: cwd}
 	return lines
+}
+
+// readerCWD is the directory the reader shortens paths against: where the
+// selected session was opened, which is where its paths are rooted however
+// far it has since wandered.
+func (m *Model) readerCWD() string {
+	s, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	if s.Info.OriginCWD != "" {
+		return s.Info.OriginCWD
+	}
+	return s.Info.CWD
 }
 
 // readerWidth is the column the reader currently owns — the same arithmetic
@@ -74,6 +89,7 @@ func (m *Model) readerColumn(w, h int) []string {
 			Unfolded: m.unfolded,
 			Query:    m.query,
 			Anchor:   m.anchor,
+			CWD:      m.readerCWD(),
 		})
 		rows = append(rows, strings.Split(frame, "\n")...)
 	}
@@ -136,7 +152,7 @@ func (m *Model) anchorReader() {
 	if m.cursor >= len(rows) {
 		return
 	}
-	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
+	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD()}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
 		// The scroll is clamped to the last screenful at once: an offset
 		// past it drew the same frame, and the first j after it moved the

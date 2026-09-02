@@ -210,9 +210,10 @@ type Model struct {
 type readerCache struct {
 	lines []readerLine
 	valid bool
-	n     int // events the document was built from
-	w     int // and the width it was wrapped to
-	ver   int // and the fold generation
+	n     int    // events the document was built from
+	w     int    // and the width it was wrapped to
+	ver   int    // and the fold generation
+	cwd   string // and the directory its paths were shortened against
 }
 
 // New returns a deck bound to a fleet Manager.
@@ -1776,15 +1777,18 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 	fw, mw, tw := m.layout(w)
 	if fw == 0 && mw > 0 {
-		// Two columns, the companion and the trail: the conversation, or
-		// the live pane while `m` has it and the keys are on the trail.
+		// Two columns, the trail and its companion: the conversation, or
+		// the live pane while `m` has it and the keys are on the trail. The
+		// trail leads — it is the column the board handed over, the keys
+		// are on it, and its card names the session — and the companion
+		// reads to its right, the way a file tree stands beside the file.
 		companion := m.readerColumn
 		if m.mirrorShown() {
 			companion = m.mirrorColumn
 		}
 		return joinColumns(h, []column{
-			{mw, companion(mw, h)},
 			{tw, m.trailColumn(tw, h)},
+			{mw, companion(mw, h)},
 		})
 	}
 	if fw == 0 {

@@ -1,30 +1,30 @@
  ⌂ compass                                                                                                ▲1 2m  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  ⌁ dev:1.0 · live                                              │ ▌ 2 ● api                                    3m [Lv2]
-                                                                │     ◆ test   1216✓ 2✗                    ⌁ dev
-                                                                │ ◉ "fix the 401 bug"                           38m ago
-                                                                │ ╷
-                                                                │ ◆ scout  middleware.py                             5m
-                                                                │ │
-                                                                │ ◆ build  tokens.py                                12m
-                                                                │ │  └ touched tokens.py · middleware.py
-                                                                │ │
-                                                                │ ◆ test   pytest                             18✓ 2✗ 8m
-                                                                │ │  └ ✗ test_refresh_expired_token
-                                                                │ ├─◈ scout the payments module                ⌀ 7m ago
-                                                                │ │  └ came back with no report
-                                                                │ ●▸fix    tokens.py                             for 3m
-                                                                │
-                                                                │
-                                                                │
-                                                                │
-                                                                │
- [38;5;39m⏺ Read(src/auth/middleware.py)[0m                                 │
-   ⎿ read 214 lines                                             │
-                                                                │
- [31m✗ test_refresh_expired_token — AssertionError: expected 200, g[0m │
-                                                                │
- [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m                           │
+ ▌ 2 ● api                                    3m [Lv2] │  ⌁ dev:1.0 · live
+     ◆ test   1216✓ 2✗                    ⌁ dev        │
+ ◉ "fix the 401 bug"                           38m ago │
+ ╷                                                     │
+ ◆ scout  middleware.py                             5m │
+ │                                                     │
+ ◆ build  tokens.py                                12m │
+ │  └ touched tokens.py · middleware.py                │
+ │                                                     │
+ ◆ test   pytest                             18✓ 2✗ 8m │
+ │  └ ✗ test_refresh_expired_token                     │
+ ├─◈ scout the payments module                ⌀ 7m ago │
+ │  └ came back with no report                         │
+ ●▸fix    tokens.py                             for 3m │
+                                                       │
+                                                       │
+                                                       │
+                                                       │
+                                                       │
+                                                       │ [38;5;39m⏺ Read(src/auth/middleware.py)[0m
+                                                       │   ⎿ read 214 lines
+                                                       │
+                                                       │ [31m✗ test_refresh_expired_token — AssertionError: expected 200, g[0m
+                                                       │
+                                                       │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  j/k legs · h/l session · [ ] chapters · m live pane · tab reader · enter attach · esc board

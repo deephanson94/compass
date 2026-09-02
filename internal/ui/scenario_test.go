@@ -120,6 +120,7 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 		n++
 		ev.UUID = fmt.Sprintf("e%d", n)
 		ev.SessionID = "s"
+		ev.CWD = "/home/user/src" // where the paths below are rooted, as a real line carries it
 		evs = append(evs, ev)
 	}
 	for _, p := range tr.Prompts {

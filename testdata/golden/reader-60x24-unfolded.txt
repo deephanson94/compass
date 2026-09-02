@@ -1,10 +1,10 @@
-❯ fix the 401 bug in the auth middleware
+❯ fix the 401 bug in the auth middleware               12:00
 
 The refresh path looks wrong. Let me run the auth suite
 first and see which tests object.
 
 ⏺ Bash(pytest tests/auth -x)
-  ⎿ 6 lines · space folds
+  ⎿ 6 lines
     collected 20 items
 
     tests/auth/test_refresh.py .F
