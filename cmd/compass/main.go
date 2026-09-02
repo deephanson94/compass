@@ -47,6 +47,7 @@ func main() {
 	fs := flag.NewFlagSet("compass", flag.ExitOnError)
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
 	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: enter no longer attaches")
+	mirror := fs.Bool("mirror", cfg.Mirror, "open the live mirror of the selected pane at Lv1 (m toggles it)")
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
 		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only)`)
@@ -77,7 +78,7 @@ func main() {
 	case "help":
 		fs.Usage()
 	default:
-		if err := ui.Run(mgr, *readonly, build); err != nil {
+		if err := ui.Run(mgr, *readonly, *mirror, build); err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
 		}

@@ -273,14 +273,20 @@ func walkTo(t *testing.T, m *Model, at time.Time) {
 	t.Fatalf("no trail row stands on %v", at)
 }
 
-// T75 — the middle panel follows the trail: the live mirror at Lv1, and from
-// Lv2 the reader, re-anchored to the cursor's own moment on every move.
+// T75 — the reader follows the trail's cursor: every Lv2 move re-anchors it
+// to that row's own moment, and Lv3 shows it. The middle panel is a level,
+// not a fixture of the deck (decision #15): nothing at Lv1 unless `m` asks
+// for the mirror, nothing at Lv2, the reader at Lv3.
 func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 	forceASCII(t)
 
 	m := followModel(120, 30)
+	if got := m.View(); strings.Contains(got, mirrorMark+" dev:1.0 · live") {
+		t.Fatalf("Lv1 opened the mirror unasked:\n%s", got)
+	}
+	press(m, "m")
 	if got := m.View(); !strings.Contains(got, mirrorMark+" dev:1.0 · live") {
-		t.Fatalf("Lv1 must keep the live mirror:\n%s", got)
+		t.Fatalf("m did not bring the mirror:\n%s", got)
 	}
 
 	pressTab(m)
@@ -288,14 +294,19 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 		t.Fatalf("tab left the deck at Lv%d", m.level)
 	}
 	got := m.View()
-	for _, want := range []string{"READER · api", "TRAIL · api"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("Lv2 deck is missing %q:\n%s", want, got)
+	if !strings.Contains(got, "TRAIL · api") {
+		t.Errorf("Lv2 deck is missing the trail:\n%s", got)
+	}
+	for _, gone := range []string{"READER · api", mirrorMark + " dev:1.0 · live"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("Lv2 has a middle panel (%q); it is the trail unfolded and nothing beside it", gone)
 		}
 	}
-	if strings.Contains(got, mirrorMark+" dev:1.0 · live") {
-		t.Error("the mirror outlived Lv1; the middle panel is the reader there")
+	m.zoomIn()
+	if got := m.View(); !strings.Contains(got, "READER · api") {
+		t.Errorf("Lv3 deck is missing the reader:\n%s", got)
 	}
+	m.zoomOut()
 
 	// Tab opens on the present: the newest row, where the pinned trail already was.
 	rows := TrailRows(m.trail, levelWaypoints)
@@ -322,11 +333,16 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 		t.Errorf("the conversation barely moved: %d anchors over %d rows", len(anchors), len(rows))
 	}
 
-	// And the panel really is showing that moment, not merely holding a number.
+	// And the panel really is showing that moment, not merely holding a
+	// number — at Lv3, where the reader is drawn.
 	walkTo(t, m, fixtureBase.Add(9*time.Minute))
+	m.zoomIn()
 	early := m.View()
+	m.zoomOut()
 	walkTo(t, m, fixtureBase.Add(37*time.Minute))
+	m.zoomIn()
 	late := m.View()
+	m.zoomOut()
 	if !strings.Contains(early, "moment09") {
 		t.Errorf("the reader is not showing the scout leg's moment:\n%s", early)
 	}

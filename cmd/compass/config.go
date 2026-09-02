@@ -17,6 +17,7 @@ type config struct {
 	Narrator   string // narrator = "haiku" | "off" | any claude model
 	Readonly   bool   // readonly = true (enter no longer attaches)
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
+	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
 }
 
 // loadConfig reads the config file if there is one. $COMPASS_CONFIG overrides
@@ -53,6 +54,8 @@ func loadConfig() config {
 			c.Readonly = value == "true"
 		case "live_within":
 			c.LiveWithin = value
+		case "mirror":
+			c.Mirror = value == "true"
 		}
 	}
 	return c

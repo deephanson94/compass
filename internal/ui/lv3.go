@@ -34,13 +34,18 @@ func (m *Model) readerWidth() int {
 	if inner < 10 {
 		inner = w
 	}
+	// The width the reader has when it is drawn — at Lv3 — whatever level is
+	// asking. Lv2 computes the anchor for a panel it does not draw, and if it
+	// used its own layout the anchor would be found at the trail's width and
+	// then shown at the middle's, and the reader would jump as it took focus.
 	switch {
 	case inner < minDeckCols:
-		return inner
+		return inner // one column, and at Lv3 it is the reader's
 	case m.width >= deckWideCols:
-		return inner - fleetWidth - trailWidth - 2*gutterWidth
+		fleet, trail := sidePanelWidths(inner)
+		return inner - fleet - trail - 2*gutterWidth
 	default:
-		return inner - fleetWidth - gutterWidth
+		return inner - twoColumnFleet(inner) - gutterWidth // it stands where the trail did
 	}
 }
 
