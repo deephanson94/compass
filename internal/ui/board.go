@@ -607,12 +607,13 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	return dimStyle.Render(clip(line, w))
 }
 
-// foldTotals is what the legs above the fold add up to — the ships and the
-// red runs — so a day that scrolled off still answers "what did it ship".
+// foldTotals is what the day adds up to — the ships and the red runs of
+// the whole trail — so a day that scrolled off still answers "what did it
+// ship", with the same numbers the trail's title gives (counting only the
+// hidden legs made the figures change with the terminal's width).
 func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 	ships, red := 0, 0
-	for i := 0; i < hidden && i < len(tr.Legs); i++ {
-		l := tr.Legs[i]
+	for _, l := range tr.Legs {
 		switch {
 		case l.Class == journey.Ship:
 			ships++

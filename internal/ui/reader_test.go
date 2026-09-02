@@ -476,8 +476,15 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 
 	press(m, "j")
 	press(m, "j")
-	if m.scroll != 2 {
-		t.Errorf("j j at Lv3 = line %d, want 2", m.scroll)
+	// Two rows down — or three, when the second would have put a line of
+	// air at the top of the page, which a single step never does.
+	doc := m.doc(m.readerWidth())
+	want := 2
+	if doc[2].kind == readerBlank {
+		want = 3
+	}
+	if m.scroll != want {
+		t.Errorf("j j at Lv3 = line %d, want %d", m.scroll, want)
 	}
 	still(t, "j")
 

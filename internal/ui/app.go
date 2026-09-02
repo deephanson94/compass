@@ -1302,6 +1302,11 @@ func (m *Model) point(key string) {
 		return
 	}
 	m.selectedKey = key
+	if m.level >= levelTrail && !m.boardShown() {
+		// No board: selecting a session puts its trail on screen, which
+		// is opening it. "unread" never cleared at 100 columns.
+		m.markSeen(key)
+	}
 	// The board already holds this session's trail, plan and labels: use
 	// them, rather than blanking the panel until the next poll — which, on a
 	// terminal too narrow for the board, made every j/k show "nothing yet"
@@ -1589,11 +1594,22 @@ func (m *Model) footerLine(w int) string {
 	if m.note == "" {
 		return left
 	}
-	note := dimStyle.Render(clip(m.note, w))
-	gap := w - lipgloss.Width(left) - lipgloss.Width(note)
-	if gap < 2 {
-		return note // the note is the news; the keymap is always there
+	// The note is the news, but the keymap is the only place the reader's
+	// keys are named: shed the keymap's fragments for the note first, and
+	// clip the note before the keymap goes.
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
+		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
+			break
+		}
+		keys = strings.Replace(keys, drop, "", 1)
 	}
+	left = dimStyle.Render(clip(keys, w))
+	room := w - lipgloss.Width(left) - 2
+	if room < 12 {
+		return dimStyle.Render(clip(m.note, w)) // no keymap fits beside it
+	}
+	note := dimStyle.Render(clip(m.note, room))
+	gap := w - lipgloss.Width(left) - lipgloss.Width(note)
 	return left + strings.Repeat(" ", gap) + note
 }
 

@@ -98,7 +98,7 @@ func (m *Model) readerTitle(w int) string {
 		if m.anchorText != "" {
 			room := w - 1 - len([]rune("READER · "+name)) - 1 - len([]rune(right)) - 3
 			if room >= 8 {
-				right = clip(m.anchorText, room) + " · " + right
+				right = clip(m.anchorText, room) + " · " + right // clip marks the cut with …
 			}
 		}
 	}
@@ -160,6 +160,11 @@ func (m *Model) scrollBy(delta int) bool {
 	}
 	was := clampScroll(m.scroll, len(doc), m.readerHeight())
 	m.scroll = clampScroll(was+delta, len(doc), m.readerHeight())
+	// A single step never lands the top of the page on a line of air: the
+	// press that only pushed a blank in and a line out revealed nothing.
+	if (delta == 1 || delta == -1) && m.scroll < len(doc) && doc[m.scroll].kind == readerBlank {
+		m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
+	}
 	return m.scroll != was
 }
 

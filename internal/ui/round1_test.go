@@ -2012,3 +2012,86 @@ func TestNarrowHelpKeepsTheTrailGlyphs(t *testing.T) {
 		t.Errorf("the narrow help dropped the trail's marks:\n%s", got)
 	}
 }
+
+// ---- round eight
+
+// The board's fold tally is the whole day's, the same numbers as the trail's
+// title, whatever the terminal's height hides.
+func TestFoldTallyIsTheWholeDays(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := longTrail(40)
+	for i := range tr.Legs {
+		if i%10 == 3 {
+			tr.Legs[i].Class = journey.Ship
+		}
+	}
+	m.trails[api] = tr
+	short := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 10), "\n")
+	tall := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 30), "\n")
+	for _, got := range []string{short, tall} {
+		if !strings.Contains(got, "4 ships") {
+			t.Errorf("the fold tally is not the whole day's:\n%s", got)
+		}
+	}
+}
+
+// A single reader step never lands the page on a line of air.
+func TestReaderStepSkipsAir(t *testing.T) {
+	forceASCII(t)
+	m := followModel(120, 22)
+	pressTab(m)
+	walkTo(t, m, fixtureBase.Add(37*time.Minute))
+	pressTab(m)
+	doc := m.doc(m.readerWidth())
+	m.scroll = 2
+	press(m, "k")
+	if m.scroll < len(doc) && doc[m.scroll].kind == readerBlank {
+		t.Errorf("k landed the page on a blank line (%d)", m.scroll)
+	}
+	press(m, "j")
+	if m.scroll < len(doc) && doc[m.scroll].kind == readerBlank {
+		t.Errorf("j landed the page on a blank line (%d)", m.scroll)
+	}
+}
+
+// The reader's footer keeps its keys beside a note.
+func TestReaderFooterKeepsItsKeysBesideANote(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(100, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)
+	pressTab(m)
+	pressTab(m)
+	if m.level != levelReader {
+		t.Fatalf("level = %d, want the reader", m.level)
+	}
+	m.note = "no waypoints · reader at the present"
+	foot := m.footerLine(98)
+	if !strings.Contains(foot, "space fold") || !strings.Contains(foot, "no waypoints") {
+		t.Errorf("the footer lost its keys to the note: %q", foot)
+	}
+}
+
+// Without a board, selecting a session opens its trail: unread clears.
+func TestUnreadClearsWhenTheTrailIsOnScreen(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(100, 30)
+	tf := sessionKey("s-tfstate")
+	if m.level != levelTrail {
+		t.Fatalf("a 100-column deck opened at level %d", m.level)
+	}
+	if !m.unread(m.sessions[rowFor(t, m, tf).sess]) {
+		t.Fatalf("fixture: tfstate is not unread")
+	}
+	m.point(tf)
+	if m.unread(m.sessions[rowFor(t, m, tf).sess]) {
+		t.Errorf("selecting a session at Lv1 without a board did not mark it read")
+	}
+	wide := boardModel(152, 30)
+	wide.point(tf)
+	if !wide.unread(wide.sessions[rowFor(t, wide, tf).sess]) {
+		t.Errorf("selecting a column on the board marked it read before it was opened")
+	}
+}
