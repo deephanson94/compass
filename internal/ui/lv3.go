@@ -148,17 +148,44 @@ func (m *Model) readerTitle(w int) string {
 			}
 		}
 	}
+	tag := ""
 	if m.sessionView() && m.level >= levelReader {
 		// The keys are here, and the card across the gutter has stopped
 		// saying so: the word goes where the bar is.
+		tag = "[reader]"
+	}
+	// The name is never clipped for the row: "▌READE… the question…" lost
+	// which of two sessions was open. The anchored row gets what the name
+	// and the tag leave; the tag goes before the row does.
+	body := w - 1
+	title := "READER · " + name
+	room := body - lipgloss.Width(title) - 1
+	if tag != "" {
+		room -= lipgloss.Width(tag) + 2
+	}
+	if lipgloss.Width(right) > room {
+		if m.anchor >= 0 && !m.searching && m.query == "" {
+			// The row's text, clipped to fit; the clock stays.
+			clock := m.anchorAt.Local().Format("15:04")
+			if room >= len(clock)+3+8 {
+				right = clip(m.anchorText, room-len(clock)-3) + " · " + clock
+			} else if room >= len(clock) {
+				right = clock
+			} else {
+				right = ""
+			}
+		} else {
+			right = clip(right, max(room, 0))
+		}
+	}
+	if tag != "" {
 		if right != "" {
 			right += "  "
 		}
-		right += "[reader]"
+		right += tag
 	}
 	mark := m.titleMark(panelReader)
-	body := w - 1
-	left := m.titleStyleFor(panelReader).Render(clip("READER · "+name, body-lipgloss.Width(right)-1))
+	left := m.titleStyleFor(panelReader).Render(clip(title, body-lipgloss.Width(right)-1))
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1

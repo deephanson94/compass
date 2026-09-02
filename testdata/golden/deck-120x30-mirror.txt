@@ -2,7 +2,7 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
  ▌ 2 ● api                                3m [session] │  ⌁ dev:1.0 · live
-     ✗ red 18✓ 2✗ · edited since · ◈1 back · 1 empty   │
+     ✗ red 18✓ 2✗ · edited since · ◈1 back       ⌁ dev │
  ◉ "fix the 401 bug"                           38m ago │
  ╷                                                     │
  ◆ scout  middleware.py                             5m │

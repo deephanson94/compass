@@ -174,6 +174,11 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 			said = "Running the suite."
 			tool, input = "Bash", `{"command":"pytest tests/ -x -q"}`
 			result = "............................................................\n" + runSummaryFor(l) + " in 4.21s"
+			if strings.HasPrefix(l.Label, "go test") {
+				// The leg says go test; the reader should not say pytest.
+				tool, input = "Bash", `{"command":"go test ./..."}`
+				result = "ok  \tgithub.com/example/cli\t4.21s\n" + runSummaryFor(l)
+			}
 			isErr = strings.Contains(legBadge(l), "✗")
 		case journey.Ship:
 			said = "Committing."
@@ -602,10 +607,14 @@ func sceneVeryLong() scene {
 				leg.Current = true
 			}
 			tr.Legs = append(tr.Legs, leg)
-			if i%14 == 13 {
-				tr.Prompts = append(tr.Prompts, journey.Prompt{Text: []string{"ok keep going", "now the audit log", "fix all the failures first", "yes and update the docs", "please continue — our quota is back"}[(i/14)%5], At: leg.End.Add(20 * time.Second)})
-			}
 			at = leg.End.Add(30 * time.Second)
+			if i%14 == 13 {
+				// A prompt comes after the session sat waiting for it — six
+				// to twelve minutes here, as a person at a fleet does.
+				wait := time.Duration(6+(i/14)%3*3) * time.Minute
+				tr.Prompts = append(tr.Prompts, journey.Prompt{Text: []string{"ok keep going", "now the audit log", "fix all the failures first", "yes and update the docs", "please continue — our quota is back"}[(i/14)%5], At: leg.End.Add(wait)})
+				at = leg.End.Add(wait + 30*time.Second)
+			}
 		}
 		return tr
 	}
@@ -689,7 +698,7 @@ func pressKey(m *Model, key string) {
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"r", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "tab", "shift+tab", "A", "A", "m", "?"}
+var canonicalKeys = []string{"r", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "esc", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder

@@ -105,7 +105,7 @@ func TestFoldRowsLeadWithTheOutput(t *testing.T) {
 	forceASCII(t)
 
 	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 70, Height: 20})
-	if !strings.Contains(got, "⎿ collected 20 items · +5 lines") {
+	if !strings.Contains(got, "⎿ collected 20 items · 5 more lines") {
 		t.Errorf("the pytest result should lead with its first line:\n%s", got)
 	}
 	if strings.Contains(got, "space unfolds") {
@@ -139,7 +139,7 @@ func TestFoldRowsLeadWithTheOutput(t *testing.T) {
 	got = RenderReader(ev, ReaderOpts{Width: 70, Height: 20})
 	for _, want := range []string{
 		"⎿ 3 lines",                    // a file is counted, not quoted
-		"⎿ 1 passed in 0.4s · 2 lines", // the dots are not what the run said
+		"⎿ 1 passed in 0.4s · 1 more line", // the dots are not what the run said
 		"⎿ Everything up-to-date",      // one line is the line
 		"⎿ ✗ FAILED test_a.py::test_x", // a failure leads with what failed, not its dots
 	} {

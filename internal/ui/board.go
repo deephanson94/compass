@@ -594,7 +594,7 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 		if runs := repeatRuns(l); red && runs >= 2 {
 			// The same test red again: the loop is the column's news,
 			// and a board column has no room for the test's name.
-			parts = append(parts, "same test "+ordinal(runs)+" leg")
+			parts = append(parts, "same test "+ordinal(runs)+" failure")
 		}
 		break
 	}

@@ -1959,7 +1959,7 @@ func TestLateResultNamesItsCall(t *testing.T) {
 	if !strings.Contains(got, "↩ result of Agent(score the gates)") {
 		t.Errorf("a late result does not name its call:\n%s", got)
 	}
-	if strings.Count(got, "↩") != 1 {
+	if strings.Count(got, "↩ result of") != 1 {
 		t.Errorf("a result under its own call is annotated:\n%s", got)
 	}
 }
@@ -2062,7 +2062,7 @@ func TestReaderFooterKeepsItsKeysBesideANote(t *testing.T) {
 	}
 	m.note = "no waypoints · reader at the present"
 	foot := m.footerLine(98)
-	if !strings.Contains(foot, "space fold") || !strings.Contains(foot, "no waypoints") {
+	if !strings.Contains(foot, "space unfold") || !strings.Contains(foot, "no waypoints") {
 		t.Errorf("the footer lost its keys to the note: %q", foot)
 	}
 }

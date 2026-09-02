@@ -119,6 +119,15 @@ func ReaderAnchor(events []transcript.Event, o ReaderOpts, at time.Time) int {
 			continue
 		}
 		if !l.at.Before(at) {
+			// A moment that lands on a result lands on its call instead:
+			// a page opened on "⎿ edited · +1 −1" named nothing.
+			for i > 0 && (l.kind == readerFold || l.kind == readerFoldErr || l.kind == readerBody) {
+				prev := doc[i-1]
+				if prev.kind != readerCall && prev.kind != readerFold && prev.kind != readerFoldErr && prev.kind != readerBody {
+					break
+				}
+				i, l = i-1, prev
+			}
 			return i
 		}
 	}
@@ -254,6 +263,31 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 			answered[res.ToolUseID] = true
 		}
 	}
+	// Where each result lands, and where each call is made, so a call whose
+	// result comes after other calls can say so at the call site.
+	resultAt := map[string]int{}
+	var callAt []int
+	for i, ev := range events {
+		if ev.IsSidechain {
+			continue
+		}
+		for _, res := range ev.ToolResults {
+			if _, seen := resultAt[res.ToolUseID]; !seen {
+				resultAt[res.ToolUseID] = i
+			}
+		}
+		if len(ev.ToolUses) > 0 {
+			callAt = append(callAt, i)
+		}
+	}
+	nextCall := func(after int) int {
+		for _, c := range callAt {
+			if c > after {
+				return c
+			}
+		}
+		return -1
+	}
 	calls := map[string]transcript.ToolUse{}
 	lastCall := ""
 	for i, ev := range events {
@@ -287,11 +321,17 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 				calls[use.ID] = use
 				lastCall = use.ID
 				d.call(i, ev.Timestamp, use, ev.CWD)
-				if !answered[use.ID] {
+				switch {
+				case !answered[use.ID]:
 					// Dispatched and not back, or hung: the reader said
 					// nothing, and an agent still out looked exactly like
 					// one returned and folded.
 					d.pending(i, ev.Timestamp, use)
+				case nextCall(i) >= 0 && resultAt[use.ID] > nextCall(i):
+					// Answered, but only after other calls were made: the
+					// result is drawn where it landed, under "↩ result of",
+					// and the call site says so rather than looking hung.
+					d.push(resultIndent+glyphResult+" "+clip(glyphLate+" result below", d.width-len(resultIndent)-2), readerBody, i, ev.Timestamp)
 				}
 			}
 		}
@@ -509,15 +549,14 @@ func (d *docBuilder) result(event int, at time.Time, use transcript.ToolUse, res
 		// The first line that says something, and how much more there is:
 		// "+5 lines" when it was the first line, the whole count when it
 		// was not — pytest's row of dots is not what the run said.
-		at, preview := previewLine(lines)
+		_, preview := previewLine(lines)
 		head = d.shorten(preview, cwd)
-		switch {
-		case len(lines) == 1:
-		case at == 0:
-			head += " · +" + plural(len(lines)-1, "line")
-		default:
-			head += " · " + plural(len(lines), "line")
+		if len(lines) > 1 {
+			head += " · " + more(len(lines)-1)
 		}
+	}
+	if res.IsError && len(lines) > 1 && !open {
+		head += " · " + more(len(lines)-1)
 	}
 	d.push(resultIndent+glyphResult+" "+clip(head, d.width-len(resultIndent)-2), kind, event, at)
 	if !open {
@@ -574,6 +613,16 @@ func lineCount(s string) int {
 		return 0
 	}
 	return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1
+}
+
+// more is the one shape a fold's remainder wears — "5 more lines" — on a
+// clean result and a failed one alike; "+1 line" beside "edited · +1 −1"
+// read as a diff stat.
+func more(n int) string {
+	if n == 1 {
+		return "1 more line"
+	}
+	return fmt.Sprintf("%d more lines", n)
 }
 
 // countsOnly names the tools whose result is a file or a listing: the first

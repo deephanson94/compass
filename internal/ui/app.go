@@ -712,7 +712,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case !m.showMirror:
 		case m.width < deckWideCols:
-			m.note = fmt.Sprintf("the mirror needs %d columns; this terminal has %d", deckWideCols, m.width)
+			m.note = fmt.Sprintf("the mirror needs %d columns", deckWideCols)
 		case m.level == levelBoard:
 			m.note = "the mirror shows beside a session (tab)"
 		case m.sessionView() && m.level >= levelReader:
@@ -1239,7 +1239,7 @@ func (m *Model) zoomOut() {
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
 	case m.level == levelTrail:
-		m.note = fmt.Sprintf("no board under %d columns · this terminal has %d", deckWideCols, m.width)
+		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	}
 }
 
@@ -1635,13 +1635,14 @@ func overlay(rows, panel []string, left, top int) {
 		if top+i >= len(rows) {
 			break
 		}
+		// What is left of the panel stays; what is right of it goes: a
+		// column's tail sliced at the border read as a leg with no label.
 		line := rows[top+i]
 		before := ansi.Truncate(line, left, "")
 		if w := lipgloss.Width(before); w < left {
 			before += strings.Repeat(" ", left-w)
 		}
-		after := ansi.TruncateLeft(line, left+pw, "")
-		rows[top+i] = before + pad(p, pw) + after
+		rows[top+i] = before + pad(p, pw)
 	}
 }
 
@@ -1730,7 +1731,19 @@ func (m *Model) replyState(s fleet.Session) string {
 	case state.Stuck:
 		return "◍ stuck · silent " + since + " — the line is typed under the hung call"
 	case state.Working:
-		return "● working for " + since + " — the line queues behind its turn"
+		// The turn's own clock — "for 1h", or "◈3 out 20m · quiet 15m"
+		// — not the last write's: how long the line will queue is how
+		// long the turn has been going.
+		tail := ""
+		if s.Info.Key() == m.selectedKey {
+			tail = headTail(m.trail, m.now, true)
+		} else if tr, ok := m.trails[s.Info.Key()]; ok {
+			tail = headTail(tr, m.now, true)
+		}
+		if tail == "" {
+			tail = "for " + since
+		}
+		return "● working " + tail + " — the line queues behind its turn"
 	default:
 		return "○ idle " + since + " — waiting for a prompt"
 	}
@@ -1855,7 +1868,7 @@ func (m *Model) footerLine(w int) string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.replying:
-		keys = fmt.Sprintf("reply: 1–%d sends · esc closes", min(len(m.replies), 9))
+		keys = fmt.Sprintf("reply: 1–%d types and sends · esc closes", min(len(m.replies), 9))
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · g grab · ? help · q quit"
 		if m.archiveView {
@@ -1867,9 +1880,9 @@ func (m *Model) footerLine(w int) string {
 			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · ⇧tab board · A live fleet · ? help · q quit"
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · h/l session · a ask · enter attach · esc back"
+		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · enter attach · esc back"
 	case m.level >= levelReader:
-		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · a ask · enter attach · esc back"
+		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints && m.sessionView():
 		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board"
 	case m.level >= levelWaypoints:
@@ -1890,7 +1903,10 @@ func (m *Model) footerLine(w int) string {
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
 	// clip the note before the keymap goes.
-	for _, drop := range []string{" · r reply", " · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
+	// The keys a note is about — the chapters it counts, the reply it
+	// reports — go last: a footer that dropped `[ ] turns` on the frame
+	// that said "❯ 3/12" read as the key having gone.
+	for _, drop := range []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · [ ] chapters", " · [ ] turns", " · r reply", " · ? help"} {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
 			break
 		}

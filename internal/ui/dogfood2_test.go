@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
@@ -94,16 +96,16 @@ func TestRepeatedFailuresSayHowManyTimes(t *testing.T) {
 	tr := journey.Trail{Legs: []journey.Leg{leg(base, 1), leg(base.Add(10*time.Minute), 2), leg(base.Add(20*time.Minute), 3)}}
 	tr.Legs[2].Current = true
 	got := renderLv(tr, base.Add(30*time.Minute), 2, 60, 30)
-	for _, want := range []string{"test_refresh_expired_token · 2nd leg", "test_refresh_expired_token · 3rd leg"} {
+	for _, want := range []string{"test_refresh_expired_token · 2nd failure", "test_refresh_expired_token · 3rd failure"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q at Lv2:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "1st leg") > 0 {
+	if strings.Count(got, "1st failure") > 0 {
 		t.Errorf("the first failure is not a repeat:\n%s", got)
 	}
 	// On a wide row the detail rides inline, and says it there too.
-	if got := renderLv(tr, base.Add(30*time.Minute), 1, 120, 30); !strings.Contains(got, "· 3rd leg") {
+	if got := renderLv(tr, base.Add(30*time.Minute), 1, 120, 30); !strings.Contains(got, "· 3rd failure") {
 		t.Errorf("the wide row should carry the count:\n%s", got)
 	}
 	for n, want := range map[int]string{1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 11: "11th", 12: "12th", 13: "13th", 21: "21st", 22: "22nd", 103: "103rd"} {
@@ -178,7 +180,7 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 		}
 	}
 	// A panel, not a takeover: the deck is still there around it.
-	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 sends") {
+	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 types and sends") {
 		t.Errorf("the deck should stay under the panel, and the footer name the keys:\n%s", view)
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
@@ -478,11 +480,179 @@ func TestTheVerdictNamesARepeatedFailure(t *testing.T) {
 	}
 	tr := journey.Trail{Legs: []journey.Leg{leg(base, 1), leg(base.Add(10*time.Minute), 3)}}
 	s := fleet.Session{Snap: state.Snapshot{State: state.Idle}}
-	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); !strings.Contains(got, "✗ red 18✓ 1✗ · same test 3rd leg") {
+	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); !strings.Contains(got, "✗ red 18✓ 1✗ · same test 3rd failure") {
 		t.Errorf("the verdict should name the loop: %q", got)
 	}
 	tr.Legs = tr.Legs[:1]
 	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); strings.Contains(got, "same test") {
 		t.Errorf("a first failure is not a loop: %q", got)
+	}
+}
+
+// ---- round ten
+
+// The reply panel blanks the rest of every row it covers: a column's tail
+// sliced at the border read as a leg with no label.
+func TestTheReplyPanelBlanksToTheEdge(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(152, 40) // four columns of trail: the panel over column one has neighbours
+	press(m, "r")
+	if !m.replying {
+		t.Fatalf("r did not offer the replies: %q", m.note)
+	}
+	got := m.View()
+	if !strings.Contains(got, "◆ ") {
+		t.Fatal("the fixture should draw trails beside the panel")
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "a digit types the line") {
+			after := line[strings.LastIndex(line, "│")+len("│"):]
+			if strings.TrimSpace(after) != "" {
+				t.Errorf("the row is not blank right of the panel: %q", line)
+			}
+		}
+	}
+}
+
+// The panel's working line carries the turn's clock, not the last write's:
+// "working for 40s" over a one-hour turn said the opposite of what it
+// exists to say.
+func TestTheReplyPanelClockIsTheTurns(t *testing.T) {
+	forceASCII(t)
+	m := followModel(152, 40)
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == sessionKey("s-api") {
+			m.sessions[i].Snap = state.Snapshot{State: state.Working, Since: fixtureBase.Add(39 * time.Minute)}
+			m.sessions[i].Info.LastEventAt = fixtureBase.Add(39*time.Minute + 20*time.Second)
+		}
+	}
+	m.now = fixtureBase.Add(40 * time.Minute)
+	press(m, "r")
+	want := "● working " + headTail(m.trail, m.now, true) + " —"
+	if view := m.View(); !strings.Contains(view, want) || strings.Contains(view, "working for 40s") {
+		t.Errorf("the panel should carry HEAD's own figure %q:\n%s", want, view)
+	}
+}
+
+// A compaction is drawn under a fork too: the one rule that means "the
+// memory changed here" is not the one to skip.
+func TestACompactionIsDrawnUnderAFork(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := hourlyTrail(base, 4)
+	tr.Branches = []journey.Branch{{ToolUseID: "b", Label: "scout", Start: base.Add(90 * time.Minute), End: base.Add(100 * time.Minute), Done: true, AfterLeg: 1, Report: "found it"}}
+	tr.Compactions = []time.Time{base.Add(110 * time.Minute)} // after leg 1 (forked), before leg 2
+	got := renderLv(tr, base.Add(5*time.Hour), 1, 60, 40)
+	if !strings.Contains(got, "⟲ context compacted") {
+		t.Errorf("a compaction after a forked leg is not drawn:\n%s", got)
+	}
+}
+
+// The card's second row says the wait once, keeps the tmux session, and
+// for a working session with nothing to count says the present.
+func TestTheCardSaysThingsOnce(t *testing.T) {
+	forceASCII(t)
+	m := followModel(152, 40)
+	base := fixtureBase
+	tr := m.trail
+	tr.Prompts = append(tr.Prompts, journey.Prompt{Text: "and now the docs", At: base.Add(3 * time.Hour)})
+	m.SetTrail(tr)
+	m.now = base.Add(3*time.Hour + 10*time.Minute)
+	toLv2(m)
+	card := ansi.Strip(m.sessionCard(96)[1])
+	if strings.Count(card, "on you") > 1 {
+		t.Errorf("the wait is said twice: %q", card)
+	}
+	if !strings.Contains(card, "⌁ dev") {
+		t.Errorf("the tmux session should always be on the card: %q", card)
+	}
+	if !strings.Contains(card, "3h") {
+		t.Errorf("the day should be on the card: %q", card)
+	}
+	// A working session with nothing to count says the present.
+	w := followModel(152, 40)
+	for i := range w.sessions {
+		if w.sessions[i].Info.Key() == sessionKey("s-api") {
+			w.sessions[i].Snap = state.Snapshot{State: state.Working, Since: base.Add(35 * time.Minute), Activity: "Edit: tokens.py"}
+		}
+	}
+	plain := journey.Trail{Prompts: []journey.Prompt{{Text: "go", At: base}}, Legs: []journey.Leg{
+		{Class: journey.Scout, Label: "loader.go", Start: base.Add(time.Minute), End: base.Add(5 * time.Minute)},
+		{Class: journey.Build, Label: "tokens.py", Start: base.Add(6 * time.Minute), Current: true}}}
+	w.SetTrail(plain)
+	if w.trails == nil {
+		w.trails = map[string]journey.Trail{}
+	}
+	w.trails[sessionKey("s-api")] = plain // the board's copy, as a refresh hands it over
+	toLv2(w)
+	card = ansi.Strip(w.sessionCard(96)[1])
+	if strings.Contains(card, "scout loader.go") || !strings.Contains(card, "● build") {
+		t.Errorf("a working card should say the present, not the last leg: %q", card)
+	}
+}
+
+// The reader's title never clips its own name for the anchored row: the
+// tag goes before the row, and the row before the name.
+func TestTheReaderTitleKeepsItsName(t *testing.T) {
+	forceASCII(t)
+	m := followModel(120, 34)
+	toLv3(m)
+	m.anchor, m.anchorAt, m.anchorText = 3, fixtureBase, strings.Repeat("a long anchored row ", 6)
+	title := ansi.Strip(m.readerTitle(50))
+	if !strings.Contains(title, "READER · api") {
+		t.Errorf("the name was clipped: %q", title)
+	}
+	if !strings.Contains(title, "[reader]") || !strings.Contains(title, "…") || lipgloss.Width(title) > 50 {
+		t.Errorf("the row should be clipped with a mark and the tag kept, within the width: %q (%d)", title, lipgloss.Width(title))
+	}
+}
+
+// A moment that lands on a result lands on its call: a page opened on
+// "⎿ edited · +1 −1" named nothing.
+func TestTheAnchorLandsOnTheCall(t *testing.T) {
+	base := fixtureBase
+	ev := []transcript.Event{
+		{Type: transcript.EventAssistant, Timestamp: base, ToolUses: []transcript.ToolUse{{ID: "e", Name: "Edit", Input: json.RawMessage(`{"file_path":"a.go","old_string":"x","new_string":"y"}`)}}},
+		{Type: transcript.EventUser, Timestamp: base.Add(time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "e", Text: "The file a.go has been updated."}}},
+	}
+	o := ReaderOpts{Width: 80}
+	line := ReaderAnchor(ev, o, base.Add(time.Minute))
+	doc := readerDoc(ev, o)
+	if line < 0 || doc[line].kind != readerCall {
+		t.Errorf("the anchor landed on line %d (%v), not the call", line, doc[line].kind)
+	}
+}
+
+// A call whose result lands after other calls says so at the call site,
+// and a fold's remainder wears one shape on a clean result and a failed one.
+func TestLateResultsAreMarkedAtTheCallAndFoldsWearOneShape(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	ev := []transcript.Event{
+		{Type: transcript.EventAssistant, Timestamp: base, ToolUses: []transcript.ToolUse{{ID: "e", Name: "Edit", Input: json.RawMessage(`{"file_path":"a.go","old_string":"x","new_string":"y"}`)}}},
+		{Type: transcript.EventAssistant, Timestamp: base.Add(time.Minute), ToolUses: []transcript.ToolUse{{ID: "b", Name: "Bash", Input: json.RawMessage(`{"command":"pytest"}`)}}},
+		{Type: transcript.EventUser, Timestamp: base.Add(2 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "b", IsError: true, Text: "FAILED test_x\nassert 1 == 2\nsecond line"}}},
+		{Type: transcript.EventUser, Timestamp: base.Add(3 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "e", Text: "The file a.go has been updated."}}},
+	}
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 20, Anchor: -1})
+	for _, want := range []string{"⏺ Edit(a.go)\n  ⎿ ↩ result below", "⎿ ✗ FAILED test_x · 2 more lines", "↩ result of Edit(a.go)\n  ⎿ edited · +1 −1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "+2 lines") || strings.Contains(got, "· 3 lines") {
+		t.Errorf("a fold's remainder should say 'N more lines':\n%s", got)
+	}
+}
+
+// The day is on the trail's title and card from an hour in, not two.
+func TestTheDayCountsFromAnHour(t *testing.T) {
+	base := fixtureBase
+	tr := hourlyTrail(base, 2)
+	if got := trailDay(tr, base.Add(70*time.Minute), false); !strings.Contains(got, "1h") {
+		t.Errorf("an hour-old trail should have a day figure: %q", got)
+	}
+	if got := trailDay(tr, base.Add(40*time.Minute), false); got != "" {
+		t.Errorf("forty minutes is not a day: %q", got)
 	}
 }

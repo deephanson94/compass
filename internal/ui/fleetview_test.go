@@ -939,7 +939,7 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 		for _, want := range []string{
 			"j/k move · enter attach (prefix d returns) · g grab · ? help · q quit",
 			"j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back",
-			"j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back",
+			"j/k scroll · space unfold · / search · n/N · a ask · enter attach · esc back",
 		} {
 			if got := m.View(); !strings.Contains(got, want) {
 				t.Errorf("the Lv%d footer does not fit an 80-column deck: %q", m.level, want)

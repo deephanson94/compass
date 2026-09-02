@@ -487,16 +487,18 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		switch {
 		case i == 0:
 			// The journey's first node. Nothing came before it.
+		case compactedBetween(tr.Compactions, nodes[i-1].at, n.at):
+			// The conversation ran out of context here and was folded into
+			// a summary: everything below works from what the summary kept.
+			// A session compacted twice is the one to read closely. Drawn
+			// even under a fork or a tick — the one rule that means "the
+			// memory changed here" is not the one to skip.
+			b.node(compactRule(compactionIn(tr.Compactions, nodes[i-1].at, n.at), o.Width))
 		case forked:
 			// The fork row above is a rail segment of its own: `├` reaches down
 			// to this node as well as right to the lane it opened.
 		case ticked:
 			// The tick above is a rail segment of its own too.
-		case compactedBetween(tr.Compactions, nodes[i-1].at, n.at):
-			// The conversation ran out of context here and was folded into
-			// a summary: everything below works from what the summary kept.
-			// A session compacted twice is the one to read closely.
-			b.node(compactRule(compactionIn(tr.Compactions, nodes[i-1].at, n.at), o.Width))
 		case i == 1:
 			b.node(ruleStyle.Render(railHead))
 		case long && hourTurned(nodes[i-1].at, n.at):
@@ -1208,7 +1210,9 @@ func waypointBody(w journey.Waypoint, bug, width int) string {
 // looks like the first two.
 func failText(w journey.Waypoint) string {
 	if w.Runs >= 2 {
-		return w.Text + " · " + ordinal(w.Runs) + " leg"
+		// "10th failure", not "10th leg": beside "↑ 128 legs" the leg
+		// count read as the leg's number.
+		return w.Text + " · " + ordinal(w.Runs) + " failure"
 	}
 	return w.Text
 }
@@ -1437,9 +1441,18 @@ func (m *Model) cardSecond(w int) string {
 	}
 	room := w - 4
 	verdict := strings.Split(boardVerdict(s, m.trail, m.now), " · ")
-	if s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou {
-		// The two states you must not miss keep the fleet row's own
-		// sentence — the hung call, the question — over the verdict.
+	if s.Snap.State != state.Idle && len(verdictParts(m.trail, m.now, true)) == 0 {
+		// Nothing to count: the fleet row's own sentence — the hung call,
+		// the question, the present — not the last finished leg. The
+		// board's column says the present; zooming in lost it.
+		if r, ok := m.boardRows()[m.selectedKey]; ok {
+			if lines := m.entryLines(r, room); len(lines) > 1 {
+				if head := strings.TrimSpace(ansi.Strip(lines[1])); head != "" {
+					verdict = []string{head}
+				}
+			}
+		}
+	} else if s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou {
 		if r, ok := m.boardRows()[m.selectedKey]; ok {
 			if lines := m.entryLines(r, room); len(lines) > 1 {
 				if head := strings.TrimSpace(ansi.Strip(lines[1])); head != "" {
@@ -1452,34 +1465,48 @@ func (m *Model) cardSecond(w int) string {
 	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
 		tmux = "⌁ " + tmuxSessionName(pane.Target)
 	}
-	line := ""
-	for _, try := range []struct {
-		day  []string
-		tmux string
-	}{
-		{dayParts(m.trail, m.now, false), tmux},
-		{dayParts(m.trail, m.now, true), tmux},
-		{dayParts(m.trail, m.now, false), ""},
-		{dayParts(m.trail, m.now, true), ""},
-	} {
-		parts := append(append([]string{}, verdict...), try.day...)
-		fit := room
-		if try.tmux != "" {
-			fit -= lipgloss.Width(try.tmux) + 2
+	// The tmux session is always kept — `enter` attaches from here — and
+	// the day is added after the verdict, so joinFit sheds the day's
+	// clauses before the verdict's; the long form when it all fits, the
+	// compact one otherwise.
+	fit := room
+	if tmux != "" {
+		fit -= lipgloss.Width(tmux) + 2
+	}
+	best := ""
+	for _, compact := range []bool{false, true} {
+		day := dayParts(m.trail, m.now, compact)
+		parts := append([]string{}, verdict...)
+		if len(day) > 0 {
+			// The day's total carries the wait; the verdict's clause is
+			// the same hour twice on one row.
+			parts = withoutPrefix(parts, "on you ")
 		}
-		if text := joinFit(parts, fit); text == strings.Join(parts, " · ") {
-			line = text
-			if try.tmux != "" {
-				line = pad(line, fit+2) + try.tmux
-			}
+		parts = append(parts, day...)
+		text := joinFit(parts, fit)
+		if text == strings.Join(parts, " · ") {
+			best = text
 			break
 		}
+		if best == "" || len(text) > len(best) {
+			best = text
+		}
 	}
-	if line == "" {
-		parts := append(append([]string{}, verdict...), dayParts(m.trail, m.now, true)...)
-		line = joinFit(parts, room)
+	if tmux != "" {
+		best = pad(best, fit+2) + tmux
 	}
-	return "    " + dimStyle.Render(line)
+	return "    " + dimStyle.Render(best)
+}
+
+// withoutPrefix drops the clauses that begin with prefix.
+func withoutPrefix(parts []string, prefix string) []string {
+	out := parts[:0:0]
+	for _, p := range parts {
+		if !strings.HasPrefix(p, prefix) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // trailOpts is the model's state as the renderer wants it.
@@ -1539,8 +1566,8 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 	if len(tr.Prompts) > 0 && tr.Prompts[0].At.Before(start) {
 		start = tr.Prompts[0].At
 	}
-	if now.Sub(start) <= longTrailSpan {
-		return ""
+	if now.Sub(start) < longTrailSpan/2 {
+		return "" // under an hour there is no day to add up
 	}
 	ships, red := 0, 0
 	for _, l := range tr.Legs {
