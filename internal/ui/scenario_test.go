@@ -489,6 +489,7 @@ func sceneSubagents() scene {
 	t = withBranch(t, 3, "Measure moe_by_andy DLA on dx6", n.Add(-20*time.Minute), false, "")
 	t = withBranch(t, 3, "Review /auto-resume skill design", n.Add(-18*time.Minute), false, "")
 	t = withBranch(t, 3, "Red-team the plugin architecture", n.Add(-15*time.Minute), false, "")
+	t.Legs[len(t.Legs)-1].End = n.Add(-15 * time.Minute) // its last own word: the dispatch, 15m ago
 	tr[sessionKey("porter")] = withTasks(t,
 		journey.Task{ID: "1", Subject: "Score encoder gates", Status: "completed"},
 		journey.Task{ID: "2", Subject: "Measure DLA on dx6", Active: "Measuring DLA on dx6", Status: "in_progress", Owner: "measurer"},

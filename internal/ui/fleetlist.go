@@ -422,8 +422,8 @@ func (m *Model) groupAge(g fleetGroup) string {
 	if m.groupEcho(g) != "" {
 		var oldest time.Time
 		for _, i := range g.entries {
-			if s := m.sessions[i]; wantsAttention(s.Snap.State) && (oldest.IsZero() || s.Snap.Since.Before(oldest)) {
-				oldest = s.Snap.Since
+			if s := m.sessions[i]; wantsAttention(s.Snap.State) && (oldest.IsZero() || headSince(s).Before(oldest)) {
+				oldest = headSince(s) // the row's own clock: silence for a hung one
 			}
 		}
 		if !oldest.IsZero() {

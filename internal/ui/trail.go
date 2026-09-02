@@ -764,6 +764,17 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 		badge, badgeW = "", 0
 		labelWidth = width - trailPrefixWidth - 1 - len([]rune(age))
 	}
+	if labelWidth < trailMinLabel && l.Current {
+		// HEAD's figure can be a sentence — "◈3 out 20m · quiet 1h" — and
+		// a narrow column keeps the label and the first clause over the
+		// whole clause and no label.
+		for _, part := range strings.SplitN(age, " · ", 2) {
+			if w := width - trailPrefixWidth - 1 - len([]rune(part)); w >= trailMinLabel {
+				age, labelWidth = part, w
+				break
+			}
+		}
+	}
 	if labelWidth < trailMinLabel {
 		// Too narrow for a label: the verb and the age still answer "what, when".
 		return head + padLeft(dimStyle.Render(age), width-(trailPrefixWidth-1))

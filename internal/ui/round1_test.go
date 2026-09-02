@@ -1570,3 +1570,39 @@ func TestParkedHeadKeepsItsOwnName(t *testing.T) {
 		t.Errorf("a working HEAD lost the plan's name:\n%s", got)
 	}
 }
+
+// A narrow column keeps HEAD's label and the first clause of its figure
+// rather than the whole figure and no label.
+func TestNarrowHeadKeepsItsLabel(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{
+		{Class: journey.Build, Label: "encoder.py", Start: base, End: base.Add(5 * time.Minute), Files: []string{"encoder.py"}, Current: true},
+	}, Branches: []journey.Branch{{Label: "a", Start: base.Add(10 * time.Minute), AfterLeg: 0}, {Label: "b", Start: base.Add(12 * time.Minute), AfterLeg: 0}, {Label: "c", Start: base.Add(12 * time.Minute), AfterLeg: 0}}}
+	narrow := renderLv(tr, base.Add(30*time.Minute), 1, 35, 10)
+	if !strings.Contains(narrow, "● build  encoder.py") || !strings.Contains(narrow, "◈3 out 20m") {
+		t.Errorf("a narrow HEAD lost its label or its agents:\n%s", narrow)
+	}
+	wide := renderLv(tr, base.Add(30*time.Minute), 1, 60, 10)
+	if !strings.Contains(wide, "encoder.py") || !strings.Contains(wide, "◈3 out 20m · quiet 25m") {
+		t.Errorf("a wide HEAD lost part of its figure:\n%s", wide)
+	}
+}
+
+// The group header's echoed clock is the row's own: a hung session's
+// silence, not the moment its call began.
+func TestGroupHeaderClockIsTheRowsOwn(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	for i := range m.sessions {
+		if m.sessions[i].Info.ID == "s-infra" {
+			m.sessions[i].Snap = state.Snapshot{State: state.Stuck, Since: m.now.Add(-6 * time.Minute), Reason: "no output for 4m mid-turn", Activity: "Bash: sleep"}
+			m.sessions[i].Info.LastEventAt = m.now.Add(-4 * time.Minute)
+		}
+	}
+	for _, r := range m.fleetRows() {
+		if r.header && r.label == "⌁ ops" && r.age != "4m" {
+			t.Errorf("ops header clock = %q, want the stuck row's own 4m", r.age)
+		}
+	}
+}
