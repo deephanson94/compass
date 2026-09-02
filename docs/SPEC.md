@@ -67,9 +67,11 @@ the row, narrated or not: colour reinforces the class, it never carries it alone
 
 Deterministic, offline, instant. AI never gates rendering.
 
-### 2.3 Three zoom levels, one key
+### 2.3 Four zoom levels, one key
 
 `Tab` zooms in, `Shift+Tab` zooms out. That's the whole navigation model.
+
+**Lv0 — Board.** Every trail that fits, side by side: one column per session, urgent first, bright while it has something unread in it (#16). The default view from 110 columns up; `Tab` opens the selected column as Lv1.
 
 **Lv1 — Trail.** The git graph of legs. Five to twelve nodes for a typical session.
 Answerable in one glance: what phases happened, in what order, where is it now, what's
@@ -144,6 +146,13 @@ escalating cues, all silent:
 
 ### 2.5 One mode, one binary
 
+**The board (Lv0).** On a terminal wide enough, the deck opens on every trail
+that fits, side by side — one column per session in the fleet's order, each
+under its own fleet row, bright while it has something unread in it and dim
+once it is history (decision #16). `Tab` opens the selected column as the single
+trail below; the three-panel deck drawn here is that trail with the mirror
+switched on (`m`, decision #15).
+
 **The deck.** `compass` runs full-screen in its own terminal tab — *outside*
 tmux. It sees every Claude session on the machine at once (transcripts aren't
 tmux-scoped), across all your tmux sessions and even bare-shell sessions. Three
@@ -175,11 +184,12 @@ via `capture-pane` polling — the same mechanism tmux's own `choose-tree` previ
 uses — so you watch the *actual* CLI exactly as it renders, colors and all, while
 compass still owns no PTY and handles no input. Keystrokes always happen in the real
 pane, so `Enter` hands you that pane's own terminal (§3). Sessions with no pane show
-their latest transcript activity in the mirror's place. On terminals too narrow for
-three panels (<~110 cols) the mirror collapses and the deck falls back to fleet + trail.
+their latest transcript activity in the mirror's place. The mirror is off by default
+(#15): `m` opens it on the single trail from 110 columns; below that the deck is fleet +
+trail at every level but Lv3.
 
-From Lv2 down the middle panel stops being the mirror and becomes the **reader**,
-anchored to the trail cursor (#13): watching at Lv1, reading below it.
+The **reader** is a level, not a panel (#15): Lv2 is the trail unfolded with a cursor on
+it, and Lv3 opens the conversation anchored to that cursor.
 
 Each fleet entry shows *where the session lives* (`dev:1.0` = tmux session `dev`,
 window 1, pane 0) so you always know where to go.
@@ -229,14 +239,14 @@ The constraint, proven:
 |--------------|------|-------|
 | see what session 3 is doing | `3` | 1 |
 | unblock whichever session needs me | `g` — it selects *and* hands over the terminal | 1 |
-| see why webapp's tests fail | `2` `Tab` | 2 |
-| read the exact moment a bug was fixed | `2` `Tab` … (j/k to aim are free-aim, not depth — the reader follows the cursor, so the moment is already on screen) | 2 |
+| see why webapp's tests fail | `2` `Tab` `Tab` from the board, `2` `Tab` from a trail | 2 |
+| read the exact moment a bug was fixed | `2` `Tab` `Tab` `Tab` from the board (j/k on the legs aim the reader; aiming is not depth) | 3 |
 | ask a session why it made a choice | `2` `a` | 2 |
 | get to session 3's actual CLI | `3` `Enter` | 2 |
 
-Rule of the constraint: **every destination is ≤3 *depth* keypresses**; `j`/`k`
-aiming within a list doesn't count against depth, and nothing may hide behind a
-fourth level. Any feature that can't fit this dies or moves to config.
+Rule of the constraint: **every destination is ≤3 *depth* keypresses**; selecting a
+session (`1`–`9`, `g`, `j`/`k`) is aiming, not depth, and nothing may hide behind a
+fourth level. From the board the trail is one `Tab`, the legs two, the reader three. Any feature that can't fit this dies or moves to config.
 
 ## 4. Visual language
 
@@ -291,8 +301,8 @@ fourth level. Any feature that can't fit this dies or moves to config.
 | 9 | Live CLI in deck mode | **Yes — the middle panel is a live mirror** of the selected session's pane, streamed read-only via `capture-pane` polling. Glass, not a terminal: compass renders the pane's screen but never takes input for it; interaction goes through `Enter`, which hands over the real terminal (M6). Collapses on narrow terminals. (Possible future: an explicit interact mode forwarding keys via `send-keys` — parked, not designed.) |
 | 10 | Fleet liveness (2026-08-31, first dogfood: 280 transcripts vs ~15 real sessions) | **The fleet means "something can need you."** Live = in a tmux pane, plus a small recency door (default 5m, `-live-within 0` shuts it) so a pane-matching miss can never hide a session that is writing its transcript right now. Everything else is the archive: never tailed, never amber, one `A` away, fully browsable (trail/reader/ask all work there). |
 | 12 | Trail direction, revisited (2026-08-31, dogfood) | **Time flows downward** — oldest at top, newest at the bottom, **pinned** to the bottom so the latest needs no keys. Newest-on-top was chosen before anyone had used it and fought the thing it describes: a conversation reads downward. Ghost todos moved below HEAD with it (the future is further down, not further up). The trail also became a real viewport — it used to *drop* rows to fit, silently discarding the older half of a long journey. |
-| 13 | The trail drives the conversation | From Lv2 the middle panel is the **reader anchored to the trail cursor**, re-anchored on every move: the trail is a minimap, the conversation is the code. Lv1 keeps the live mirror (watching), Lv3 hands the reader focus (reading). `Enter` therefore means one thing at every level — go to the live session. |
+| 13 | The trail drives the conversation | From Lv2 the middle panel is the **reader anchored to the trail cursor**, re-anchored on every move: the trail is a minimap, the conversation is the code. Lv1 keeps the live mirror (watching), Lv3 hands the reader focus (reading). `Enter` therefore means one thing at every level — go to the live session. *Superseded by #15: Lv2 has no middle panel; the reader is Lv3.* |
 | 14 | What a row says (2026-09-01, dogfood) | **Result, not process.** A fleet row's second line is the last thing the session *finished* — `1216✓ 2✗`, a commit — falling back to the call in flight only when nothing has. "Bash: pytest tests/auth -x" answers whether a session is busy, which the glyph already did; the counts answer whether it is going well, which nothing did. The state word goes with it on the two states the glyph tells you about anyway (`working`, `idle`), and stays on the two it must not let you miss (`needs you`, `stuck`) — the width freed goes to the session's name. And §2.2's own `18✓ 2✗` badge returns to Lv1 legs: the leg has always carried the parsed run, and Lv1 rendered the label and dropped it, putting the one number that says whether a leg went well two keypresses away. Target: a reader spends ~80% of their time at Lv1, so Lv1 has to answer without being left. |
-| 16 | The board (2026-09-02, dogfood) | **Lv0: every trail that fits, side by side.** Dropping the mirror left a wide monitor showing one trail and a list of names, and the person looking at it worried about everything it was not showing — the mirror had been answering that worry, badly. The board answers it: the fleet at its 30-column floor, then as many trail columns as fit at 34 or wider, in the fleet's own order (needs-you, stuck, working, idle by recency), the selected session always among them, idle columns drawn dim. It is the default view on any terminal wide enough; `Tab` opens the selected column as the single trail, `Shift+Tab` from the trail returns. Board → reader is three `Tab`s, so §3's depth rule holds. The fleet keeps its two-line rows (§6's one-line idea is not needed: the board wants the fleet's width, not its height). Every column is polled each tick — the feeds already existed per session; only the selected one was being read. |
+| 16 | The board (2026-09-02, dogfood) | **Lv0: every trail that fits, side by side.** Dropping the mirror left a wide monitor showing one trail and a list of names, and the person looking at it worried about everything it was not showing — the mirror had been answering that worry, badly. The board answers it: the fleet at its 30-column floor, then as many trail columns as fit at 34 or wider, in the fleet's own order (needs-you, stuck, working, idle by recency), the selected session always among them. A column is bright while it has something to read — working, needs-you, or finished within the day and not opened since; `Tab` or `Enter` on it marks it read — and dim once it is history (the first dogfood: "porter finished two minutes ago and it's already dim"). The fleet list is not drawn on the board: its rows are the column headers, and the sessions without a column are named in a strip along the bottom. It is the default view on any terminal wide enough; `Tab` opens the selected column as the single trail, `Shift+Tab` from the trail returns. Board → reader is three `Tab`s, so §3's depth rule holds. The fleet keeps its two-line rows (§6's one-line idea is not needed: the board wants the fleet's width, not its height). Every column is polled each tick — the feeds already existed per session; only the selected one was being read. |
 | 15 | The middle panel (2026-09-02, dogfood) | **Off by default; `m` brings the mirror back.** The deck is fleet + trail at Lv1 and Lv2, and the reader joins them at Lv3 — the reader is a *level*, not a panel. Two things decided it. The dogfooding happened under 110 columns, where the mirror never opened, and nobody missed it: the CLI it mirrors is one `Enter` away, in your own tmux. And the reason to want it — checking that a leg was classified right — is served better by the Lv2→Lv3 reader, which opens on exactly the tool calls the leg was built from, than by a glimpse of the CLI's last screenful. The columns go to the trail, which is where labels, reports and results were being truncated. `m` toggles the mirror at Lv1 (`-mirror` / `mirror = true` starts it on), and capture-pane only runs while it is on screen. The tripwire use of capture-pane (ARCHITECTURE §2.4) is untouched: detection never needed a panel. |
 | 11 | Fleet grouping | **Live view groups by tmux session → window** (tmux's own order; amber floats within its group, header carries a `▲` echo; `elsewhere` for live-unmapped; headers dropped when degenerate). **Archive groups by project directory, newest first** — "I start sessions in the respective directory." `1`–`9` stay flat; `g` stays one key. |

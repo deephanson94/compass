@@ -2,6 +2,7 @@ package ui
 
 import (
 	"sync"
+	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
@@ -13,9 +14,11 @@ import (
 // fleet Manager has a tailer of its own for the state machine; this one is
 // separate so a session that is never selected costs nothing.
 type feed struct {
-	tailer *transcript.Tailer
-	seg    *journey.Segmenter
-	trail  journey.Trail
+	keepsEvents bool      // the reader's ring is kept (the selected session's feed)
+	polled      time.Time // last poll, for retain's expiry
+	tailer      *transcript.Tailer
+	seg         *journey.Segmenter
+	trail       journey.Trail
 
 	// events is the transcript itself, kept because the Lv3 reader renders it
 	// as a document. A very long session is held to the newest feedEventCap
@@ -47,7 +50,13 @@ func newFeedStore() *feedStore {
 // document for the Lv3 reader. The first call replays the whole transcript — a
 // session's journey starts at its first line, not at the moment compass looked
 // at it.
-func (fs *feedStore) poll(key, path string) (journey.Trail, []transcript.Event) {
+//
+// wantEvents says whether the caller reads the conversation too. A board
+// column draws only the trail, and keeping every column's events would hold
+// up to feedEventCap events per column for a reader nobody opened; a feed
+// that never kept events and is now asked for them replays the transcript
+// once, which is the cost selecting a session always had.
+func (fs *feedStore) poll(key, path string, wantEvents bool) (journey.Trail, []transcript.Event) {
 	if fs == nil || key == "" || path == "" {
 		return journey.Trail{}, nil
 	}
@@ -55,10 +64,11 @@ func (fs *feedStore) poll(key, path string) (journey.Trail, []transcript.Event) 
 	defer fs.mu.Unlock()
 
 	f := fs.feeds[key]
-	if f == nil || f.tailer.Path() != path {
-		f = &feed{tailer: transcript.NewTailer(path), seg: journey.NewSegmenter()}
+	if f == nil || f.tailer.Path() != path || (wantEvents && !f.keepsEvents) {
+		f = &feed{tailer: transcript.NewTailer(path), seg: journey.NewSegmenter(), keepsEvents: wantEvents}
 		fs.feeds[key] = f
 	}
+	f.polled = time.Now()
 
 	events, err := f.tailer.Poll()
 	if err != nil || len(events) == 0 {
@@ -69,9 +79,18 @@ func (fs *feedStore) poll(key, path string) (journey.Trail, []transcript.Event) 
 		f.seg.Observe(ev)
 	}
 	f.trail = f.seg.Trail()
-	f.remember(events)
+	if f.keepsEvents {
+		f.remember(events)
+	}
 	return f.trail, f.events
 }
+
+// feedIdle is how long a feed nobody polls is kept. A session that had a
+// column and lost it — the selection moved on, the board narrowed — keeps
+// its journey this long in case it comes back, then is replayed from the
+// transcript if it does. Without this every session ever boarded kept its
+// feed until its transcript left the disk.
+const feedIdle = 5 * time.Minute
 
 // remember appends the new events, dropping the oldest once the ring is full.
 // The trim copies into a fresh slice rather than sliding the old one: a
@@ -96,8 +115,9 @@ func (fs *feedStore) retain(sessions []fleet.Session) {
 	for _, s := range sessions {
 		live[s.Info.Key()] = true
 	}
-	for key := range fs.feeds {
-		if !live[key] {
+	cutoff := time.Now().Add(-feedIdle)
+	for key, f := range fs.feeds {
+		if !live[key] || f.polled.Before(cutoff) {
 			delete(fs.feeds, key)
 		}
 	}

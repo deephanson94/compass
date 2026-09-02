@@ -849,6 +849,7 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 		tabs  int
 		level int
 	}{
+		{"Lv0", -1, levelBoard},
 		{"Lv1", 0, levelTrail},
 		{"Lv2", 1, levelWaypoints},
 		{"Lv3", 2, levelReader},
@@ -859,6 +860,9 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 			m.spawn = func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd {
 				got = cmd
 				return nil
+			}
+			if tc.tabs < 0 {
+				m.zoomOut() // back to the board the deck opened on
 			}
 			for i := 0; i < tc.tabs; i++ {
 				pressTab(m)
@@ -1169,6 +1173,7 @@ func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
 	}
 	m.SetPaneOrder(list)
 	m.SetPanes(map[string]tmuxop.Pane{sessionKey("s-old"): list[0], sessionKey("s-new"): list[1]})
+	openTrail(m) // the fleet list is a Lv1 panel; the board does not draw it
 
 	var header fleetRow
 	for _, r := range m.fleetRows() {

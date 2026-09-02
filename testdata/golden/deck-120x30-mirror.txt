@@ -27,4 +27,4 @@
                                 │                                              │
                                 │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m         │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · g grab · ? help · q quit
+ j/k move · enter attach (prefix d returns) · ⇧tab board · g grab · ? help · q quit

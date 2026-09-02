@@ -34,10 +34,12 @@ and watches all of them at once.
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The middle panel is the **live mirror**: the selected session's actual tmux pane,
-streamed read-only via `capture-pane` (the same trick tmux's own `choose-tree`
-preview uses) — you watch the real CLI render, but compass owns no PTY. Press `3`
-to watch infra instead. When you want to *type*, `Enter` hands you the terminal:
+On a wide terminal compass opens on **the board**: every session's trail side by
+side, urgent ones first, each bright while it has something you haven't read and
+dim once it's history. `Tab` opens one trail; `Shift+Tab` comes back. The deck
+above is that one trail with the **live mirror** switched on (`m`): the selected
+session's actual tmux pane, streamed read-only via `capture-pane` — you watch the
+real CLI render, but compass owns no PTY. When you want to *type*, `Enter` hands you the terminal:
 outside tmux compass suspends and attaches, so the pane is a real PTY with a real
 keyboard and your own prefix + `d` brings the deck back; inside tmux your client
 just switches. `g` grabs whichever session has been waiting on you longest and
@@ -46,9 +48,9 @@ windows, or panes.
 
 The trail on the right reads like the conversation does — oldest at the top, the
 newest work at the bottom, and it stays pinned there so the latest is always on
-screen. From `Tab` (Lv2) down, the middle panel becomes the conversation itself,
-anchored to whatever trail row your cursor is on: the trail is a minimap, the
-transcript is the code.
+screen. `Tab` (Lv2) unfolds each leg; `Tab` again (Lv3) opens the conversation
+itself, anchored to whatever trail row your cursor is on: the trail is a minimap,
+the transcript is the code.
 
 ## Principles
 
@@ -102,9 +104,8 @@ tmux split-window -h -l 70 'compass'    # fleet + trail beside the CLI
 tmux split-window -h -l 46 'compass'    # the trail alone, for a narrow strip
 ```
 
-compass fits itself to the pane. From 62 columns up it drops the live mirror —
-the real CLI is right there, so a rendering of it is redundant — and shows the
-fleet beside the trail. Below 62 it shows the trail alone: the header keeps the
+compass fits itself to the pane. Below 110 columns there is no board and no
+mirror — the real CLI is right there — and it shows the fleet beside the trail. Below 62 it shows the trail alone: the header keeps the
 fleet's alarm (`▲2 ●1 ○3`) and the trail's title names whichever session `j`/`k`
 has landed on.
 

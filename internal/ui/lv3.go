@@ -225,12 +225,16 @@ func (m *Model) requestNarration() {
 		m.refreshLabels()
 		return
 	}
-	m.narrated = shape
 	prompt := ""
 	if n := len(m.trail.Prompts); n > 0 {
 		prompt = m.trail.Prompts[n-1].Text
 	}
-	m.narrator.Request(m.selectedKey, m.trail, prompt)
+	// Remember the shape only once it is spoken for. A refusal — the one
+	// batch in flight was a board column's — used to be remembered as if it
+	// were an answer, and the trail being read was never asked for again.
+	if m.narrator.Request(m.selectedKey, m.trail, prompt) {
+		m.narrated = shape
+	}
 	m.refreshLabels()
 }
 

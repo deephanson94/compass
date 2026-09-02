@@ -77,7 +77,9 @@ type fleetMsg struct {
 // signature did not change, but what compass passes into it did (M6 contract).
 type Narrator interface {
 	Labels(key string, tr journey.Trail) map[string]string
-	Request(key string, tr journey.Trail, prompt string)
+	// Request reports false when the trail must be asked for again next
+	// tick (see narrator.Request).
+	Request(key string, tr journey.Trail, prompt string) bool
 }
 
 // panesMsg carries both shapes of the same truth: the key → pane map the deck
@@ -177,6 +179,10 @@ type Model struct {
 	// labels. The selected session's trail is here as well as in trail.
 	trails      map[string]journey.Trail
 	boardLabels map[string]map[string]string
+	seen        map[string]time.Time // when each session's trail or pane was last opened
+	boardForced bool                 // the deck left the board only because the terminal narrowed
+	boardShapes map[string]string    // each column's trail shape its labels were read for
+	refreshing  bool                 // a refresh is in flight; the tick does not launch another
 
 	// showMirror opens the live mirror of the selected pane in the middle of
 	// the deck at Lv1. Off by default (decision #15): the CLI it mirrors is
@@ -277,8 +283,13 @@ func (m *Model) SetSize(width, height int) {
 	// The board needs width. A deck that opened on it and then found itself
 	// in a narrow terminal is a single trail from here on, so the first Tab
 	// does something visible.
-	if m.level == levelBoard && !m.boardShown() {
-		m.level = levelTrail
+	switch {
+	case m.level == levelBoard && !m.boardFits():
+		m.level, m.boardForced = levelTrail, true
+	case m.boardForced && m.level == levelTrail && m.boardFits():
+		// The width came back — a tmux zoom, a window snap — and so does
+		// the view it took away.
+		m.level, m.boardForced = levelBoard, false
 	}
 }
 
@@ -352,6 +363,12 @@ func (m *Model) refresh() tea.Cmd {
 		// poll and nothing it would want overwritten.
 		return nil
 	}
+	if m.refreshing {
+		// A board of large transcripts can take longer to replay than the
+		// tick between refreshes. One at a time: the next tick tries again.
+		return nil
+	}
+	m.refreshing = true
 	selected, root := m.selectedKey, mgr.Root()
 	// The todo file on disk is named after the session id, not the key: the id
 	// is what claude itself writes under. Two sessions sharing an id share that
@@ -374,7 +391,7 @@ func (m *Model) refresh() tea.Cmd {
 		if feeds != nil {
 			feeds.retain(sessions)
 			if selected != "" && path != "" {
-				msg.trail, msg.events = feeds.poll(selected, path)
+				msg.trail, msg.events = feeds.poll(selected, path, true)
 				msg.hasTrail = true
 			}
 			// The board's columns. Each feed reads only what its transcript
@@ -387,7 +404,9 @@ func (m *Model) refresh() tea.Cmd {
 						msg.trails[t.key] = msg.trail
 						continue
 					}
-					tr, _ := feeds.poll(t.key, t.path)
+					// A column draws only the trail; the reader's events are
+					// kept for the selected session alone.
+					tr, _ := feeds.poll(t.key, t.path, false)
 					msg.trails[t.key] = tr
 				}
 			}
@@ -460,7 +479,7 @@ func (m *Model) capture() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tickMsg:
@@ -484,6 +503,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, breathTick()
 
 	case fleetMsg:
+		m.refreshing = false
+		if m.loaded && msg.at.Before(m.now) {
+			// A slower refresh landing after a faster one: its fleet, its
+			// trails and its clock are all older than what is on screen.
+			return m, nil
+		}
 		// Init lists panes against a fleet that has not arrived yet, so the
 		// first pairing has nothing to pair. Re-list the moment there is
 		// something to pair with: otherwise every session reads "no pane" —
@@ -492,9 +517,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
 		m.clampSelection()
 		if first && len(m.sessions) > 0 {
+			m.refreshBoard(msg.trails)
 			return m, tea.Batch(m.titleCmd(), m.relistPanes())
 		}
-		m.refreshBoard(msg.trails)
 		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
 			items := msg.todos
 			if msg.hasTrail {
@@ -510,10 +535,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.SetTodos(items)
 		}
+		// After the selected session's own narration request, so the column
+		// being read is never starved of the one batch in flight.
+		m.refreshBoard(msg.trails)
 		return m, m.titleCmd()
 
 	case narratedMsg:
 		m.refreshLabels()
+		m.boardShapes = nil // labels landed: every column reads them again
+		m.refreshBoard(m.trails)
 		return m, nil
 
 	case askDoneMsg:
@@ -621,7 +651,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.capture()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		m.selectIndex(int(key[0] - '1'))
+		i := int(key[0] - '1')
+		if m.level == levelBoard && m.boardShown() {
+			if !m.boardSelect(i) {
+				m.note = fmt.Sprintf("no session %d on the board", i+1)
+			}
+		} else if !m.selectIndex(i) {
+			m.note = fmt.Sprintf("no session %d", i+1)
+		}
 		return m, m.refresh()
 	}
 
@@ -654,21 +691,41 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(m.refresh(), m.attach())
 		}
-	default: // levelTrail
+	default: // levelTrail, and the board
 		switch key {
 		case "j", "down":
-			m.move(1)
+			if m.level == levelBoard && m.boardShown() {
+				m.boardMove(1)
+			} else {
+				m.move(1)
+			}
 			return m, m.refresh()
 		case "k", "up":
-			m.move(-1)
+			if m.level == levelBoard && m.boardShown() {
+				m.boardMove(-1)
+			} else {
+				m.move(-1)
+			}
 			return m, m.refresh()
 		case "ctrl+d":
+			if m.level == levelBoard && m.boardShown() {
+				m.note = "the board shows the present · tab into a trail to scroll back"
+				return m, nil
+			}
 			m.trailScrollBy(m.trailHalfPage())
 			return m, nil
 		case "ctrl+u":
+			if m.level == levelBoard && m.boardShown() {
+				m.note = "the board shows the present · tab into a trail to scroll back"
+				return m, nil
+			}
 			m.trailScrollBy(-m.trailHalfPage())
 			return m, nil
 		case "G":
+			if m.level == levelBoard && m.boardShown() {
+				m.note = "the board is already at the present"
+				return m, nil
+			}
 			// Back to the present, whatever the offset was.
 			m.trailPinned = true
 			return m, nil
@@ -846,11 +903,18 @@ func (m *Model) keepCursorVisible() {
 func (m *Model) zoomIn() {
 	switch {
 	case m.level < levelTrail:
-		m.level = levelTrail
-		// The column's trail is already in hand: the single trail opens on it
-		// rather than empty until the next poll.
+		m.level, m.boardForced = levelTrail, false
+		m.markSeen(m.selectedKey)
+		// The column's trail, plan and labels are already in hand: the single
+		// trail opens on them rather than bare until the next poll. The
+		// reader's events are not — those are kept for the selected session
+		// only, and arrive with its next poll.
 		if tr, ok := m.trails[m.selectedKey]; ok {
 			m.trail = tr
+			m.todos = planItems(tr.Tasks)
+			if l := m.boardLabels[m.selectedKey]; l != nil {
+				m.labels = l
+			}
 		}
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
@@ -876,7 +940,7 @@ func (m *Model) zoomOut() {
 	case m.level > levelTrail:
 		m.level = levelTrail
 		m.cursor, m.anchor = -1, -1
-	case m.level > levelBoard && m.boardShown():
+	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
 	}
 }
@@ -898,6 +962,7 @@ func (m *Model) attach() tea.Cmd {
 		m.note = "no tmux pane for this session"
 		return nil
 	}
+	m.markSeen(m.selectedKey)
 	cmd := tmuxop.Attach(pane.Target, pane.ID, m.inTmux)
 	done := func(err error) tea.Msg {
 		return attachDoneMsg{target: pane.Target, inside: m.inTmux, err: err}
@@ -926,7 +991,7 @@ func (m *Model) attach() tea.Cmd {
 // on a single trail, any column's on the board.
 func (m *Model) anyWorking() bool {
 	if m.level == levelBoard && m.boardShown() {
-		n, _ := boardColumns(m.width - 2*edgePad)
+		n, _ := boardColumns(m.width-2*edgePad, len(m.viewOrder()))
 		for _, key := range m.boardKeys(n) {
 			if s, ok := m.session(key); ok && s.Snap.State == state.Working {
 				return true
@@ -1025,12 +1090,13 @@ func (m *Model) point(key string) {
 
 // selectIndex is the `1`–`9` keys: an index into the rendered order, groups
 // and their headers ignored.
-func (m *Model) selectIndex(i int) {
+func (m *Model) selectIndex(i int) bool {
 	order := m.fleetOrder()
 	if i < 0 || i >= len(order) {
-		return
+		return false
 	}
 	m.point(m.sessions[order[i]].Info.Key())
+	return true
 }
 
 // move is j/k: one session down or up the rendered order, skipping headers —
@@ -1153,6 +1219,9 @@ func (m *Model) View() string {
 // headerLine: the product mark on the left, the fleet's pulse on the right.
 func (m *Model) headerLine(w int) string {
 	left := titleStyle.Render("⌂ compass")
+	if m.level == levelBoard && m.boardShown() {
+		left += dimStyle.Render(" · board")
+	}
 	right := m.statusChips()
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -1203,7 +1272,15 @@ func (m *Model) footerLine(w int) string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.level == levelBoard && m.boardShown():
-		keys = "j/k move · " + m.enterKeymap() + " · tab one trail · g grab · ? help · q quit"
+		keys = "j/k columns · " + m.enterKeymap() + " · tab one trail · g grab · ? help · q quit"
+		if m.archiveView {
+			keys = "j/k columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
+		}
+	case m.level == levelTrail && m.boardShown():
+		keys = "j/k move · " + m.enterKeymap() + " · ⇧tab board · g grab · ? help · q quit"
+		if m.archiveView {
+			keys = "j/k move · " + m.enterKeymap() + " · ⇧tab board · A live fleet · ? help · q quit"
+		}
 	case m.level >= levelReader:
 		keys = "j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints:

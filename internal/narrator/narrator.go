@@ -107,15 +107,22 @@ func (n *Narrator) Labels(sessionID string, tr journey.Trail) map[string]string 
 // batch. No-op when everything is cached, when a batch is already running, or
 // when there is no runner to ask. prompt is the latest user prompt — context
 // for the whole batch; when it is empty the trail's own last prompt stands in.
-func (n *Narrator) Request(sessionID string, tr journey.Trail, prompt string) {
+//
+// It reports whether the trail is now spoken for: a batch went out, or there
+// was nothing left to ask. False means "ask again next tick" — the one batch
+// in flight belonged to someone else, or everything askable is cooling off.
+// A caller that remembers it asked, and stops asking, must not remember a
+// refusal: with several sessions asking every tick, a refused one that
+// stopped would never be named at all.
+func (n *Narrator) Request(sessionID string, tr journey.Trail, prompt string) bool {
 	if n == nil || n.runner == nil || n.cache == nil {
-		return
+		return true // nobody to ask; nothing to wait for
 	}
 
 	n.mu.Lock()
 	if n.inFlight {
 		n.mu.Unlock()
-		return // one batch at a time; the next tick will pick up the rest
+		return false // one batch at a time; the next tick will pick up the rest
 	}
 	// Spend the backoff: this Request skips what the last failure left behind,
 	// and by clearing the set now the next one will retry it.
@@ -125,12 +132,13 @@ func (n *Narrator) Request(sessionID string, tr journey.Trail, prompt string) {
 	digests := n.digests(sessionID, tr, prompt, cooling)
 	if len(digests) == 0 {
 		n.mu.Unlock()
-		return
+		return len(cooling) == 0 // all cached, or all cooling
 	}
 	n.inFlight = true
 	n.mu.Unlock()
 
 	go n.run(digests)
+	return true
 }
 
 // Idle reports whether no batch is in flight. Callers that need Request's

@@ -27,4 +27,4 @@
                                 │ rerunning the whole auth suite to be sure    │
                                 │ nothing else moved                           │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · g grab · ? help · q quit
+ j/k move · enter attach (prefix d returns) · ⇧tab board · g grab · ? help · q quit
