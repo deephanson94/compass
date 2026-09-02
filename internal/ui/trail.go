@@ -351,18 +351,44 @@ func ghostCost(show, total int) int {
 // it started" now that the start is at the top.
 func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts) {
 	forked := false
+	ticked := false
 	for i, n := range nodes {
+		// A leg that produced nothing countable — no result, no files, no
+		// narrated phrase — is drawn as its own rail segment with the class
+		// word on it, in the one row the rail would have taken anyway. Three
+		// "test  pytest" rows with no counts said nothing three times; as
+		// ticks they still show that tests ran between the legs that did
+		// something, at a third of the height (SPEC §4: every line answers a
+		// question; anything that doesn't is dimmed or dropped).
+		if n.leg >= 0 && tickLeg(tr.Legs[n.leg], o) {
+			stroke := railStroke
+			if i == 1 {
+				stroke = railHead
+			}
+			if forked {
+				stroke = " " // the fork row above already reached down to here
+			}
+			leg := tr.Legs[n.leg]
+			b.selNode(b.pick(), tickRow(leg, stroke, o.Width))
+			forked = b.branches(tr, n.leg, o) > 0
+			ticked = !forked
+			continue
+		}
+
 		switch {
 		case i == 0:
 			// The journey's first node. Nothing came before it.
 		case forked:
 			// The fork row above is a rail segment of its own: `├` reaches down
 			// to this node as well as right to the lane it opened.
+		case ticked:
+			// The tick above is a rail segment of its own too.
 		case i == 1:
 			b.node(ruleStyle.Render(railHead))
 		default:
 			b.node(ruleStyle.Render(railStroke))
 		}
+		ticked = false
 
 		if n.leg >= 0 {
 			leg := tr.Legs[n.leg]
@@ -466,6 +492,23 @@ func legKey(key string, l journey.Leg) string {
 	return key + "/" + strconv.FormatInt(l.Start.UnixNano(), 10) + "/" + l.Class.String()
 }
 
+// tickLeg reports whether a closed leg has nothing to say beyond its class:
+// no parsed result, no files touched, and no narrated phrase for it.
+func tickLeg(l journey.Leg, o TrailOpts) bool {
+	if l.Current || len(l.Waypoints) > 0 || len(l.Files) > 0 {
+		return false
+	}
+	_, narrated := legLabel(l, o)
+	return !narrated
+}
+
+// tickRow is a tick leg's whole appearance: the rail stroke and the class
+// word, dim, in the verb column where the leg's own row would have put it.
+func tickRow(l journey.Leg, stroke string, width int) string {
+	row := ruleStyle.Render(stroke) + " " + dimStyle.Render(l.Class.String())
+	return pad(row, width)
+}
+
 // legLabel resolves what a leg says: the narrated line when one has landed for
 // it, the heuristic label otherwise. HEAD always keeps its heuristic label —
 // narration is for history, and the live leg is still changing its mind.
@@ -473,7 +516,9 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	if l.Current || len(o.Labels) == 0 {
 		return l.Label, false
 	}
-	if text := strings.TrimSpace(o.Labels[legKey(o.SessionKey, l)]); text != "" {
+	// A cached label from before the narrator learned to refuse the class
+	// name is still the class name; the heuristic label beats it.
+	if text := strings.TrimSpace(o.Labels[legKey(o.SessionKey, l)]); text != "" && !strings.EqualFold(text, l.Class.String()) {
 		return text, true
 	}
 	return l.Label, false
@@ -487,7 +532,7 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 // says what the class was for, and the glyph keeps the class's tint.
 func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int, pulse bool) string {
 	glyph := glyphLeg
-	age := relAge(now, l.Start)
+	age := legSpan(l)
 	if l.Current {
 		glyph = glyphHead
 		if pulse {
@@ -537,6 +582,19 @@ func badgeStyle(badge string) lipgloss.Style {
 		return textStyle
 	}
 	return dimStyle
+}
+
+// legSpan is the right-margin figure of a closed leg: its duration. It used to
+// be the age of its start, and on a session that did its work in one burst
+// every leg read "17h" — the same figure ten times, telling you nothing about
+// where the time went. The prompts still carry ages, so "when" stays
+// anchored; the legs now say "how long", which is the thing that tells them
+// apart. HEAD keeps its age (legRow), because HEAD is still moving.
+func legSpan(l journey.Leg) string {
+	if l.End.IsZero() || l.End.Before(l.Start) {
+		return "—"
+	}
+	return state.ShortDuration(l.End.Sub(l.Start))
 }
 
 // legBadge is the leg's newest run summary at badge size, or "" for a leg that

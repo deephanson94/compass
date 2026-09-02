@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"github.com/deephanson94/compass/internal/narrator"
 	"strings"
 	"testing"
 	"time"
@@ -244,8 +245,11 @@ func longTrail(n int) journey.Trail {
 	}
 	for i := 0; i < n; i++ {
 		tr.Legs = append(tr.Legs, journey.Leg{
-			Class:   classes[i%len(classes)],
-			Label:   fmt.Sprintf("step %d", i),
+			Class: classes[i%len(classes)],
+			Label: fmt.Sprintf("step %d", i),
+			// A leg that touched nothing and produced nothing is a tick on
+			// the rail, not a row; this fixture wants rows.
+			Files:   []string{fmt.Sprintf("step%d.go", i)},
 			Start:   fixtureBase.Add(time.Duration(i+1) * time.Minute),
 			End:     fixtureBase.Add(time.Duration(i+2) * time.Minute),
 			Current: i == n-1,
@@ -607,5 +611,97 @@ func TestLv2CursorIsInverted(t *testing.T) {
 		if i != at && strings.Contains(line, "\x1b[7m") {
 			t.Errorf("row %d is inverted too; only the cursor's row may be: %q", i, ansi.Strip(line))
 		}
+	}
+}
+
+// A leg that produced nothing countable — no result, no files, no narrated
+// phrase — is a tick on the rail, not a row. Three "test  pytest" rows with no
+// counts said nothing three times on a dogfooded trail; as ticks they still
+// show that tests ran between the legs that did something, in the row the
+// rail would have taken anyway.
+func TestALegWithNothingToSayIsATickOnTheRail(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{
+		Prompts: []journey.Prompt{{Text: "fix the 401 bug", At: base}},
+		Legs: []journey.Leg{
+			{Class: journey.Scout, Label: "middleware.py", Start: base.Add(1 * time.Minute), End: base.Add(4 * time.Minute), Files: []string{"middleware.py"}},
+			{Class: journey.Test, Label: "pytest", Start: base.Add(5 * time.Minute), End: base.Add(6 * time.Minute)},
+			{Class: journey.Build, Label: "tokens.py", Start: base.Add(7 * time.Minute), End: base.Add(15 * time.Minute), Files: []string{"tokens.py"}},
+			{Class: journey.Fix, Label: "tokens.py", Start: base.Add(16 * time.Minute), Files: []string{"tokens.py"}, Current: true},
+		},
+	}
+	o := TrailOpts{Now: base.Add(20 * time.Minute), Width: 38, Height: 20, Level: 1, Cursor: -1}
+	doc := TrailLines(tr, o)
+
+	// prompt, cap, scout, tick, build, rail, fix — the tick is one row where
+	// a rail and a leg row used to be two.
+	if len(doc) != 7 {
+		t.Fatalf("the trail is %d rows, want 7:\n%s", len(doc), strings.Join(doc, "\n"))
+	}
+	if got := strings.TrimSpace(doc[3]); got != "│ test" {
+		t.Errorf("row 3 = %q, want the tick %q", got, "│ test")
+	}
+	if strings.HasPrefix(strings.TrimSpace(doc[4]), "◆ build") == false {
+		t.Errorf("the leg after the tick should follow it directly, got %q", doc[4])
+	}
+	for _, row := range doc {
+		if strings.Contains(row, "◆ test") {
+			t.Errorf("the empty test leg still has a full row: %q", row)
+		}
+	}
+
+	// The tick is still a moment: the enumeration keeps every leg, so `j`/`k`
+	// can land on it and the reader can anchor there.
+	legs := 0
+	for _, r := range TrailRows(tr, 2) {
+		if r.Kind == "leg" {
+			legs++
+		}
+	}
+	if legs != 4 {
+		t.Errorf("TrailRows lists %d legs, want 4: the tick must stay selectable", legs)
+	}
+
+	// And a result, a file, or a narrated phrase each earn the row back.
+	withResult := tr
+	withResult.Legs = append([]journey.Leg(nil), tr.Legs...)
+	withResult.Legs[1].Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "12 passed", Short: "12✓"}}
+	// prompt, cap, scout, rail, test, rail, build, rail, fix.
+	if doc := TrailLines(withResult, o); len(doc) != 9 {
+		t.Errorf("a test leg with a parsed run is %d rows, want a full row (9 total)", len(doc))
+	}
+	narrated := o
+	narrated.SessionKey = sessionKey("s-x")
+	narrated.Labels = map[string]string{narrator.LegKey(sessionKey("s-x"), tr.Legs[1]): "ran the auth suite"}
+	if doc := TrailLines(tr, narrated); len(doc) != 9 {
+		t.Errorf("a narrated test leg is %d rows, want a full row (9 total)", len(doc))
+	}
+}
+
+// A closed leg's right-margin figure is how long it took, not how long ago it
+// began. On a session that did its work in one burst every leg read "17h".
+func TestAClosedLegShowsItsDuration(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{
+		Prompts: []journey.Prompt{{Text: "go", At: base}},
+		Legs: []journey.Leg{
+			{Class: journey.Build, Label: "tokens.py", Start: base.Add(10 * time.Minute), End: base.Add(22 * time.Minute), Files: []string{"tokens.py"}},
+		},
+	}
+	got := RenderTrail(tr, TrailOpts{Now: base.Add(17 * time.Hour), Width: 38, Height: 5, Level: 1, Cursor: -1})
+	var legRow string
+	for _, row := range strings.Split(got, "\n") {
+		if strings.Contains(row, "build") {
+			legRow = row
+		}
+	}
+	if !strings.Contains(legRow, "12m") {
+		t.Errorf("the leg does not show its 12m duration: %q", legRow)
+	}
+	// The prompt keeps its age (17h); the leg must not.
+	if strings.Contains(legRow, "17h") {
+		t.Errorf("the leg still shows its age: %q", legRow)
 	}
 }

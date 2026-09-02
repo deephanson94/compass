@@ -351,3 +351,52 @@ func TestDiscoverLeavesTheTitleEmptyWhenNobodyHasSpoken(t *testing.T) {
 		t.Errorf("Title = %q, want empty: the harness talking to itself is not a prompt", s.Title)
 	}
 }
+
+// The title is the strongest thing you said, not the first. The first thing
+// most people type is "/model", and four of nine rows said so.
+func TestDiscoverPrefersProseOverASlashCommand(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-home-user-ranked")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := func(uuid, ts, content string) string {
+		return `{"type":"user","message":{"role":"user","content":"` + content + `"},"uuid":"` + uuid + `",` +
+			`"timestamp":"` + ts + `","cwd":"/home/user/ranked","sessionId":"SID","gitBranch":"main"}` + "\n"
+	}
+	const bareModel = `<command-name>/model</command-name>\n<command-message>model</command-message>`
+	const kickoff = `<command-name>/kickoff</command-name>\n<command-message>kickoff</command-message>\n<command-args>probe the tree</command-args>`
+
+	cases := []struct {
+		id, want string
+		lines    []string
+	}{
+		{"99999999-0001-4999-8999-999999999999", "fix the 401 bug", []string{
+			line("a", "2026-08-30T09:00:00.000Z", bareModel),
+			line("b", "2026-08-30T09:00:01.000Z", kickoff),
+			line("c", "2026-08-30T09:00:02.000Z", "fix the 401 bug"),
+		}},
+		{"99999999-0002-4999-8999-999999999999", "/kickoff probe the tree", []string{
+			line("a", "2026-08-30T09:00:00.000Z", bareModel),
+			line("b", "2026-08-30T09:00:01.000Z", kickoff),
+		}},
+		{"99999999-0003-4999-8999-999999999999", "/model", []string{
+			line("a", "2026-08-30T09:00:00.000Z", bareModel),
+		}},
+	}
+	for _, c := range cases {
+		body := strings.ReplaceAll(strings.Join(c.lines, ""), "SID", c.id)
+		if err := os.WriteFile(filepath.Join(dir, c.id+".jsonl"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		if s := findSession(t, got, c.id); s.Title != c.want {
+			t.Errorf("Title = %q, want %q", s.Title, c.want)
+		}
+	}
+}

@@ -497,7 +497,10 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	if strings.TrimSpace(act) == "" || act == "idle" {
 		act = s.Info.Title
 	}
-	if strings.TrimSpace(act) == "" {
+	// The reason is worth a line when the state is one you must not miss —
+	// "waiting on your answer", "api error 403". For working and idle it is
+	// "turn complete" and "no activity yet": the glyph already said that.
+	if strings.TrimSpace(act) == "" && wantsAttention(s.Snap.State) {
 		act = s.Snap.Reason
 	}
 	if !s.HasClass {

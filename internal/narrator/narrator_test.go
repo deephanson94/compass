@@ -757,3 +757,35 @@ func TestT48ConcurrentRequestsAndLabelsAreRaceFree(t *testing.T) {
 		break
 	}
 }
+
+// The instruction says "name the work, not the class", and the model does not
+// always listen: a dogfooded trail read "build  build" twice. Such a label is
+// treated as declined — never cached, and the leg cools off like any other the
+// model would not name — so the row keeps its heuristic label instead.
+func TestALabelThatIsOnlyTheClassIsDeclined(t *testing.T) {
+	n, r, _, notified := newNarrator(t)
+	tr := twoClosedAndAHead()
+
+	n.Request(sessAlpha, tr, "make refresh rotate the token")
+	held := r.waitBatch(t)
+	if len(held) != 2 {
+		t.Fatalf("held batch has %d digests, want 2", len(held))
+	}
+	r.answer(
+		narrator.Label{Key: held[0].Key, Text: strings.ToUpper(held[0].Class)}, // "BUILD" under build
+		narrator.Label{Key: held[1].Key, Text: "watches the suite go red"},
+	)
+	waitNotify(t, notified)
+
+	labels := n.Labels(sessAlpha, tr)
+	if got, ok := labels[held[0].Key]; ok {
+		t.Errorf("the class name was cached as a label: %q", got)
+	}
+	if labels[held[1].Key] != "watches the suite go red" {
+		t.Errorf("the real label did not land: %v", labels)
+	}
+
+	// Declined means cooling: the next Request does not re-ask for it.
+	n.Request(sessAlpha, tr, "make refresh rotate the token")
+	r.noBatch(t, "the declined key is cooling off for one call")
+}

@@ -892,3 +892,103 @@ func TestSegmenterFullWalk(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------- prompts as typed
+
+// A slash command reaches the transcript as three tags; the trail quotes it
+// the way it was typed. "<command-message>kickoff</command-message>" was the
+// opening row of a dogfooded trail.
+func TestASlashCommandPromptReadsAsTyped(t *testing.T) {
+	tr := segment(prompt(1*time.Minute, "<command-name>/kickoff</command-name>\n"+
+		"            <command-message>kickoff</command-message>\n"+
+		"            <command-args>probe the prefix tree</command-args>"))
+	if len(tr.Prompts) != 1 {
+		t.Fatalf("got %d prompts, want 1", len(tr.Prompts))
+	}
+	if want := "/kickoff probe the prefix tree"; tr.Prompts[0].Text != want {
+		t.Errorf("prompt = %q, want %q", tr.Prompts[0].Text, want)
+	}
+}
+
+// ---------------------------------------------------------------- background agents
+
+// resultText is a tool_result carrying words, which result() cannot make.
+func resultText(offset time.Duration, id, text string) transcript.Event {
+	ev := result(offset, id, false)
+	ev.ToolResults[0].Text = text
+	return ev
+}
+
+const launchAckText = "Spawned successfully. (This tool result is internal metadata; " +
+	"the agent's real result arrives as a task notification.)"
+
+// A background agent's tool_result is only its launch acknowledgement. It
+// used to close the lane on the spot and put the ack on the trail as the
+// agent's finding: "◈ score encoder gates ✓ / Spawned successfully. (This
+// tool result is internal metadat…".
+func TestALaunchAckDoesNotMergeTheBranch(t *testing.T) {
+	tr := segment(
+		prompt(0, "score the gates"),
+		agent(1*time.Minute, "a1", "score encoder gates"),
+		resultText(1*time.Minute+time.Second, "a1", launchAckText),
+	)
+	if len(tr.Branches) != 1 {
+		t.Fatalf("got %d branches, want 1", len(tr.Branches))
+	}
+	br := tr.Branches[0]
+	if br.Done {
+		t.Error("the branch merged on the launch ack; the agent had only just started")
+	}
+	if br.Report != "" {
+		t.Errorf("the ack became the agent's report: %q", br.Report)
+	}
+}
+
+// The agent's verdict comes minutes later as a task-notification — a user
+// turn, wrapped in tags, naming the Agent call by its tool-use id. That id is
+// a join, not a guess.
+func TestATaskNotificationMergesTheBranchItNames(t *testing.T) {
+	notification := func(offset time.Duration, id, summary, result string) transcript.Event {
+		return prompt(offset, "<task-notification>\n<task-id>t1</task-id>\n"+
+			"<tool-use-id>"+id+"</tool-use-id>\n<status>completed</status>\n"+
+			"<summary>"+summary+"</summary>\n<result>"+result+"</result>\n</task-notification>")
+	}
+
+	tr := segment(
+		prompt(0, "score the gates"),
+		agent(1*time.Minute, "a1", "score encoder gates"),
+		resultText(1*time.Minute+time.Second, "a1", launchAckText),
+		notification(9*time.Minute, "zzz", "some other agent finished", "irrelevant"),
+	)
+	if tr.Branches[0].Done {
+		t.Fatal("a notification for an agent this trail never forked merged the branch")
+	}
+
+	tr = segment(
+		prompt(0, "score the gates"),
+		agent(1*time.Minute, "a1", "score encoder gates"),
+		resultText(1*time.Minute+time.Second, "a1", launchAckText),
+		notification(9*time.Minute, "a1", `Agent "score encoder gates" finished`,
+			"3 defects found against the oracle\n\ndetails follow"),
+	)
+	br := tr.Branches[0]
+	if !br.Done || !br.End.Equal(at(9*time.Minute)) {
+		t.Errorf("Done/End = %v/%v, want merged at +9m", br.Done, br.End)
+	}
+	if want := "3 defects found against the oracle"; br.Report != want {
+		t.Errorf("Report = %q, want the agent's own first line %q", br.Report, want)
+	}
+	// The notification is the harness relaying, not the person asking.
+	if len(tr.Prompts) != 1 {
+		t.Errorf("got %d prompts, want 1: the notification was quoted as a prompt", len(tr.Prompts))
+	}
+
+	// An agent that said nothing still gets the harness's one-line summary.
+	tr = segment(
+		agent(1*time.Minute, "a1", "score encoder gates"),
+		notification(9*time.Minute, "a1", `Agent "score encoder gates" finished`, ""),
+	)
+	if want := `Agent "score encoder gates" finished`; tr.Branches[0].Report != want {
+		t.Errorf("Report = %q, want the summary %q", tr.Branches[0].Report, want)
+	}
+}

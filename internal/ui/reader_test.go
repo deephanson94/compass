@@ -197,7 +197,11 @@ func TestNarratedPhraseDoesNotRepeatTheClass(t *testing.T) {
 		{"scouting around", "scout  scouting around"},               // not the same word
 		{"rescout the module", "scout  rescout the module"},         // nor a suffix of one
 		{"fix probe6 exit", "scout  fix probe6 exit"},               // another class's verb stays
-		{"scout", "scout  scout"},                                   // nothing would be left
+		// A phrase that is only the class name says nothing the verb column
+		// did not; the heuristic label is what the row falls back to. This
+		// case used to assert "scout  scout" as correct — which is exactly
+		// the "build  build" a dogfooded trail showed twice.
+		{"scout", "scout  middleware.py"},
 	} {
 		got := RenderTrail(tr, TrailOpts{
 			Labels:     map[string]string{narrator.LegKey(key, tr.Legs[0]): tc.phrase},

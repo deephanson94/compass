@@ -209,6 +209,7 @@ type tailState struct {
 }
 
 func peekHead(f *os.File, info *SessionInfo) {
+	titleRank := titleNone
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), peekLineMax)
 	for n := 0; n < peekLines && sc.Scan(); n++ {
@@ -225,10 +226,12 @@ func peekHead(f *os.File, info *SessionInfo) {
 		if info.StartedAt.IsZero() && !ev.Timestamp.IsZero() {
 			info.StartedAt = ev.Timestamp
 		}
-		if info.Title == "" && ev.Type == transcript.EventUser {
-			info.Title = promptTitle(ev)
+		if titleRank < titleProse && ev.Type == transcript.EventUser {
+			if title, rank := promptTitle(ev); rank > titleRank {
+				info.Title, titleRank = title, rank
+			}
 		}
-		if info.CWD != "" && info.GitBranch != "" && info.Title != "" && !info.StartedAt.IsZero() {
+		if info.CWD != "" && info.GitBranch != "" && titleRank == titleProse && !info.StartedAt.IsZero() {
 			return
 		}
 	}
@@ -323,20 +326,36 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 	}
 }
 
+// Title ranks. A session's title is the strongest-ranked user turn seen so
+// far, not the first: the first thing most people type is "/model", and a row
+// that says so nine times over says nothing (2026-09-02 dogfood).
+const (
+	titleNone  = iota
+	titleSlash // a bare slash command: "/model", "/compact"
+	titleArgs  // a slash command with arguments: "/kickoff probe the prefix tree"
+	titleProse // words a person wrote
+)
+
 // promptTitle reduces a user turn to the one line worth showing, clipped to
-// titleMax runes. It returns "" for anything that is not a person talking:
-// the fleet asks its rows what you asked for, and the harness's own turns are
-// not an answer to that.
-func promptTitle(ev transcript.Event) string {
+// titleMax runes, and says how much it is worth. It returns titleNone for
+// anything that is not a person talking: the fleet asks its rows what you
+// asked for, and the harness's own turns are not an answer to that.
+func promptTitle(ev transcript.Event) (string, int) {
 	if ev.Machinery() {
-		return ""
+		return "", titleNone
 	}
-	text := ev.Text
-	// A slash command is a real thing you typed; only its expansion is noise.
-	if cmd, ok := transcript.SlashCommand(text); ok {
-		text = cmd
+	if cmd, ok := transcript.SlashCommand(ev.Text); ok {
+		rank := titleSlash
+		if strings.Contains(cmd, " ") {
+			rank = titleArgs
+		}
+		return clipTitle(cmd), rank
 	}
-	return clipTitle(text)
+	title := clipTitle(ev.Text)
+	if title == "" {
+		return "", titleNone
+	}
+	return title, titleProse
 }
 
 // clipTitle reduces text to its first line, clipped to titleMax runes.

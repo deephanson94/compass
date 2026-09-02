@@ -1176,3 +1176,33 @@ func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
 		t.Errorf("the header carries the stalest age instead of the freshest:\n%q", headerLine)
 	}
 }
+
+// An idle session with nothing finished and nothing asked used to fall through
+// to its state reason — "turn complete", "no activity yet" — which is what the
+// ○ beside its name already said.
+func TestAnIdleRowDoesNotRepeatItsStateAsASecondLine(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	quiet := fleet.Session{
+		Info: fleet.SessionInfo{ID: "s-deep", TranscriptPath: sessionKey("s-deep"), CWD: "/home/user/deep",
+			GitBranch: "main", LastEventAt: base},
+		Snap:  state.Snapshot{State: state.Idle, Since: base, Reason: "turn complete", Activity: "idle"},
+		Live:  true,
+		Class: journey.Scout, HasClass: true,
+	}
+	m := New(nil)
+	m.SetSize(120, 24)
+	m.SetSessions([]fleet.Session{quiet}, base.Add(6*24*time.Hour))
+	col := strings.Join(fleetText(m, 120, 24), "\n")
+	if strings.Contains(col, "turn complete") {
+		t.Errorf("the idle row repeats its state:\n%s", col)
+	}
+
+	// The reason still earns its line when the state is one you must not miss.
+	quiet.Snap = state.Snapshot{State: state.NeedsYou, Since: base, Reason: "waiting on your answer"}
+	m.SetSessions([]fleet.Session{quiet}, base.Add(time.Hour))
+	// Clipped to the column, but there.
+	if col := strings.Join(fleetText(m, 120, 24), "\n"); !strings.Contains(col, "waiting on your") {
+		t.Errorf("the needs-you row lost its reason:\n%s", col)
+	}
+}

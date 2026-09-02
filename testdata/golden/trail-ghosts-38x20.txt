@@ -1,12 +1,12 @@
 ◉ "fix the 401 bug"                38m
 ╷
-◆ scout  middleware.py             31m
+◆ scout  middleware.py              5m
 │
-◆ build  tokens.py                 25m
+◆ build  tokens.py                 12m
 │
-◆ test   pytest             18✓ 2✗ 12m
+◆ test   pytest              18✓ 2✗ 8m
 ├─◈ scout the payments module        ✓
-● fix    tokens.py                ← 3m
+● fix    tokens.py                ← 2m
 ┊
 ◌ add a regression test
 ┊

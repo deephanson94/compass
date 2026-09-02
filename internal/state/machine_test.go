@@ -611,3 +611,21 @@ func TestAnAPIErrorWithNoWordsKeepsWhatItHas(t *testing.T) {
 		t.Error("the snapshot does not admit it is an api error")
 	}
 }
+
+// "Continue from where you left off." is the harness's line, not the person's.
+// Counting it as a prompt started a turn the model might never answer, and a
+// resumed-then-abandoned session drifted to stuck on the strength of it.
+func TestTheHarnessDoesNotStartATurn(t *testing.T) {
+	ev, err := transcript.ParseLine([]byte(`{"type":"user","isMeta":true,"uuid":"c1",` +
+		`"timestamp":"2026-09-01T07:00:00.000Z","message":{"role":"user",` +
+		`"content":"Continue from where you left off."},"sessionId":"s"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := state.NewMachine()
+	m.Observe(ev)
+	got := m.Evaluate(ev.Timestamp.Add(10 * time.Minute))
+	if got.State != state.Idle {
+		t.Errorf("state is %v after ten quiet minutes, want idle: nobody asked for anything", got.State)
+	}
+}

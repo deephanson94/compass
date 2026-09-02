@@ -21,6 +21,10 @@ type entry struct {
 	machine  *state.Machine
 	sawEvent bool // once events carry timestamps, they beat the file's mtime
 
+	// titleRank is how good info.Title is (promptTitle's ranks), so a later
+	// prose prompt can replace the "/model" a session opened with.
+	titleRank int
+
 	// class is the kind of work the session's latest classifiable event
 	// belongs to — the trail's own vocabulary, so the fleet and the trail
 	// describe a session the same way. Only live sessions have one: an
@@ -387,9 +391,9 @@ func (e *entry) absorb(ev transcript.Event) {
 		}
 		e.sawEvent = true
 	}
-	if e.info.Title == "" && ev.Type == transcript.EventUser {
-		if title := promptTitle(ev); title != "" {
-			e.info.Title = title
+	if e.titleRank < titleProse && ev.Type == transcript.EventUser {
+		if title, rank := promptTitle(ev); rank > e.titleRank {
+			e.info.Title, e.titleRank = title, rank
 		}
 	}
 }

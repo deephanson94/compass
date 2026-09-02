@@ -145,7 +145,11 @@ func substantive(ev transcript.Event) bool {
 	case transcript.EventAssistant:
 		return true
 	case transcript.EventUser:
-		return strings.TrimSpace(ev.Text) != ""
+		// Only a person's words open a turn. "Continue from where you left
+		// off." is the harness's, and counting it started a turn that the
+		// model might never answer — a resumed-then-abandoned session drifted
+		// to stuck on the strength of a line nobody typed.
+		return strings.TrimSpace(ev.Text) != "" && !ev.Machinery()
 	default:
 		return false
 	}
