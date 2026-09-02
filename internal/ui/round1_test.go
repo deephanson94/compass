@@ -46,7 +46,7 @@ func renderLv(tr journey.Trail, now time.Time, level, w, h int) string {
 func TestBoardVerdictReadsTheTrailsTail(t *testing.T) {
 	base := fixtureBase
 	now := base.Add(60 * time.Minute)
-	s := fleet.Session{Snap: state.Snapshot{State: state.Idle}}
+	s := fleet.Session{Snap: state.Snapshot{State: state.Working}} // live: its lanes are out, not lost
 	red := journey.Leg{Class: journey.Test, Label: "pytest", Start: base.Add(10 * time.Minute), End: base.Add(12 * time.Minute),
 		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "18 passed · 2 failed", Short: "18✓ 2✗"}}}
 	green := journey.Leg{Class: journey.Test, Label: "go test", Start: base.Add(20 * time.Minute), End: base.Add(22 * time.Minute),
@@ -1256,36 +1256,39 @@ func TestMoreDeadKeysSayWhy(t *testing.T) {
 	}
 }
 
-// Tab from Lv1 skips a Lv2 that would show nothing beneath any leg.
-func TestTabSkipsAnEmptyLv2(t *testing.T) {
+// Lv2 opens the reader beside the trail, following the cursor; the keys
+// stay on the trail until the second Tab.
+func TestLv2OpensTheReader(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
 	openTrail(m)
-	m.SetTrail(journey.Trail{
-		Prompts: []journey.Prompt{{Text: "go", At: fixtureBase}},
-		Legs: []journey.Leg{
-			{Class: journey.Scout, Label: "a.go", Start: fixtureBase.Add(time.Minute), End: fixtureBase.Add(2 * time.Minute), Files: []string{"a.go"}},
-			{Class: journey.Build, Label: "a.go", Start: fixtureBase.Add(3 * time.Minute), Files: []string{"a.go"}, Current: true},
-		},
-	})
-	pressTab(m)
-	if m.level != levelReader {
-		t.Errorf("Tab on a trail with no waypoints stopped at level %d, want the reader", m.level)
+	m.events = eventsFor(m.trail)
+	if got := m.View(); strings.Contains(got, "READER · api") {
+		t.Fatalf("Lv1 draws the reader unasked:\n%s", got)
 	}
-	if !strings.Contains(m.note, "no waypoints") {
-		t.Errorf("note = %q, want it to say why Lv2 was skipped", m.note)
-	}
-	// Shift+Tab skips the cursor on the way up too.
-	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.level != levelTrail {
-		t.Errorf("shift+tab from a reader Tab skipped to did not return to the trail: level %d", m.level)
-	}
-	// With detail beneath a leg, Tab stops at Lv2 as ever — on a wide
-	// deck too, where the row carries that detail itself.
-	m.SetTrail(fixtureLv2Trail(fixtureBase))
 	pressTab(m)
 	if m.level != levelWaypoints {
-		t.Errorf("Tab on a trail with waypoints skipped Lv2: level %d", m.level)
+		t.Fatalf("level = %d, want Lv2", m.level)
+	}
+	got := m.View()
+	if !strings.Contains(got, "READER · api") || !strings.Contains(got, "▌TRAIL · api") {
+		t.Errorf("Lv2 does not show the reader beside the focused trail:\n%s", got)
+	}
+	press(m, "k")
+	press(m, "k")
+	rows := TrailRows(m.trail, levelWaypoints)
+	if m.anchor < 0 || !strings.Contains(m.readerTitle(80), rows[m.cursor].Time.Local().Format("15:04")) {
+		t.Errorf("the reader did not follow the cursor to %q", rows[m.cursor].Text)
+	}
+	pressTab(m)
+	if m.level != levelReader || !strings.Contains(m.View(), "▌READER · api") {
+		t.Errorf("the second Tab did not hand the keys to the reader")
+	}
+	narrow := boardModel(100, 30)
+	openTrail(narrow)
+	pressTab(narrow)
+	if strings.Contains(narrow.View(), "READER") {
+		t.Errorf("a 100-column deck drew a middle panel at Lv2")
 	}
 }
 
@@ -1588,17 +1591,17 @@ func TestParkedHeadKeepsItsOwnName(t *testing.T) {
 	}
 }
 
-// A narrow column keeps HEAD's whole figure — the wait is the sentence —
-// and drops the label before it.
-func TestNarrowHeadKeepsItsWait(t *testing.T) {
+// A narrow column keeps HEAD's label and the first clause of its figure:
+// what it is doing and that agents are out, over how long with no name.
+func TestNarrowHeadKeepsItsLabel(t *testing.T) {
 	forceASCII(t)
 	base := fixtureBase
 	tr := journey.Trail{Legs: []journey.Leg{
 		{Class: journey.Build, Label: "encoder.py", Start: base, End: base.Add(5 * time.Minute), Files: []string{"encoder.py"}, Current: true},
 	}, Branches: []journey.Branch{{Label: "a", Start: base.Add(10 * time.Minute), AfterLeg: 0}, {Label: "b", Start: base.Add(12 * time.Minute), AfterLeg: 0}, {Label: "c", Start: base.Add(12 * time.Minute), AfterLeg: 0}}}
 	narrow := renderLv(tr, base.Add(30*time.Minute), 1, 35, 10)
-	if strings.Contains(narrow, "encoder.py") || !strings.Contains(narrow, "● build  ◈3 out 20m · quiet 25m") {
-		t.Errorf("a narrow HEAD kept its label over the wait:\n%s", narrow)
+	if !strings.Contains(narrow, "● build  encoder.py") || !strings.Contains(narrow, "◈3 out 20m") || strings.Contains(narrow, "quiet") {
+		t.Errorf("a narrow HEAD lost its label or its first clause:\n%s", narrow)
 	}
 	wide := renderLv(tr, base.Add(30*time.Minute), 1, 60, 10)
 	if !strings.Contains(wide, "encoder.py") || !strings.Contains(wide, "◈3 out 20m · quiet 25m") {
@@ -2093,5 +2096,57 @@ func TestUnreadClearsWhenTheTrailIsOnScreen(t *testing.T) {
 	wide.point(tf)
 	if !wide.unread(wide.sessions[rowFor(t, wide, tf).sess]) {
 		t.Errorf("selecting a column on the board marked it read before it was opened")
+	}
+}
+
+// ---- first real dogfood
+
+// A tick carries the leg's label.
+func TestTickCarriesItsLabel(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{
+		{Class: journey.Build, Label: "a.go", Start: base, End: base.Add(5 * time.Minute), Files: []string{"a.go"}},
+		{Class: journey.Build, Label: "go build ./...", Start: base.Add(10 * time.Minute), End: base.Add(11 * time.Minute)},
+		{Class: journey.Scout, Label: "b.go", Start: base.Add(30 * time.Minute), Current: true},
+	}}
+	if got := renderLv(tr, base.Add(40*time.Minute), 1, 44, 20); !strings.Contains(got, "build  go build ./...") {
+		t.Errorf("the tick dropped its label:\n%s", got)
+	}
+}
+
+// An idle session's open lanes are lost, not out: on the rail, in the
+// verdict, and in the header's count.
+func TestIdleSessionsLanesAreLost(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	tf := sessionKey("s-tfstate") // idle
+	tr := m.trails[tf]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "a", Start: fixtureBase.Add(10 * time.Minute), AfterLeg: 0})
+	m.trails[tf] = tr
+	col := strings.Join(m.boardColumn(tf, rowFor(t, m, tf), 44, 20), "\n")
+	if !strings.Contains(col, "⌀ lost 30m ago") || strings.Contains(col, " out") {
+		t.Errorf("an idle session's lane is still out:\n%s", col)
+	}
+	if !strings.Contains(col, "◈1 lost") {
+		t.Errorf("the verdict does not count the lost lane:\n%s", col)
+	}
+	if got := m.statusChips(); strings.Contains(got, "◈1 out") {
+		t.Errorf("the header counts a lost lane as out: %q", got)
+	}
+	api := sessionKey("s-api")
+	atr := m.trails[api]
+	atr.Branches = append(atr.Branches, journey.Branch{Label: "b", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	m.trails[api] = atr
+	if got := m.statusChips(); !strings.Contains(got, "◈1 out") {
+		t.Errorf("the header does not count a working session's lane: %q", got)
+	}
+}
+
+// The legend explains the chapter counter.
+func TestLegendExplainsChapters(t *testing.T) {
+	forceASCII(t)
+	if got := strings.Join(helpLegendLines(90, true), "\n"); !strings.Contains(got, "◉ 3/12") {
+		t.Errorf("the legend does not explain the chapter counter:\n%s", got)
 	}
 }

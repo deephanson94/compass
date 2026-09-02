@@ -157,7 +157,6 @@ type Model struct {
 	anchor     int
 	anchorAt   time.Time // the moment the anchor stands for; zero when none
 	anchorText string    // what that row said
-	skippedLv2 bool      // Tab went Lv1 → reader over an empty Lv2
 
 	// selectedKey is the session the deck is pointed at, held by its Key() —
 	// its transcript path. The session id is a label two sessions can share
@@ -916,19 +915,6 @@ func (m *Model) chapter(key string) {
 	m.note = fmt.Sprintf("◉ %d/%d · %s · %s", nth, len(prompts), clip(`"`+rows[target].Text+`"`, 40), rows[target].Time.Local().Format("15:04"))
 }
 
-// lv2AddsNothing reports whether the trail has no Lv2 detail at all: no
-// waypoint, no touched row, no finding — the same rows at Lv1 and Lv2.
-func (m *Model) lv2AddsNothing() bool {
-	w, h := m.trailBox()
-	o := m.trailOpts(w, h)
-	o.Height = 1 << 20 // the whole document, whatever the panel
-	o.NoInline = true  // detail the row carries is still detail Lv2 has
-	o.Level = levelTrail
-	lv1 := len(TrailLines(m.trail, o))
-	o.Level = levelWaypoints
-	return lv1 > 0 && len(TrailLines(m.trail, o)) == lv1
-}
-
 // firstRowInView is the first selectable row at or below the trail
 // viewport's top, or -1 when none is.
 func (m *Model) firstRowInView() int {
@@ -1117,18 +1103,6 @@ func (m *Model) zoomIn() {
 			}
 		}
 	case m.level < levelWaypoints:
-		if m.lv2AddsNothing() {
-			// No leg has anything beneath it: Lv2 would be Lv1 with a
-			// cursor, and the keypress it costs bought an empty screen.
-			// The reader opens on the present; Shift+Tab still reaches
-			// the cursor for anyone who wants a moment other than now.
-			m.level = levelWaypoints
-			m.cursorMove(0)
-			m.enterReader()
-			m.skippedLv2 = true
-			m.note = "no waypoints · reader at the present"
-			return
-		}
 		m.level = levelWaypoints
 		// Lv2 is the trail with a cursor on it. A trail scrolled back to
 		// some earlier hour puts the cursor there — on the first row in
@@ -1152,14 +1126,6 @@ func (m *Model) zoomOut() {
 	switch {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
-		if m.skippedLv2 {
-			// Tab skipped the cursor on the way down; the way up skips it
-			// too, or every exit from the reader pays for an empty screen.
-			m.skippedLv2 = false
-			m.level = levelTrail
-			m.cursor, m.anchor = -1, -1
-			return
-		}
 		// The reader goes back to following the cursor it left behind.
 		m.anchorReader()
 	case m.level > levelTrail:
@@ -1523,8 +1489,8 @@ func (m *Model) statusChips() string {
 	// over four lanes still out twenty minutes in was a claim, and wrong.
 	out, oldestOut := 0, time.Time{}
 	for _, s := range m.sessions {
-		if !s.Live {
-			continue
+		if !s.Live || s.Snap.State == state.Idle {
+			continue // an idle session's open lanes are lost, not out
 		}
 		for _, b := range m.trails[s.Info.Key()].Branches {
 			if !b.Done {
@@ -1648,7 +1614,11 @@ func (m *Model) middleShown() bool {
 	if m.width < deckWideCols {
 		return false
 	}
-	return m.level >= levelReader || m.mirrorShown()
+	// The reader is drawn from Lv2, following the cursor; at Lv3 the keys
+	// move into it. Lv2 used to be the trail with a cursor and nothing
+	// beside it, and on a wide terminal that was Lv1 with one row
+	// inverted — a keypress that bought nothing to look at.
+	return m.level >= levelWaypoints || m.mirrorShown()
 }
 
 // layout is the deck's column widths for an inner width: fleet, middle, trail.
@@ -1727,7 +1697,7 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 	if mw > 0 {
 		middle := m.mirrorColumn
-		if m.level >= levelReader {
+		if m.level >= levelWaypoints {
 			middle = m.readerColumn
 		}
 		return joinColumns(h, []column{

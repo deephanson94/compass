@@ -351,7 +351,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		// A working column shows its HEAD row anyway — pinned, it is always
 		// the last row of the trail — so the header says what HEAD cannot:
 		// how the suite stands, what shipped, what is still out.
-		if parts := verdictParts(tr, m.now); len(parts) > 0 {
+		if parts := verdictParts(tr, m.now, true); len(parts) > 0 {
 			second = "    " + dimStyle.Render(joinFit(parts, w-4))
 		}
 	}
@@ -422,7 +422,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 // "did it work" with zero keys and zero inference, which for eleven of twelve
 // sessions on an afternoon board is the only thing anyone needed.
 func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
-	parts := verdictParts(tr, now)
+	parts := verdictParts(tr, now, s.Snap.State != state.Idle)
 	if len(parts) == 0 {
 		// Nothing countable: the newest completed leg, so a quiet column
 		// still says what it last did.
@@ -443,7 +443,7 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 // verdictParts is the verdict without its fallback: only what the trail
 // can count. A working column's header uses this — its HEAD row already
 // says what it is doing, and "test pytest" over it said less.
-func verdictParts(tr journey.Trail, now time.Time) []string {
+func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 	var parts []string
 
 	// Agents still out, oldest first: the number that changes what you do.
@@ -456,10 +456,14 @@ func verdictParts(tr journey.Trail, now time.Time) []string {
 			}
 		}
 	}
-	if out > 0 {
+	switch {
+	case out > 0 && !live:
+		// The turn is over: what never came back is lost, not out.
+		parts = append(parts, fmt.Sprintf("◈%d lost", out))
+	case out > 0:
 		// The same words HEAD uses, parked or not: "◈3 out 20m · quiet
 		// 15m" is the header's to say as much as the trail's.
-		parts = append(parts, strings.TrimPrefix(headTail(tr, now), "for "))
+		parts = append(parts, strings.TrimPrefix(headTail(tr, now, true), "for "))
 		if !strings.HasPrefix(parts[len(parts)-1], "◈") {
 			parts[len(parts)-1] = fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
 		}

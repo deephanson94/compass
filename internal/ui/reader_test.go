@@ -301,10 +301,10 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 	if !strings.Contains(got, "TRAIL · api") {
 		t.Errorf("Lv2 deck is missing the trail:\n%s", got)
 	}
-	for _, gone := range []string{"READER · api", mirrorMark + " dev:1.0 · live"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("Lv2 has a middle panel (%q); it is the trail unfolded and nothing beside it", gone)
-		}
+	// Lv2 draws the reader beside the trail, following the cursor, in the
+	// mirror's place; the mirror waits for Lv1.
+	if !strings.Contains(got, "READER · api") || strings.Contains(got, mirrorMark+" dev:1.0 · live") {
+		t.Errorf("Lv2 should show the reader, not the mirror:\n%s", got)
 	}
 	m.zoomIn()
 	if got := m.View(); !strings.Contains(got, "READER · api") {

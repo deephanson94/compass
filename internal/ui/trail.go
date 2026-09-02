@@ -232,7 +232,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	}
 
 	o.HeadWaits = headWaits(tr)
-	o.HeadTail = headTail(tr, o.Now)
+	o.HeadTail = headTail(tr, o.Now, o.HeadState != state.Idle)
 	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if len(tr.Legs) == 0 {
@@ -687,6 +687,15 @@ func tickLeg(l journey.Leg, o TrailOpts) bool {
 // word, dim, in the verb column where the leg's own row would have put it.
 func tickRow(l journey.Leg, stroke string, width int) string {
 	head := ruleStyle.Render(stroke) + " " + dimStyle.Render(l.Class.String())
+	// The leg's own label rides on the tick when it has one: "│ build" ten
+	// times down a column said nothing about what was built.
+	if label := strings.TrimSpace(l.Label); label != "" && label != l.Class.String() {
+		if room := width - lipgloss.Width(head) - 1 - len([]rune(legSpan(l))) - 4; room >= trailMinLabel {
+			// Padded like a leg row's class, so the labels line up down
+			// the column.
+			head = ruleStyle.Render(stroke) + " " + dimStyle.Render(pad(l.Class.String(), trailVerbWidth)) + " " + dimStyle.Render(clip(label, room))
+		}
+	}
 	// A test leg that reported nothing is a run with no verdict, which is a
 	// fact, not an absence: "?" says so, where a bare word between a red run
 	// and a green one read as if the tests had simply skipped a beat.
@@ -791,11 +800,20 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 		badge, badgeW = "", 0
 		labelWidth = width - trailPrefixWidth - 1 - len([]rune(age))
 	}
+	if labelWidth < trailMinLabel && l.Current && strings.Contains(age, " · ") {
+		// HEAD's figure can be a sentence — "◈3 out 20m · quiet 15m". A
+		// narrow column keeps the label and the first clause: a row that
+		// says what it is doing and that agents are out beats one that
+		// says how long, with no name. (The person reading the real thing
+		// wanted the name.)
+		first := strings.SplitN(age, " · ", 2)[0]
+		if w := width - trailPrefixWidth - 1 - len([]rune(first)); w >= trailMinLabel {
+			age, labelWidth = first, w
+		}
+	}
 	if labelWidth < trailMinLabel {
 		// Too narrow for a label: the verb and the figure still answer
-		// "what, when" — and for HEAD the figure is the sentence that
-		// matters ("◈3 out 20m · quiet 15m"), so it is the label that goes,
-		// never the wait.
+		// "what, when".
 		return head + " " + dimStyle.Render(clip(age, width-trailPrefixWidth-1))
 	}
 	// A wide panel spends its width inside the row: the leg's own detail —
@@ -922,7 +940,7 @@ func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
 // them ("quiet 15m": nothing of its own since the newest left) or still
 // working ("for 2h"). One sentence at every depth; zooming in must not
 // change the words.
-func headTail(tr journey.Trail, now time.Time) string {
+func headTail(tr journey.Trail, now time.Time, live bool) string {
 	var head *journey.Leg
 	for i := range tr.Legs {
 		if tr.Legs[i].Current {
@@ -944,7 +962,7 @@ func headTail(tr journey.Trail, now time.Time) string {
 			}
 		}
 	}
-	if out == 0 {
+	if out == 0 || !live {
 		return "for " + relAge(now, head.Start)
 	}
 	tail := fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
@@ -1214,6 +1232,12 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		// "✓ 2h ago" how long since it came back; a leg's bare figure is a
 		// duration. Three kinds of number down one rail need their words.
 		tail := mark + " " + relAge(o.Now, br.Start) + " out"
+		if !br.Done && o.HeadState == state.Idle {
+			// The turn is over and this never came back: lost, not out.
+			// "◈1 out 3d" on a session idle for three days was a count of
+			// nothing.
+			tail = branchEmpty + " lost " + relAge(o.Now, br.Start) + " ago"
+		}
 		if br.Done {
 			back := br.End
 			if back.IsZero() {

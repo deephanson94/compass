@@ -658,7 +658,7 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 		// HEAD's own row, in HEAD's own words: the same glyph, label and
 		// figure the trail draws, so zooming in never changes the sentence.
 		o := TrailOpts{Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State,
-			HeadSince: headSince(s), HeadWaits: headWaits(tr), HeadTail: headTail(tr, m.now), Now: m.now, Width: 1000}
+			HeadSince: headSince(s), HeadWaits: headWaits(tr), HeadTail: headTail(tr, m.now, true), Now: m.now, Width: 1000}
 		label, _ := legLabel(l, o)
 		glyph, tail := headMark(o, l)
 		// The newest verdict rides beside the present: below 110 columns
