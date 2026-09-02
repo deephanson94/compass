@@ -135,12 +135,12 @@ func TestTheBoardReturnsWhenTheWidthDoes(t *testing.T) {
 	if m.level != levelBoard {
 		t.Errorf("widened again: level %d, want the board back", m.level)
 	}
-	// But a trail the person chose stays chosen.
+	// But a session the person chose stays chosen.
 	pressTab(m)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.WindowSizeMsg{Width: 152, Height: 30})
-	if m.level != levelTrail {
-		t.Errorf("a chosen trail was replaced by the board on resize: level %d", m.level)
+	if m.level == levelBoard {
+		t.Errorf("a chosen session was replaced by the board on resize")
 	}
 }
 
@@ -333,9 +333,9 @@ func TestATallColumnShowsThePresent(t *testing.T) {
 
 // ---------------------------------------------------------------- keys
 
-// Tab opens the selected column as the single trail, with the trail, plan and
-// labels already in hand; shift+tab and esc come back. Board → reader is
-// three tabs (§3).
+// Tab opens the selected column as the session view — the trail with its
+// cursor and the conversation beside it, the trail, plan and labels already
+// in hand; shift+tab and esc come back. Board → reader is two tabs.
 func TestTabWalksBoardTrailWaypointsReader(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
@@ -343,19 +343,18 @@ func TestTabWalksBoardTrailWaypointsReader(t *testing.T) {
 	m.boardLabels[sessionKey("s-api")] = map[string]string{"k": "v"}
 
 	pressTab(m)
-	if m.level != levelTrail {
-		t.Fatalf("tab from the board went to Lv%d", m.level)
+	if m.level != levelWaypoints {
+		t.Fatalf("tab from the board went to Lv%d, want the session view", m.level)
 	}
 	if len(m.trail.Legs) == 0 {
-		t.Error("the single trail opened empty; the board had its trail already")
+		t.Error("the session opened empty; the board had its trail already")
 	}
 	if m.labels["k"] != "v" {
 		t.Error("the column's narrated labels did not come along")
 	}
-	if got := m.View(); !strings.Contains(got, "TRAIL · api") {
-		t.Errorf("Lv1 is not the single trail:\n%s", got)
+	if got := m.View(); !strings.Contains(got, "● api") || !strings.Contains(got, "READER · api") || strings.Contains(got, "FLEET · live") {
+		t.Errorf("the session view is not the column expanded beside its conversation:\n%s", got)
 	}
-	pressTab(m)
 	pressTab(m)
 	if m.level != levelReader {
 		t.Errorf("three tabs from the board reached Lv%d, want the reader", m.level)
@@ -451,8 +450,8 @@ func TestBoardAndTrailFootersNameEachOther(t *testing.T) {
 		t.Errorf("the board's footer does not offer one trail:\n%s", got)
 	}
 	pressTab(m)
-	if got := m.View(); !strings.Contains(got, "⇧tab board") {
-		t.Errorf("the trail's footer does not offer the board:\n%s", got)
+	if got := m.View(); !strings.Contains(got, "esc board") {
+		t.Errorf("the session's footer does not offer the board:\n%s", got)
 	}
 }
 

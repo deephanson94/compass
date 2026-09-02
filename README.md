@@ -51,7 +51,7 @@ nothing; a lane whose label begins another live session's prompt is marked
 `→3`, a hedge that `3` goes and checks. A trail
 longer than its column is drawn without the air between legs, with the hour on
 the rail where it turns; a tall board packs its columns into bands, each as tall
-as its tallest trail. `Tab` opens one trail; `Shift+Tab` comes back. The deck
+as its tallest trail. `Tab` opens a session; `Shift+Tab` comes back. The deck
 above is that one trail with the **live mirror** switched on (`m`): the selected
 session's actual tmux pane, streamed read-only via `capture-pane` — you watch the
 real CLI render, but compass owns no PTY. When you want to *type*, `Enter` hands you the terminal:
@@ -87,13 +87,15 @@ the transcript is the code.
    monochrome. Nothing blinks, and nothing rings a bell: attention is visual (amber
    sort, tab-title badge), which is exactly what survives an SSH hop.
 
-## The three zoom levels
+## The three levels
 
-| Level | One Tab away | Shows |
-|-------|--------------|-------|
-| **Lv1 — Trail** | default | The journey as a git graph: scout → build → test → fix, subagents as branches, plan as ghost nodes |
-| **Lv2 — Waypoints** | `Tab` | Legs expanded — each bug, each test run (18✓ 2✗), files touched, commits, subagent findings — with the conversation open beside them, following your cursor |
-| **Lv3 — Deep dive** | `Tab` `Tab` | The reader takes the keys: scroll, unfold tool output, search, `[ ]` between your turns. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
+| Level | Keys | Shows |
+|-------|------|-------|
+| **Board** | opens here | Every session's trail side by side, urgent first. `h`/`l` across, numbers jump, `Enter` attaches |
+| **Session** | `Tab` | That column expanded: its header card, the journey as a git graph with a cursor on the present, and beside it the conversation following the cursor — or the live tmux pane, with `m`. `j`/`k` walk the legs, `h`/`l` slide to the next session, `[ ]` step your prompts |
+| **Reader** | `Tab` `Tab` | The keys move into the conversation: scroll, unfold tool output, search, `[ ]` between your turns. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
+
+Below 110 columns there is no board: the deck is the fleet list beside one trail, `Tab` puts a cursor on it, and a third `Tab` gives the reader the whole width.
 
 ## Using it
 
@@ -157,8 +159,10 @@ run and nothing else.
 |-----|---|
 | `1`–`9` | select a session |
 | `Enter` | go to it: compass hands you the session's terminal (prefix + `d` returns) |
-| `Tab` / `Shift+Tab` | zoom: trail → waypoints → the conversation itself |
-| `j`/`k` | move — the fleet at Lv1, the trail's rows at Lv2 (the conversation follows), the reader at Lv3 |
+| `Tab` / `Shift+Tab` | zoom: board → session → the conversation itself |
+| `j`/`k` | move — the trail's legs in a session (the conversation follows), the reader's lines once the keys are in it |
+| `h`/`l` | across the board's columns, or to the neighbouring session |
+| `m` | the live tmux pane beside the trail instead of the conversation; sticks until pressed again |
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |

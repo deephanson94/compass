@@ -285,24 +285,22 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 	// reader at Lv3 takes the fleet's width on a deck this narrow, and at
 	// thirty rows the whole fixture fit on one screen.
 	m := followModel(120, 22)
+	if m.level != levelWaypoints {
+		t.Fatalf("a wide deck opened at Lv%d, want the session view", m.level)
+	}
 	if got := m.View(); strings.Contains(got, mirrorMark+" dev:1.0 · live") {
-		t.Fatalf("Lv1 opened the mirror unasked:\n%s", got)
+		t.Fatalf("the session view opened the mirror unasked:\n%s", got)
 	}
 	press(m, "m")
 	if got := m.View(); !strings.Contains(got, mirrorMark+" dev:1.0 · live") {
-		t.Fatalf("m did not bring the mirror:\n%s", got)
+		t.Fatalf("m did not bring the live pane beside the trail:\n%s", got)
 	}
-
-	pressTab(m)
-	if m.level != levelWaypoints {
-		t.Fatalf("tab left the deck at Lv%d", m.level)
-	}
+	press(m, "m") // and back to the conversation
 	got := m.View()
-	if !strings.Contains(got, "TRAIL · api") {
-		t.Errorf("Lv2 deck is missing the trail:\n%s", got)
+	if !strings.Contains(got, " 2 ● api") {
+		t.Errorf("Lv2 deck is missing the session's trail card:\n%s", got)
 	}
-	// Lv2 draws the reader beside the trail, following the cursor, in the
-	// mirror's place; the mirror waits for Lv1.
+	// Lv2 draws the reader beside the trail, following the cursor.
 	if !strings.Contains(got, "READER · api") || strings.Contains(got, mirrorMark+" dev:1.0 · live") {
 		t.Errorf("Lv2 should show the reader, not the mirror:\n%s", got)
 	}
@@ -369,9 +367,9 @@ func TestGReturnsToThePresentAtLv2(t *testing.T) {
 	forceASCII(t)
 
 	m := followModel(120, 30)
-	pressTab(m)
+	toLv2(m)
 	rows := TrailRows(m.trail, levelWaypoints)
-	newest := m.scroll // Tab opens on the present, so this is its moment
+	newest := m.scroll // the session opens on the present, so this is its moment
 
 	for i := 0; i < len(rows); i++ {
 		press(m, "k")
@@ -435,7 +433,7 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 	forceASCII(t)
 
 	m := followModel(120, 30)
-	pressTab(m)
+	toLv2(m)
 	walkTo(t, m, fixtureBase.Add(15*time.Minute))
 	cursor, anchored := m.cursor, m.scroll
 
@@ -558,7 +556,7 @@ func TestTheReaderMarksTheAnchoredLine(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
 	m := followModel(120, 30)
-	pressTab(m) // Lv2: the cursor lands on the newest row
+	toLv2(m) // Lv2: the cursor lands on the newest row
 	if m.anchor < 0 {
 		t.Fatal("entering Lv2 anchored nothing")
 	}
@@ -600,7 +598,7 @@ func TestNoCursorMarksNothing(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
-	m := followModel(120, 30)
+	m := followModel(100, 30) // a narrow deck's Lv1: fleet and trail, no cursor
 	if m.anchor != -1 {
 		t.Errorf("Lv1 anchored line %d; there is no cursor to follow", m.anchor)
 	}

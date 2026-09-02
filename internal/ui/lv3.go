@@ -41,6 +41,9 @@ func (m *Model) readerWidth() int {
 	switch {
 	case inner < minDeckCols:
 		return inner // one column, and at Lv3 it is the reader's
+	case m.boardFits() && !m.archiveView:
+		companion, _ := sessionSplit(inner) // the session view, at Lv2 or Lv3
+		return companion
 	case m.width < deckWideCols:
 		return inner // the reader alone at Lv3 (layout): the deck is too narrow for a middle panel
 	case m.width >= deckWideCols && m.width < readerRoomCols:

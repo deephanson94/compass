@@ -10,16 +10,16 @@ import (
 // here only when they already do something.
 var helpKeys = [][2]string{
 	{"1 – 9", "select a session"},
-	{"j / k", "move down / up (↓ ↑ too) — on the board, h / l or ← → across"},
+	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
 	{"g", "grab the session waiting longest, and attach"},
 	{"A", "browse the archive — every past session, by project"},
-	{"tab", "zoom in: board → trail → legs → reader"},
+	{"tab", "zoom in: board → session → reader"},
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
 	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
-	{"m", "show / hide the live mirror (on one trail)"},
+	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
 	{"/ n N", "reader: search, next, previous"},
@@ -119,6 +119,9 @@ func helpKeyLinesFor(w int, board bool) []string {
 			case "⇧ tab":
 				what = "zoom out (esc too)"
 			}
+		}
+		if what == "" {
+			continue // not a key on this terminal
 		}
 		lines = append(lines, dimStyle.Render(pad(key, 10))+textStyle.Render(clip(what, w-10)))
 	}

@@ -345,24 +345,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 // and the eye goes to the columns with something in them to read.
 func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
-	entry := m.entryLines(r, w)
-	second := entry[1]
-	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
-		// A working column shows its HEAD row anyway — pinned, it is always
-		// the last row of the trail — so the header says what HEAD cannot:
-		// how the suite stands, what shipped, what is still out.
-		if parts := verdictParts(tr, m.now, true); len(parts) > 0 {
-			second = "    " + dimStyle.Render(joinFit(parts, w-4))
-		}
-	}
-	second, marked := m.boardSecondLine(s, second, w)
-	third := m.boardDelta(key, s, w)
-	if third == "" && !marked {
-		// The tmux session is what `enter` spends; a column that never
-		// says where it lives is the one you attach to blind.
-		third, _ = m.boardSecondLine(s, "", w)
-	}
-	rows := []string{entry[0], second, third}
+	rows := m.columnHeader(key, r, w)
 	if h <= 3 {
 		return fit(rows, h)
 	}
@@ -415,6 +398,32 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		}
 	}
 	return append(rows, lines...)
+}
+
+// columnHeader is a session's three-row card: the fleet row, the verdict
+// (or the sentence a needs-you or stuck session owes), and what is new
+// since the last look or where it lives. The board's columns wear it, and
+// so does the session view, so the view reads as the column expanded.
+func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
+	s := m.sessions[r.sess]
+	entry := m.entryLines(r, w)
+	second := entry[1]
+	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
+		// A working column shows its HEAD row anyway — pinned, it is always
+		// the last row of the trail — so the header says what HEAD cannot:
+		// how the suite stands, what shipped, what is still out.
+		if parts := verdictParts(tr, m.now, true); len(parts) > 0 {
+			second = "    " + dimStyle.Render(joinFit(parts, w-4))
+		}
+	}
+	second, marked := m.boardSecondLine(s, second, w)
+	third := m.boardDelta(key, s, w)
+	if third == "" && !marked {
+		// The tmux session is what `enter` spends; a column that never
+		// says where it lives is the one you attach to blind.
+		third, _ = m.boardSecondLine(s, "", w)
+	}
+	return []string{entry[0], second, third}
 }
 
 // boardVerdict is how a journey came out, in words, from its own tail: what

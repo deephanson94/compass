@@ -1303,10 +1303,51 @@ func relAge(now, t time.Time) string {
 // the graph.
 func (m *Model) trailColumn(w, h int) []string {
 	rows := []string{m.trailTitle(w), ""}
+	if m.sessionView() {
+		rows = m.sessionCard(w)
+	}
 	if h > 2 {
 		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-2))...)
 	}
 	return rows
+}
+
+// sessionCard is the session view's title: the column's own header — the
+// fleet row and the verdict — so one Tab from the board reads as that
+// column expanded, with the level and the day on the right.
+func (m *Model) sessionCard(w int) []string {
+	r, ok := m.boardRows()[m.selectedKey]
+	if !ok {
+		return []string{m.trailTitle(w), ""}
+	}
+	level := "[Lv2]"
+	if m.level >= levelReader {
+		level = "[Lv3]"
+	}
+	right := level
+	if n := m.legsAbove(); n > 0 {
+		right = fmt.Sprintf("↑ %d legs  %s", n, right)
+	}
+	if !m.trailPinned {
+		right = "↓ G  " + right
+	}
+	body := w - 1
+	hdr := m.columnHeader(m.selectedKey, r, body-lipgloss.Width(right)-1)
+	// One session on screen: the fleet's selection arrow says nothing here.
+	first := m.titleMark(panelTrail) + strings.Replace(hdr[0], "▸", " ", 1)
+	gap := w - lipgloss.Width(first) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	first += strings.Repeat(" ", gap) + dimStyle.Render(right)
+	second := hdr[1]
+	if day := strings.TrimPrefix(trailDay(m.trail, m.now, false), " · "); day != "" {
+		// The day's sum, where the column had no room for it.
+		if lipgloss.Width(second)+3+len([]rune(day)) <= w {
+			second = pad(second, w-len([]rune(day))) + dimStyle.Render(day)
+		}
+	}
+	return []string{first, second}
 }
 
 // trailOpts is the model's state as the renderer wants it.

@@ -225,9 +225,9 @@ func TestT31RenderTrailGolden(t *testing.T) {
 	compareGolden(t, "trail-38x20.txt", got)
 }
 
-// T32 — the whole deck at 120x30: fleet and trail, and no middle panel. The
-// mirror is off by default (decision #15): the CLI it would show is one Enter
-// away, and the trail is where the columns were being truncated.
+// T32 — the whole deck at 120x30, one Tab from the board: the session view,
+// the conversation beside the trail. The mirror is off by default: the CLI
+// it would show is one `m` away.
 func TestT32DeckTwoColumnGolden(t *testing.T) {
 	forceASCII(t)
 
@@ -306,6 +306,7 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{}, "")
+	toLv2(m)
 	press(m, "m")
 
 	got := m.View()
@@ -342,6 +343,7 @@ func TestMirrorWithoutATranscriptStillSaysWho(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{}, "")
+	toLv2(m)
 	m.SetEvents(nil)
 	press(m, "m")
 
@@ -360,13 +362,17 @@ func TestMirrorWithoutATranscriptStillSaysWho(t *testing.T) {
 
 // middleColumn pulls the mirror's column out of a rendered deck frame.
 func middleColumn(frame string) []string {
+	// The companion panel: between the fleet and the trail on a narrow
+	// deck, the left of two in the session view.
 	var out []string
 	for _, line := range strings.Split(frame, "\n") {
 		parts := strings.Split(line, "│")
-		if len(parts) < 3 {
-			continue
+		switch {
+		case len(parts) >= 3:
+			out = append(out, parts[1])
+		case len(parts) == 2:
+			out = append(out, parts[0])
 		}
-		out = append(out, parts[1])
 	}
 	return out
 }
@@ -476,9 +482,8 @@ func TestFocusMarkerFollowsTheKeys(t *testing.T) {
 		level  int
 		marked string
 	}{
-		{1, "FLEET · live"}, // j/k walk the fleet
-		{2, "TRAIL · api"},  // …the trail's rows
-		{3, "READER · api"}, // …and then the conversation
+		{2, " 2 ● api"},     // the session view: the keys are the trail's, under its card
+		{3, "READER · api"}, // …and then the conversation's
 	} {
 		for m.level < want.level {
 			pressTab(m)
@@ -496,12 +501,10 @@ func TestFocusMarkerFollowsTheKeys(t *testing.T) {
 		}
 	}
 
-	// Zooming back out hands them back.
-	for m.level > levelTrail {
-		m.zoomOut()
-	}
-	if got := m.View(); !strings.Contains(got, focusMark+"FLEET · live") {
-		t.Errorf("shift+tab did not return the keys to the fleet:\n%s", got)
+	// Zooming back out hands them back to the trail.
+	m.zoomOut()
+	if got := m.View(); !strings.Contains(got, focusMark+" 2 ● api") {
+		t.Errorf("shift+tab did not return the keys to the trail:\n%s", got)
 	}
 }
 
@@ -513,7 +516,7 @@ func TestFocusMarkerIsNotTheSelectionMarker(t *testing.T) {
 		t.Fatal("the focus marker is the fleet's selection marker")
 	}
 	forceASCII(t)
-	m := deckModel(120, 20, map[string]tmuxop.Pane{}, "")
+	m := deckModel(100, 20, map[string]tmuxop.Pane{}, "") // a narrow deck: the fleet list at Lv1
 	got := m.View()
 	if !strings.Contains(got, focusMark+"FLEET") {
 		t.Fatalf("the fleet is not marked at Lv1:\n%s", got)
@@ -535,20 +538,21 @@ func TestNoCaptureWhileTheMirrorIsOffScreen(t *testing.T) {
 	}
 
 	m := deckModel(120, 30, pane, fixtureFrame)
+	toLv2(m)
 	if m.capture() != nil {
-		t.Error("Lv1 with the mirror off still polls the pane")
+		t.Error("the session view with the mirror off still polls the pane")
 	}
 	press(m, "m")
 	if m.capture() == nil {
-		t.Fatal("m opened the mirror but nothing polls the pane")
+		t.Fatal("m opened the live pane but nothing polls it")
 	}
-	pressTab(m) // Lv2: the mirror is a Lv1 panel
-	if m.capture() != nil {
-		t.Error("Lv2 polls the pane with no mirror on screen")
-	}
-	pressTab(m) // Lv3
+	pressTab(m) // Lv3: the keys are the reader's, and the reader is what is drawn
 	if m.capture() != nil {
 		t.Error("Lv3 polls the pane with no mirror on screen")
+	}
+	m.zoomOut() // back at Lv2 the pane returns
+	if m.capture() == nil {
+		t.Error("shift+tab back to the session did not bring the live pane back")
 	}
 
 	narrow := deckModel(100, 30, pane, fixtureFrame)

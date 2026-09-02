@@ -1,30 +1,30 @@
  ⌂ compass                                                                                                ▲1 2m  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · live                                 │  TRAIL · api                                                     [Lv1]
-                                               │
-  ⌁ dev                                        │ ◉ "fix the 401 bug"                                            38m ago
- ▸2 ● api                                   3m │ ╷
-     ◆ test   1216✓ 2✗                         │ ◆ scout  middleware.py                                              5m
-                                               │ │
-  elsewhere                                  ▲ │ ◆ build  tokens.py                                                 12m
-  1 ▲ infra                     needs you   2m │ │
-     AskUserQuestion                           │ ◆ test   pytest                                              18✓ 2✗ 8m
-                                               │ ├─◈ scout the payments module                                 ⌀ 7m ago
-  3 ○ docs                         unread  22m │ │  └ came back with no report
-     ◆ docs   46✓                              │ ● fix    tokens.py                                              for 3m
-
-
-
-
-
-
-
-
-
-
-
-
-
+  READER · api                                tokens.py · 12:37 │ ▌ 2 ● api                                    3m [Lv2]
+                                                                │     ◆ test   1216✓ 2✗                    ⌁ dev
+ moment16 sending a subagent at the payments module, in case it │ ◉ "fix the 401 bug"                           38m ago
+ shares the same refresh helper                                 │ ╷
+                                                                │ ◆ scout  middleware.py                             5m
+ moment21 the subagent came back: payments never touches        │ │
+ refresh, so the blast radius is the auth package alone         │ ◆ build  tokens.py                                12m
+                                                                │ │  └ touched tokens.py · middleware.py
+ moment26 eighteen passed and two failed, both of them in the   │ │
+ refresh path and both about an expired token                   │ ◆ test   pytest                             18✓ 2✗ 8m
+                                                                │ │  └ ✗ test_refresh_expired_token
+ moment28 opening tokens.py, which is where the expiry          │ ├─◈ scout the payments module                ⌀ 7m ago
+ comparison the failing tests object to actually lives          │ │  └ came back with no report
+                                                                │ ●▸fix    tokens.py                             for 3m
+ moment30 a syntax error at tokens.py line 88 was hiding the    │
+ real fault; fixing that first and rerunning                    │
+                                                                │
+ moment34 the expiry check compares a UTC stamp against local   │
+ time, which is why it only fails after a refresh               │
+                                                                │
+ moment37 patching tokens.py to compare in UTC, then rerunning  │
+ the two tests that were objecting                              │
+                                                                │
+ moment39 both refresh tests pass now; rerunning the whole auth │
+ suite to be sure nothing else moved                            │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · [ ] chapters · ⇧tab board · g grab · ? help · q quit
+ j/k legs · h/l session · [ ] chapters · m live pane · tab reader · enter attach · esc board

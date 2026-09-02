@@ -649,8 +649,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// a list, not a board: three hundred columns of "reading its
 		// transcript…" answered nothing, and the list has the prompts.
 		m.toggleArchive()
-		if m.level == levelBoard {
+		if m.level != levelTrail {
+			// The archive is a list; it opens as one, whatever the depth.
 			m.level = levelTrail
+			m.cursor, m.anchor = -1, -1
 		}
 		return m, m.refresh()
 	case "m":
@@ -660,8 +662,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.width < deckWideCols:
 			m.note = fmt.Sprintf("the mirror needs %d columns; this terminal has %d", deckWideCols, m.width)
 		case m.level == levelBoard:
-			m.note = "the mirror shows on one trail (tab)"
-		case m.level != levelTrail:
+			m.note = "the mirror shows beside a session (tab)"
+		case m.sessionView() && m.level >= levelReader:
+			// The live pane has no keys: they go back to the trail.
+			m.level = levelWaypoints
+			m.anchorReader()
+			m.note = "the live pane · m again for the conversation"
+		case !m.sessionView() && m.level != levelTrail:
 			m.note = "the mirror shows at Lv1 (esc to zoom out)"
 		}
 		return m, m.capture()
@@ -679,6 +686,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.readerKey(key)
 	case levelWaypoints:
 		switch key {
+		case "h", "left", "l", "right":
+			if m.sessionView() {
+				if key == "h" || key == "left" {
+					m.sessionMove(-1)
+				} else {
+					m.sessionMove(1)
+				}
+				return m, m.refresh()
+			}
+			return m, nil
 		case "j", "down":
 			// A key that moves nothing says why: two identical frames
 			// after `j` read as a dead key, and the cursor opens on the
@@ -802,6 +819,15 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		// Enter means one thing at every depth (M7 contract).
 		return m, m.attach()
+	case "h", "left", "l", "right":
+		if m.sessionView() {
+			if key == "h" || key == "left" {
+				m.sessionMove(-1)
+			} else {
+				m.sessionMove(1)
+			}
+			return m, m.refresh()
+		}
 	case "j", "down":
 		if !m.scrollBy(1) {
 			m.note = "end of the conversation"
@@ -1096,6 +1122,13 @@ func (m *Model) zoomIn() {
 	switch {
 	case m.level < levelTrail:
 		m.level, m.boardForced = levelTrail, false
+		if m.boardFits() && !m.archiveView {
+			// Three levels on a terminal with a board: the board chooses,
+			// the session reads, the reader digs. The single trail with a
+			// fleet list beside it was the board's column drawn wider
+			// next to a list the board already is (decision #18).
+			m.level = levelWaypoints
+		}
 		m.markSeen(m.selectedKey)
 		// The column's trail, plan and labels are already in hand: the single
 		// trail opens on them rather than bare until the next poll. The
@@ -1107,6 +1140,9 @@ func (m *Model) zoomIn() {
 			if l := m.boardLabels[m.selectedKey]; l != nil {
 				m.labels = l
 			}
+		}
+		if m.level == levelWaypoints {
+			m.cursorMove(0) // the cursor opens on the present; the reader follows
 		}
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
@@ -1137,6 +1173,9 @@ func (m *Model) zoomOut() {
 	case m.level > levelTrail:
 		m.level = levelTrail
 		m.cursor, m.anchor = -1, -1
+		if m.boardFits() && !m.archiveView {
+			m.level = levelBoard // the session view came from the board; back to it
+		}
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
 	case m.level == levelTrail:
@@ -1549,14 +1588,18 @@ func (m *Model) footerLine(w int) string {
 		if m.archiveView {
 			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · ⇧tab board · A live fleet · ? help · q quit"
 		}
+	case m.level >= levelReader && m.sessionView():
+		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · h/l session · a ask · enter attach · esc back"
 	case m.level >= levelReader:
 		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · a ask · enter attach · esc back"
+	case m.level >= levelWaypoints && m.sessionView():
+		keys = "j/k legs · h/l session · [ ] chapters · m live pane · tab reader · enter attach · esc board"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back"
 	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · tab deeper", " · a ask", " · g grab"} {
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -1569,7 +1612,7 @@ func (m *Model) footerLine(w int) string {
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
 	// clip the note before the keymap goes.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
 			break
 		}
@@ -1609,7 +1652,10 @@ type column struct {
 // Lv1, on a terminal wide enough for three columns. It is what capture()
 // checks before spending a tmux call.
 func (m *Model) mirrorShown() bool {
-	return m.showMirror && m.level == levelTrail && m.width >= deckWideCols
+	// In the session view the live pane stands in for the conversation
+	// while the keys are on the trail; at Lv3 the keys are the reader's,
+	// so the reader is what is drawn.
+	return m.showMirror && m.width >= deckWideCols && (m.level == levelTrail || (m.sessionView() && m.level == levelWaypoints))
 }
 
 // middleShown says whether the deck draws a middle panel at all: the mirror
@@ -1642,6 +1688,12 @@ func (m *Model) layout(inner int) (fleet, middle, trail int) {
 		// and the fleet is two Shift+Tabs away.
 		return 0, 0, inner
 	}
+	if m.sessionView() {
+		// The session view: the companion — conversation, or the live
+		// pane — and the trail, no fleet list. The board is the fleet.
+		companion, trail := sessionSplit(inner)
+		return 0, companion, trail
+	}
 	if m.middleShown() {
 		if m.level >= levelReader && m.width < readerRoomCols {
 			// The keys are the reader's and the fleet is two Shift+Tabs
@@ -1655,6 +1707,43 @@ func (m *Model) layout(inner int) (fleet, middle, trail int) {
 	}
 	fleet = twoColumnFleet(inner)
 	return fleet, 0, inner - fleet - gutterWidth
+}
+
+// sessionView says whether the deck is showing one session on a terminal
+// that has a board: the trail with its cursor, a companion panel following
+// it, and no fleet list, because the board is the fleet.
+func (m *Model) sessionView() bool {
+	return m.boardFits() && !m.archiveView && m.level >= levelWaypoints
+}
+
+// sessionSplit divides the session view: the trail takes a little under
+// half, enough for its detail to ride on the row, and the companion the
+// rest.
+func sessionSplit(inner int) (companion, trail int) {
+	trail = inner * 45 / 100
+	if trail < trailWidth {
+		trail = trailWidth
+	}
+	if trail > sessionTrailMax {
+		trail = sessionTrailMax
+	}
+	return inner - trail - gutterWidth, trail
+}
+
+// sessionMove is h/l inside a session: the neighbouring session in the
+// board's order, at the same depth, its cursor on the present.
+func (m *Model) sessionMove(delta int) {
+	was := m.selectedKey
+	m.boardMove(delta)
+	if m.selectedKey == was {
+		if delta < 0 {
+			m.note = "the first session"
+		} else {
+			m.note = "the last session"
+		}
+		return
+	}
+	m.cursorMove(0)
 }
 
 // twoColumnFleet is the fleet's width when the trail has the rest of the deck:
@@ -1687,10 +1776,14 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 	fw, mw, tw := m.layout(w)
 	if fw == 0 && mw > 0 {
-		// The reader has taken the fleet's width: two columns, the
-		// conversation and the trail beside it.
+		// Two columns, the companion and the trail: the conversation, or
+		// the live pane while `m` has it and the keys are on the trail.
+		companion := m.readerColumn
+		if m.mirrorShown() {
+			companion = m.mirrorColumn
+		}
 		return joinColumns(h, []column{
-			{mw, m.readerColumn(mw, h)},
+			{mw, companion(mw, h)},
 			{tw, m.trailColumn(tw, h)},
 		})
 	}
@@ -1703,7 +1796,7 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 	if mw > 0 {
 		middle := m.mirrorColumn
-		if m.level >= levelWaypoints {
+		if m.level >= levelWaypoints && !(m.sessionView() && m.showMirror) {
 			middle = m.readerColumn
 		}
 		return joinColumns(h, []column{

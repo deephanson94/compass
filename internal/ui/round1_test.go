@@ -311,7 +311,7 @@ func TestTouchedRowNeverRestatesTheLabel(t *testing.T) {
 // The trail's title counts the legs its viewport hides above the fold.
 func TestPinnedTrailTitleCountsLegsAbove(t *testing.T) {
 	forceASCII(t)
-	m := boardModel(120, 20)
+	m := boardModel(100, 20) // Lv1 is a narrow deck's
 	openTrail(m)
 	m.SetTrail(hourlyTrail(fixtureBase.Add(-30*time.Hour), 30))
 	if got := m.trailTitle(60); !strings.Contains(got, "↑ ") || !strings.Contains(got, "legs  [Lv1]") {
@@ -327,7 +327,7 @@ func TestPinnedTrailTitleCountsLegsAbove(t *testing.T) {
 // thirty legs above the fold.
 func TestZoomInLandsOnTheFirstVisibleRow(t *testing.T) {
 	forceASCII(t)
-	m := boardModel(120, 20)
+	m := boardModel(100, 20) // a narrow deck: Lv1 then Lv2
 	openTrail(m)
 	m.SetTrail(hourlyTrail(fixtureBase.Add(-30*time.Hour), 30))
 	// Pinned to the present: Tab lands on the newest row, as it always did.
@@ -362,7 +362,7 @@ func TestHalfPageMovesTheCursorAtLv2(t *testing.T) {
 	m := boardModel(120, 30)
 	openTrail(m)
 	m.SetTrail(hourlyTrail(fixtureBase.Add(-30*time.Hour), 30))
-	pressTab(m)
+	toLv2(m)
 	m.cursor = 0
 	pressCtrl(m, tea.KeyCtrlD)
 	if want := m.trailHalfPage(); m.cursor != want {
@@ -741,7 +741,7 @@ func TestHelpFitsTheTerminalItIsOn(t *testing.T) {
 	forceASCII(t)
 	with := strings.Join(helpLinesFor(120, 40, true), "\n")
 	without := strings.Join(helpLinesFor(100, 40, false), "\n")
-	if !strings.Contains(with, "board → trail") {
+	if !strings.Contains(with, "board → session") {
 		t.Errorf("help with a board does not name it:\n%s", with)
 	}
 	if strings.Contains(without, "board") {
@@ -783,7 +783,7 @@ func TestStuckHeadNamesTheHungCall(t *testing.T) {
 // says which chapter and when.
 func TestPromptsAreChapters(t *testing.T) {
 	forceASCII(t)
-	m := boardModel(120, 24)
+	m := boardModel(100, 24) // a narrow deck: Lv1 has the viewport, Lv2 the cursor
 	openTrail(m)
 	tr := longTrail(60)
 	tr.Prompts = append(tr.Prompts,
@@ -1033,8 +1033,7 @@ func TestArchiveOpensOnItsFirstRow(t *testing.T) {
 func TestDeadKeysSayWhy(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
-	openTrail(m)
-	pressTab(m) // Lv2, cursor on the newest row
+	openTrail(m) // the session view: Lv2, cursor on the newest row
 	press(m, "j")
 	if !strings.Contains(m.note, "at the present") {
 		t.Errorf("j on the newest row said %q", m.note)
@@ -1228,7 +1227,7 @@ func TestWorkingFleetRowCarriesTheVerdict(t *testing.T) {
 // Keys that move nothing say why, at Lv1 and in the reader too.
 func TestMoreDeadKeysSayWhy(t *testing.T) {
 	forceASCII(t)
-	m := boardModel(152, 30)
+	m := boardModel(100, 30) // a narrow deck: Lv1 scrolls the trail
 	openTrail(m)
 	pressCtrl(m, tea.KeyCtrlU)
 	if !strings.Contains(m.note, "whole trail is on screen") {
@@ -1239,8 +1238,7 @@ func TestMoreDeadKeysSayWhy(t *testing.T) {
 		t.Errorf("G on a pinned trail said %q", m.note)
 	}
 	m.events = eventsFor(m.trail)
-	pressTab(m)
-	pressTab(m)
+	toLv3(m)
 	if m.level != levelReader {
 		t.Fatalf("level = %d, want the reader", m.level)
 	}
@@ -1261,18 +1259,17 @@ func TestMoreDeadKeysSayWhy(t *testing.T) {
 func TestLv2OpensTheReader(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
-	openTrail(m)
-	m.events = eventsFor(m.trail)
 	if got := m.View(); strings.Contains(got, "READER · api") {
-		t.Fatalf("Lv1 draws the reader unasked:\n%s", got)
+		t.Fatalf("the board draws the reader unasked:\n%s", got)
 	}
+	m.events = eventsFor(fixtureTrail(fixtureBase))
 	pressTab(m)
 	if m.level != levelWaypoints {
 		t.Fatalf("level = %d, want Lv2", m.level)
 	}
 	got := m.View()
-	if !strings.Contains(got, "READER · api") || !strings.Contains(got, "▌TRAIL · api") {
-		t.Errorf("Lv2 does not show the reader beside the focused trail:\n%s", got)
+	if !strings.Contains(got, "READER · api") || !strings.Contains(got, "▌ 2 ● api") {
+		t.Errorf("Lv2 does not show the reader beside the focused session card:\n%s", got)
 	}
 	press(m, "k")
 	press(m, "k")
@@ -1408,7 +1405,7 @@ func TestLaneLinksToTheSessionThatLooksLikeIt(t *testing.T) {
 // The trail's title adds a long day up, and says nothing for a short one.
 func TestTrailTitleAddsTheDayUp(t *testing.T) {
 	forceASCII(t)
-	m := boardModel(120, 30)
+	m := boardModel(100, 30) // a narrow deck: the trail's own title
 	openTrail(m)
 	if got := m.trailTitle(70); strings.Contains(got, "ship") || strings.Count(got, " · ") != 1 {
 		t.Errorf("a short trail's title adds itself up: %q", got)
@@ -1505,32 +1502,25 @@ func TestFoldRowGoesCompactWhenNarrow(t *testing.T) {
 	}
 }
 
-// On a deck under 150 columns the reader takes the fleet's width at Lv3.
-func TestReaderTakesTheFleetsWidthOnANarrowDeck(t *testing.T) {
+// The session view's companion and readerWidth agree at every width, and no
+// fleet list is drawn beside them.
+func TestSessionViewHasNoFleetList(t *testing.T) {
 	forceASCII(t)
-	m := boardModel(120, 30)
-	openTrail(m)
-	m.events = eventsFor(m.trail)
-	pressTab(m)
-	pressTab(m)
-	got := m.View()
-	if strings.Contains(got, "FLEET · live") {
-		t.Errorf("the fleet is still drawn beside the reader at 120 columns:\n%s", got)
-	}
-	if !strings.Contains(got, "READER · api") || !strings.Contains(got, "TRAIL · api") {
-		t.Errorf("the reader and the trail are not both drawn:\n%s", got)
-	}
-	fw, mw, _ := m.layout(m.width - 2*edgePad)
-	if fw != 0 || mw != m.readerWidth() {
-		t.Errorf("layout (%d, %d) and readerWidth %d disagree", fw, mw, m.readerWidth())
-	}
-	wide := boardModel(160, 30)
-	openTrail(wide)
-	wide.events = eventsFor(wide.trail)
-	pressTab(wide)
-	pressTab(wide)
-	if !strings.Contains(wide.View(), "FLEET · live") {
-		t.Errorf("a wide deck lost its fleet at Lv3")
+	for _, w := range []int{120, 160, 220} {
+		m := boardModel(w, 30)
+		openTrail(m)
+		m.events = eventsFor(m.trail)
+		got := m.View()
+		if strings.Contains(got, "FLEET · live") {
+			t.Errorf("%d columns: the fleet list is drawn beside the session:\n%s", w, got)
+		}
+		if !strings.Contains(got, "READER · api") {
+			t.Errorf("%d columns: the conversation is not beside the trail:\n%s", w, got)
+		}
+		fw, mw, _ := m.layout(m.width - 2*edgePad)
+		if fw != 0 || mw != m.readerWidth() {
+			t.Errorf("%d columns: layout (%d, %d) and readerWidth %d disagree", w, fw, mw, m.readerWidth())
+		}
 	}
 }
 
@@ -2167,10 +2157,17 @@ func TestBoardMovesSideways(t *testing.T) {
 	if !strings.Contains(m.View(), "h/l columns") {
 		t.Errorf("the board's footer does not name h/l")
 	}
-	// Off the board, h and l do nothing to the selection.
+	// Inside a session, h and l are the neighbouring sessions.
 	openTrail(m)
 	press(m, "l")
+	if m.selectedKey == was {
+		t.Errorf("l did not move to the next session inside the session view")
+	}
+	if m.level != levelWaypoints {
+		t.Errorf("l left the session view: level %d", m.level)
+	}
+	press(m, "h")
 	if m.selectedKey != was {
-		t.Errorf("l moved the selection at Lv1")
+		t.Errorf("h did not come back")
 	}
 }
