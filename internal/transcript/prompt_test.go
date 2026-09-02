@@ -1,6 +1,7 @@
 package transcript_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/deephanson94/compass/internal/transcript"
@@ -136,5 +137,29 @@ func TestRelayedMessagesAreNotPrompts(t *testing.T) {
 	ev := transcript.Event{Type: transcript.EventUser, Text: "why does Another Claude session sent a message show up?"}
 	if ev.Machinery() {
 		t.Error("a prompt that mentions the phrase mid-sentence was called machinery")
+	}
+}
+
+// The result line Claude Code writes for TaskCreate, verbatim from a
+// transcript: the model sees the text, and the structured account rides
+// beside it as toolUseResult. Both reach the ToolResult.
+func TestAToolResultCarriesItsStructuredAccount(t *testing.T) {
+	line := `{"type":"user","uuid":"u1","timestamp":"2026-09-02T00:58:00.000Z","message":{"role":"user",` +
+		`"content":[{"tool_use_id":"toolu_01","type":"tool_result",` +
+		`"content":"Task #1 created successfully: Build ghost waypoints"}]},` +
+		`"toolUseResult":{"task":{"id":"1","subject":"Build ghost waypoints"}},"sessionId":"s"}`
+	ev, err := transcript.ParseLine([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ev.ToolResults) != 1 {
+		t.Fatalf("got %d results, want 1", len(ev.ToolResults))
+	}
+	r := ev.ToolResults[0]
+	if !strings.HasPrefix(r.Text, "Task #1 created") {
+		t.Errorf("Text = %q", r.Text)
+	}
+	if !strings.Contains(string(r.Meta), `"id":"1"`) {
+		t.Errorf("Meta = %s, want the structured toolUseResult", r.Meta)
 	}
 }

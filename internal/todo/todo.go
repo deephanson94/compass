@@ -25,6 +25,7 @@ const (
 type Item struct {
 	Text   string
 	Status Status
+	Active string // present-tense form ("Fixing the token refresh"), when the writer kept one
 }
 
 // Read loads the session's todo list: it scans <root>/todos/ for *.json files
@@ -117,7 +118,7 @@ func parseFile(path string) (items []Item, ok bool) {
 		if text == "" {
 			continue // an entry with nothing to say is nothing to draw
 		}
-		items = append(items, Item{Text: text, Status: Status(raw.Status)})
+		items = append(items, Item{Text: text, Status: Status(raw.Status), Active: raw.ActiveForm})
 	}
 	return items, true
 }

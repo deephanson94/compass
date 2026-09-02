@@ -1,6 +1,8 @@
 package journey
 
 import (
+	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,12 +43,30 @@ type Branch struct {
 	Report    string    // first non-empty line of the agent's result, ≤60 runes; "" until Done
 }
 
+// Task is one entry of the plan Claude keeps for itself, read from the
+// TaskCreate and TaskUpdate calls in the transcript. This is the "adventure
+// it's going to do": pending tasks are the ghost waypoints ahead of HEAD, and
+// the in-progress one is what HEAD is called when nothing else names it.
+//
+// It used to be read from ~/.claude/todos/<session>.json. Claude Code stopped
+// writing that file; the calls that replaced it are in the transcript, which
+// is data the trail already reads, and a better source than a side file was —
+// the plan and the journey come from one place and cannot disagree.
+type Task struct {
+	ID      string // "1", "2", … — assigned by Claude Code in TaskCreate's result
+	Subject string // imperative: "Fix the token refresh"
+	Active  string // present tense, for the spinner: "Fixing the token refresh"; may be ""
+	Status  string // "pending", "in_progress", "completed", "deleted"
+	Owner   string // an agent name, when a teammate claimed it
+}
+
 // Trail is the whole journey as the panel needs it: what was asked, what was
-// done, and what forked off along the way.
+// done, what forked off along the way, and what is still to come.
 type Trail struct {
 	Prompts  []Prompt // every substantive user prompt, oldest first
 	Legs     []Leg    // oldest first
 	Branches []Branch // oldest first
+	Tasks    []Task   // creation order; deleted ones stay, marked
 }
 
 // maxFiles caps how many distinct basenames a leg remembers. Five is already
@@ -97,6 +117,12 @@ type Segmenter struct {
 	runners     map[string]runner
 	runnerOrder []string // insertion order, for eviction
 
+	// The plan. A TaskCreate call names a task; its result, a beat later,
+	// assigns the id every TaskUpdate refers to. byCreate bridges the two.
+	tasks    []Task
+	byTask   map[string]int // task id → index into tasks
+	byCreate map[string]int // TaskCreate tool_use id → index into tasks
+
 	// Pressure from differing weak votes (rule 4). The votes are buffered, not
 	// folded: if the streak dies they flush into the open leg, and on the third
 	// they migrate wholesale into the new leg they open — Start, Votes and Files
@@ -126,12 +152,17 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 	// place failure is visible.
 	for _, res := range ev.ToolResults {
 		s.observeResult(res, ev.Timestamp)
+		s.resolveTask(res)
 	}
 
 	// A background agent's verdict arrives the same way a person's words do —
 	// as a user turn — but it is the harness relaying, not the person, so it
-	// is read here and never becomes a prompt.
-	if ev.Type == transcript.EventUser {
+	// is read here and never becomes a prompt. It is also read from the
+	// queue-operation line that enqueued it: in a real transcript a quarter of
+	// the notifications never reached a user turn at all, because the session
+	// died — on quota, say — before the queue drained. The join is by id, so
+	// reading both is harmless where both exist.
+	if ev.Type == transcript.EventUser || ev.Type == transcript.EventQueueOp {
 		if n, ok := transcript.ParseTaskNotification(ev.Text); ok {
 			s.observeNotification(n, ev.Timestamp)
 		}
@@ -146,8 +177,15 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 	}
 
 	for _, use := range ev.ToolUses {
-		if use.Name == agentTool {
+		switch use.Name {
+		case agentTool:
 			s.fork(use, ev.Timestamp)
+			continue
+		case taskCreateTool:
+			s.createTask(use)
+			continue
+		case taskUpdateTool:
+			s.updateTask(use)
 			continue
 		}
 		if v, ok := classifyUse(use); ok {
@@ -165,6 +203,9 @@ func (s *Segmenter) Trail() Trail {
 	}
 	if len(s.branches) > 0 {
 		tr.Branches = append(make([]Branch, 0, len(s.branches)), s.branches...)
+	}
+	if len(s.tasks) > 0 {
+		tr.Tasks = append(make([]Task, 0, len(s.tasks)), s.tasks...)
 	}
 	if len(s.legs) > 0 {
 		tr.Legs = make([]Leg, len(s.legs))
@@ -262,6 +303,103 @@ func (s *Segmenter) observeNotification(n transcript.TaskNotification, at time.T
 		b.Report = clip(line, waypointText)
 	} else if line := firstNonEmptyLine(n.Summary); line != "" {
 		b.Report = clip(line, waypointText)
+	}
+}
+
+// The task tools, by name. Their shapes are Claude Code's own and were read
+// off real transcripts: TaskCreate takes subject/description/activeForm and
+// gets its id back in the result; TaskUpdate names a taskId and the fields
+// that change.
+const (
+	taskCreateTool = "TaskCreate"
+	taskUpdateTool = "TaskUpdate"
+)
+
+// createTask opens a pending task from a TaskCreate call. It has no id yet —
+// that arrives with the result — so the call's own id remembers which task
+// to finish naming.
+func (s *Segmenter) createTask(use transcript.ToolUse) {
+	var in struct {
+		Subject    string `json:"subject"`
+		ActiveForm string `json:"activeForm"`
+	}
+	if err := json.Unmarshal(use.Input, &in); err != nil || strings.TrimSpace(in.Subject) == "" {
+		return
+	}
+	if s.byCreate == nil {
+		s.byCreate = make(map[string]int)
+		s.byTask = make(map[string]int)
+	}
+	s.byCreate[use.ID] = len(s.tasks)
+	s.tasks = append(s.tasks, Task{Subject: in.Subject, Active: in.ActiveForm, Status: "pending"})
+}
+
+// resolveTask gives a created task its id, from the result's structured
+// account first — {"task":{"id":"1"}} — and from the text Claude Code writes
+// beside it ("Task #1 created successfully: …") when a transcript predates
+// the structure.
+func (s *Segmenter) resolveTask(res transcript.ToolResult) {
+	i, ok := s.byCreate[res.ToolUseID]
+	if !ok {
+		return
+	}
+	delete(s.byCreate, res.ToolUseID)
+	id := ""
+	if len(res.Meta) > 0 {
+		var meta struct {
+			Task struct {
+				ID string `json:"id"`
+			} `json:"task"`
+		}
+		if err := json.Unmarshal(res.Meta, &meta); err == nil {
+			id = meta.Task.ID
+		}
+	}
+	if id == "" {
+		if m := taskCreated.FindStringSubmatch(res.Text); m != nil {
+			id = m[1]
+		}
+	}
+	if id == "" {
+		return // a task nothing can refer to is still a pending ghost
+	}
+	s.tasks[i].ID = id
+	s.byTask[id] = i
+}
+
+// taskCreated is the text form of TaskCreate's result.
+var taskCreated = regexp.MustCompile(`^Task #(\S+) created`)
+
+// updateTask applies a TaskUpdate call: whichever of status, subject, active
+// form and owner it carries. An update for a task this trail never saw
+// created — a teammate's, in another transcript — is ignored.
+func (s *Segmenter) updateTask(use transcript.ToolUse) {
+	var in struct {
+		TaskID     string `json:"taskId"`
+		Status     string `json:"status"`
+		Subject    string `json:"subject"`
+		ActiveForm string `json:"activeForm"`
+		Owner      string `json:"owner"`
+	}
+	if err := json.Unmarshal(use.Input, &in); err != nil {
+		return
+	}
+	i, ok := s.byTask[in.TaskID]
+	if !ok {
+		return
+	}
+	t := &s.tasks[i]
+	if in.Status != "" {
+		t.Status = in.Status
+	}
+	if in.Subject != "" {
+		t.Subject = in.Subject
+	}
+	if in.ActiveForm != "" {
+		t.Active = in.ActiveForm
+	}
+	if in.Owner != "" {
+		t.Owner = in.Owner
 	}
 }
 

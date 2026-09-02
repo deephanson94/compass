@@ -992,3 +992,91 @@ func TestATaskNotificationMergesTheBranchItNames(t *testing.T) {
 		t.Errorf("Report = %q, want the summary %q", tr.Branches[0].Report, want)
 	}
 }
+
+// ---------------------------------------------------------------- the plan
+
+// Real shapes, from a transcript written by Claude Code 2.1.220: TaskCreate's
+// input carries no id; the id arrives in the result's structured
+// toolUseResult; TaskUpdate names the id and the fields that change.
+func taskCreate(offset time.Duration, id, subject, active string) transcript.Event {
+	return transcript.Event{
+		Type: transcript.EventAssistant, UUID: "a", SessionID: "s", Timestamp: at(offset),
+		ToolUses: []transcript.ToolUse{{ID: id, Name: "TaskCreate",
+			Input: []byte(`{"subject":"` + subject + `","description":"…","activeForm":"` + active + `"}`)}},
+	}
+}
+
+func taskCreated(offset time.Duration, useID, taskID, subject string) transcript.Event {
+	ev := result(offset, useID, false)
+	ev.ToolResults[0].Text = "Task #" + taskID + " created successfully: " + subject
+	ev.ToolResults[0].Meta = []byte(`{"task":{"id":"` + taskID + `","subject":"` + subject + `"}}`)
+	return ev
+}
+
+func taskUpdate(offset time.Duration, input string) transcript.Event {
+	return transcript.Event{
+		Type: transcript.EventAssistant, UUID: "a", SessionID: "s", Timestamp: at(offset),
+		ToolUses: []transcript.ToolUse{{ID: "tu", Name: "TaskUpdate", Input: []byte(input)}},
+	}
+}
+
+func TestThePlanIsReadFromTheTranscript(t *testing.T) {
+	tr := segment(
+		prompt(0, "fix the 401 bug"),
+		taskCreate(1*time.Minute, "c1", "Fix the token refresh", "Fixing the token refresh"),
+		taskCreated(1*time.Minute+time.Second, "c1", "1", "Fix the token refresh"),
+		taskCreate(2*time.Minute, "c2", "Add a regression test", "Adding a regression test"),
+		taskCreated(2*time.Minute+time.Second, "c2", "2", "Add a regression test"),
+		taskUpdate(3*time.Minute, `{"taskId":"1","status":"in_progress","owner":"plugin-arch-redteam"}`),
+		taskUpdate(9*time.Minute, `{"taskId":"1","status":"completed"}`),
+		taskUpdate(10*time.Minute, `{"taskId":"2","subject":"Add two regression tests","activeForm":"Adding two regression tests"}`),
+		taskUpdate(11*time.Minute, `{"taskId":"7","status":"completed"}`), // never created here
+	)
+	if len(tr.Tasks) != 2 {
+		t.Fatalf("got %d tasks, want 2: %+v", len(tr.Tasks), tr.Tasks)
+	}
+	a, b := tr.Tasks[0], tr.Tasks[1]
+	if a.ID != "1" || a.Status != "completed" || a.Owner != "plugin-arch-redteam" || a.Active != "Fixing the token refresh" {
+		t.Errorf("task 1 = %+v", a)
+	}
+	if b.ID != "2" || b.Status != "pending" || b.Subject != "Add two regression tests" || b.Active != "Adding two regression tests" {
+		t.Errorf("task 2 = %+v", b)
+	}
+}
+
+// A transcript that predates the structured result still names its tasks:
+// the text Claude Code writes beside it carries the id too.
+func TestATaskIDFallsBackToTheResultText(t *testing.T) {
+	created := taskCreated(1*time.Minute+time.Second, "c1", "4", "Fix the token refresh")
+	created.ToolResults[0].Meta = nil
+	tr := segment(
+		taskCreate(1*time.Minute, "c1", "Fix the token refresh", ""),
+		created,
+		taskUpdate(3*time.Minute, `{"taskId":"4","status":"deleted"}`),
+	)
+	if len(tr.Tasks) != 1 || tr.Tasks[0].ID != "4" || tr.Tasks[0].Status != "deleted" {
+		t.Errorf("tasks = %+v, want one task, id 4, deleted", tr.Tasks)
+	}
+}
+
+// A quarter of a real transcript's agent notifications were enqueued and never
+// delivered as a user turn — the session died first. The queue-operation line
+// is the same envelope, and the join is by id, so it closes the lane too.
+func TestAQueuedNotificationClosesTheBranch(t *testing.T) {
+	queued := transcript.Event{
+		Type: transcript.EventQueueOp, SessionID: "s", Timestamp: at(9 * time.Minute),
+		Text: "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>a1</tool-use-id>\n" +
+			"<status>completed</status>\n<summary>Agent \"score encoder gates\" finished</summary>\n" +
+			"<result>3 defects found</result>\n</task-notification>",
+	}
+	tr := segment(
+		prompt(0, "score the gates"),
+		agent(1*time.Minute, "a1", "score encoder gates"),
+		resultText(1*time.Minute+time.Second, "a1", launchAckText),
+		queued,
+	)
+	br := tr.Branches[0]
+	if !br.Done || br.Report != "3 defects found" {
+		t.Errorf("branch = %+v; the queued notification did not close it", br)
+	}
+}

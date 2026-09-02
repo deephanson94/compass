@@ -492,6 +492,21 @@ func legKey(key string, l journey.Leg) string {
 	return key + "/" + strconv.FormatInt(l.Start.UnixNano(), 10) + "/" + l.Class.String()
 }
 
+// inProgress is the plan's present tense: the first in-progress item's active
+// form, its subject when it has none, "" when nothing is in progress.
+func inProgress(items []todo.Item) string {
+	for _, it := range items {
+		if it.Status != todo.InProgress {
+			continue
+		}
+		if s := strings.TrimSpace(it.Active); s != "" {
+			return s
+		}
+		return strings.TrimSpace(it.Text)
+	}
+	return ""
+}
+
 // tickLeg reports whether a closed leg has nothing to say beyond its class:
 // no parsed result, no files touched, and no narrated phrase for it.
 func tickLeg(l journey.Leg, o TrailOpts) bool {
@@ -513,7 +528,17 @@ func tickRow(l journey.Leg, stroke string, width int) string {
 // it, the heuristic label otherwise. HEAD always keeps its heuristic label —
 // narration is for history, and the live leg is still changing its mind.
 func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
-	if l.Current || len(o.Labels) == 0 {
+	if l.Current {
+		// HEAD is named by the plan when the plan has a name for it: the
+		// in-progress task's own present tense is what the session is doing
+		// in its own words, and beats a file name — or nothing, which is what
+		// a build leg twenty minutes into unfamiliar files used to show.
+		if doing := inProgress(o.Todos); doing != "" {
+			return doing, false
+		}
+		return l.Label, false
+	}
+	if len(o.Labels) == 0 {
 		return l.Label, false
 	}
 	// A cached label from before the narrator learned to refuse the class

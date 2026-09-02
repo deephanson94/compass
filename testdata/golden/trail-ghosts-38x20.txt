@@ -6,7 +6,7 @@
 │
 ◆ test   pytest              18✓ 2✗ 8m
 ├─◈ scout the payments module        ✓
-● fix    tokens.py                ← 2m
+● fix    fix the token refresh    ← 2m
 ┊
 ◌ add a regression test
 ┊
