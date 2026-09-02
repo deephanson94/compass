@@ -289,3 +289,21 @@ func TestACallsArgumentIsDim(t *testing.T) {
 		t.Errorf("a query across the seam matched %d rows", len(m))
 	}
 }
+
+// The gateway's refusal is drawn warm in the reader, not as the model's
+// words: a session dead on quota read as prose at the foot of the page.
+func TestTheReaderDrawsAnAPIErrorWarm(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	ev := []transcript.Event{
+		{Type: transcript.EventAssistant, Timestamp: fixtureBase, Text: "Please run /login · API Error: 403 your daily quota is exhausted", APIError: true, Status: 403},
+	}
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 5, Anchor: -1})
+	if !strings.Contains(ansi.Strip(got), "✗ Please run /login · API Error: 403") {
+		t.Errorf("the refusal should lead with the failure mark:\n%s", got)
+	}
+	if !strings.Contains(got, stuckStyle.Render("✗ Please run /login · API Error: 403 your daily quota is exhausted")) {
+		t.Errorf("the refusal should be drawn in the stuck colour:\n%s", got)
+	}
+}

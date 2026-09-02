@@ -314,7 +314,15 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 				d.result(i, ev.Timestamp, calls[res.ToolUseID], res, unfolded[i], ev.CWD)
 			}
 		case transcript.EventAssistant:
-			if text := strings.TrimSpace(ev.Text); text != "" {
+			if text := strings.TrimSpace(ev.Text); text != "" && ev.APIError {
+				// The gateway refusing the call, not the model speaking:
+				// the one warm thing the reader draws besides a failed
+				// result, so a session dead on quota is not prose.
+				d.gap()
+				for _, row := range wrapPrefix(text, glyphErrRes+" ", "  ", d.measure()) {
+					d.push(row, readerFoldErr, i, ev.Timestamp)
+				}
+			} else if text != "" {
 				d.text(i, ev.Timestamp, text)
 			}
 			for _, use := range ev.ToolUses {
