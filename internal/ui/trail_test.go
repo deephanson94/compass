@@ -223,8 +223,10 @@ func TestT44TrailGhostsMoreGolden(t *testing.T) {
 	if !strings.Contains(got, "┊ +2 more") {
 		t.Errorf("a plan of six should collapse its tail into one row:\n%s", got)
 	}
-	if n := strings.Count(got, glyphGhost); n != maxGhosts {
-		t.Errorf("drew %d ghosts, want %d", n, maxGhosts)
+	// Twenty rows give the plan ten: four ghosts and their rails, and
+	// the "+2 more" row, is what fits.
+	if n := strings.Count(got, glyphGhost); n != 4 {
+		t.Errorf("drew %d ghosts, want 4", n)
 	}
 	for _, gone := range []string{"open the PR", "ask about the rate limit"} {
 		if strings.Contains(got, gone) {

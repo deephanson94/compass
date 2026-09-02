@@ -10,7 +10,7 @@
      ◆ test   1216✓ 2✗          │ moment28 opening tokens.py, which is where   │ ◆ build  tokens.py                 12m
                                 │ the expiry comparison the failing tests      │ │
   3 ○ docs                  22m │ object to actually lives                     │ ◆ test   pytest              18✓ 2✗ 8m
-     ◆ docs   46✓               │                                              │ ├─◈ scout the payments module     ✓ 7m
+     ◆ docs   46✓               │                                              │ ├─◈ scout the payments module ✓ 7m ago
                                 │ moment30 a syntax error at tokens.py line 88 │ │  └ came back with no report
                                 │ was hiding the real fault; fixing that first │ ● fix    tokens.py              for 3m
                                 │ and rerunning                                │
@@ -27,4 +27,4 @@
                                 │ rerunning the whole auth suite to be sure    │
                                 │ nothing else moved                           │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · ⇧tab board · g grab · ? help · q quit
+ j/k move · enter attach (prefix d returns) · [ ] chapters · ⇧tab board · g grab · ? help · q quit

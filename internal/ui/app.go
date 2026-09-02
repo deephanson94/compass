@@ -154,7 +154,8 @@ type Model struct {
 	// anchor is the reader line the Lv2 cursor's row lands on — marked, so the
 	// two panels say they are showing the same moment. -1 when there is no
 	// cursor to follow.
-	anchor int
+	anchor   int
+	anchorAt time.Time // the moment the anchor stands for; zero when none
 
 	// selectedKey is the session the deck is pointed at, held by its Key() —
 	// its transcript path. The session id is a label two sessions can share
@@ -739,23 +740,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.move(-1)
 			}
 			return m, m.refresh()
-		case "ctrl+d":
+		case "ctrl+d", "ctrl+u":
 			if m.level == levelBoard && m.boardShown() {
 				m.note = "the board shows the present · tab into a trail to scroll back"
 				return m, nil
 			}
-			m.trailScrollBy(m.trailHalfPage())
-			return m, nil
-		case "ctrl+u":
-			if m.level == levelBoard && m.boardShown() {
-				m.note = "the board shows the present · tab into a trail to scroll back"
+			if total, h, _ := m.trailView(); total <= h {
+				m.note = "the whole trail is on screen"
 				return m, nil
 			}
-			m.trailScrollBy(-m.trailHalfPage())
+			if key == "ctrl+u" {
+				m.trailScrollBy(-m.trailHalfPage())
+			} else {
+				m.trailScrollBy(m.trailHalfPage())
+			}
 			return m, nil
 		case "G":
 			if m.level == levelBoard && m.boardShown() {
 				m.note = "the board is already at the present"
+				return m, nil
+			}
+			if m.trailPinned {
+				m.note = "already at the present"
 				return m, nil
 			}
 			// Back to the present, whatever the offset was.
@@ -790,9 +796,13 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		// Enter means one thing at every depth (M7 contract).
 		return m, m.attach()
 	case "j", "down":
-		m.scrollBy(1)
+		if !m.scrollBy(1) {
+			m.note = "end of the conversation"
+		}
 	case "k", "up":
-		m.scrollBy(-1)
+		if !m.scrollBy(-1) {
+			m.note = "start of the conversation"
+		}
 	case "ctrl+d":
 		m.scrollBy(m.readerHeight() / 2)
 	case "ctrl+u":
@@ -896,6 +906,18 @@ func (m *Model) chapter(key string) {
 		m.trailPinned = m.trailScroll >= lastScreenful(len(doc), h)
 	}
 	m.note = fmt.Sprintf("◉ %d/%d · %s · %s", nth, len(prompts), clip(`"`+rows[target].Text+`"`, 40), rows[target].Time.Local().Format("15:04"))
+}
+
+// lv2AddsNothing reports whether the trail has no Lv2 detail at all: no
+// waypoint, no touched row, no finding — the same rows at Lv1 and Lv2.
+func (m *Model) lv2AddsNothing() bool {
+	w, h := m.trailBox()
+	o := m.trailOpts(w, h)
+	o.Height = 1 << 20 // the whole document, whatever the panel
+	o.Level = levelTrail
+	lv1 := len(TrailLines(m.trail, o))
+	o.Level = levelWaypoints
+	return lv1 > 0 && len(TrailLines(m.trail, o)) == lv1
 }
 
 // firstRowInView is the first selectable row at or below the trail
@@ -1056,6 +1078,17 @@ func (m *Model) zoomIn() {
 			}
 		}
 	case m.level < levelWaypoints:
+		if m.lv2AddsNothing() {
+			// No leg has anything beneath it: Lv2 would be Lv1 with a
+			// cursor, and the keypress it costs bought an empty screen.
+			// The reader opens on the present; Shift+Tab still reaches
+			// the cursor for anyone who wants a moment other than now.
+			m.level = levelWaypoints
+			m.cursorMove(0)
+			m.enterReader()
+			m.note = "no waypoints · reader at the present"
+			return
+		}
 		m.level = levelWaypoints
 		// Lv2 is the trail with a cursor on it. A trail scrolled back to
 		// some earlier hour puts the cursor there — on the first row in
@@ -1487,14 +1520,14 @@ func (m *Model) footerLine(w int) string {
 			keys = "j/k columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
-		keys = "j/k move · " + m.enterKeymap() + " · ⇧tab board · g grab · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
 			keys = "j/k move · " + m.enterKeymap() + " · ⇧tab board · A live fleet · ? help · q quit"
 		}
 	case m.level >= levelReader:
 		keys = "j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · enter attach · tab deeper · a ask · esc back"
+		keys = "j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back"
 	}
 	left := dimStyle.Render(clip(keys, w))
 	if m.note == "" {

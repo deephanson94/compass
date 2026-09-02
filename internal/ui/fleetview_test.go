@@ -499,7 +499,7 @@ func TestT58PanesMsgCarriesTmuxOrder(t *testing.T) {
 
 	m.Update(msg)
 	rows := m.fleetRows()
-	if len(rows) < 2 || !rows[0].header || rows[0].label != "ops" {
+	if len(rows) < 2 || !rows[0].header || rows[0].label != "⌁ ops" {
 		t.Errorf("the live view should group in pane-list order, got %+v", rows)
 	}
 }
@@ -545,7 +545,7 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 		}
 		got = append(got, m.sessions[r.sess].Info.ID)
 	}
-	want := []string{"[ops]", "s-ops", "[dev]", "s-w9", "s-w10"}
+	want := []string{"[⌁ ops]", "s-ops", "[⌁ dev]", "s-w9", "s-w10"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("rendered order = %v, want %v", got, want)
 	}
@@ -922,7 +922,7 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 		m := groupedModel(80, 24)
 		for _, want := range []string{
 			"j/k move · enter attach (prefix d returns) · g grab · ? help · q quit",
-			"j/k rows · enter attach · tab deeper · a ask · esc back",
+			"j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back",
 			"j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back",
 		} {
 			if got := m.View(); !strings.Contains(got, want) {
@@ -1204,7 +1204,7 @@ func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
 			break
 		}
 	}
-	if header.label != "tinker" {
+	if header.label != "⌁ tinker" {
 		t.Fatalf("first header is %q, want the tmux session", header.label)
 	}
 	if want := "9h"; header.age != want {

@@ -3,14 +3,14 @@
 
  ▌FLEET · live                  │  ⌁ dev:1.0 · live                            │  TRAIL · api                     [Lv1]
                                 │                                              │
-  dev                           │                                              │ ◉ "fix the 401 bug"            38m ago
+  ⌁ dev                         │                                              │ ◉ "fix the 401 bug"            38m ago
  ▸2 ● api                    3m │                                              │ ╷
      ◆ test   1216✓ 2✗          │                                              │ ◆ scout  middleware.py              5m
                                 │                                              │ │
   elsewhere               ▲  2m │                                              │ ◆ build  tokens.py                 12m
   1 ▲ infra      needs you   2m │                                              │ │
      AskUserQuestion            │                                              │ ◆ test   pytest              18✓ 2✗ 8m
-                                │                                              │ ├─◈ scout the payments module     ✓ 7m
+                                │                                              │ ├─◈ scout the payments module ✓ 7m ago
   3 ○ docs                  22m │                                              │ │  └ came back with no report
      ◆ docs   46✓               │                                              │ ● fix    tokens.py              for 3m
                                 │                                              │
@@ -27,4 +27,4 @@
                                 │                                              │
                                 │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m         │
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · ⇧tab board · g grab · ? help · q quit
+ j/k move · enter attach (prefix d returns) · [ ] chapters · ⇧tab board · g grab · ? help · q quit

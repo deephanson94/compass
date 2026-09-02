@@ -5,7 +5,7 @@
 ◆ test   pytest             18✓ 2✗ 12m
 │  ├ ✗ test_refresh_expired_token
 │  └ ✗ test_refresh_revoked_token
-├─◈ scout the payments module    ✓ 19m
+├─◈ scout the payments modu… ✓ 19m ago
 │  └ payments never touches refresh
 ◆ fix    token refresh              8m
 │  ├ bug1 syntax error in tokens.py:88

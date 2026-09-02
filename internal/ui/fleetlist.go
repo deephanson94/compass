@@ -215,6 +215,11 @@ func (m *Model) fleetRows() []fleetRow {
 	for _, g := range groups {
 		if headers {
 			hdr := fleetRow{header: true, label: g.name}
+			if !m.archiveView && g.name != elsewhereGroup {
+				// The group is the tmux session: say so, because "work"
+				// over a row read as a word, not a place to attach to.
+				hdr.label = "⌁ " + g.name
+			}
 			if len(g.entries) > 1 {
 				// A header over one row would only repeat it — and so
 				// would a clock equal to the first row's beneath it.
@@ -647,6 +652,14 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 		tail := "for " + relAge(m.now, l.Start)
 		if out := agentsOut(tr); out > 0 {
 			tail = fmt.Sprintf("◈%d out · %s", out, tail)
+		}
+		// The newest verdict rides beside the present: below 110 columns
+		// there is no board, and a red suite was a board-only fact.
+		for i := len(tr.Legs) - 1; i >= 0; i-- {
+			if badge := legBadge(tr.Legs[i]); badge != "" && badge != "?" {
+				tail = badge + " · " + tail
+				break
+			}
 		}
 		labelW := w - 2 - trailVerbWidth - 1 - 1 - len([]rune(tail))
 		if labelW < trailMinLabel {

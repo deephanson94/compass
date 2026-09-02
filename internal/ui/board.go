@@ -209,12 +209,19 @@ func (m *Model) boardLines(w, h int) []string {
 	bands, bh := 1, body
 	if len(order) > n && body >= 2*boardBandMin+1 {
 		half := (body - 1) / 2
-		fits := true
+		fits, over := true, 0
 		for _, key := range m.boardKeys(n) {
-			if m.boardColumnRows(key, cw) > half+boardBandSlack {
-				fits = false
+			rows := m.boardColumnRows(key, cw)
+			if rows > body {
+				fits = false // a day-long trail: the whole height is its
 				break
 			}
+			if rows > half+boardBandSlack {
+				over++
+			}
+		}
+		if over > 1 {
+			fits = false // the band would fold most of what it shows
 		}
 		if fits {
 			bands, bh = 2, half
@@ -263,7 +270,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	}
 	s := m.sessions[r.sess]
 	doc := TrailLines(tr, TrailOpts{
-		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: s.Snap.Since,
+		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 	})
 	return 3 + len(doc)
@@ -373,7 +380,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Labels:     m.boardLabels[key],
 		Head:       m.headFor(s),
 		HeadState:  s.Snap.State,
-		HeadSince:  s.Snap.Since,
+		HeadSince:  headSince(s),
 		SessionKey: key,
 		Now:        m.now,
 		Width:      w,
@@ -394,7 +401,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		if len(tr.Prompts) > 0 {
 			began = " · began " + relAge(m.now, tr.Prompts[0].At) + " ago"
 		}
-		lines[0] = dimStyle.Render(clip(fmt.Sprintf("↑ %d legs above%s", hidden, began), w))
+		lines[0] = dimStyle.Render(clip(fmt.Sprintf("↑ %d legs above%s%s", hidden, began, foldTotals(tr, hidden)), w))
 	}
 	if m.boardMuted(s) {
 		for i, line := range lines {
@@ -444,7 +451,7 @@ func verdictParts(tr journey.Trail, now time.Time) []string {
 		}
 	}
 	if out > 0 {
-		parts = append(parts, fmt.Sprintf("◈%d out · oldest %s", out, relAge(now, oldest)))
+		parts = append(parts, fmt.Sprintf("◈%d out %s", out, relAge(now, oldest)))
 	}
 
 	// The newest completed leg: shipped, or what it was.
@@ -579,6 +586,39 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	}
 	line := fmt.Sprintf("↳ %d new %s · looked %s ago", n, word, state.ShortDuration(m.now.Sub(seen)))
 	return dimStyle.Render(clip(line, w))
+}
+
+// foldTotals is what the legs above the fold add up to — the ships and the
+// red runs — so a day that scrolled off still answers "what did it ship".
+func foldTotals(tr journey.Trail, hidden int) string {
+	ships, red := 0, 0
+	for i := 0; i < hidden && i < len(tr.Legs); i++ {
+		l := tr.Legs[i]
+		switch {
+		case l.Class == journey.Ship:
+			ships++
+		case strings.Contains(legBadge(l), "✗"):
+			red++
+		}
+	}
+	out := ""
+	if ships > 0 {
+		out += " · " + plural(ships, "ship")
+	}
+	if red > 0 {
+		out += fmt.Sprintf(" · %d red", red)
+	}
+	return out
+}
+
+// headSince is the clock HEAD's figure counts from: for a hung session the
+// last thing it wrote — "silent 4m" beside "no output for 4m" — and for the
+// rest the state's own start.
+func headSince(s fleet.Session) time.Time {
+	if s.Snap.State == state.Stuck && !s.Info.LastEventAt.IsZero() {
+		return s.Info.LastEventAt
+	}
+	return s.Snap.Since
 }
 
 // hiddenAbove counts the legs a pinned column keeps above its first row.

@@ -108,6 +108,12 @@ func runSummary(short string) string {
 // result — output for a run, the file for a read, an error for a failure —
 // so folding, scrolling and search have something to act on.
 func eventsFor(tr journey.Trail) []transcript.Event {
+	return eventsBehind(tr, "")
+}
+
+// eventsBehind is eventsFor with the session's activity: the call in flight
+// on a live session, written as a tool_use no result has answered.
+func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 	var evs []transcript.Event
 	n := 0
 	add := func(ev transcript.Event) {
@@ -180,6 +186,16 @@ func eventsFor(tr journey.Trail) []transcript.Event {
 				ToolResults: []transcript.ToolResult{{ToolUseID: b.ToolUseID, Text: b.Report}}})
 		}
 	}
+	if cmd := strings.TrimPrefix(activity, "Bash: "); cmd != activity && cmd != "" {
+		// The hung call, at the very end: what HEAD names is what the
+		// reader ends on.
+		at := sceneNow.Add(-4 * time.Minute)
+		if n := len(tr.Legs); n > 0 {
+			at = tr.Legs[n-1].Start.Add(time.Minute)
+		}
+		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: at, Text: "Running the backfill over every shard.",
+			ToolUses: []transcript.ToolUse{{ID: "toolu_hung", Name: "Bash", Input: json.RawMessage(fmt.Sprintf(`{"command":%q}`, cmd))}}})
+	}
 	sort.SliceStable(evs, func(i, j int) bool { return evs[i].Timestamp.Before(evs[j].Timestamp) })
 	return evs
 }
@@ -224,7 +240,11 @@ func sess(id, name, cwd, branch, title string, st state.State, since time.Time, 
 }
 
 func gone(id, name, title string, at time.Time) fleet.Session {
-	branch := []string{"main", "fix/" + name + "-timeouts", "feat/" + name + "-v2", "chore/deps", "spike/" + name}[len(id)%5]
+	n := 0
+	for _, r := range id {
+		n += int(r)
+	}
+	branch := []string{"main", "fix/" + name + "-timeouts", "feat/" + name + "-v2", "chore/deps", "spike/" + name}[n%5]
 	return fleet.Session{
 		Info: fleet.SessionInfo{ID: id, TranscriptPath: sessionKey(id), ProjectSlug: "-home-user-" + name,
 			CWD: "/home/user/" + name, GitBranch: branch, Title: title, StartedAt: at.Add(-time.Hour), LastEventAt: at},
@@ -378,7 +398,9 @@ func sceneFewOngoing() scene {
 		legSpec{journey.Fix, "a timezone in the fixture", 8 * time.Minute, []string{"conftest.py"}, "", nil},
 		legSpec{journey.Test, "pytest", 70 * time.Second, nil, "", nil},
 	)
-	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/dedupe", "dedupe the nightly load", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 4m mid-turn", "Bash: python backfill.py --all"))
+	etl := sess("etl", "etl", "/home/user/etl", "feat/dedupe", "dedupe the nightly load", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 4m mid-turn", "Bash: python backfill.py --all")
+	etl.Info.LastEventAt = n.Add(-4 * time.Minute) // the silence the reason counts
+	ss = append(ss, etl)
 	tr[sessionKey("etl")] = trailOf(n.Add(-40*time.Minute), "backfill last week's shards", true,
 		legSpec{journey.Scout, "backfill.py", 5 * time.Minute, []string{"backfill.py"}, "", nil},
 		legSpec{journey.Build, "backfill.py", 20 * time.Minute, []string{"backfill.py"}, "", nil},
@@ -552,8 +574,18 @@ func sceneModel(sc scene, w, h int) *Model {
 	}
 	m.point(first)
 	m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: true,
-		trail: sc.trails[first], events: eventsFor(sc.trails[first]), trails: sc.trails})
+		trail: sc.trails[first], events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails})
 	return m
+}
+
+// activity is the selected session's call in flight, for the reader.
+func (sc scene) activity(key string) string {
+	for _, s := range sc.sessions {
+		if s.Info.Key() == key {
+			return s.Snap.Activity
+		}
+	}
+	return ""
 }
 
 // pressKey sends one key by name — "tab", "shift+tab", "esc", "enter",
@@ -582,7 +614,7 @@ func pressKey(m *Model, key string) {
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"j", "tab", "tab", "j", "j", "tab", "shift+tab", "shift+tab", "shift+tab", "2", "tab", "ctrl+u", "G", "shift+tab", "A", "A", "m", "?"}
+var canonicalKeys = []string{"tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "tab", "shift+tab", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder
@@ -607,7 +639,7 @@ func poll(m *Model, sc scene) {
 		return
 	}
 	m.Update(fleetMsg{sessions: m.sessions, at: m.now, trailFor: key, hasTrail: true,
-		trail: tr, events: eventsFor(tr), trails: sc.trails})
+		trail: tr, events: eventsBehind(tr, sc.activity(key)), trails: sc.trails})
 }
 
 func selectedName(m *Model) string {

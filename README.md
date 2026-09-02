@@ -42,7 +42,8 @@ the ship, the agents (`✗ red 18✓ 2✗ · edited since`, `✓ shipped 4m ago`
 HEAD at the bottom of each column wears the fleet's glyph: `● build  wiring the
 filter    for 1h` while it works, `◍ build  Bash: python backfill.py --all
 silent 4m` when it has hung, `▲ design asks you   waiting 4m` with the question
-spelled out beneath. A trail longer than its column is drawn without the air
+spelled out beneath, `● build  measuring   waiting on ◈2 · 30m` when it is parked
+on agents it sent out. A trail longer than its column is drawn without the air
 between legs, with the hour on the rail where it turns; a tall board with short
 trails wraps into a second band of columns. `Tab` opens one trail; `Shift+Tab`
 comes back. The deck

@@ -5,10 +5,10 @@
 ◆ build  tokens.py                 12m
 │
 ◆ test   pytest              18✓ 2✗ 8m
-├─◈ scout the payments module     ✓ 7m
+├─◈ scout the payments module ✓ 7m ago
 │  └ came back with no report
 ● fix    fix the token refresh  for 3m
-┊ 2 of 4 tasks to go
+┊ 2 to go · 2 done
 ◌ add a regression test
 ┊
 ◌ update the changelog

@@ -202,6 +202,12 @@ func (d *docBuilder) last() readerKind {
 // own conversation is the trail's branch lane, not this document's business.
 func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []readerLine {
 	d := &docBuilder{width: width}
+	answered := map[string]bool{}
+	for _, ev := range events {
+		for _, res := range ev.ToolResults {
+			answered[res.ToolUseID] = true
+		}
+	}
 	for i, ev := range events {
 		if ev.IsSidechain {
 			continue
@@ -220,6 +226,12 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 			}
 			for _, use := range ev.ToolUses {
 				d.call(i, ev.Timestamp, use)
+				if !answered[use.ID] {
+					// Dispatched and not back, or hung: the reader said
+					// nothing, and an agent still out looked exactly like
+					// one returned and folded.
+					d.pending(i, ev.Timestamp, use)
+				}
 			}
 		}
 	}
@@ -260,6 +272,15 @@ func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse) {
 		line += "()"
 	}
 	d.push(clip(line, d.width), readerCall, event, at)
+}
+
+// pending draws the stub under a call nothing has answered yet.
+func (d *docBuilder) pending(event int, at time.Time, use transcript.ToolUse) {
+	word := "⋯ no result yet"
+	if use.Name == "Agent" {
+		word = "⋯ still out"
+	}
+	d.push(resultIndent+glyphResult+" "+clip(word, d.width-len(resultIndent)-2), readerBody, event, at)
 }
 
 // result draws what a call returned: one folded row saying how much there is,

@@ -65,7 +65,7 @@ func TestBoardVerdictReadsTheTrailsTail(t *testing.T) {
 			[]string{"✗ red 18✓ 2✗ · rerunning for 10m"}, []string{"edited since"}},
 		{"agents out", journey.Trail{Legs: []journey.Leg{green}, Branches: []journey.Branch{
 			{Label: "a", Start: base.Add(50 * time.Minute)}, {Label: "b", Start: base.Add(55 * time.Minute)}, {Label: "c", Start: base, Done: true, End: base}}},
-			[]string{"◈2 out · oldest 10m"}, nil},
+			[]string{"◈2 out 10m"}, nil},
 		{"nothing countable", journey.Trail{Legs: []journey.Leg{fix}}, []string{"fix tokens.py"}, nil},
 		{"only HEAD", journey.Trail{Legs: []journey.Leg{{Class: journey.Scout, Start: base, Current: true}}}, nil, []string{"scout"}},
 	} {
@@ -226,8 +226,11 @@ func TestCursorRowIsMarked(t *testing.T) {
 	rows := TrailRows(tr, 2)
 	marked := 0
 	for _, line := range strings.Split(got, "\n") {
-		if strings.HasPrefix(line, "▸") {
+		if r := []rune(line); len(r) > 1 && (r[0] == '▸' || r[1] == '▸') {
 			marked++
+			if r[1] == '▸' && r[0] == '▸' {
+				t.Errorf("the mark ate the glyph: %q", line)
+			}
 			if !strings.Contains(line, rows[1].Text[:8]) {
 				t.Errorf("▸ marks %q, not the cursor row %q", line, rows[1].Text)
 			}
@@ -274,7 +277,7 @@ func TestGhostRailCountsWhatIsToGo(t *testing.T) {
 		{ID: "5", Subject: "Old idea", Status: "deleted"},
 	}
 	got := RenderTrail(tr, TrailOpts{Todos: planItems(tr.Tasks), Now: fixtureBase.Add(40 * time.Minute), Width: 44, Height: 30, Level: 1, Cursor: -1, Pinned: true})
-	if !strings.Contains(got, "┊ 2 of 4 tasks to go") {
+	if !strings.Contains(got, "┊ 2 to go · 2 done") {
 		t.Errorf("the ghost rail does not count the plan:\n%s", got)
 	}
 }
@@ -650,10 +653,10 @@ func TestGroupHeaderClockIsTheEchoedWait(t *testing.T) {
 	}
 	var ops, dev fleetRow
 	for _, r := range m.fleetRows() {
-		if r.header && r.label == "ops" {
+		if r.header && r.label == "⌁ ops" {
 			ops = r
 		}
-		if r.header && r.label == "dev" {
+		if r.header && r.label == "⌁ dev" {
 			dev = r
 		}
 	}
@@ -734,7 +737,8 @@ func TestStuckHeadNamesTheHungCall(t *testing.T) {
 	api := sessionKey("s-api")
 	for i := range m.sessions {
 		if m.sessions[i].Info.Key() == api {
-			m.sessions[i].Snap = state.Snapshot{State: state.Stuck, Since: fixtureBase.Add(36 * time.Minute), Reason: "no output for 4m mid-turn", Activity: "Bash: python backfill.py --all"}
+			m.sessions[i].Snap = state.Snapshot{State: state.Stuck, Since: fixtureBase.Add(34 * time.Minute), Reason: "no output for 4m mid-turn", Activity: "Bash: python backfill.py --all"}
+			m.sessions[i].Info.LastEventAt = fixtureBase.Add(36 * time.Minute) // the silence the reason counts: 4m
 		}
 	}
 	col := strings.Join(m.boardColumn(api, rowFor(t, m, api), 70, 20), "\n")
@@ -933,7 +937,7 @@ func TestGroupHeaderClockNeverRepeatsItsFirstRow(t *testing.T) {
 		}
 	}
 	for _, r := range m.fleetRows() {
-		if r.header && r.label == "dev" && r.age != "" {
+		if r.header && r.label == "⌁ dev" && r.age != "" {
 			t.Errorf("dev header carries %q, the clock of the row beneath it", r.age)
 		}
 	}
@@ -945,7 +949,7 @@ func TestGroupHeaderClockNeverRepeatsItsFirstRow(t *testing.T) {
 	}
 	found := false
 	for _, r := range m.fleetRows() {
-		if r.header && r.label == "dev" && r.age == "10s" {
+		if r.header && r.label == "⌁ dev" && r.age == "10s" {
 			found = true
 		}
 	}
@@ -1123,5 +1127,209 @@ func TestLongQuestionIsSpelledOutUnderHead(t *testing.T) {
 	col = strings.Join(m.boardColumn(infra, rowFor(t, m, infra), 40, 20), "\n")
 	if !strings.Contains(col, "▲ design Port 22 open?") || strings.Contains(col, "asks you") {
 		t.Errorf("a short question is not on HEAD's row:\n%s", col)
+	}
+}
+
+// ---- round four
+
+// A parent with agents out and nothing of its own since it sent them is
+// parked on them, and HEAD says so.
+func TestHeadSaysWhenItIsWaitingOnAgents(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{
+		{Class: journey.Build, Label: "measuring", Start: base, End: base.Add(5 * time.Minute), Files: []string{"m.py"}, Current: true},
+	}, Branches: []journey.Branch{
+		{Label: "a", Start: base.Add(10 * time.Minute), AfterLeg: 0},
+		{Label: "b", Start: base.Add(12 * time.Minute), AfterLeg: 0},
+	}}
+	got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20)
+	if !strings.Contains(got, "waiting on ◈2 · 30m") {
+		t.Errorf("a parked parent does not say it is waiting:\n%s", got)
+	}
+	// A vote of its own after the dispatch: it is working.
+	tr.Legs[0].End = base.Add(15 * time.Minute)
+	if got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20); strings.Contains(got, "waiting on") || !strings.Contains(got, "for 30m") {
+		t.Errorf("a parent working past its dispatch is called parked:\n%s", got)
+	}
+	// Lanes wear their words: out / ago.
+	if !strings.Contains(got, "⋯ 20m out") {
+		t.Errorf("an open lane's clock has no word:\n%s", got)
+	}
+	tr.Branches[0].Done, tr.Branches[0].End = true, base.Add(20*time.Minute)
+	if got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20); !strings.Contains(got, "✓ 10m ago") {
+		t.Errorf("a returned lane's clock has no word:\n%s", got)
+	}
+}
+
+// The fleet's group header names the tmux session as a place.
+func TestGroupHeaderIsATmuxSession(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	openTrail(m)
+	col := strings.Join(fleetText(m, 120, 30), "\n")
+	if !strings.Contains(col, "⌁ ops") || !strings.Contains(col, "⌁ dev") {
+		t.Errorf("the group headers do not read as tmux sessions:\n%s", col)
+	}
+	if strings.Contains(col, "⌁ elsewhere") {
+		t.Errorf("elsewhere is not a tmux session:\n%s", col)
+	}
+	press(m, "A")
+	if col := strings.Join(fleetText(m, 120, 30), "\n"); strings.Contains(col, "⌁ ") {
+		t.Errorf("the archive's project headers wear the pane mark:\n%s", col)
+	}
+}
+
+// The newest verdict rides beside the present on a working fleet row.
+func TestWorkingFleetRowCarriesTheVerdict(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	if got := m.secondLine(m.sessions[rowFor(t, m, api).sess], 50); !strings.Contains(got, "18✓ 2✗ · for 3m") {
+		t.Errorf("the fleet row lost the red suite: %q", got)
+	}
+}
+
+// Keys that move nothing say why, at Lv1 and in the reader too.
+func TestMoreDeadKeysSayWhy(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	pressCtrl(m, tea.KeyCtrlU)
+	if !strings.Contains(m.note, "whole trail is on screen") {
+		t.Errorf("ctrl+u on a trail that fits said %q", m.note)
+	}
+	press(m, "G")
+	if !strings.Contains(m.note, "already at the present") {
+		t.Errorf("G on a pinned trail said %q", m.note)
+	}
+	m.events = eventsFor(m.trail)
+	pressTab(m)
+	pressTab(m)
+	if m.level != levelReader {
+		t.Fatalf("level = %d, want the reader", m.level)
+	}
+	press(m, "G")
+	press(m, "j")
+	if !strings.Contains(m.note, "end of the conversation") {
+		t.Errorf("j at the end of the reader said %q", m.note)
+	}
+	press(m, "g")
+	press(m, "k")
+	if !strings.Contains(m.note, "start of the conversation") {
+		t.Errorf("k at the start of the reader said %q", m.note)
+	}
+}
+
+// Tab from Lv1 skips a Lv2 that would show nothing beneath any leg.
+func TestTabSkipsAnEmptyLv2(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	m.SetTrail(journey.Trail{
+		Prompts: []journey.Prompt{{Text: "go", At: fixtureBase}},
+		Legs: []journey.Leg{
+			{Class: journey.Scout, Label: "a.go", Start: fixtureBase.Add(time.Minute), End: fixtureBase.Add(2 * time.Minute), Files: []string{"a.go"}},
+			{Class: journey.Build, Label: "a.go", Start: fixtureBase.Add(3 * time.Minute), Files: []string{"a.go"}, Current: true},
+		},
+	})
+	pressTab(m)
+	if m.level != levelReader {
+		t.Errorf("Tab on a trail with no waypoints stopped at level %d, want the reader", m.level)
+	}
+	if !strings.Contains(m.note, "no waypoints") {
+		t.Errorf("note = %q, want it to say why Lv2 was skipped", m.note)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.level != levelWaypoints {
+		t.Errorf("shift+tab from the reader did not reach the cursor: level %d", m.level)
+	}
+	// With detail beneath a leg, Tab stops at Lv2 as ever.
+	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m.SetTrail(fixtureLv2Trail(fixtureBase))
+	pressTab(m)
+	if m.level != levelWaypoints {
+		t.Errorf("Tab on a trail with waypoints skipped Lv2: level %d", m.level)
+	}
+}
+
+// The reader's title says which moment it is anchored to.
+func TestReaderTitleNamesItsMoment(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)
+	pressTab(m)
+	pressTab(m)
+	rows := TrailRows(m.trail, levelWaypoints)
+	want := rows[m.cursor].Time.Local().Format("15:04")
+	if got := m.readerTitle(60); !strings.Contains(got, want) {
+		t.Errorf("reader title %q does not carry the anchored moment %s", got, want)
+	}
+}
+
+// A call nothing has answered says so in the reader.
+func TestReaderMarksCallsStillOut(t *testing.T) {
+	forceASCII(t)
+	tr := fixtureTrail(fixtureBase)
+	tr.Branches = append(tr.Branches, journey.Branch{ToolUseID: "toolu_out", Label: "measure the thing", Start: fixtureBase.Add(38 * time.Minute), AfterLeg: 3})
+	got := RenderReader(eventsBehind(tr, "Bash: python backfill.py --all"), ReaderOpts{Width: 80, Height: 200})
+	if !strings.Contains(got, "⋯ still out") {
+		t.Errorf("an agent still out is not marked:\n%s", got)
+	}
+	if !strings.Contains(got, "⋯ no result yet") {
+		t.Errorf("a hung call is not marked:\n%s", got)
+	}
+	if strings.Count(got, "⋯ ") != 2 {
+		t.Errorf("answered calls are marked as pending:\n%s", got)
+	}
+}
+
+// The row above the fold adds the day up: ships and red runs.
+func TestFoldRowCountsShipsAndRedRuns(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := longTrail(40)
+	for i := range tr.Legs {
+		switch i % 10 {
+		case 3:
+			tr.Legs[i].Class = journey.Ship
+		case 6:
+			tr.Legs[i].Class = journey.Test
+			tr.Legs[i].Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 passed · 1 failed", Short: "1✓ 1✗"}}
+		}
+	}
+	m.trails[api] = tr
+	got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 52, 12), "\n")
+	if !strings.Contains(got, "legs above · began") || !strings.Contains(got, "ships · ") || !strings.Contains(got, " red") {
+		t.Errorf("the fold row does not add the day up:\n%s", got)
+	}
+}
+
+// A band may fold one column a little; it never folds two, and never a
+// column that does not fit the whole height.
+func TestBandFoldsAtMostOneColumn(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 48)
+	// Push a column a little past the half-height (21 + 4 rows of slack),
+	// but not past the body.
+	over := func(key string) {
+		tr := m.trails[key]
+		for i := 0; m.boardColumnRows(key, 34) <= 25; i++ {
+			tr.Prompts = append(tr.Prompts, journey.Prompt{Text: "and then", At: fixtureBase.Add(time.Duration(6+i) * time.Second)})
+			m.trails[key] = tr
+		}
+		if rows := m.boardColumnRows(key, 34); rows > 43 {
+			t.Fatalf("fixture: %s is %d rows, past the body", key, rows)
+		}
+	}
+	over(sessionKey("s-api"))
+	if got := strings.Join(m.boardLines(148, 43), "\n"); strings.Contains(got, "+1 more") {
+		t.Errorf("one column over the half kept the board to one band:\n%s", got)
+	}
+	over(sessionKey("s-webapp"))
+	if got := strings.Join(m.boardLines(148, 43), "\n"); !strings.Contains(got, "+1 more") {
+		t.Errorf("two columns over the half still wrapped:\n%s", got)
 	}
 }

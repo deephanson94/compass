@@ -86,6 +86,10 @@ func (m *Model) readerTitle(w int) string {
 		right = "/" + m.draft + "▏"
 	case m.query != "":
 		right = "/" + m.query
+	case m.anchor >= 0 && !m.anchorAt.IsZero():
+		// Where the reader is: the moment it was anchored to, so a reader
+		// scrolled to an hour can tell it is the hour.
+		right = m.anchorAt.Local().Format("15:04")
 	}
 	mark := m.titleMark(panelReader)
 	body := w - 1
@@ -120,14 +124,17 @@ func (m *Model) anchorReader() {
 	}
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
-		m.scroll, m.anchor = line, line
+		m.scroll, m.anchor, m.anchorAt = line, line, rows[m.cursor].Time
 	}
 }
 
-// scrollBy moves the reader, clamped to the document.
-func (m *Model) scrollBy(delta int) {
+// scrollBy moves the reader, clamped to the document. It reports whether
+// the viewport moved at all, so a key at either end can say so.
+func (m *Model) scrollBy(delta int) bool {
 	doc := m.doc(m.readerWidth())
+	was := m.scroll
 	m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
+	return m.scroll != was
 }
 
 // readerHeight is the rows the document gets: the deck body minus the

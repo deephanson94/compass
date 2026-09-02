@@ -45,7 +45,7 @@ const (
 	trailWayWidth    = 5                  // "│  ├ "
 	trailGhostWidth  = 2                  // "◌ "
 	trailMinLabel    = 6                  // below this a label says nothing
-	maxGhosts        = 4                  // the plan shows its next four moves
+	maxGhosts        = 6                  // the plan shows its next six moves, room allowing
 )
 
 // TrailOpts is everything the trail needs beyond the journey itself: the plan
@@ -73,6 +73,12 @@ type TrailOpts struct {
 	// contradicting the fleet beside it.
 	HeadState state.State
 	HeadSince time.Time
+
+	// HeadWaits is how many agents HEAD has out with nothing of its own
+	// written since it sent them: a parent parked on its children, which
+	// "● build … for 2h" over three ⋯ lanes could not distinguish from a
+	// parent working. trailDoc sets it from the trail.
+	HeadWaits int
 
 	// Dense drops the plain rail rows between legs. trailDoc sets it itself
 	// when a Lv1 trail does not fit its viewport: under pressure the rail
@@ -186,6 +192,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		return rows, noSel(len(rows))
 	}
 
+	o.HeadWaits = headWaits(tr)
 	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if len(tr.Legs) == 0 {
@@ -319,8 +326,11 @@ func (b *trailBuilder) cursored(l trailLine, text string) string {
 	// to anyone whose terminal renders reverse video faintly. Every row
 	// opens with a glyph or a rail stroke whose meaning the rest of the row
 	// repeats in words, so the cell is the cheapest one to spend.
-	if r := []rune(plain); len(r) > 0 {
-		r[0] = '▸'
+	if r := []rune(plain); len(r) > 1 && r[1] == ' ' {
+		r[1] = '▸' // after the glyph: "◉▸" keeps the row's shape
+		plain = string(r)
+	} else if len(r) > 0 {
+		r[0] = '▸' // a rail stroke has nothing to keep
 		plain = string(r)
 	}
 	if pad := b.width - lipgloss.Width(plain); pad > 0 {
@@ -372,7 +382,11 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 	for i := 0; i < show; i++ {
 		rail := ruleStyle.Render(railGhost)
 		if i == 0 && total > 0 {
-			rail += " " + dimStyle.Render(clip(fmt.Sprintf("%d of %d tasks to go", len(pending), total), body))
+			count := fmt.Sprintf("%d to go", len(pending))
+			if done := total - len(pending); done > 0 {
+				count += fmt.Sprintf(" · %d done", done)
+			}
+			rail += " " + dimStyle.Render(clip(count, body))
 		}
 		if i == 0 || !b.dense {
 			b.node(rail)
@@ -463,7 +477,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// office CIDR only,…" left the decision one attach away.
 			var extra []detailRow
 			if leg.Current && o.HeadState == state.NeedsYou && o.Head != "" && label != o.Head {
-				for _, line := range wrapN(o.Head, o.Width-trailWayWidth, 3) {
+				for _, line := range wrapN(o.Head, o.Width-trailWayWidth, 4) {
 					extra = append(extra, detailRow{text: dimStyle.Render(line), sel: -1})
 				}
 			}
@@ -819,7 +833,38 @@ func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
 	// "for 2h" — read beside the finished legs' durations it is the same
 	// kind of number, where "← 2h" was read by everyone who tried it as
 	// "two hours ago".
-	return glyph, "for " + relAge(o.Now, l.Start)
+	figure = "for " + relAge(o.Now, l.Start)
+	if o.HeadWaits > 0 {
+		figure = fmt.Sprintf("waiting on ◈%d · %s", o.HeadWaits, relAge(o.Now, l.Start))
+	}
+	return glyph, figure
+}
+
+// headWaits counts the open lanes HEAD is parked on: agents out, and no
+// vote of HEAD's own since the newest of them left.
+func headWaits(tr journey.Trail) int {
+	var head *journey.Leg
+	for i := range tr.Legs {
+		if tr.Legs[i].Current {
+			head = &tr.Legs[i]
+		}
+	}
+	if head == nil {
+		return 0
+	}
+	out, newest := 0, time.Time{}
+	for _, b := range tr.Branches {
+		if !b.Done {
+			out++
+			if b.Start.After(newest) {
+				newest = b.Start
+			}
+		}
+	}
+	if out == 0 || head.End.After(newest) {
+		return 0
+	}
+	return out
 }
 
 func badgeStyle(badge string) lipgloss.Style {
@@ -1040,11 +1085,13 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		// The lane's clock: how long the agent has been out, or how long ago
 		// it came back. An agent that never returns is the silent failure of
 		// delegated work, and a lane without a clock could not show it.
-		age := relAge(o.Now, br.Start)
+		// One meaning per clock: "⋯ 20m out" is how long it has been away,
+		// "✓ 2h ago" how long since it came back; a leg's bare figure is a
+		// duration. Three kinds of number down one rail need their words.
+		tail := mark + " " + relAge(o.Now, br.Start) + " out"
 		if br.Done && !br.End.IsZero() {
-			age = relAge(o.Now, br.End)
+			tail = mark + " " + relAge(o.Now, br.End) + " ago"
 		}
-		tail := mark + " " + age
 		labelWidth := width - trailForkWidth - 1 - len([]rune(tail))
 		if labelWidth < trailMinLabel {
 			continue
