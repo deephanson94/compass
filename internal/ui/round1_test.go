@@ -841,6 +841,23 @@ func TestTallBoardWrapsIntoTwoBands(t *testing.T) {
 	if got := strings.Join(boardModel(152, 30).boardLines(148, 25), "\n"); !strings.Contains(got, "+1 more") {
 		t.Errorf("a 30-row board wrapped where it had no room:\n%s", got)
 	}
+	// A column a few rows over the half still wraps — pinned, it loses
+	// those rows to its fold and says so.
+	over := boardModel(152, 48)
+	tr := over.trails[sessionKey("s-api")]
+	for i := 0; i < 3; i++ {
+		tr.Tasks = append(tr.Tasks, journey.Task{ID: string(rune('1' + i)), Subject: "step", Status: "pending"})
+	}
+	tr.Prompts = append(tr.Prompts,
+		journey.Prompt{Text: "and the revoked case", At: fixtureBase.Add(16 * time.Minute)},
+		journey.Prompt{Text: "now run it", At: fixtureBase.Add(28 * time.Minute)})
+	over.trails[sessionKey("s-api")] = tr
+	if rows := over.boardColumnRows(sessionKey("s-api"), 34); rows <= 21 || rows > 25 {
+		t.Fatalf("fixture: the api column is %d rows, want a few over the half of 21", rows)
+	}
+	if got := strings.Join(over.boardLines(148, 43), "\n"); strings.Contains(got, "+1 more") {
+		t.Errorf("a column three rows over the half kept the board to one band:\n%s", got)
+	}
 	// A long trail in the first band: one band, however tall.
 	tall := boardModel(152, 48)
 	tall.trails[sessionKey("s-api")] = longTrail(60)

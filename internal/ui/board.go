@@ -202,15 +202,16 @@ func (m *Model) boardLines(w, h int) []string {
 	}
 	// A tall board with short trails wraps into a second band of columns
 	// rather than naming half the fleet in the strip over twenty blank
-	// rows. Only when the first band's columns all fit a half-height: a
-	// day-long trail keeps the whole height, because cutting it in half to
-	// show two idle sessions underneath would lose the morning.
+	// rows. Only when the first band's columns all fit a half-height, give
+	// or take a few rows a pinned column can lose to its fold: a day-long
+	// trail keeps the whole height, because cutting it in half to show two
+	// idle sessions underneath would lose the morning.
 	bands, bh := 1, body
 	if len(order) > n && body >= 2*boardBandMin+1 {
 		half := (body - 1) / 2
 		fits := true
 		for _, key := range m.boardKeys(n) {
-			if m.boardColumnRows(key, cw) > half {
+			if m.boardColumnRows(key, cw) > half+boardBandSlack {
 				fits = false
 				break
 			}
@@ -242,8 +243,12 @@ func (m *Model) boardLines(w, h int) []string {
 }
 
 // boardBandMin is the least height a band of columns is worth: the header's
-// three rows and enough trail to read.
-const boardBandMin = 12
+// three rows and enough trail to read. boardBandSlack is how many rows a
+// column may lose to its fold for the sake of the band beneath it.
+const (
+	boardBandMin   = 12
+	boardBandSlack = 4
+)
 
 // boardColumnRows is how many rows a column would take to show its whole
 // trail: the header and the document.
