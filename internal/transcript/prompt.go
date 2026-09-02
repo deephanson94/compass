@@ -4,32 +4,31 @@ import "strings"
 
 // A transcript's user lines are not all people talking. The harness writes its
 // own turns through the same channel — notifications, reminders, hook feedback,
-// the caveat before a local command's output — and a reader that mistakes one
-// for a prompt reports "<local-command-caveat>Caveat…" as what you asked for.
+// the caveat before a local command's output, the output itself — and a reader
+// that mistakes one for a prompt reports "<local-command-caveat>Caveat…" as
+// what you asked for.
 //
-// Two signals separate them: isMeta, which Claude Code sets on its own
-// bookkeeping turns, and the opening tag, for the envelopes that carry no flag.
-// Only the second is a pattern, and it is the last resort.
+// Two signals separate them. isMeta, which Claude Code sets on some of its own
+// bookkeeping turns; and the opening character. In a 5,400-line transcript,
+// every user turn that opened with a tag was the harness's — task
+// notifications, reminders, command wrappers, captured output — and not one
+// human prompt opened with one. So a turn that opens with a tag is machinery,
+// with one exception: a slash command expands to tags too, and that is the
+// person talking. This replaced a list of tag names that grew by one every
+// time a dogfood found the next wrapper.
 //
 // There is a third field that looks like it belongs here and does not.
 // `origin` reads {"kind":"human"} in one Claude Code version and the bare
 // string "cli" in another, so a reader that trusts its shape either rejects
 // every prompt from the older one or fails to parse the line at all. Both
 // versions are in this repo's own fixtures. Everything it would have caught,
-// isMeta and the tags already do.
+// isMeta and the tag rule already do.
 
-// envelopeTags open the automated turns the harness wraps around its own
-// messages. Matched at the start of the text only: a prompt that *mentions*
-// one of these is still a prompt.
-var envelopeTags = []string{
-	"<system-reminder",
-	"<task-notification",
-	"<wake",
-	"<local-command-caveat",
-	"<teammate-message",
-	// Two shapes seen on a dogfooded trail, rendered as if the person had
-	// said them: a teammate's relayed message, and a background agent's own
-	// instructions echoed back. Neither carries isMeta.
+// relayPrefixes open the harness's turns that carry neither a flag nor a tag:
+// a teammate's message relayed, a background agent's instructions echoed back.
+// Matched at the start of the text only: a prompt that mentions one of these
+// is still a prompt.
+var relayPrefixes = []string{
 	"Another Claude session sent a message",
 	`Background agent "`,
 }
@@ -55,15 +54,32 @@ func (e Event) Machinery() bool {
 // holding text rather than an event.
 func EnvelopeText(text string) bool {
 	t := strings.TrimSpace(text)
+	if _, ok := SlashCommand(t); ok {
+		return false // the one tagged turn a person wrote
+	}
+	if opensWithTag(t) {
+		return true
+	}
 	if strings.HasPrefix(t, compactionPreamble) {
 		return true
 	}
-	for _, tag := range envelopeTags {
-		if strings.HasPrefix(t, tag) {
+	for _, p := range relayPrefixes {
+		if strings.HasPrefix(t, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// opensWithTag reports whether text begins "<name" for some letter-led name —
+// the shape of every envelope the harness writes, and of no prompt a person
+// has been seen to type.
+func opensWithTag(t string) bool {
+	if len(t) < 2 || t[0] != '<' {
+		return false
+	}
+	c := t[1]
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 // SlashCommand renders a slash-command turn the way the person typed it.
