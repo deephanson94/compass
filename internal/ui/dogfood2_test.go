@@ -13,6 +13,7 @@ import (
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/tmuxop"
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
@@ -495,14 +496,36 @@ func TestTheVerdictNamesARepeatedFailure(t *testing.T) {
 // sliced at the border read as a leg with no label.
 func TestTheReplyPanelBlanksToTheEdge(t *testing.T) {
 	forceASCII(t)
-	m := groupedModel(152, 40) // four columns of trail: the panel over column one has neighbours
+	// The board: the panel stands under the selected column, and the
+	// columns to its right are what it must not slice.
+	m := boardModel(152, 40)
+	m.SetPanes(map[string]tmuxop.Pane{
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
+	})
+	m.point(sessionKey("s-api"))
+	before := strings.Split(m.View(), "\n")
 	press(m, "r")
 	if !m.replying {
 		t.Fatalf("r did not offer the replies: %q", m.note)
 	}
 	got := m.View()
-	if !strings.Contains(got, "◆ ") {
-		t.Fatal("the fixture should draw trails beside the panel")
+	covered := 0
+	for i, line := range strings.Split(got, "\n") {
+		trimmed := strings.TrimRight(line, " ")
+		if !strings.HasPrefix(strings.TrimSpace(trimmed), "│") || !strings.Contains(trimmed, "│ ") || strings.Contains(trimmed, "READER") {
+			continue // not a row of the panel's body
+		}
+		// A row that had a neighbour to the right before the panel came
+		// now ends at the panel's own border.
+		if lipgloss.Width(strings.TrimRight(before[i], " ")) > lipgloss.Width(trimmed) {
+			covered++
+		}
+		if !strings.HasSuffix(trimmed, "│") && !strings.HasSuffix(trimmed, "┐") && !strings.HasSuffix(trimmed, "┘") {
+			t.Errorf("text survives right of the panel: %q", line)
+		}
+	}
+	if covered == 0 {
+		t.Fatalf("the fixture drew nothing right of the panel:\n%s", got)
 	}
 	for _, line := range strings.Split(got, "\n") {
 		if strings.Contains(line, "a digit types the line") {
