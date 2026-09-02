@@ -315,7 +315,7 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	for _, want := range []string{
 		"⌁ no pane · from transcript", // the header names the source
 		"moment30",                    // and the newest turn is on screen
-		"◆ test   1216✓ 2✗",           // and says how its last run went
+		"18✓ 2✗",                      // and says how its last run went, off its own trail
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no-pane mirror is missing %q", want)

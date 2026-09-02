@@ -1956,7 +1956,7 @@ func TestLateResultNamesItsCall(t *testing.T) {
 		{Type: transcript.EventUser, UUID: "4", Timestamp: fixtureBase.Add(3 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "a", Text: "3 defects"}}},
 	}
 	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 30})
-	if !strings.Contains(got, "↩ Agent(score the gates)") {
+	if !strings.Contains(got, "↩ result of Agent(score the gates)") {
 		t.Errorf("a late result does not name its call:\n%s", got)
 	}
 	if strings.Count(got, "↩") != 1 {

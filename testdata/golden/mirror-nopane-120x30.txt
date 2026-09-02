@@ -2,7 +2,7 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
  ▌ 2 ● api                                3m [session] │  ⌁ no pane · from transcript
-     ◆ test   1216✓ 2✗                                 │
+     ✗ red 18✓ 2✗ · edited since · ◈1 back · 1 empty   │
  ◉ "fix the 401 bug"                           38m ago │ moment16 sending a subagent at the payments module, in case it
  ╷                                                     │ shares the same refresh helper
  ◆ scout  middleware.py                             5m │

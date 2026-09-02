@@ -27,4 +27,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · [ ] chapters · g grab · ? help · q quit
+ j/k move · enter attach (prefix d returns) · [ ] chapters · r reply · g grab · ? help · q quit

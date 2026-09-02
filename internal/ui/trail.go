@@ -594,7 +594,7 @@ func compactionAt(compactions []time.Time, after, upTo time.Time) (time.Time, bo
 
 // compactRule is the rail row a compaction falls on: "│ ⟲ compacted 14:02 ────".
 func compactRule(at time.Time, width int) string {
-	row := railStroke + " " + glyphCompact + " compacted " + at.Local().Format("15:04") + " "
+	row := railStroke + " " + glyphCompact + " context compacted " + at.Local().Format("15:04") + " "
 	if rest := width - len([]rune(row)); rest > 0 {
 		row += strings.Repeat("─", rest)
 	}
@@ -1103,10 +1103,13 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited ti
 	// "2h ago", where a leg says "12m": the prompt is when, the leg is how
 	// long, and without the word a column of figures reads as one kind.
 	age := relAge(now, p.At) + " ago"
-	if waited >= waitNotable && width >= trailInlineWidth {
+	if waited >= waitNotable {
 		// How long the session sat waiting for this prompt, where the row
-		// has the room: "waited 40m · 2h ago".
-		age = "waited " + relDuration(waited) + " · " + age
+		// has the room for it and a readable prompt: "waited 40m · 2h ago".
+		with := "waited " + relDuration(waited) + " · " + age
+		if width-len([]rune(with))-8 >= trailInlineMin {
+			age = with
+		}
 	}
 	// The chapter: "◉ 9/13" is what `[` and `]` step through, and on a
 	// trail with a dozen prompts it is the readout to steer by.
@@ -1205,7 +1208,7 @@ func waypointBody(w journey.Waypoint, bug, width int) string {
 // looks like the first two.
 func failText(w journey.Waypoint) string {
 	if w.Runs >= 2 {
-		return w.Text + " · " + ordinal(w.Runs) + " time"
+		return w.Text + " · " + ordinal(w.Runs) + " leg"
 	}
 	return w.Text
 }
@@ -1396,16 +1399,17 @@ func (m *Model) sessionCard(w int) []string {
 	// Where the keys are, in the words the help uses — board, session,
 	// reader — not a level number: one Tab from the board read "[Lv2]",
 	// and the person pressing it asked whether that was expected.
-	level := "[session]"
+	// At Lv3 the card says nothing: the keys are in the reader, and the
+	// word goes where the bar is (readerTitle).
+	right := "[session]"
 	if m.level >= levelReader {
-		level = "[reader]"
+		right = ""
 	}
-	right := level
 	if n := m.legsAbove(); n > 0 {
-		right = fmt.Sprintf("↑ %d legs  %s", n, right)
+		right = strings.TrimSpace(fmt.Sprintf("↑ %d legs  %s", n, right))
 	}
 	if !m.trailPinned {
-		right = "↓ G  " + right
+		right = strings.TrimSpace("↓ G  " + right)
 	}
 	body := w - 1
 	hdr := m.columnHeader(m.selectedKey, r, body-lipgloss.Width(right)-1)
@@ -1416,14 +1420,66 @@ func (m *Model) sessionCard(w int) []string {
 		gap = 1
 	}
 	first += strings.Repeat(" ", gap) + dimStyle.Render(right)
-	second := hdr[1]
-	if day := strings.TrimPrefix(trailDay(m.trail, m.now, false), " · "); day != "" {
-		// The day's sum, where the column had no room for it.
-		if lipgloss.Width(second)+3+len([]rune(day)) <= w {
-			second = pad(second, w-len([]rune(day))) + dimStyle.Render(day)
+	return []string{first, m.cardSecond(w)}
+}
+
+// cardSecond is the card's second row: the verdict, then the day added up
+// — "22h · 16 ships · 10 red · 2 compactions · waited on you 40m" — and
+// the tmux session on the right. The board's column had no room for the
+// day and the trail's own title has it below 110 columns; the session
+// view is the one place a long day is read closely, and it was the one
+// place the day was not said. Clauses are shed whole, the day's compact
+// form tried before any clause goes, the tmux name before the day.
+func (m *Model) cardSecond(w int) string {
+	s, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	room := w - 4
+	verdict := strings.Split(boardVerdict(s, m.trail, m.now), " · ")
+	if s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou {
+		// The two states you must not miss keep the fleet row's own
+		// sentence — the hung call, the question — over the verdict.
+		if r, ok := m.boardRows()[m.selectedKey]; ok {
+			if lines := m.entryLines(r, room); len(lines) > 1 {
+				if head := strings.TrimSpace(ansi.Strip(lines[1])); head != "" {
+					verdict = []string{head}
+				}
+			}
 		}
 	}
-	return []string{first, second}
+	tmux := ""
+	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
+		tmux = "⌁ " + tmuxSessionName(pane.Target)
+	}
+	line := ""
+	for _, try := range []struct {
+		day  []string
+		tmux string
+	}{
+		{dayParts(m.trail, m.now, false), tmux},
+		{dayParts(m.trail, m.now, true), tmux},
+		{dayParts(m.trail, m.now, false), ""},
+		{dayParts(m.trail, m.now, true), ""},
+	} {
+		parts := append(append([]string{}, verdict...), try.day...)
+		fit := room
+		if try.tmux != "" {
+			fit -= lipgloss.Width(try.tmux) + 2
+		}
+		if text := joinFit(parts, fit); text == strings.Join(parts, " · ") {
+			line = text
+			if try.tmux != "" {
+				line = pad(line, fit+2) + try.tmux
+			}
+			break
+		}
+	}
+	if line == "" {
+		parts := append(append([]string{}, verdict...), dayParts(m.trail, m.now, true)...)
+		line = joinFit(parts, room)
+	}
+	return "    " + dimStyle.Render(line)
 }
 
 // trailOpts is the model's state as the renderer wants it.

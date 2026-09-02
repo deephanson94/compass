@@ -64,7 +64,15 @@ func trailOf(start time.Time, prompt string, current bool, legs ...legSpec) jour
 			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestRun, Text: runSummary(l.tests), Short: l.tests, At: leg.End})
 		}
 		for _, f := range l.fails {
-			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestFail, Text: f, At: leg.End})
+			runs := 1
+			for _, earlier := range tr.Legs {
+				for _, w := range earlier.Waypoints {
+					if w.Kind == journey.WaypointTestFail && w.Text == f {
+						runs++ // what the segmenter would have counted
+					}
+				}
+			}
+			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestFail, Text: f, Runs: runs, At: leg.End})
 		}
 		if l.class == journey.Ship {
 			// A real ship leg carries its commit, and is named by it.
@@ -500,6 +508,8 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "pytest", 5 * time.Minute, nil, "20✓", nil},
 		legSpec{journey.Build, "implement s6e encoder tests", 25 * time.Minute, []string{"test_s6e.py"}, "", nil},
 	)
+	t.Prompts = append(t.Prompts, journey.Prompt{Text: "the encoder is in; now the tests, then measure DLA", At: n.Add(-70 * time.Minute)})
+	t.Compactions = []time.Time{n.Add(-95 * time.Minute)}
 	t = withBranch(t, 0, "Score encoder gates vs oracle defects", n.Add(-165*time.Minute), true, "3 defects found against the oracle; two are the same root cause")
 	t = withBranch(t, 3, "Measure moe_by_andy DLA on dx6", n.Add(-20*time.Minute), false, "")
 	t = withBranch(t, 3, "Review /auto-resume skill design", n.Add(-18*time.Minute), false, "")

@@ -20,7 +20,7 @@ func (m *Model) doc(width int) []readerLine {
 	if c.valid && c.n == len(m.events) && c.w == width && c.ver == m.docVer && c.cwd == cwd {
 		return c.lines
 	}
-	lines := readerDoc(m.events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd})
+	lines := readerDoc(m.events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now})
 	m.docCache = readerCache{lines: lines, valid: true, n: len(m.events), w: width, ver: m.docVer, cwd: cwd}
 	return lines
 }
@@ -75,7 +75,7 @@ func (m *Model) readerWidth() int {
 // readerColumn is the deck's Lv3 middle panel: whose conversation this is, the
 // search when one is live, and the document.
 func (m *Model) readerColumn(w, h int) []string {
-	rows := []string{m.readerTitle(w), ""}
+	rows := []string{m.readerTitle(w), m.readerAbove(w)}
 	if h > 2 && len(m.events) == 0 && len(m.trail.Legs) > 0 {
 		// The trail is in hand and the conversation is not yet: it is being
 		// read, not absent. "nothing to read yet … as it happens" claimed a
@@ -91,10 +91,36 @@ func (m *Model) readerColumn(w, h int) []string {
 			Query:    m.query,
 			Anchor:   m.anchor,
 			CWD:      m.readerCWD(),
+			Now:      m.now,
 		})
 		rows = append(rows, strings.Split(frame, "\n")...)
 	}
 	return rows
+}
+
+// readerAbove is the row under the reader's title: what the page is not
+// showing above its first line, so a conversation opened on its tail says
+// it is a tail — "↑ 212 lines above · 3 turns" — and air when nothing is.
+func (m *Model) readerAbove(w int) string {
+	if len(m.events) == 0 {
+		return ""
+	}
+	doc := m.doc(m.readerWidth())
+	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	if top == 0 {
+		return ""
+	}
+	turns := 0
+	for i := 0; i < top; i++ {
+		if doc[i].kind == readerSaid && (i == 0 || doc[i-1].kind != readerSaid) {
+			turns++
+		}
+	}
+	text := "↑ " + plural(top, "line") + " above"
+	if turns > 0 {
+		text += " · " + plural(turns, "turn") + " of yours"
+	}
+	return dimStyle.Render(clip(" "+text, w))
 }
 
 // readerTitle mirrors the trail's: READER · <name>, with the search state —
@@ -121,6 +147,14 @@ func (m *Model) readerTitle(w int) string {
 				right = clip(m.anchorText, room) + " · " + right // clip marks the cut with …
 			}
 		}
+	}
+	if m.sessionView() && m.level >= levelReader {
+		// The keys are here, and the card across the gutter has stopped
+		// saying so: the word goes where the bar is.
+		if right != "" {
+			right += "  "
+		}
+		right += "[reader]"
 	}
 	mark := m.titleMark(panelReader)
 	body := w - 1
@@ -153,7 +187,7 @@ func (m *Model) anchorReader() {
 	if m.cursor >= len(rows) {
 		return
 	}
-	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD()}
+	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD(), Now: m.now}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
 		// The scroll is clamped to the last screenful at once: an offset
 		// past it drew the same frame, and the first j after it moved the
@@ -203,10 +237,25 @@ func (m *Model) readerChapter(key string) {
 		m.note = "no turns of yours in this conversation"
 		return
 	}
-	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	// Where the reader is: the turn it is standing on, if `[ ]` put it
+	// there; otherwise the line it is anchored to — HEAD's moment, or the
+	// row the trail cursor chose — or the top of the page. `[` from a
+	// fresh page lands on the turn governing that line: on a short
+	// conversation that fits the panel, "no earlier turn" with a turn in
+	// plain sight was false on its face.
+	cur := -1
+	for i, t := range turns {
+		if t == m.anchor {
+			cur = i
+		}
+	}
+	at := clampScroll(m.scroll, len(doc), m.readerHeight())
+	if m.anchor > at {
+		at = m.anchor
+	}
 	if key == "]" {
 		for i, t := range turns {
-			if t > top {
+			if (cur >= 0 && i > cur) || (cur < 0 && t > at) {
 				m.landOnTurn(doc, turns, i)
 				return
 			}
@@ -215,7 +264,7 @@ func (m *Model) readerChapter(key string) {
 		return
 	}
 	for i := len(turns) - 1; i >= 0; i-- {
-		if turns[i] < top {
+		if (cur >= 0 && i < cur) || (cur < 0 && turns[i] <= at) {
 			m.landOnTurn(doc, turns, i)
 			return
 		}

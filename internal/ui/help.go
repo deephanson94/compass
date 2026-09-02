@@ -20,7 +20,7 @@ var helpKeys = [][2]string{
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
-	{"r", "quick reply: type a stock line into the session's pane (a digit picks)"},
+	{"r", "quick reply: a panel of stock lines; a digit types one into the pane"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
 	{"/ n N", "reader: search, next, previous"},
@@ -118,7 +118,7 @@ func helpLegendFold(legend []string, w int) []string {
 		switch {
 		case strings.Contains(l, "⌀ back") || strings.Contains(l, "◌ planned"):
 			if !folded {
-				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · ✗ · 3rd time", w)))
+				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · ✗ 3rd leg · on you: waits · →3", w)))
 				folded = true
 			}
 		default:
@@ -171,9 +171,11 @@ func helpLegendLines(w int, roomy bool) []string {
 		dimStyle.Render(clip("        →3 a live session whose prompt is this lane's", w)),
 		dimStyle.Render(clip("        ◌ planned — Claude's own next moves", w)),
 		dimStyle.Render(clip("        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them", w)),
-		dimStyle.Render(clip("        ⟲ compacted — the conversation was folded into a summary here", w)),
-		dimStyle.Render(clip("        ✗ test · 3rd time — the same test has failed in three legs", w)),
-		dimStyle.Render(clip("        on you 40m — today's wait for your next prompt (gaps over 3h are you away)", w)),
+		dimStyle.Render(clip("        ⟲ context compacted — the model works from a summary below", w)),
+		dimStyle.Render(clip("        ✗ test · 3rd leg — the same test has failed in three legs", w)),
+		dimStyle.Render(clip("        on you 40m today — its waits for your next prompt (3h+ = away)", w)),
+		dimStyle.Render(clip("        16⚑ 10✗ 2⟲ — ships · red runs · compactions, when a row is tight", w)),
+		dimStyle.Render(clip("        ↩ result of X — a result that landed late; it is X's", w)),
 		dimStyle.Render(clip("board:  bright = something unread · dim = read, or a day old", w)),
 		"",
 		dimStyle.Render(clip("every leg is one of seven classes, named on its row:", w)),

@@ -19,6 +19,7 @@ const (
 	glyphCall   = "⏺" // a tool call
 	glyphResult = "⎿" // what it returned, folded
 	glyphErrRes = "✗" // …and it failed
+	glyphLate   = "↩" // a result that arrived after other calls
 )
 
 const (
@@ -53,6 +54,11 @@ type ReaderOpts struct {
 	// with nothing naming it — which is exactly where a reader is looking when
 	// they walk the newest legs.
 	Anchor int
+
+	// Now is the moment the document is read at: an agent still out says
+	// how long, the same clock its lane on the trail carries. Zero leaves
+	// the stub bare.
+	Now time.Time
 
 	// CWD is the session's working directory: a tool call's path is shown
 	// relative to it, the way the CLI shows it, so a column of
@@ -202,6 +208,7 @@ type docBuilder struct {
 	lines []readerLine
 	width int
 	cwd   string
+	now   time.Time
 }
 
 func (d *docBuilder) push(text string, kind readerKind, event int, at time.Time) {
@@ -239,7 +246,7 @@ func (d *docBuilder) last() readerKind {
 // readerDoc flattens the events into rows. Sidechains are skipped: a subagent's
 // own conversation is the trail's branch lane, not this document's business.
 func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
-	d := &docBuilder{width: o.Width, cwd: o.CWD}
+	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now}
 	unfolded := o.Unfolded
 	answered := map[string]bool{}
 	for _, ev := range events {
@@ -261,10 +268,13 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 			for _, res := range ev.ToolResults {
 				if res.ToolUseID != lastCall {
 					// A result that is not the last call's — a background
-					// agent's, back long after other calls — says whose it
-					// is, or it reads as the call above it answering twice.
+					// agent's, back long after other calls, or the lead's
+					// own edit landing after an agent was dispatched — is
+					// named at the call's own depth, in words: hung under
+					// the call above it, it read as that call's second
+					// answer, and under an Agent it said the agent did it.
 					if use, ok := calls[res.ToolUseID]; ok {
-						d.push(resultIndent+glyphResult+" "+clip("↩ "+use.Name+"("+d.argument(use, ev.CWD)+")", d.width-len(resultIndent)-2), readerBody, i, ev.Timestamp)
+						d.late(i, ev.Timestamp, use, ev.CWD)
 					}
 				}
 				d.result(i, ev.Timestamp, calls[res.ToolUseID], res, unfolded[i], ev.CWD)
@@ -448,10 +458,24 @@ func (d *docBuilder) pending(event int, at time.Time, use transcript.ToolUse) {
 	switch use.Name {
 	case "Agent":
 		word = "⋯ still out"
+		if !d.now.IsZero() && d.now.After(at) {
+			// The lane on the trail says "⋯ 20m out"; three bare stubs
+			// were three agents nobody could tell apart.
+			word += " · " + relDuration(d.now.Sub(at))
+		}
 	case "AskUserQuestion":
 		word = "⋯ no answer yet"
 	}
 	d.push(resultIndent+glyphResult+" "+clip(word, d.width-len(resultIndent)-2), readerBody, event, at)
+}
+
+// late names a result that arrived after other calls: "↩ result of
+// Edit(tokens.py)" at a call's own depth, so what hangs beneath it is read
+// as that call's, never as the call above's.
+func (d *docBuilder) late(event int, at time.Time, use transcript.ToolUse, cwd string) {
+	head := glyphLate + " result of " + use.Name
+	line := head + "(" + d.argument(use, cwd) + ")"
+	d.pushDim(clip(line, d.width), len([]rune(head)), readerCall, event, at)
 }
 
 // result draws what a call returned: one folded row leading with the first
@@ -471,6 +495,10 @@ func (d *docBuilder) result(event int, at time.Time, use transcript.ToolUse, res
 
 	kind, head := readerFold, plural(len(lines), "line")
 	switch {
+	case !res.IsError && !open && editShape(use) != "":
+		// "The file tokens.py has been updated." restated the call above
+		// it, five times a screen. The shape of the change is the news.
+		head = editShape(use)
 	case res.IsError:
 		// The first line that says something: a failed pytest opens with
 		// its row of dots, and "✗ ......" said nothing about what failed.
@@ -518,6 +546,34 @@ func resultBody(text string) []string {
 		lines[i] = strings.TrimRight(strings.ReplaceAll(l, "\t", "    "), " ")
 	}
 	return lines
+}
+
+// editShape is what an Edit or Write did, counted from its own input —
+// "+12 −3" for an edit, "12 lines" for a write — since the tool's own
+// wording says only that the file was touched.
+func editShape(use transcript.ToolUse) string {
+	switch use.Name {
+	case "Edit":
+		old, new := inputField(use.Input, "old_string"), inputField(use.Input, "new_string")
+		if old == "" && new == "" {
+			return ""
+		}
+		return fmt.Sprintf("edited · +%d −%d", lineCount(new), lineCount(old))
+	case "Write":
+		if content := inputField(use.Input, "content"); content != "" {
+			return "written · " + plural(lineCount(content), "line")
+		}
+	}
+	return ""
+}
+
+// lineCount is the lines in s: zero for nothing, one for a line without
+// its newline.
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1
 }
 
 // countsOnly names the tools whose result is a file or a listing: the first

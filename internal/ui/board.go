@@ -206,32 +206,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// height was left for. Sized to the screen instead, a board of short
 	// trails ended every column in eight blank rows while naming four
 	// sessions in the strip.
-	var bands [][]string
-	heights := []int{}
-	rem := body
-	all := m.boardKeys(len(order))
-	for pos := 0; pos < len(all) && rem >= boardBandMin; pos += n {
-		band := all[pos:min(pos+n, len(all))]
-		tallest := 0
-		for _, key := range band {
-			tallest = max(tallest, m.boardColumnRows(key, cw))
-		}
-		bh := min(max(tallest, boardBandMin), rem)
-		bands = append(bands, band)
-		heights = append(heights, bh)
-		rem -= bh + 1 // and the row of air under it
-	}
-	shown := 0
-	for _, band := range bands {
-		shown += len(band)
-	}
-	// The selected column is always drawn: boardKeys puts it among the
-	// first shown, so pack once more over that order.
-	keys := m.boardKeys(shown)
-	if len(bands) == 1 {
-		// One band takes the whole height, whatever its tallest trail.
-		heights[0] = body
-	}
+	keys, heights := m.boardPack(n, cw, body)
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
@@ -251,6 +226,63 @@ func (m *Model) boardLines(w, h int) []string {
 	lines = fit(lines, body)
 	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
 	return fit(lines, h)
+}
+
+// boardPack packs the columns into bands for a body of the given height:
+// the keys drawn, in order, n to a band, and each band's height.
+func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
+	order := m.viewOrder()
+	var bands [][]string
+	rem := body
+	all := m.boardKeys(len(order))
+	for pos := 0; pos < len(all) && rem >= boardBandMin; pos += n {
+		band := all[pos:min(pos+n, len(all))]
+		tallest := 0
+		for _, key := range band {
+			tallest = max(tallest, m.boardColumnRows(key, cw))
+		}
+		bh := min(max(tallest, boardBandMin), rem)
+		bands = append(bands, band)
+		heights = append(heights, bh)
+		rem -= bh + 1 // and the row of air under it
+	}
+	shown := 0
+	for _, band := range bands {
+		shown += len(band)
+	}
+	// The selected column is always drawn: boardKeys puts it among the
+	// first shown, so pack once more over that order.
+	keys = m.boardKeys(shown)
+	if len(bands) == 1 {
+		// One band takes the whole height, whatever its tallest trail.
+		heights[0] = body
+	}
+	return keys, heights
+}
+
+// boardPlace is where the selected column stands on the board: the
+// column's left edge and its band's top row, so a panel about that
+// session can sit beside it rather than over someone else's.
+func (m *Model) boardPlace(w int) (x, y int, ok bool) {
+	n, cw := boardColumns(w, len(m.viewOrder()))
+	if n == 0 {
+		return 0, 0, false
+	}
+	h := m.height - 5
+	if h < 1 {
+		h = 1
+	}
+	keys, heights := m.boardPack(n, cw, h-2)
+	y = 0
+	for i, key := range keys {
+		if i > 0 && i%n == 0 {
+			y += heights[i/n-1] + 1
+		}
+		if key == m.selectedKey {
+			return (i % n) * (cw + gutterWidth), y, true
+		}
+	}
+	return 0, 0, false
 }
 
 // boardBandMin is the least height a band of columns is worth: the header's
@@ -446,13 +478,28 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 			}
 		}
 	}
-	if d := youWaited(tr, now, s); d >= waitNotable {
+	if promptWaits(tr) >= waitNotable {
 		// The day's wait on you, the open one included: the number that
-		// says which session your own turns are the bottleneck of. Last,
-		// so it is the first clause a narrow column sheds.
-		parts = append(parts, "on you "+relDuration(d))
+		// says which session your own turns are the bottleneck of. Only
+		// when there is a day to add up — an idle session's open wait
+		// alone is the age two rows above, and saying it twice taught
+		// the eye to skip the clause. Last, so it is the first clause a
+		// narrow column sheds.
+		parts = append(parts, "on you "+relDuration(youWaited(tr, now, s))+" today")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// repeatRuns is how many legs the leg's most-repeated failing test has now
+// failed in — 0 when nothing in it has failed before.
+func repeatRuns(l journey.Leg) int {
+	runs := 0
+	for _, w := range l.Waypoints {
+		if w.Kind == journey.WaypointTestFail && w.Runs > runs {
+			runs = w.Runs
+		}
+	}
+	return runs
 }
 
 // verdictParts is the verdict without its fallback: only what the trail
@@ -543,6 +590,11 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 		parts = append(parts, verdict)
 		if suffix != "" {
 			parts = append(parts, suffix)
+		}
+		if runs := repeatRuns(l); red && runs >= 2 {
+			// The same test red again: the loop is the column's news,
+			// and a board column has no room for the test's name.
+			parts = append(parts, "same test "+ordinal(runs)+" leg")
 		}
 		break
 	}
@@ -671,6 +723,17 @@ func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 		out += " · waited on you " + relDuration(d)
 	}
 	return out
+}
+
+// dayParts is the day's totals as clauses, for a row that sheds them whole:
+// "3h", "16 ships", "10 red", "2 compactions", "waited on you 40m" — or the
+// compact "16⚑ 10✗ 2⟲ · on you 40m".
+func dayParts(tr journey.Trail, now time.Time, compact bool) []string {
+	day := strings.TrimPrefix(trailDay(tr, now, compact), " · ")
+	if day == "" {
+		return nil
+	}
+	return strings.Split(day, " · ")
 }
 
 // headSince is the clock HEAD's figure counts from: for a hung session the

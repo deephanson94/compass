@@ -29,7 +29,13 @@ func (m *Model) mirrorColumn(w, h int) []string {
 	// and a frame is only ever drawn while the pane it came from is still there.
 	pane, live := m.selectedPane()
 	header := mirrorMark + " no pane · from transcript"
-	if live {
+	switch {
+	case live && strings.TrimSpace(m.mirror) == "":
+		// The pane is there and its screen is not here yet: what is
+		// drawn is the transcript, and a panel titled "live" over
+		// compass's own fold marks was taken for the pane itself.
+		header = mirrorMark + " " + pane.Target + " · no capture yet · from transcript"
+	case live:
 		header = mirrorMark + " " + pane.Target + " · live"
 	}
 

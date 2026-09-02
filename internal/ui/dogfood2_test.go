@@ -94,16 +94,16 @@ func TestRepeatedFailuresSayHowManyTimes(t *testing.T) {
 	tr := journey.Trail{Legs: []journey.Leg{leg(base, 1), leg(base.Add(10*time.Minute), 2), leg(base.Add(20*time.Minute), 3)}}
 	tr.Legs[2].Current = true
 	got := renderLv(tr, base.Add(30*time.Minute), 2, 60, 30)
-	for _, want := range []string{"test_refresh_expired_token · 2nd time", "test_refresh_expired_token · 3rd time"} {
+	for _, want := range []string{"test_refresh_expired_token · 2nd leg", "test_refresh_expired_token · 3rd leg"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q at Lv2:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "1st time") > 0 {
+	if strings.Count(got, "1st leg") > 0 {
 		t.Errorf("the first failure is not a repeat:\n%s", got)
 	}
 	// On a wide row the detail rides inline, and says it there too.
-	if got := renderLv(tr, base.Add(30*time.Minute), 1, 120, 30); !strings.Contains(got, "· 3rd time") {
+	if got := renderLv(tr, base.Add(30*time.Minute), 1, 120, 30); !strings.Contains(got, "· 3rd leg") {
 		t.Errorf("the wide row should carry the count:\n%s", got)
 	}
 	for n, want := range map[int]string{1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 11: "11th", 12: "12th", 13: "13th", 21: "21st", 22: "22nd", 103: "103rd"} {
@@ -124,7 +124,7 @@ func TestCompactionsMarkTheRail(t *testing.T) {
 	tr.Compactions = []time.Time{base.Add(2*time.Hour + 30*time.Minute), base.Add(4*time.Hour + 30*time.Minute)}
 	now := base.Add(7 * time.Hour)
 	got := renderLv(tr, now, 1, 60, 40)
-	for _, want := range []string{"⟲ compacted " + tr.Compactions[0].Local().Format("15:04"), "⟲ compacted " + tr.Compactions[1].Local().Format("15:04")} {
+	for _, want := range []string{"⟲ context compacted " + tr.Compactions[0].Local().Format("15:04"), "⟲ context compacted " + tr.Compactions[1].Local().Format("15:04")} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q on the rail:\n%s", want, got)
 		}
@@ -172,7 +172,7 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 		t.Fatal("r did not offer the replies")
 	}
 	view := m.View()
-	for _, want := range []string{"┌ reply to api · ⌁ dev:1.0", "1  please continue", "2  report status", "3  you were stuck", "esc closes"} {
+	for _, want := range []string{"┌ reply to 2 · api · ⌁ dev:1.0", "1  please continue", "2  report status", "3  you were stuck", "esc closes", "● working for"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the panel should offer %q:\n%s", want, view)
 		}
@@ -364,5 +364,125 @@ func TestWaitedOnYouCountsTheGapsBeforeYourPrompts(t *testing.T) {
 	}
 	if got := renderLv(tr, now, 1, 50, 30); strings.Contains(got, "waited") {
 		t.Errorf("a narrow row has no room for the wait:\n%s", got)
+	}
+}
+
+// ---- round nine
+
+// `[` from a fresh page lands on the turn governing where the reader is
+// anchored: on a conversation that fits the panel nothing scrolls, and
+// "no earlier turn" with a turn in plain sight was false on its face.
+func TestChapterFromAFreshPageLandsOnTheGoverningTurn(t *testing.T) {
+	forceASCII(t)
+	m := followModel(220, 48)
+	base := fixtureBase
+	m.SetEvents([]transcript.Event{
+		{Type: transcript.EventAssistant, Timestamp: base.Add(-time.Minute), Text: "Resuming from the summary."},
+		{Type: transcript.EventUser, Timestamp: base, Text: "dedupe the nightly load"},
+		{Type: transcript.EventAssistant, Timestamp: base.Add(time.Minute), Text: "Looking at the loader."},
+		{Type: transcript.EventAssistant, Timestamp: base.Add(2 * time.Minute), Text: "Wiring the filter."},
+	})
+	toLv3(m)
+	doc := m.doc(m.readerWidth())
+	if m.scroll != 0 || len(doc) > m.readerHeight() {
+		t.Fatalf("the fixture should fit the panel: scroll %d, %d lines", m.scroll, len(doc))
+	}
+	m.anchor = len(doc) - 1 // anchored at the present, below the turn
+	press(m, "[")
+	if m.anchor != 2 || !strings.Contains(m.note, `"dedupe the nightly load"`) {
+		t.Errorf("[ should land on the turn above the anchor: anchor %d, note %q", m.anchor, m.note)
+	}
+	press(m, "[")
+	if m.note != "no earlier turn" {
+		t.Errorf("a second [ has nothing earlier: %q", m.note)
+	}
+}
+
+// The board says "on you" only when there is a day to add up: an idle
+// session's open wait alone is the age already on the row above.
+func TestOnYouNeedsADayToAddUp(t *testing.T) {
+	base := fixtureBase
+	now := base.Add(2 * time.Hour)
+	tr := journey.Trail{
+		Prompts: []journey.Prompt{{Text: "start", At: base}},
+		Legs:    []journey.Leg{{Class: journey.Build, Label: "x.go", Start: base.Add(time.Minute), End: base.Add(10 * time.Minute)}},
+	}
+	idle := fleet.Session{Live: true, Snap: state.Snapshot{State: state.Idle}, Info: fleet.SessionInfo{LastEventAt: base.Add(10 * time.Minute)}}
+	if got := boardVerdict(idle, tr, now); strings.Contains(got, "on you") {
+		t.Errorf("an open wait alone is the row's age, not a clause: %q", got)
+	}
+	tr.Prompts = append(tr.Prompts, journey.Prompt{Text: "and again", At: base.Add(50 * time.Minute)})
+	tr.Legs = append(tr.Legs, journey.Leg{Class: journey.Test, Label: "pytest", Start: base.Add(51 * time.Minute), End: base.Add(60 * time.Minute)})
+	idle.Info.LastEventAt = base.Add(60 * time.Minute)
+	if got := boardVerdict(idle, tr, now); !strings.Contains(got, "on you 1h today") {
+		t.Errorf("a day of waits, the open one included, is the clause: %q", got)
+	}
+}
+
+// `A` from the archive returns to the board it was pressed from; with
+// nothing archived it changes nothing.
+func TestArchiveReturnsToTheBoard(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 40)
+	var live []fleet.Session
+	for _, s := range m.sessions {
+		if s.Live {
+			live = append(live, s)
+		}
+	}
+	m.SetSessions(live, fixtureBase.Add(40*time.Minute))
+	press(m, "A")
+	if m.level != levelBoard || m.archiveView || m.note != "nothing archived yet" {
+		t.Fatalf("with nothing archived A should change nothing: level %d archive %v note %q", m.level, m.archiveView, m.note)
+	}
+	m = boardModel(152, 40)
+	if m.archivedCount() == 0 {
+		t.Fatal("the board fixture should have something archived")
+	}
+	press(m, "A")
+	if !m.archiveView || m.level != levelTrail {
+		t.Fatalf("A should open the archive as a list: archive %v level %d", m.archiveView, m.level)
+	}
+	press(m, "A")
+	if m.archiveView || m.level != levelBoard {
+		t.Errorf("A again should return to the board: archive %v level %d", m.archiveView, m.level)
+	}
+}
+
+// The reply panel says what its target is doing, since the line lands in
+// that session's input: a question gets the question itself.
+func TestTheReplyPanelNamesTheTargetsState(t *testing.T) {
+	forceASCII(t)
+	m := followModel(152, 40)
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == sessionKey("s-api") {
+			m.sessions[i].Snap = state.Snapshot{State: state.NeedsYou, Since: fixtureBase.Add(30 * time.Minute), Activity: "Open port 22 to the office CIDR only? [office CIDR / keep bastion]"}
+		}
+	}
+	press(m, "r")
+	if view := m.View(); !strings.Contains(view, "▲ on a question · Open port 22") || !strings.Contains(view, "typed into that prompt") {
+		t.Errorf("the panel should say the target is on a question:\n%s", view)
+	}
+}
+
+// A red run of a test that has failed before is a loop, and the board's
+// verdict row says so where the test's name would not fit.
+func TestTheVerdictNamesARepeatedFailure(t *testing.T) {
+	base := fixtureBase
+	leg := func(at time.Time, runs int) journey.Leg {
+		return journey.Leg{Class: journey.Test, Label: "pytest", Start: at, End: at.Add(time.Minute),
+			Waypoints: []journey.Waypoint{
+				{Kind: journey.WaypointTestRun, Text: "18 passed · 1 failed", Short: "18✓ 1✗", At: at},
+				{Kind: journey.WaypointTestFail, Text: "test_x", Runs: runs, At: at},
+			}}
+	}
+	tr := journey.Trail{Legs: []journey.Leg{leg(base, 1), leg(base.Add(10*time.Minute), 3)}}
+	s := fleet.Session{Snap: state.Snapshot{State: state.Idle}}
+	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); !strings.Contains(got, "✗ red 18✓ 1✗ · same test 3rd leg") {
+		t.Errorf("the verdict should name the loop: %q", got)
+	}
+	tr.Legs = tr.Legs[:1]
+	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); strings.Contains(got, "same test") {
+		t.Errorf("a first failure is not a loop: %q", got)
 	}
 }

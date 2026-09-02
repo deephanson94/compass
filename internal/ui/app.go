@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -689,10 +690,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// stays selected, per view, so coming back lands where you left. It is
 		// a list, not a board: three hundred columns of "reading its
 		// transcript…" answered nothing, and the list has the prompts.
+		was := m.archiveView
 		m.toggleArchive()
-		if m.level != levelTrail {
+		switch {
+		case m.archiveView == was:
+			// Nothing archived: the note says so, and the deck stays.
+		case m.archiveView && m.level != levelTrail:
 			// The archive is a list; it opens as one, whatever the depth.
 			m.level = levelTrail
+			m.cursor, m.anchor = -1, -1
+		case !m.archiveView && m.boardFits():
+			// And leaving it goes back to the board, which is where `A`
+			// was pressed: the fleet list beside one trail is not a
+			// level a terminal with a board has.
+			m.level = levelBoard
 			m.cursor, m.anchor = -1, -1
 		}
 		return m, m.refresh()
@@ -757,10 +768,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+d":
 			// Half a page of rows: the cursor is what the viewport follows
 			// here, so the cursor is what moves (SPEC §3).
+			was := m.cursor
 			m.cursorMove(m.trailHalfPage())
+			if m.cursor == was {
+				m.note = "at the present · k goes back"
+			}
 			return m, nil
 		case "ctrl+u":
+			was := m.cursor
 			m.cursorMove(-m.trailHalfPage())
+			if m.cursor == was {
+				m.note = "at the start of the trail"
+			}
 			return m, nil
 		case "G":
 			// G means the same thing at every depth: back to the present. At
@@ -1570,7 +1589,9 @@ func (m *Model) View() string {
 		// The quick replies float over the deck as a small panel: a line
 		// of footer was too easy to miss, and the person pressing `r`
 		// expected something to pop up.
-		overlay(out[3:3+bodyHeight], m.replyPanel(inner), inner)
+		panel := m.replyPanel(inner)
+		left, top := m.panelPlace(inner, panelWidth(panel))
+		overlay(out[3:3+bodyHeight], panel, left, top)
 	}
 
 	for i, line := range out {
@@ -1582,23 +1603,31 @@ func (m *Model) View() string {
 	return strings.Join(out, "\n")
 }
 
-// overlay draws panel centred over rows, leaving what is around it: the
-// deck stays where it was, with the panel on top.
-func overlay(rows, panel []string, width int) {
-	if len(panel) == 0 || len(rows) == 0 {
-		return
-	}
+// panelWidth is the widest row of a panel.
+func panelWidth(panel []string) int {
 	pw := 0
 	for _, p := range panel {
 		if w := lipgloss.Width(p); w > pw {
 			pw = w
 		}
 	}
-	top := (len(rows) - len(panel)) / 2
+	return pw
+}
+
+// overlay draws panel over rows at left, top, leaving what is around it:
+// the deck stays where it was, with the panel on top. A panel that would
+// run off the bottom is lifted until it fits.
+func overlay(rows, panel []string, left, top int) {
+	if len(panel) == 0 || len(rows) == 0 {
+		return
+	}
+	pw := panelWidth(panel)
+	if top+len(panel) > len(rows) {
+		top = len(rows) - len(panel)
+	}
 	if top < 0 {
 		top = 0
 	}
-	left := (width - pw) / 2
 	if left < 0 {
 		left = 0
 	}
@@ -1616,58 +1645,117 @@ func overlay(rows, panel []string, width int) {
 	}
 }
 
-// replyPanel is the quick replies as a boxed list: who it goes to, the
-// numbered lines, and the two keys that matter.
+// replyPanelMax is the widest the reply panel gets: a long stock line
+// wraps rather than stretching the box across the deck.
+const replyPanelMax = 64
+
+// replyPanel is the quick replies as a boxed list: who it goes to — the
+// board's number, the name, the pane, since two sessions can share a name
+// and a tmux session — what that session is doing right now, the numbered
+// lines, and the two keys that matter. A column of air on each side keeps
+// the deck's text from running into the border.
 func (m *Model) replyPanel(inner int) []string {
-	name, target := "—", ""
-	if s, ok := m.selected(); ok {
+	name, target, who := "—", "", ""
+	s, ok := m.selected()
+	if ok {
 		name = sessionName(s.Info)
+		for i, key := range m.viewOrder() {
+			if m.sessions[key].Info.Key() == m.selectedKey {
+				who = strconv.Itoa(i+1) + " · "
+			}
+		}
 	}
 	if pane, ok := m.selectedPane(); ok {
 		target = pane.Target
 	}
-	title := " reply to " + name
+	title := " reply to " + who + name
 	if target != "" {
 		title += " · " + mirrorMark + " " + target
 	}
 	title += " "
-	rows := []string{}
-	body := 0
-	for i, r := range m.replies {
-		if i >= 9 {
-			break
-		}
-		rows = append(rows, fmt.Sprintf("%d  %s", i+1, r))
-	}
-	for _, r := range rows {
-		if w := lipgloss.Width(r); w > body {
-			body = w
-		}
-	}
-	hint := "a digit sends the line and presses enter · esc closes"
-	if w := lipgloss.Width(hint); w > body {
-		body = w
-	}
-	if w := lipgloss.Width(title) + 2; w > body {
-		body = w
-	}
-	if max := inner - 6; body > max {
+
+	body := replyPanelMax
+	if max := inner - 8; body > max {
 		body = max
 	}
 	if body < 20 {
 		body = 20
 	}
+	var rows []readerLine
+	if ok {
+		for _, line := range wrapPrefix(m.replyState(s), "", "", body) {
+			rows = append(rows, readerLine{text: line, kind: readerBody})
+		}
+		rows = append(rows, readerLine{kind: readerBlank})
+	}
+	for i, r := range m.replies {
+		if i >= 9 {
+			break
+		}
+		for _, line := range wrapPrefix(r, fmt.Sprintf("%d  ", i+1), "   ", body) {
+			rows = append(rows, readerLine{text: line, kind: readerText})
+		}
+	}
+	rows = append(rows, readerLine{kind: readerBlank},
+		readerLine{text: "a digit types the line and presses enter · esc closes", kind: readerBody})
+
 	box := func(s string, style lipgloss.Style) string {
-		return ruleStyle.Render("│") + " " + style.Render(pad(clip(s, body), body)) + " " + ruleStyle.Render("│")
+		return " " + ruleStyle.Render("│") + " " + style.Render(pad(clip(s, body), body)) + " " + ruleStyle.Render("│") + " "
 	}
-	top := "┌" + title + strings.Repeat("─", body+2-lipgloss.Width(title)) + "┐"
-	out := []string{ruleStyle.Render(clip(top, body+4))}
+	fill := body + 2 - lipgloss.Width(title)
+	if fill < 0 {
+		title, fill = clip(title, body+2), 0
+	}
+	out := []string{" " + ruleStyle.Render("┌"+title+strings.Repeat("─", fill)+"┐") + " "}
 	for _, r := range rows {
-		out = append(out, box(r, textStyle))
+		out = append(out, box(r.text, readerStyle(r.kind)))
 	}
-	out = append(out, box("", dimStyle), box(hint, dimStyle))
-	out = append(out, ruleStyle.Render("└"+strings.Repeat("─", body+2)+"┘"))
+	out = append(out, " "+ruleStyle.Render("└"+strings.Repeat("─", body+2)+"┘")+" ")
 	return out
+}
+
+// replyState is the one line the panel owes before a digit is pressed:
+// what the session is doing, because the line lands in its input and
+// what that means depends on it. A session on a question gets the
+// question, since the digits of that menu are on the same keys.
+func (m *Model) replyState(s fleet.Session) string {
+	since := relAge(m.now, headSince(s))
+	switch s.Snap.State {
+	case state.NeedsYou:
+		q := strings.TrimSpace(m.headFor(s))
+		if q == "" {
+			q = "a question"
+		}
+		return "▲ on a question · " + q + " — the line is typed into that prompt"
+	case state.Stuck:
+		return "◍ stuck · silent " + since + " — the line is typed under the hung call"
+	case state.Working:
+		return "● working for " + since + " — the line queues behind its turn"
+	default:
+		return "○ idle " + since + " — waiting for a prompt"
+	}
+}
+
+// panelPlace is where a panel goes so the selection stays in view: on the
+// board, under the selected column's header; in a session, over the
+// companion; on a narrow deck, over the trail — never over the row or the
+// card that names the session it is about.
+func (m *Model) panelPlace(inner, pw int) (left, top int) {
+	if m.level == levelBoard && m.boardShown() {
+		if x, y, ok := m.boardPlace(inner); ok {
+			return min(x, max(inner-pw, 0)), y + 3
+		}
+		return 0, 3
+	}
+	fw, mw, _ := m.layout(inner)
+	switch {
+	case fw == 0 && mw > 0:
+		_, tw := sessionSplit(inner)
+		return min(tw+gutterWidth, max(inner-pw, 0)), 2
+	case fw > 0:
+		return min(fw+gutterWidth, max(inner-pw, 0)), 2
+	}
+	return 0, 2
 }
 
 // headerLine: the product mark on the left, the fleet's pulse on the right.
@@ -1754,7 +1842,7 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · g grab · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
@@ -1774,7 +1862,7 @@ func (m *Model) footerLine(w int) string {
 			keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
-		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · ⇧tab board · g grab · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
 			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · ⇧tab board · A live fleet · ? help · q quit"
 		}
@@ -1785,11 +1873,11 @@ func (m *Model) footerLine(w int) string {
 	case m.level >= levelWaypoints && m.sessionView():
 		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back"
+		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back"
 	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · r reply", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
+	for _, drop := range []string{" · r reply", " · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -1802,7 +1890,7 @@ func (m *Model) footerLine(w int) string {
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
 	// clip the note before the keymap goes.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · r reply", " · h/l session", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
+	for _, drop := range []string{" · r reply", " · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
 			break
 		}
