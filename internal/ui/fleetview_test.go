@@ -1014,9 +1014,10 @@ func TestANarrowPaneKeepsTheTrail(t *testing.T) {
 	}
 }
 
-// And the deck actually spends a wide terminal on the side panels, rather than
-// computing widths it does not use: at 200 columns the trail column is wider
-// than its floor, measured off the rendered frame.
+// And the deck actually spends a wide terminal on the panels, rather than
+// computing widths it does not use: at 200 columns both the fleet and the
+// trail are wider than at 118, measured off the rendered frame. Two columns
+// by default (decision #15); the mirror's three are measured when `m` asks.
 func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
 	forceASCII(t)
 
@@ -1032,16 +1033,29 @@ func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
 		return m
 	}
 
-	narrow := columnWidths(t, build(118).View())
+	// 90 rather than 118: by 118 the two-column fleet is already at its cap.
+	narrow := columnWidths(t, build(90).View())
 	wide := columnWidths(t, build(200).View())
-	if len(narrow) != 3 || len(wide) != 3 {
-		t.Fatalf("expected three columns, got %v and %v", narrow, wide)
+	if len(narrow) != 2 || len(wide) != 2 {
+		t.Fatalf("expected two columns, got %v and %v", narrow, wide)
 	}
 	if wide[0] <= narrow[0] {
 		t.Errorf("the fleet stayed at %d columns on a 200-column terminal", wide[0])
 	}
-	if wide[2] <= narrow[2] {
-		t.Errorf("the trail stayed at %d columns on a 200-column terminal", wide[2])
+	if wide[1] <= narrow[1] {
+		t.Errorf("the trail stayed at %d columns on a 200-column terminal", wide[1])
+	}
+
+	// With the mirror on, the middle takes the growth first and the sides
+	// still grow past their floors.
+	withMirror := func(w int) *Model { m := build(w); press(m, "m"); return m }
+	narrow3 := columnWidths(t, withMirror(118).View())
+	wide3 := columnWidths(t, withMirror(200).View())
+	if len(narrow3) != 3 || len(wide3) != 3 {
+		t.Fatalf("with the mirror on, expected three columns, got %v and %v", narrow3, wide3)
+	}
+	if wide3[0] <= narrow3[0] || wide3[2] <= narrow3[2] {
+		t.Errorf("the side panels did not grow with the mirror on: %v → %v", narrow3, wide3)
 	}
 }
 
@@ -1093,6 +1107,7 @@ func TestTheFleetShowsTheAPIErrorRatherThanTheStaleOutcome(t *testing.T) {
 	m := New(nil)
 	m.SetSize(120, 24)
 	m.SetSessions([]fleet.Session{blocked}, base.Add(40*time.Minute))
+	press(m, "m") // the mirror's no-pane fallback is where the words are read
 
 	got := m.View()
 	if !strings.Contains(got, "api error 403") {

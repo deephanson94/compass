@@ -18,6 +18,7 @@ var helpKeys = [][2]string{
 	{"⇧ tab", "zoom back out to the trail (esc too)"},
 	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
 	{"G", "back to the present: the newest row"},
+	{"m", "show / hide the live mirror of the selected pane (Lv1, wide)"},
 	{"?", "this help"},
 	{"q", "quit"},
 }

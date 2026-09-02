@@ -224,10 +224,10 @@ func TestT31RenderTrailGolden(t *testing.T) {
 	compareGolden(t, "trail-38x20.txt", got)
 }
 
-// T32 — the whole deck at 120x30: fleet, live mirror, trail. The mirror's
-// content is raw ANSI and one of its lines is wider than the column, which is
-// the point: nothing may leak past the hairline into the trail.
-func TestT32DeckThreeColumnGolden(t *testing.T) {
+// T32 — the whole deck at 120x30: fleet and trail, and no middle panel. The
+// mirror is off by default (decision #15): the CLI it would show is one Enter
+// away, and the trail is where the columns were being truncated.
+func TestT32DeckTwoColumnGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{
@@ -236,6 +236,30 @@ func TestT32DeckThreeColumnGolden(t *testing.T) {
 
 	got := m.View()
 	compareGolden(t, "deck-120x30.txt", got)
+
+	if strings.Contains(got, mirrorMark+" dev:1.0 · live") || strings.Contains(got, "Churning") {
+		t.Error("the mirror is on screen without being asked for")
+	}
+	// The trail has the middle's columns: the widest fixture label used to be
+	// clipped at 38 and is whole here.
+	if !strings.Contains(got, "scout the payments module") {
+		t.Errorf("the trail did not get the width the mirror gave up:\n%s", got)
+	}
+}
+
+// T32b — `m` brings the mirror back: fleet, live mirror, trail. The mirror's
+// content is raw ANSI and one of its lines is wider than the column, which is
+// the point: nothing may leak past the hairline into the trail.
+func TestT32bMirrorToggledOnGolden(t *testing.T) {
+	forceASCII(t)
+
+	m := deckModel(120, 30, map[string]tmuxop.Pane{
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
+	}, fixtureFrame)
+	press(m, "m")
+
+	got := m.View()
+	compareGolden(t, "deck-120x30-mirror.txt", got)
 
 	for _, line := range strings.Split(got, "\n") {
 		if lipgloss.Width(line) > 120 {
@@ -281,6 +305,7 @@ func TestT34MirrorNoPaneGolden(t *testing.T) {
 	forceASCII(t)
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{}, "")
+	press(m, "m")
 
 	got := m.View()
 	compareGolden(t, "mirror-nopane-120x30.txt", got)
@@ -317,6 +342,7 @@ func TestMirrorWithoutATranscriptStillSaysWho(t *testing.T) {
 
 	m := deckModel(120, 30, map[string]tmuxop.Pane{}, "")
 	m.SetEvents(nil)
+	press(m, "m")
 
 	got := m.View()
 	for _, want := range []string{
@@ -494,5 +520,42 @@ func TestFocusMarkerIsNotTheSelectionMarker(t *testing.T) {
 	// The selected session still carries its own marker, unchanged.
 	if !strings.Contains(got, "▸2 ● api") {
 		t.Errorf("the selected row lost its marker:\n%s", got)
+	}
+}
+
+// The mirror's one running cost was five capture-pane calls a second. With
+// the mirror off screen there is nothing to capture into, so nothing is
+// asked of tmux: not at Lv1 by default, not at Lv2 or Lv3 with it on, and
+// not on a terminal too narrow to draw it.
+func TestNoCaptureWhileTheMirrorIsOffScreen(t *testing.T) {
+	forceASCII(t)
+	pane := map[string]tmuxop.Pane{
+		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
+	}
+
+	m := deckModel(120, 30, pane, fixtureFrame)
+	if m.capture() != nil {
+		t.Error("Lv1 with the mirror off still polls the pane")
+	}
+	press(m, "m")
+	if m.capture() == nil {
+		t.Fatal("m opened the mirror but nothing polls the pane")
+	}
+	pressTab(m) // Lv2: the mirror is a Lv1 panel
+	if m.capture() != nil {
+		t.Error("Lv2 polls the pane with no mirror on screen")
+	}
+	pressTab(m) // Lv3
+	if m.capture() != nil {
+		t.Error("Lv3 polls the pane with no mirror on screen")
+	}
+
+	narrow := deckModel(100, 30, pane, fixtureFrame)
+	press(narrow, "m")
+	if narrow.capture() != nil {
+		t.Error("a terminal too narrow for the mirror still polls the pane")
+	}
+	if narrow.note == "" {
+		t.Error("m on a narrow terminal said nothing about why nothing happened")
 	}
 }

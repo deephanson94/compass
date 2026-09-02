@@ -400,3 +400,47 @@ func TestDiscoverPrefersProseOverASlashCommand(t *testing.T) {
 		}
 	}
 }
+
+// The wrapper the last dogfood found: a local command's captured output,
+// which carries no isMeta and which the title ranking promoted over "/model"
+// as prose. The rule is now the shape — a turn that opens with a tag — so the
+// next wrapper is covered before anyone sees it.
+func TestDiscoverIgnoresCapturedCommandOutput(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-home-user-stdout")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := func(uuid, ts, content string) string {
+		return `{"type":"user","message":{"role":"user","content":"` + content + `"},"uuid":"` + uuid + `",` +
+			`"timestamp":"` + ts + `","cwd":"/home/user/stdout","sessionId":"SID","gitBranch":"main"}` + "\n"
+	}
+	const stdout = `<local-command-stdout>Set model to claude-opus-5</local-command-stdout>`
+	cases := []struct {
+		id, want string
+		lines    []string
+	}{
+		{"77777777-0001-4777-8777-777777777777", "fix the 401 bug", []string{
+			line("a", "2026-08-30T09:00:00.000Z", stdout),
+			line("b", "2026-08-30T09:00:01.000Z", "fix the 401 bug"),
+		}},
+		{"77777777-0002-4777-8777-777777777777", "", []string{
+			line("a", "2026-08-30T09:00:00.000Z", stdout),
+		}},
+	}
+	for _, c := range cases {
+		body := strings.ReplaceAll(strings.Join(c.lines, ""), "SID", c.id)
+		if err := os.WriteFile(filepath.Join(dir, c.id+".jsonl"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		if s := findSession(t, got, c.id); s.Title != c.want {
+			t.Errorf("Title = %q, want %q", s.Title, c.want)
+		}
+	}
+}

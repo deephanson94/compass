@@ -166,8 +166,14 @@ type Model struct {
 	searching bool
 	pulse     bool // HEAD's breath is on its off-beat
 	readonly  bool
-	inTmux    bool   // $TMUX was set: Enter switches the client instead of suspending
-	note      string // one line of consequence, cleared by the next keypress
+
+	// showMirror opens the live mirror of the selected pane in the middle of
+	// the deck at Lv1. Off by default (decision #15): the CLI it mirrors is
+	// one Enter away, and the columns are worth more to the trail. `m` flips
+	// it; `-mirror` / `mirror = true` starts it on.
+	showMirror bool
+	inTmux     bool   // $TMUX was set: Enter switches the client instead of suspending
+	note       string // one line of consequence, cleared by the next keypress
 
 	// spawn is how a built command reaches the world. The deck leaves it nil
 	// and runs the command itself; a harness installs one to read the command
@@ -215,9 +221,10 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly bool, build func(notify func()) Narrator) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, build func(notify func()) Narrator) error {
 	m := New(mgr)
 	m.readonly = readonly
+	m.showMirror = mirror
 	m.inTmux = os.Getenv("TMUX") != ""
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if build != nil {
@@ -385,6 +392,11 @@ func markMapped(mgr *fleet.Manager, mapped map[string]tmuxop.Pane) {
 // capture mirrors the selected pane, and only it: 200ms of one capture-pane is
 // cheap, one per session would not be.
 func (m *Model) capture() tea.Cmd {
+	// No mirror on screen, no capture-pane: five calls a second into tmux
+	// for a frame nobody is looking at is the one cost the mirror had.
+	if !m.mirrorShown() {
+		return nil
+	}
 	pane, ok := m.selectedPane()
 	if !ok {
 		return nil
@@ -542,6 +554,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// stays selected, per view, so coming back lands where you left.
 		m.toggleArchive()
 		return m, m.refresh()
+	case "m":
+		m.showMirror = !m.showMirror
+		switch {
+		case !m.showMirror:
+		case m.width < deckWideCols:
+			m.note = fmt.Sprintf("the mirror needs %d columns; this terminal has %d", deckWideCols, m.width)
+		case m.level != levelTrail:
+			m.note = "the mirror shows at Lv1 (esc to zoom out)"
+		}
+		return m, m.capture()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		m.selectIndex(int(key[0] - '1'))
 		return m, m.refresh()
@@ -688,16 +710,7 @@ func (m *Model) trailBox() (int, int) {
 	if inner < 10 {
 		inner = w
 	}
-	width := inner
-	switch {
-	case inner < minDeckCols:
-		// The trail is not on screen at all; a sane box keeps the arithmetic
-		// honest until it is.
-	case m.width >= deckWideCols:
-		width = trailWidth
-	default:
-		width = inner - fleetWidth - gutterWidth
-	}
+	_, _, width := m.layout(inner)
 
 	h := m.height
 	if h <= 0 {
@@ -1144,45 +1157,87 @@ type column struct {
 	rows  []string
 }
 
-// deckLines lays the fleet beside the mirror and the trail. Wide terminals get
-// all three; narrow ones drop the mirror first (it needs the most room to say
-// anything), then the trail.
+// mirrorShown says whether the live mirror is on screen: switched on, at
+// Lv1, on a terminal wide enough for three columns. It is what capture()
+// checks before spending a tmux call.
+func (m *Model) mirrorShown() bool {
+	return m.showMirror && m.level == levelTrail && m.width >= deckWideCols
+}
+
+// middleShown says whether the deck draws a middle panel at all: the mirror
+// when it is on at Lv1, the reader at Lv3. Lv2 is the trail unfolded, with the
+// fleet beside it and nothing else — the reader is a level, not a panel
+// (decision #15).
+func (m *Model) middleShown() bool {
+	if m.width < deckWideCols {
+		return false
+	}
+	return m.level >= levelReader || m.mirrorShown()
+}
+
+// layout is the deck's column widths for an inner width: fleet, middle, trail.
+// middle is 0 when nothing is drawn there; fleet is 0 when the terminal holds
+// one column, which is the trail's (the reader's at Lv3). Every panel that
+// needs to know how wide it is — the trail's viewport, the reader's folds,
+// the deck itself — asks here, so none of them can disagree.
+func (m *Model) layout(inner int) (fleet, middle, trail int) {
+	if inner < minDeckCols {
+		return 0, 0, inner
+	}
+	if m.middleShown() {
+		fleet, trail = sidePanelWidths(inner)
+		return fleet, inner - fleet - trail - 2*gutterWidth, trail
+	}
+	fleet = twoColumnFleet(inner)
+	return fleet, 0, inner - fleet - gutterWidth
+}
+
+// twoColumnFleet is the fleet's width when the trail has the rest of the deck:
+// it grows from its floor toward its cap on a third of whatever is spare past
+// both floors, and the trail takes the other two thirds and everything after.
+// Session names are the thing the fleet truncates; the trail's labels and
+// reports are the thing the deck exists to show.
+func twoColumnFleet(inner int) int {
+	spare := inner - fleetWidth - trailWidth - gutterWidth
+	if spare < 0 {
+		spare = 0
+	}
+	fleet := fleetWidth + spare/3
+	if fleet > fleetWidthMax {
+		fleet = fleetWidthMax
+	}
+	return fleet
+}
+
+// deckLines lays the deck out: the fleet, then either the trail alone beside
+// it or a middle panel between them — the live mirror (Lv1, when it is on) or
+// the reader (Lv3). Below minDeckCols there is one column: the trail, because
+// the reason to run compass that narrow is to sit it beside a CLI in your own
+// tmux, and beside a CLI the trail is the half that is not already on screen;
+// the header carries the fleet's alarm and the trail's title names the
+// selected session.
 func (m *Model) deckLines(w, h int) []string {
-	if w < minDeckCols {
-		// One column only. It is the trail: the reason to run compass this
-		// narrow is to sit it beside a CLI in your own tmux, and beside a CLI
-		// the trail is the half that is not already on screen. The fleet's
-		// alarm is not lost with it — the header carries `▲2 ●1 ○3`, and the
-		// trail's own title names whichever session j/k has landed on.
+	fw, mw, tw := m.layout(w)
+	if fw == 0 {
 		one := m.trailColumn
 		if m.level >= levelReader {
 			one = m.readerColumn
 		}
 		return fit(one(w, h), h)
 	}
-
-	fw := fleetWidth
-	if m.width >= deckWideCols {
-		// The middle panel follows the trail (M7 contract): the live mirror at
-		// Lv1, and from Lv2 down the reader — anchored to the cursor's row
-		// there, holding focus at Lv3. It takes everything the fixed columns
-		// do not need.
+	if mw > 0 {
 		middle := m.mirrorColumn
-		if m.level >= levelWaypoints {
+		if m.level >= levelReader {
 			middle = m.readerColumn
 		}
-		fw, tw := sidePanelWidths(w)
-		mw := w - fw - tw - 2*gutterWidth
 		return joinColumns(h, []column{
 			{fw, m.fleetColumn(fw, h)},
 			{mw, middle(mw, h)},
 			{tw, m.trailColumn(tw, h)},
 		})
 	}
-
-	// Too narrow for three: the middle panel is dropped and the trail keeps
-	// working, except at Lv3, where the conversation takes the trail's place.
-	tw := w - fw - gutterWidth
+	// Two columns. At Lv3 on a terminal too narrow for three, the conversation
+	// takes the trail's place rather than going unread.
 	second := m.trailColumn
 	if m.level >= levelReader {
 		second = m.readerColumn
@@ -1193,11 +1248,11 @@ func (m *Model) deckLines(w, h int) []string {
 	})
 }
 
-// sidePanelWidths shares out a wide terminal. The fleet and the trail are the
-// two panels only compass draws; the mirror is a rendering of a pane the user
-// can look at directly. So once the mirror has enough width to be readable,
-// every further column goes to the sides — evenly, and no further than their
-// caps, past which a row is padding rather than information.
+// sidePanelWidths shares out a three-column deck. The fleet and the trail are
+// the two panels only compass draws; the middle is a rendering of something
+// else — a pane, a conversation. So once the middle has enough width to be
+// readable, every further column goes to the sides — evenly, and no further
+// than their caps, past which a row is padding rather than information.
 func sidePanelWidths(w int) (fleet, trail int) {
 	fleet, trail = fleetWidth, trailWidth
 	spare := w - fleet - trail - 2*gutterWidth - mirrorEnough

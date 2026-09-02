@@ -1,30 +1,30 @@
  ⌂ compass                                                                                                   ▲1  ●2  ○2
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · archive               │  ⌁ no pane · from transcript                 │  TRAIL · docs                    [Lv1]
-                                │                                              │
-  docs                       1h │                                              │ ◌ nothing yet
- ▸1 ○ update the readme      1h │                                              │
-     main                       │                                              │ scouting will appear here
-                                │                                              │
-  infra                      2h │                                              │
-  2 ○ move dns to route53    2h │                                              │
-     tf/dns                     │                                              │
-                                │                                              │
-  api                        3h │                                              │
-  3 ○ add rate limiting      3h │                                              │
-     claude/rate-limit          │                                              │
-                                │                                              │
-  4 ○ port the client to…    1d │                                              │
-     main                       │                                              │
-                                │                                              │
-  scratch                    2d │                                              │
-  5 ○ try the new sdk        2d │                                              │
-     main                       │                                              │
-                                │                                              │
-                                │ "update the readme"                          │
-                                │                                              │
-                                │ ○ idle · archived                            │
-                                │ idle                                         │
+ ▌FLEET · archive                           │  TRAIL · docs                                                       [Lv1]
+                                            │
+  docs                                   1h │ ◌ nothing yet
+ ▸1 ○ update the readme                  1h │
+     main                                   │ scouting will appear here
+                                            │
+  infra                                  2h │
+  2 ○ move dns to route53                2h │
+     tf/dns                                 │
+                                            │
+  api                                    3h │
+  3 ○ add rate limiting                  3h │
+     claude/rate-limit                      │
+                                            │
+  4 ○ port the client to httpx           1d │
+     main                                   │
+                                            │
+  scratch                                2d │
+  5 ○ try the new sdk                    2d │
+     main                                   │
+
+
+
+
+
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  j/k move · enter attach (prefix d returns) · A live fleet · ? help · q quit
