@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -180,6 +181,7 @@ type Model struct {
 	trails      map[string]journey.Trail
 	boardLabels map[string]map[string]string
 	seen        map[string]time.Time // when each session's trail or pane was last opened
+	seenFile    string               // where the seen-times persist; "" = memory only (harness)
 	boardForced bool                 // the deck left the board only because the terminal narrowed
 	boardShapes map[string]string    // each column's trail shape its labels were read for
 	refreshing  bool                 // a refresh is in flight; the tick does not launch another
@@ -242,6 +244,12 @@ func Run(mgr *fleet.Manager, readonly, mirror bool, build func(notify func()) Na
 	m := New(mgr)
 	m.readonly = readonly
 	m.showMirror = mirror
+	if base, err := os.UserCacheDir(); err == nil {
+		// Beside the resume cache. What was read is a fact about the person,
+		// not the session, and it has to outlive the process for "bright
+		// means unread" to mean anything across restarts.
+		m.LoadSeen(filepath.Join(base, "compass", "seen.json"))
+	}
 	m.inTmux = os.Getenv("TMUX") != ""
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if build != nil {

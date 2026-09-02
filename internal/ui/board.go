@@ -273,7 +273,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
 	entry := m.entryLines(r, w)
-	rows := []string{entry[0], m.boardSecondLine(s, entry[1], w), ""}
+	rows := []string{entry[0], m.boardSecondLine(s, entry[1], w), m.boardDelta(key, s, w)}
 	if h <= 3 {
 		return fit(rows, h)
 	}
@@ -321,6 +321,37 @@ func (m *Model) boardSecondLine(s fleet.Session, line string, w int) string {
 	return pad(line, w-len(group)) + dimStyle.Render(group)
 }
 
+// boardDelta is the header's third row: how much a column has grown since the
+// person last opened it, when both halves of that are known. It is what makes
+// the brightness a quantity — "bright" says there is something unread, this
+// says how much and how far back. A column never opened has no baseline and
+// says nothing (the whole trail is new, and the brightness already says so);
+// a column with nothing new keeps the row as air.
+func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
+	if m.archiveView {
+		return ""
+	}
+	seen, ok := m.seen[key]
+	if !ok || !seen.Before(s.Info.LastEventAt) {
+		return ""
+	}
+	n := 0
+	for _, l := range m.trails[key].Legs {
+		if l.Start.After(seen) {
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	word := "legs"
+	if n == 1 {
+		word = "leg"
+	}
+	line := fmt.Sprintf("↳ %d new %s · looked %s ago", n, word, state.ShortDuration(m.now.Sub(seen)))
+	return dimStyle.Render(clip(line, w))
+}
+
 // boardMuted says whether a column is drawn dim. Bright means there is
 // something in it to read: a session that is working, or waiting on you, or
 // one that finished within the day and has not been opened since — "done
@@ -353,6 +384,7 @@ func (m *Model) markSeen(key string) {
 		m.seen = make(map[string]time.Time)
 	}
 	m.seen[key] = m.now
+	m.saveSeen()
 }
 
 // refreshBoard folds a refresh's trails into the board: the trails themselves,

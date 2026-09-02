@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -711,4 +712,95 @@ func (r *refusingNarrator) Labels(string, journey.Trail) map[string]string {
 func (r *refusingNarrator) Request(string, journey.Trail, string) bool {
 	r.calls++
 	return r.accept
+}
+
+// A bright column that has grown since the last look says by how much: the
+// header's third row carries the count and how far back "since" reaches. A
+// column never opened has no baseline and says nothing; one with nothing new
+// keeps the row as air; the archive never counts.
+func TestABrightColumnSaysWhatIsNewSinceTheLastLook(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	key := sessionKey("s-api")
+
+	// Never opened: no baseline, no line.
+	if got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n"); strings.Contains(got, "new leg") {
+		t.Errorf("a never-opened column claims a delta:\n%s", got)
+	}
+
+	// Looked two hours ago; the fixture trail has grown since: scout (+9m),
+	// build (+15m), test (+28m), fix (+37m) — all after the look at -2h?
+	// No: the look is placed mid-journey, after the scout leg started.
+	m.seen = map[string]time.Time{key: fixtureBase.Add(10 * time.Minute)}
+	got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n")
+	if !strings.Contains(got, "3 new legs · looked 30m ago") {
+		t.Errorf("the delta line is missing or wrong (want 3 legs after +10m, looked 30m before now):\n%s", got)
+	}
+
+	// Looked after everything: air, not "0 new legs".
+	m.seen[key] = m.now
+	if got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n"); strings.Contains(got, "new leg") {
+		t.Errorf("a fully-read column claims a delta:\n%s", got)
+	}
+
+	// Activity inside the current leg but no new leg: air, not "0 new legs".
+	m.seen[key] = fixtureBase.Add(38 * time.Minute)
+	grown := m.sessions[rowFor(t, m, key).sess]
+	grown.Info.LastEventAt = fixtureBase.Add(39 * time.Minute)
+	if got := m.boardDelta(key, grown, 40); got != "" {
+		t.Errorf("no leg is new yet the delta says %q", got)
+	}
+
+	// One new leg speaks singular.
+	m.seen[key] = fixtureBase.Add(30 * time.Minute)
+	if got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n"); !strings.Contains(got, "1 new leg ·") {
+		t.Errorf("one new leg is not singular:\n%s", got)
+	}
+
+	// The archive has no unread.
+	s := m.sessions[rowFor(t, m, key).sess]
+	m.archiveView = true
+	m.seen[key] = fixtureBase.Add(10 * time.Minute)
+	if m.boardDelta(key, s, 40) != "" {
+		t.Error("an archived column claims a delta")
+	}
+}
+
+// The seen-times survive a restart: markSeen writes them, LoadSeen reads
+// them back, and entries too old to matter are pruned on the way out.
+func TestSeenTimesSurviveARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compass", "seen.json")
+	m := boardModel(152, 30)
+	m.seenFile = path
+	pressTab(m) // marks api read, which saves
+
+	fresh := boardModel(152, 30)
+	fresh.LoadSeen(path)
+	seen, ok := fresh.seen[sessionKey("s-api")]
+	if !ok {
+		t.Fatal("a restart forgot what was read")
+	}
+	if !seen.Equal(m.seen[sessionKey("s-api")]) {
+		t.Errorf("the reloaded time is %v, want %v", seen, m.seen[sessionKey("s-api")])
+	}
+
+	// An ancient entry is pruned when the next save happens.
+	m.seen["k-old"] = time.Now().Add(-seenKeep - time.Hour)
+	m.markSeen(sessionKey("s-webapp"))
+	pruned := boardModel(152, 30)
+	pruned.LoadSeen(path)
+	if _, ok := pruned.seen["k-old"]; ok {
+		t.Error("an entry older than seenKeep survived a save")
+	}
+	if _, ok := pruned.seen[sessionKey("s-webapp")]; !ok {
+		t.Error("the save that pruned also lost the new entry")
+	}
+
+	// No file, no path: everything still works, in memory.
+	bare := boardModel(152, 30)
+	bare.LoadSeen(filepath.Join(t.TempDir(), "nowhere", "seen.json"))
+	bare.markSeen("k")
+	if _, ok := bare.seen["k"]; !ok {
+		t.Error("markSeen without a readable file lost the memory too")
+	}
 }
