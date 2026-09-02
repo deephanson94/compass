@@ -36,17 +36,18 @@ and watches all of them at once.
 
 On a wide terminal compass opens on **the board**: every session's trail side by
 side, urgent ones first, each bright while it has something you haven't read and
-dim once it's history. Under each name is how the journey stands — the suite,
+dim once it's history (and marked `unread` in words, so monochrome reads it
+too). Under each name is how the journey stands — the suite,
 the ship, the agents (`✗ red 18✓ 2✗ · edited since`, `✓ shipped 4m ago`,
 `◈3 out · oldest 20m`) — or, for a session that needs you, the question itself.
 HEAD at the bottom of each column wears the fleet's glyph: `● build  wiring the
 filter    for 1h` while it works, `◍ build  Bash: python backfill.py --all
 silent 4m` when it has hung, `▲ design asks you   waiting 4m` with the question
-spelled out beneath, `● build  measuring   waiting on ◈2 · 30m` when it is parked
-on agents it sent out. A trail longer than its column is drawn without the air
-between legs, with the hour on the rail where it turns; a tall board with short
-trails wraps into a second band of columns. `Tab` opens one trail; `Shift+Tab`
-comes back. The deck
+spelled out beneath, `● build  encoder.py   ◈3 out 20m · quiet 15m` when it is
+parked on agents it sent out — and the fleet row says the same sentence. A trail
+longer than its column is drawn without the air between legs, with the hour on
+the rail where it turns; a tall board packs its columns into bands, each as tall
+as its tallest trail. `Tab` opens one trail; `Shift+Tab` comes back. The deck
 above is that one trail with the **live mirror** switched on (`m`): the selected
 session's actual tmux pane, streamed read-only via `capture-pane` — you watch the
 real CLI render, but compass owns no PTY. When you want to *type*, `Enter` hands you the terminal:
@@ -159,7 +160,7 @@ run and nothing else.
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
 | `ctrl+d`/`ctrl+u` | half a page: the trail at Lv1, the reader at Lv3 |
 | `G` | back to the present — the newest row, at any level |
-| `[` / `]` | previous / next prompt — the chapters of a trail, at Lv1 and Lv2 |
+| `[` / `]` | previous / next prompt — the chapters of a trail, at Lv1 and Lv2; your turns, in the reader |
 | `Space` `/` `n`/`N` | Lv3: unfold a result · search · walk the matches |
 | `?` | help |
 
