@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 )
 
@@ -207,7 +208,12 @@ func (m *Model) fleetRows() []fleetRow {
 	rows := make([]fleetRow, 0, len(m.sessions)+len(groups))
 	for _, g := range groups {
 		if headers {
-			rows = append(rows, fleetRow{header: true, label: g.name, age: m.groupAge(g), echo: m.groupEcho(g)})
+			hdr := fleetRow{header: true, label: g.name}
+			if len(g.entries) > 1 {
+				// A header over one row would only repeat it.
+				hdr.age, hdr.echo = m.groupAge(g), m.groupEcho(g)
+			}
+			rows = append(rows, hdr)
 		}
 		for _, i := range g.entries {
 			rows = append(rows, fleetRow{sess: i, num: numbers[m.sessions[i].Info.Key()].num})
@@ -388,6 +394,19 @@ func countEntries(lines []string) int {
 // scan for the recent one. Hoisting the freshest to the header restores that
 // without disturbing the order underneath it.
 func (m *Model) groupAge(g fleetGroup) string {
+	// When the header echoes a state, the clock is that session's wait:
+	// "◍ 1m" over a session stuck for six read as the stuck one, one minute.
+	if m.groupEcho(g) != "" {
+		var oldest time.Time
+		for _, i := range g.entries {
+			if s := m.sessions[i]; wantsAttention(s.Snap.State) && (oldest.IsZero() || s.Snap.Since.Before(oldest)) {
+				oldest = s.Snap.Since
+			}
+		}
+		if !oldest.IsZero() {
+			return m.age(oldest)
+		}
+	}
 	var newest time.Time
 	for _, i := range g.entries {
 		if at := m.sessions[i].Info.LastEventAt; at.After(newest) {
@@ -524,6 +543,15 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	// quiet one, the prompt it was given, because "idle" is what the first line
 	// already told you.
 	act := s.Outcome
+	// The journey's own words, when the board holds its trail: what it is
+	// doing this minute, or how it came out. The fleet row, the column
+	// header and the trail then describe one session one way — three
+	// second lines that disagreed ("✓ green 215✓" here, "Edit: loader.py"
+	// there, "wiring the filter · for 1h" below) were the first thing the
+	// second review read.
+	if line := m.journeyLine(s, w); line != "" {
+		return line
+	}
 	// Unless the session is one you must not miss. Then the sentence that
 	// explains it owns the line: "waiting on your answer · open 22 to the
 	// office CIDR?", "no output for 4m mid-turn · Bash: python backfill.py
@@ -555,9 +583,11 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	if strings.TrimSpace(act) == "" && wantsAttention(s.Snap.State) {
 		act = s.Snap.Reason
 	}
-	if !s.HasClass {
+	if !s.HasClass || wantsAttention(s.Snap.State) || s.Snap.APIError {
 		// Nothing classifiable yet — a session that has only been asked for, or
 		// one woken from the archive whose replay has not reached a tool call.
+		// Or a sentence the reader must not miss: the question, the hung
+		// call, the error. It gets the width; the class is in the trail.
 		return dimStyle.Render(clip(act, w))
 	}
 	class := s.Class.String()
@@ -567,6 +597,78 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 		return head
 	}
 	return head + " " + dimStyle.Render(clip(withoutClassVerb(act, class), rest))
+}
+
+// journeyLine is a live session's second line read off its trail: for a
+// working session its HEAD — the class, what it is doing, how long, and the
+// agents it has out — and for a quiet one the verdict. "" when the trail is
+// not in hand, or the state owes the reader a sentence instead.
+func (m *Model) journeyLine(s fleet.Session, w int) string {
+	if m.archiveView || !s.Live || wantsAttention(s.Snap.State) || s.Snap.APIError {
+		return ""
+	}
+	tr, ok := m.trails[s.Info.Key()]
+	if !ok {
+		return ""
+	}
+	if s.Snap.State == state.Working {
+		head := -1
+		for i := len(tr.Legs) - 1; i >= 0; i-- {
+			if tr.Legs[i].Current {
+				head = i
+				break
+			}
+		}
+		if head < 0 {
+			return ""
+		}
+		l := tr.Legs[head]
+		label, _ := legLabel(l, TrailOpts{Todos: planItems(tr.Tasks), Head: m.headFor(s)})
+		// Laid out like the trail's own HEAD row: the figure flush right,
+		// the label clipped before it, so "for 1h" survives a narrow fleet.
+		tail := "for " + relAge(m.now, l.Start)
+		if out := agentsOut(tr); out > 0 {
+			tail = fmt.Sprintf("◈%d out · %s", out, tail)
+		}
+		labelW := w - 2 - trailVerbWidth - 1 - 1 - len([]rune(tail))
+		if labelW < trailMinLabel {
+			tail = "for " + relAge(m.now, l.Start)
+			labelW = w - 2 - trailVerbWidth - 1 - 1 - len([]rune(tail))
+		}
+		if labelW < 4 {
+			return ""
+		}
+		return classStyle(l.Class).Render(glyphHead+" "+pad(l.Class.String(), trailVerbWidth)) +
+			" " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(tail)
+	}
+	if v := boardVerdict(s, tr, m.now); v != "" {
+		return dimStyle.Render(clip(v, w))
+	}
+	return ""
+}
+
+// headFor is what HEAD is called when the state machine knows: the call a
+// stuck session is hung on, the question a waiting one is asking. "" for
+// the rest — the plan and the leg's own label do.
+func (m *Model) headFor(s fleet.Session) string {
+	switch s.Snap.State {
+	case state.Stuck, state.NeedsYou:
+		if txt := strings.TrimSpace(s.Snap.Activity); txt != "" && txt != "idle" {
+			return txt
+		}
+	}
+	return ""
+}
+
+// agentsOut counts the subagent lanes still open.
+func agentsOut(tr journey.Trail) int {
+	n := 0
+	for _, b := range tr.Branches {
+		if !b.Done {
+			n++
+		}
+	}
+	return n
 }
 
 // wantsAttention is the pair of states that float to the top of their group.

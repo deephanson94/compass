@@ -697,6 +697,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// that travels — and landing on the newest row re-pins the panel.
 			m.cursorToPresent()
 			return m, nil
+		case "[", "]":
+			m.chapter(key)
+			return m, nil
 		case "enter":
 			// The reader is already open on this row (the middle panel follows
 			// the cursor), so Enter has only ever meant one thing: go there.
@@ -747,6 +750,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Back to the present, whatever the offset was.
 			m.trailPinned = true
 			return m, nil
+		case "[", "]":
+			if m.level == levelBoard && m.boardShown() {
+				m.note = "prompts are chapters of one trail · tab into it"
+				return m, nil
+			}
+			m.chapter(key)
+			return m, nil
 		case "enter":
 			return m, m.attach()
 		case "g":
@@ -791,6 +801,90 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		m.jumpMatch(-1)
 	}
 	return m, nil
+}
+
+// chapter is `[` / `]`: the previous or next prompt, treated as a chapter
+// of the trail. A day-long journey is a dozen of your own prompts with the
+// work between them, and "take me to where I said 'now the audit log'" is
+// what getting back to an hour actually means. At Lv1 the viewport opens on
+// the prompt; at Lv2 the cursor lands on it. The note says which chapter
+// this is and when it began.
+func (m *Model) chapter(key string) {
+	rows := TrailRows(m.trail, m.level)
+	var prompts []int // indices into rows
+	for i, r := range rows {
+		if r.Kind == "prompt" {
+			prompts = append(prompts, i)
+		}
+	}
+	if len(prompts) == 0 {
+		m.note = "no prompts in this trail"
+		return
+	}
+	w, h := m.trailBox()
+	o := m.trailOpts(w, h)
+	doc, sel := trailDoc(m.trail, o)
+	docRow := map[int]int{} // row index → document line
+	for line, r := range sel {
+		if r >= 0 {
+			docRow[r] = line
+		}
+	}
+	// Where we are: the cursor at Lv2, the top of the viewport at Lv1.
+	at := -1
+	if m.level >= levelWaypoints && m.cursor >= 0 {
+		at = m.cursor
+	} else {
+		top := trailTop(len(doc), o)
+		for i := range rows {
+			if docRow[i] >= top {
+				at = i
+				break
+			}
+		}
+		if at < 0 {
+			at = len(rows)
+		}
+	}
+	target := -1
+	if key == "]" {
+		for _, p := range prompts {
+			if p > at {
+				target = p
+				break
+			}
+		}
+		if target < 0 {
+			m.note = "no later prompt · G is the present"
+			return
+		}
+	} else {
+		for i := len(prompts) - 1; i >= 0; i-- {
+			if prompts[i] < at {
+				target = prompts[i]
+				break
+			}
+		}
+		if target < 0 {
+			m.note = "no earlier prompt"
+			return
+		}
+	}
+	nth := 0
+	for i, p := range prompts {
+		if p == target {
+			nth = i + 1
+		}
+	}
+	if m.level >= levelWaypoints {
+		m.cursor = target
+		m.cursorMove(0)
+	} else {
+		line := docRow[target]
+		m.trailScroll = clampScroll(line, len(doc), h)
+		m.trailPinned = m.trailScroll >= lastScreenful(len(doc), h)
+	}
+	m.note = fmt.Sprintf("◉ %d/%d · %s · %s", nth, len(prompts), clip(`"`+rows[target].Text+`"`, 40), rows[target].Time.Local().Format("15:04"))
 }
 
 // firstRowInView is the first selectable row at or below the trail
@@ -1252,7 +1346,7 @@ func (m *Model) View() string {
 	var body []string
 	switch {
 	case m.showHelp:
-		body = helpLines(inner, bodyHeight)
+		body = helpLinesFor(inner, bodyHeight, m.boardFits())
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -1326,13 +1420,32 @@ func (m *Model) statusChips() string {
 		}
 		parts = append(parts, stateStyle(st).Render(chip))
 	}
+	// Agents out are work in flight nobody's glyph shows: "●2 ○2 all calm"
+	// over four lanes still out twenty minutes in was a claim, and wrong.
+	out, oldestOut := 0, time.Time{}
+	for _, s := range m.sessions {
+		if !s.Live {
+			continue
+		}
+		for _, b := range m.trails[s.Info.Key()].Branches {
+			if !b.Done {
+				out++
+				if oldestOut.IsZero() || b.Start.Before(oldestOut) {
+					oldestOut = b.Start
+				}
+			}
+		}
+	}
+	if out > 0 {
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("◈%d out · oldest %s", out, m.age(oldestOut))))
+	}
 	if m.archiveView {
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("archive %d", m.archivedCount())))
 	}
 	if len(parts) == 0 {
 		return dimStyle.Render("○ all quiet")
 	}
-	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && !m.archiveView {
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && out == 0 && !m.archiveView {
 		// Calm, said aloud: the absence of a warm glyph is the design, and
 		// in monochrome an absence is also what a clipped header looks like.
 		parts = append(parts, dimStyle.Render("all calm"))

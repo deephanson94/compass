@@ -151,18 +151,21 @@ func TestT58LiveFleetGolden(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		" dev",                     // the tmux session, unnumbered and dim
-		" ops",                     // …in the order the pane list names them
-		" elsewhere",               // …and the live sessions tmux cannot place
-		"◆ test   1216✓ 2✗",        // the result, in the trail's own words
-		"◆ design AskUserQuestion", // the call in flight, when nothing has finished
-		"◆ build  1190✓",           // and a quiet row still says how it went
-		"5 archived · A browses",   // the last fleet row
-		"FLEET · live",             // which fleet this is
+		" dev",                   // the tmux session, unnumbered and dim
+		" ops",                   // …in the order the pane list names them
+		" elsewhere",             // …and the live sessions tmux cannot place
+		"◆ test   1216✓ 2✗",      // the result, in the trail's own words
+		"    AskUserQuestion",    // the question, whole: no class in front of a sentence you must read
+		"◆ build  1190✓",         // and a quiet row still says how it went
+		"5 archived · A browses", // the last fleet row
+		"FLEET · live",           // which fleet this is
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("live view is missing %q", want)
 		}
+	}
+	if strings.Contains(got, "◆ design AskUserQuestion") {
+		t.Error("a needs-you row spends its width on the class instead of the question")
 	}
 	if strings.Contains(got, " misc") {
 		t.Error("a tmux session compass has nothing in must not become a group")

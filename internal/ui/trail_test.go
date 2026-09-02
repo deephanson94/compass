@@ -461,8 +461,10 @@ func TestT73NothingIsDropped(t *testing.T) {
 	tr := longTrail(100)
 	o := TrailOpts{Now: fixtureBase.Add(3 * time.Hour), Width: 38, Height: 20, Level: 1, Cursor: -1}
 	doc := TrailLines(tr, o)
-	if len(doc) < 200 {
-		t.Fatalf("the fixture is %d rows, want at least 200", len(doc))
+	// A trail this long is drawn dense — no rail row between legs — so the
+	// document is a row a leg, plus the prompt, the fork and HEAD.
+	if len(doc) < 100 {
+		t.Fatalf("the fixture is %d rows, want at least 100", len(doc))
 	}
 
 	seen := make([]bool, len(doc))

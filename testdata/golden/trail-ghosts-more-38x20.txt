@@ -1,4 +1,4 @@
-◉ "fix the 401 bug"                38m
+◉ "fix the 401 bug"            38m ago
 ╷
 ◆ scout  middleware.py              5m
 │
@@ -8,7 +8,7 @@
 ├─◈ scout the payments module     ✓ 7m
 │  └ came back with no report
 ● fix    tokens.py              for 3m
-┊ 6 of 6 to go
+┊ 6 of 6 tasks to go
 ◌ add a regression test
 ┊
 ◌ update the changelog

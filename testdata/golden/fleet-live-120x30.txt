@@ -3,7 +3,7 @@
 
  ▌FLEET · live                              │  TRAIL · api                                                        [Lv1]
                                             │
-  dev                                   40s │ ◉ "fix the 401 bug"                                                   38m
+  dev                                   40s │ ◉ "fix the 401 bug"                                               38m ago
  ▸2 ● api                                3m │ ╷
      ◆ test   1216✓ 2✗                      │ ◆ scout  middleware.py                                                 5m
                                             │ │
@@ -12,12 +12,12 @@
                                             │ ◆ test   pytest                                                 18✓ 2✗ 8m
   ops                                 ▲  2m │ ├─◈ scout the payments module                                        ✓ 7m
   1 ▲ infra                  needs you   2m │ │  └ came back with no report
-     ◆ design AskUserQuestion               │ ● fix    tokens.py                                                 for 3m
+     AskUserQuestion                        │ ● fix    tokens.py                                                 for 3m
                                             │
   4 ○ tfstate                           15m │
      ◆ build  1190✓                         │
                                             │
-  elsewhere                             22m │
+  elsewhere                                 │
   5 ○ scratch                           22m │
      ◆ scout  try the streaming api         │
                                             │

@@ -18,6 +18,7 @@ var helpKeys = [][2]string{
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
 	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
 	{"G", "back to the present: the newest row"},
+	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "show / hide the live mirror (on one trail)"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
@@ -38,18 +39,33 @@ const helpTwoCol = 104
 // what gets cut: given the width, the legend moves alongside them; without it,
 // the legend loses its explanations rather than the keys losing their rows.
 func helpLines(w, h int) []string {
-	keys := helpKeyLines(w)
+	return helpLinesFor(w, h, true)
+}
+
+func helpLinesFor(w, h int, board bool) []string {
+	keys := helpKeyLinesFor(w, board)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
 	if w >= helpTwoCol && h >= len(keys) {
 		left := w/2 - gutterWidth
 		return joinColumns(h, []column{
-			{left, helpKeyLines(left)},
+			{left, helpKeyLinesFor(left, board)},
 			{w - left - gutterWidth, helpLegendLines(w-left-gutterWidth, true)},
 		})
 	}
-	lines := append(helpKeyLines(w), "")
+	lines := append(helpKeyLinesFor(w, board), "")
 	legend := helpLegendLines(w, false)
+	if !board {
+		// No board on this terminal: its legend line would describe a
+		// brightness the person never sees.
+		kept := legend[:0]
+		for _, l := range legend {
+			if !strings.Contains(l, "board:") {
+				kept = append(kept, l)
+			}
+		}
+		legend = kept
+	}
 	if h > 0 && len(lines)+len(legend) > h {
 		// Too short for the whole legend: keep what a reader cannot infer —
 		// the glyphs and the class names — and drop the sentences around
@@ -82,9 +98,25 @@ func helpLegendCore(legend []string) []string {
 }
 
 func helpKeyLines(w int) []string {
+	return helpKeyLinesFor(w, true)
+}
+
+// helpKeyLinesFor is the key list for a terminal with or without a board:
+// on one too narrow for it, "zoom in: board → trail" describes a level the
+// person cannot reach.
+func helpKeyLinesFor(w int, board bool) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
-		lines = append(lines, dimStyle.Render(pad(k[0], 10))+textStyle.Render(clip(k[1], w-10)))
+		key, what := k[0], k[1]
+		if !board {
+			switch key {
+			case "tab":
+				what = "zoom in: trail → legs → reader"
+			case "⇧ tab":
+				what = "zoom out (esc too)"
+			}
+		}
+		lines = append(lines, dimStyle.Render(pad(key, 10))+textStyle.Render(clip(what, w-10)))
 	}
 	return lines
 }

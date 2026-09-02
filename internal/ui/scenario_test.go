@@ -386,9 +386,18 @@ func sceneVeryLong() scene {
 					// a run whose output never parsed: a tick on the rail
 				}
 			case journey.Ship:
-				leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointCommit, Text: "auth: " + leg.Label, At: leg.End}}
-			default:
-				leg.Files = []string{strings.ReplaceAll(leg.Label, " ", "_") + ".py"}
+				subject := map[string]string{
+					"commit":      []string{"auth: route sessions through the store", "auth: mint tokens from the store", "auth: audit every refresh"}[(i/10)%3],
+					"push":        "auth: push feat/sessions",
+					"open the pr": "auth: open the pr for review",
+				}[leg.Label]
+				leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointCommit, Text: subject, At: leg.End}}
+			case journey.Build:
+				leg.Files = []string{leg.Label}
+			case journey.Fix:
+				leg.Files = []string{[]string{"router.py", "tokens.py", "audit.py", "tests/test_order.py"}[i%4]}
+			case journey.Docs:
+				leg.Files = []string{leg.Label}
 			}
 			if current && i == legs-1 {
 				leg.Current = true
@@ -480,9 +489,23 @@ func walkthrough(sc scene, w, h int, keys []string) string {
 	fmt.Fprintf(&b, "=== opening frame (Lv%d) ===\n%s\n\n", m.level, m.View())
 	for _, k := range keys {
 		pressKey(m, k)
+		poll(m, sc)
 		fmt.Fprintf(&b, "=== after %q (Lv%d, selected %s) ===\n%s\n\n", k, m.level, selectedName(m), m.View())
 	}
 	return b.String()
+}
+
+// poll is the refresh that follows every keypress in the real deck: the
+// selected session's trail and conversation land again, so a session just
+// selected has its reader by the next frame rather than "reading…" for good.
+func poll(m *Model, sc scene) {
+	key := m.selectedKey
+	tr, ok := sc.trails[key]
+	if !ok {
+		return
+	}
+	m.Update(fleetMsg{sessions: m.sessions, at: m.now, trailFor: key, hasTrail: true,
+		trail: tr, events: eventsFor(tr), trails: sc.trails})
 }
 
 func selectedName(m *Model) string {
@@ -518,6 +541,7 @@ func TestScenarioWalkthrough(t *testing.T) {
 					}
 				}
 				pressKey(m, k)
+				poll(m, sc)
 			}
 			if out != "" {
 				path := filepath.Join(out, fmt.Sprintf("%s-%dx%d.txt", sc.name, w, h))

@@ -2,9 +2,9 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra             needs you   2m │ ▸2 ● api                           3m │  3 ● webapp                       40s
-     ◆ design AskUserQuestion    ⌁ ops │     ✗ red 18✓ 2✗ · edited since       │     ✗ red 18✓ 2✗ · edited since
- ↳ 2 legs · never opened               │ ↳ 4 legs · never opened               │ ↳ 2 legs · never opened
- ◉ "tighten the vpc security grou… 39m │ ◉ "fix the 401 bug"               38m │ ◉ "flake in the checkout suite"   35m
+     AskUserQuestion             ⌁ ops │     ● fix    tokens.py         for 3m │     ● fix    checkout.py      for 30m
+                                       │                                       │
+ ◉ "tighten the vpc security…  39m ago │ ◉ "fix the 401 bug"           38m ago │ ◉ "flake in the checkout sui… 35m ago
  ╷                                     │ ╷                                     │ ╷
  ◆ scout  main.tf                  18m │ ◆ scout  middleware.py             5m │ ◆ test   pytest             18✓ 2✗ 3m
  │                                     │ │                                     │ │

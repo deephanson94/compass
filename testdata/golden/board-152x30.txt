@@ -2,9 +2,9 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra           needs you   2m │ ▸2 ● api                         3m │  3 ● webapp                     40s │  4 ○ tfstate                    15m
-     ◆ design AskUserQuestion  ⌁ ops │     ✗ red 18✓ 2✗ · edited since     │     ✗ red 18✓ 2✗ · edited since     │     build state.tf            ⌁ ops
- ↳ 2 legs · never opened             │ ↳ 4 legs · never opened             │ ↳ 2 legs · never opened             │ ↳ 1 leg · never opened
- ◉ "tighten the vpc security gr… 39m │ ◉ "fix the 401 bug"             38m │ ◉ "flake in the checkout suite" 35m │ ◉ "reconcile the state file"    37m
+     AskUserQuestion           ⌁ ops │     ● fix    tokens.py       for 3m │     ● fix    checkout.py    for 30m │     build state.tf            ⌁ ops
+                                     │                                     │                                     │
+ ◉ "tighten the vpc securit… 39m ago │ ◉ "fix the 401 bug"         38m ago │ ◉ "flake in the checkout s… 35m ago │ ◉ "reconcile the state fil… 37m ago
  ╷                                   │ ╷                                   │ ╷                                   │ ╷
  ◆ scout  main.tf                18m │ ◆ scout  middleware.py           5m │ ◆ test   pytest           18✓ 2✗ 3m │ ◆ build  state.tf               21m
  │                                   │ │                                   │ │                                   │

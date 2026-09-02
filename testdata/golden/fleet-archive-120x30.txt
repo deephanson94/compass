@@ -3,11 +3,11 @@
 
  ▌FLEET · archive                           │  TRAIL · docs                                                       [Lv1]
                                             │
-  docs                                   1h │ ◌ nothing yet
+  docs                                      │ ◌ nothing yet
  ▸1 ○ update the readme                  1h │
      main                                   │ scouting will appear here
                                             │
-  infra                                  2h │
+  infra                                     │
   2 ○ move dns to route53                2h │
      tf/dns                                 │
                                             │
@@ -18,7 +18,7 @@
   4 ○ port the client to httpx           1d │
      main                                   │
                                             │
-  scratch                                2d │
+  scratch                                   │
   5 ○ try the new sdk                    2d │
      main                                   │
 

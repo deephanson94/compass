@@ -78,6 +78,15 @@ func boardColumns(inner, count int) (n, w int) {
 // needs-you, stuck, working, idle by recency — as indices into m.sessions.
 // It is the board's order, column by column and then on into the strip.
 func (m *Model) viewOrder() []int {
+	if m.archiveView {
+		// The archive is a list, never a board: its numbers run down the
+		// list as drawn, not through an order nothing else shows.
+		var out []int
+		for _, g := range m.archiveGroups() {
+			out = append(out, g.entries...)
+		}
+		return out
+	}
 	var out []int
 	for i, s := range m.sessions {
 		if s.Live != m.archiveView {
@@ -273,7 +282,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
 	entry := m.entryLines(r, w)
-	rows := []string{entry[0], m.boardSecondLine(s, m.verdictLine(key, s, entry[1], w), w), m.boardDelta(key, s, w)}
+	rows := []string{entry[0], m.boardSecondLine(s, entry[1], w), m.boardDelta(key, s, w)}
 	if h <= 3 {
 		return fit(rows, h)
 	}
@@ -289,6 +298,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	opts := TrailOpts{
 		Todos:      planItems(tr.Tasks),
 		Labels:     m.boardLabels[key],
+		Head:       m.headFor(s),
 		SessionKey: key,
 		Now:        m.now,
 		Width:      w,
@@ -317,26 +327,6 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		}
 	}
 	return append(rows, lines...)
-}
-
-// verdictLine is the column header's second row: for a session you must not
-// miss, the sentence that explains it (the fleet row already says that); for
-// the rest, how it came out, read off the trail itself rather than the fleet
-// feed — which on a day-long session had the header saying "ship" over a
-// column that ended on a design leg.
-func (m *Model) verdictLine(key string, s fleet.Session, fleetLine string, w int) string {
-	if wantsAttention(s.Snap.State) || s.Snap.APIError || m.archiveView {
-		return fleetLine
-	}
-	tr, ok := m.trails[key]
-	if !ok {
-		return fleetLine
-	}
-	v := boardVerdict(s, tr, m.now)
-	if v == "" {
-		return fleetLine
-	}
-	return dimStyle.Render(clip("    "+v, w))
 }
 
 // boardVerdict is how a journey came out, in words, from its own tail: what
@@ -458,16 +448,9 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	}
 	seen, ok := m.seen[key]
 	if !ok {
-		// No baseline, but a bright column that was never opened should
-		// say so rather than keep the row as air: "never opened" is the
-		// value the brightness stands for, and on a fresh launch it is the
-		// only one that prints.
-		if m.boardMuted(s) {
-			return ""
-		}
-		if n := len(m.trails[key].Legs); n > 0 {
-			return dimStyle.Render(clip(fmt.Sprintf("↳ %s · never opened", plural(n, "leg")), w))
-		}
+		// No baseline: the brightness already says it is unread, and "↳ 4
+		// legs · never opened" on every column of a fresh launch was a
+		// constant wearing a row.
 		return ""
 	}
 	if !seen.Before(s.Info.LastEventAt) {

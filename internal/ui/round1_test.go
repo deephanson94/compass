@@ -83,18 +83,37 @@ func TestBoardVerdictReadsTheTrailsTail(t *testing.T) {
 	}
 }
 
-// The verdict is drawn on a working or idle column and never over the
-// sentence a needs-you or stuck column owes its reader.
-func TestVerdictLineYieldsToAttention(t *testing.T) {
+// The column's second row is the session as it stands: for a working one
+// its HEAD — class, what, how long — for a quiet one the verdict, and for
+// one that needs you the sentence that says why. The fleet row says the same
+// thing in the same words (journeyLine), so zooming in loses nothing.
+func TestSecondRowIsThePresentForAWorkingColumn(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
 	api := sessionKey("s-api")
-	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 40, 20), "\n"); !strings.Contains(got, "✗ red 18✓ 2✗") {
-		t.Errorf("a working column lost its verdict:\n%s", got)
+	col := m.boardColumn(api, rowFor(t, m, api), 40, 20)
+	if !strings.Contains(col[1], "● fix    tokens.py") {
+		t.Errorf("a working column's second row is not its HEAD:\n%s", strings.Join(col, "\n"))
 	}
+	if fleet := m.secondLine(m.sessions[rowFor(t, m, api).sess], 40); !strings.Contains(fleet, "● fix    tokens.py") || !strings.HasSuffix(fleet, "for 3m") {
+		t.Errorf("the fleet row disagrees with the column, or its figure is not flush right: %q", fleet)
+	}
+	// Agents out ride on the HEAD line.
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	m.trails[api] = tr
+	if col := m.boardColumn(api, rowFor(t, m, api), 40, 20); !strings.Contains(col[1], "◈1 out · for 3m") {
+		t.Errorf("a working column with an agent out does not say so:\n%s", strings.Join(col, "\n"))
+	}
+	// A quiet column: the verdict.
+	tf := sessionKey("s-tfstate")
+	if col := m.boardColumn(tf, rowFor(t, m, tf), 40, 20); !strings.Contains(col[1], "build state.tf") {
+		t.Errorf("an idle column's second row is not its verdict:\n%s", strings.Join(col, "\n"))
+	}
+	// One that needs you: the question, whole, no class in front of it.
 	infra := sessionKey("s-infra")
-	col := m.boardColumn(infra, rowFor(t, m, infra), 40, 20)
-	if !strings.Contains(col[1], "AskUserQuestion") || strings.Contains(col[1], "scout") {
+	col = m.boardColumn(infra, rowFor(t, m, infra), 40, 20)
+	if !strings.HasPrefix(strings.TrimSpace(col[1]), "AskUserQuestion") || strings.Contains(col[1], "scout") || strings.Contains(col[1], "◆") {
 		t.Errorf("a needs-you column's second row is not its question:\n%s", strings.Join(col, "\n"))
 	}
 }
@@ -115,24 +134,16 @@ func TestBoardColumnNamesItsTmuxSession(t *testing.T) {
 	}
 }
 
-// A bright column that was never opened says what its brightness stands for.
-func TestNeverOpenedColumnCountsItsLegs(t *testing.T) {
+// A never-opened column keeps its third row as air: the brightness already
+// says it is unread, and a count on every column of a fresh launch was a
+// constant wearing a row.
+func TestNeverOpenedColumnKeepsTheRowAsAir(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
 	api := sessionKey("s-api")
-	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 40, 20), "\n"); !strings.Contains(got, "↳ 4 legs · never opened") {
-		t.Errorf("a never-opened column does not say so:\n%s", got)
-	}
-	// One leg is "1 leg".
-	m.trails[api] = journey.Trail{Legs: m.trails[api].Legs[:1]}
-	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 40, 20), "\n"); !strings.Contains(got, "↳ 1 leg · never opened") {
-		t.Errorf("one leg is not 'legs':\n%s", got)
-	}
-	// A dim column is history: nothing to count.
-	tf := sessionKey("s-tfstate")
-	m.markSeen(tf)
-	if got := strings.Join(m.boardColumn(tf, rowFor(t, m, tf), 40, 20), "\n"); strings.Contains(got, "never opened") {
-		t.Errorf("a column that was opened claims it never was:\n%s", got)
+	col := m.boardColumn(api, rowFor(t, m, api), 40, 20)
+	if strings.TrimSpace(col[2]) != "" {
+		t.Errorf("a never-opened column spends its third row: %q", col[2])
 	}
 }
 
@@ -269,18 +280,27 @@ func TestGhostRailCountsWhatIsToGo(t *testing.T) {
 		{ID: "5", Subject: "Old idea", Status: "deleted"},
 	}
 	got := RenderTrail(tr, TrailOpts{Todos: planItems(tr.Tasks), Now: fixtureBase.Add(40 * time.Minute), Width: 44, Height: 30, Level: 1, Cursor: -1, Pinned: true})
-	if !strings.Contains(got, "┊ 2 of 4 to go") {
+	if !strings.Contains(got, "┊ 2 of 4 tasks to go") {
 		t.Errorf("the ghost rail does not count the plan:\n%s", got)
 	}
 }
 
-// One touched file is a Lv2 row: on a HEAD leg twenty minutes in, it is the
-// only thing the row can say.
-func TestOneTouchedFileIsARow(t *testing.T) {
+// A touched row says what the label did not: one file that is the label is
+// the label restated, and a row that restates its parent is a dead row.
+func TestTouchedRowNeverRestatesTheLabel(t *testing.T) {
 	forceASCII(t)
-	got := RenderTrail(fixtureLv2Trail(fixtureBase), TrailOpts{Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 2, Cursor: -1})
-	if !strings.Contains(got, "└ touched tokens.py") {
-		t.Errorf("a one-file build leg has no touched row:\n%s", got)
+	tr := fixtureLv2Trail(fixtureBase)
+	opts := TrailOpts{Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 2, Cursor: -1}
+	if got := RenderTrail(tr, opts); strings.Contains(got, "└ touched tokens.py") {
+		t.Errorf("'build tokens.py' restates itself as 'touched tokens.py':\n%s", got)
+	}
+	tr.Legs[3].Files = []string{"src/auth/tokens.py"}
+	if got := RenderTrail(tr, opts); strings.Contains(got, "touched src/auth/tokens.py") {
+		t.Errorf("the same file by its path is still the label:\n%s", got)
+	}
+	tr.Legs[3].Files = []string{"conftest.py"}
+	if got := RenderTrail(tr, opts); !strings.Contains(got, "└ touched conftest.py") {
+		t.Errorf("a file the label does not name is worth a row:\n%s", got)
 	}
 }
 
@@ -457,8 +477,8 @@ func TestNeedsYouRowLeadsWithTheQuestion(t *testing.T) {
 	m := New(nil)
 	m.SetSize(120, 30)
 	got := m.secondLine(s, 60)
-	if !strings.HasPrefix(strings.TrimSpace(got), "◆ design Open 22 to the office CIDR") {
-		t.Errorf("second line = %q, want the question first", got)
+	if !strings.HasPrefix(strings.TrimSpace(got), "Open 22 to the office CIDR") {
+		t.Errorf("second line = %q, want the question, whole", got)
 	}
 	if strings.Contains(got, "waiting on your answer") {
 		t.Errorf("second line = %q, repeats the state the glyph gave", got)
@@ -516,5 +536,263 @@ func TestTickRowIsFlushWithTheEdge(t *testing.T) {
 	}
 	if strings.TrimRight(tick, " ") != tick || len([]rune(tick)) != len([]rune(leg)) {
 		t.Errorf("the tick's figure is not flush with the leg's:\n%q\n%q", leg, tick)
+	}
+}
+
+// A Lv1 trail longer than its panel gives up the air between its legs, so
+// the panel holds twice the journey; Lv2 keeps its rails, and so does a
+// trail that fits.
+func TestLongTrailDrawsDense(t *testing.T) {
+	forceASCII(t)
+	rails := func(doc []string) int {
+		n := 0
+		for _, l := range doc {
+			if strings.TrimSpace(l) == "│" {
+				n++
+			}
+		}
+		return n
+	}
+	long := longTrail(30)
+	now := fixtureBase.Add(3 * time.Hour)
+	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 12, Level: 1, Cursor: -1, Pinned: true})); n != 0 {
+		t.Errorf("a trail that does not fit still has %d rail rows at Lv1", n)
+	}
+	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 12, Level: 2, Cursor: -1, Pinned: true})); n == 0 {
+		t.Errorf("Lv2 lost its rails")
+	}
+	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 200, Level: 1, Cursor: -1, Pinned: true})); n == 0 {
+		t.Errorf("a trail that fits lost its rails")
+	}
+	// The rows that say something keep theirs: the hour rules survive.
+	hourly := hourlyTrail(fixtureBase.Add(-30*time.Hour), 30)
+	if got := strings.Join(TrailLines(hourly, TrailOpts{Now: fixtureBase, Width: 44, Height: 12, Level: 1, Cursor: -1, Pinned: true}), "\n"); !strings.Contains(got, "────") {
+		t.Errorf("dense drawing dropped the hour rules:\n%s", got)
+	}
+}
+
+// A prompt's figure says "ago": it is when, where a leg's is how long.
+func TestPromptRowSaysAgo(t *testing.T) {
+	forceASCII(t)
+	got := renderLv(fixtureTrail(fixtureBase), fixtureBase.Add(40*time.Minute), 1, 44, 20)
+	if !strings.Contains(got, "\"fix the 401 bug\"") || !strings.Contains(got, "38m ago") {
+		t.Errorf("the prompt row has no 'ago':\n%s", got)
+	}
+}
+
+// A finding wraps to a second row rather than losing its second half.
+func TestFindingWrapsToTwoRows(t *testing.T) {
+	forceASCII(t)
+	tr := fixtureLv2Trail(fixtureBase)
+	tr.Branches[0].Report = "3 defects found against the oracle; two are the same root cause"
+	got := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 40, 30)
+	if !strings.Contains(got, "same root cause") {
+		t.Errorf("the finding lost its second half:\n%s", got)
+	}
+	// Never more than two rows, however long.
+	tr.Branches[0].Report = strings.Repeat("word ", 40)
+	rows := 0
+	for _, l := range strings.Split(renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 40, 40), "\n") {
+		if strings.Contains(l, "word word") {
+			rows++
+		}
+	}
+	if rows != 2 {
+		t.Errorf("a long finding takes %d rows, want 2", rows)
+	}
+}
+
+// Agents still out are in the header, and a fleet with any out is not calm.
+func TestHeaderCountsAgentsOut(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	for i := range m.sessions {
+		if m.sessions[i].Snap.State == state.NeedsYou {
+			m.sessions[i].Snap.State = state.Idle
+		}
+	}
+	if got := m.statusChips(); !strings.Contains(got, "all calm") {
+		t.Fatalf("chips = %q, want calm before any agent is out", got)
+	}
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(20 * time.Minute), AfterLeg: 3})
+	m.trails[api] = tr
+	got := m.statusChips()
+	if !strings.Contains(got, "◈1 out · oldest 20m") {
+		t.Errorf("chips = %q, want the agent out", got)
+	}
+	if strings.Contains(got, "all calm") {
+		t.Errorf("chips = %q, calm with an agent out", got)
+	}
+}
+
+// A group header's clock is the wait of the state it echoes, and a header
+// over a single row carries no figures at all.
+func TestGroupHeaderClockIsTheEchoedWait(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	// Make another ops session the freshest, so the two clocks differ.
+	for i := range m.sessions {
+		if m.sessions[i].Info.ID == "s-tfstate" {
+			m.sessions[i].Info.LastEventAt = m.now.Add(-30 * time.Second)
+		}
+	}
+	var ops, dev fleetRow
+	for _, r := range m.fleetRows() {
+		if r.header && r.label == "ops" {
+			ops = r
+		}
+		if r.header && r.label == "dev" {
+			dev = r
+		}
+	}
+	if ops.echo != "▲" || ops.age != "2m" {
+		t.Errorf("ops header = %q %q, want the needs-you echo and its 2m wait", ops.echo, ops.age)
+	}
+	_ = dev
+	// A header over one row: nothing but the name.
+	m.SetSessions(m.sessions[:1], m.now)
+	for _, r := range m.fleetRows() {
+		if r.header && (r.age != "" || r.echo != "") {
+			t.Errorf("a header over one row carries figures: %+v", r)
+		}
+	}
+}
+
+// The archive numbers its rows down the list as drawn.
+func TestArchiveNumbersRunDownTheList(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	// Hand the archive over in the reverse of the order it draws, so the
+	// list's order and the slice's are not the same thing by accident.
+	var live, gone []fleet.Session
+	for _, s := range m.sessions {
+		if s.Live {
+			live = append(live, s)
+		} else {
+			gone = append([]fleet.Session{s}, gone...)
+		}
+	}
+	m.SetSessions(append(live, gone...), m.now)
+	press(m, "A")
+	want := 1
+	for _, r := range m.fleetRows() {
+		if r.header {
+			continue
+		}
+		if want <= 9 && r.num != want {
+			t.Fatalf("archive row numbered %d, want %d", r.num, want)
+		}
+		want++
+	}
+	m.selectIndex(2)
+	rows := m.fleetRows()
+	third := ""
+	n := 0
+	for _, r := range rows {
+		if !r.header {
+			n++
+			if n == 3 {
+				third = m.sessions[r.sess].Info.Key()
+			}
+		}
+	}
+	if m.selectedKey != third {
+		t.Errorf("3 selected %q, want the third row drawn %q", m.selectedKey, third)
+	}
+}
+
+// The help does not describe a board to a terminal that has none.
+func TestHelpFitsTheTerminalItIsOn(t *testing.T) {
+	forceASCII(t)
+	with := strings.Join(helpLinesFor(120, 40, true), "\n")
+	without := strings.Join(helpLinesFor(100, 40, false), "\n")
+	if !strings.Contains(with, "board → trail") {
+		t.Errorf("help with a board does not name it:\n%s", with)
+	}
+	if strings.Contains(without, "board") {
+		t.Errorf("help without a board describes one:\n%s", without)
+	}
+}
+
+// HEAD is named by what the state machine knows when it knows more: the
+// hung call of a stuck session, the question of a waiting one.
+func TestStuckHeadNamesTheHungCall(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == api {
+			m.sessions[i].Snap = state.Snapshot{State: state.Stuck, Since: fixtureBase.Add(36 * time.Minute), Reason: "no output for 4m mid-turn", Activity: "Bash: python backfill.py --all"}
+		}
+	}
+	col := strings.Join(m.boardColumn(api, rowFor(t, m, api), 70, 20), "\n")
+	if !strings.Contains(col, "● fix    Bash: python backfill.py --all") {
+		t.Errorf("a stuck column's HEAD is not the hung call:\n%s", col)
+	}
+	if !strings.Contains(col, "no output for 4m mid-turn · Bash: python backfill.py --all") {
+		t.Errorf("a stuck column's second row is not the reason and the call:\n%s", col)
+	}
+	m.point(api)
+	openTrail(m)
+	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "● fix    Bash: python backfill.py --all") {
+		t.Errorf("the single trail's HEAD is not the hung call:\n%s", got)
+	}
+}
+
+// `[` and `]` step between prompts: the chapters of a trail. At Lv1 the
+// viewport opens on the prompt; at Lv2 the cursor lands on it; the note
+// says which chapter and when.
+func TestPromptsAreChapters(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(120, 24)
+	openTrail(m)
+	tr := longTrail(60)
+	tr.Prompts = append(tr.Prompts,
+		journey.Prompt{Text: "now the audit log", At: fixtureBase.Add(20 * time.Minute)},
+		journey.Prompt{Text: "fix all the failures first", At: fixtureBase.Add(40 * time.Minute)},
+	)
+	m.SetTrail(tr)
+	// Lv1, pinned to the present: `[` opens on the last prompt.
+	press(m, "[")
+	if m.trailPinned {
+		t.Fatalf("[ did not move the viewport")
+	}
+	if !strings.Contains(m.note, "◉ 3/3") || !strings.Contains(m.note, "fix all the failures first") {
+		t.Errorf("note = %q, want the third chapter", m.note)
+	}
+	rows := m.trailColumn(60, 22)
+	if !strings.Contains(rows[2], "fix all the failures first") {
+		t.Errorf("the viewport did not open on the prompt:\n%s", strings.Join(rows, "\n"))
+	}
+	press(m, "[")
+	if !strings.Contains(m.note, "◉ 2/3") {
+		t.Errorf("note = %q, want the second chapter", m.note)
+	}
+	press(m, "]")
+	if !strings.Contains(m.note, "◉ 3/3") {
+		t.Errorf("note = %q, want the third chapter again", m.note)
+	}
+	press(m, "]")
+	if !strings.Contains(m.note, "no later prompt") {
+		t.Errorf("note = %q, want the end of the chapters", m.note)
+	}
+	// Lv2: the cursor lands on the prompt row.
+	press(m, "G")
+	pressTab(m)
+	press(m, "[")
+	all := TrailRows(m.trail, levelWaypoints)
+	if m.cursor < 0 || all[m.cursor].Kind != "prompt" || all[m.cursor].Text != "fix all the failures first" {
+		t.Errorf("cursor = %d, not on the last prompt", m.cursor)
+	}
+	press(m, "[")
+	if all[m.cursor].Text != "now the audit log" {
+		t.Errorf("second [ did not reach the earlier prompt: %q", all[m.cursor].Text)
+	}
+	press(m, "[")
+	press(m, "[")
+	if !strings.Contains(m.note, "no earlier prompt") {
+		t.Errorf("note = %q, want the start of the chapters", m.note)
 	}
 }

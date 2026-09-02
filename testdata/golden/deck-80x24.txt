@@ -4,7 +4,7 @@
  ▌FLEET · live                    │  TRAIL · infra                        [Lv1]
                                   │
  ▸1 ▲ infra        needs you   2m │ ◌ nothing yet
-     ◆ design AskUserQuestion     │
+     AskUserQuestion              │
                                   │ scouting will appear here
   2 ● api                      3m │
      ◆ test   1216✓ 2✗            │

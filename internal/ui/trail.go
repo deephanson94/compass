@@ -60,6 +60,17 @@ type TrailOpts struct {
 	// the session to look a leg up. "" simply finds nothing.
 	SessionKey string
 
+	// Head names HEAD when the caller knows better than the trail what the
+	// session is doing this minute: the call it is hung on, the question it
+	// is asking. "" leaves HEAD to the plan and then to the leg's own label.
+	Head string
+
+	// Dense drops the plain rail rows between legs. trailDoc sets it itself
+	// when a Lv1 trail does not fit its viewport: under pressure the rail
+	// gives up its air and twice as many legs fit, while the rows that say
+	// something — forks, ticks, hour rules — keep theirs.
+	Dense bool
+
 	Now           time.Time
 	Width, Height int
 	Level         int  // 1, 2 or 3 (the trail renders identically at 2 and 3)
@@ -175,7 +186,15 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		b.node(dimStyle.Render(clip("scouting will appear here", width)))
 	}
 	b.ghosts(o.Todos, width, o.Height)
-	return b.render()
+	doc, sel := b.render()
+	if !o.Dense && o.Level <= levelTrail && o.Height > 0 && len(doc) > o.Height {
+		// Too long for the panel: draw it again without the air, so the
+		// viewport holds twice the journey. Lv2 keeps its rails — the cursor
+		// and the details need the structure more than the rows.
+		o.Dense = true
+		return trailDoc(tr, o)
+	}
+	return doc, sel
 }
 
 // noSel is the selection map of a block no cursor can land on.
@@ -344,7 +363,7 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 	for i := 0; i < show; i++ {
 		rail := ruleStyle.Render(railGhost)
 		if i == 0 && total > 0 {
-			rail += " " + dimStyle.Render(clip(fmt.Sprintf("%d of %d to go", len(pending), total), body))
+			rail += " " + dimStyle.Render(clip(fmt.Sprintf("%d of %d tasks to go", len(pending), total), body))
 		}
 		b.node(rail)
 		b.node(dimStyle.Render(glyphGhost + " " + clip(pending[i], body)))
@@ -413,6 +432,8 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// the hour turns on carries the hour, so "when" is readable by
 			// eye down a long column (a rule every hour, no extra rows).
 			b.node(hourRule(n.at, o.Width))
+		case o.Dense:
+			// No air between legs: the trail is longer than its panel.
 		default:
 			b.node(ruleStyle.Render(railStroke))
 		}
@@ -595,6 +616,9 @@ func tickRow(l journey.Leg, stroke string, width int) string {
 // narration is for history, and the live leg is still changing its mind.
 func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	if l.Current {
+		if o.Head != "" {
+			return o.Head, false
+		}
 		// HEAD is named by the plan when the plan has a name for it: the
 		// in-progress task's own present tense is what the session is doing
 		// in its own words, and beats a file name — or nothing, which is what
@@ -734,7 +758,9 @@ func withoutClassVerb(label, class string) string {
 // promptRow quotes the human turn — the only words on the trail that are not
 // ours.
 func promptRow(p journey.Prompt, now time.Time, width int) string {
-	age := relAge(now, p.At)
+	// "2h ago", where a leg says "12m": the prompt is when, the leg is how
+	// long, and without the word a column of figures reads as one kind.
+	age := relAge(now, p.At) + " ago"
 	textWidth := width - 2 - 1 - len([]rune(age))
 	if textWidth < trailMinLabel {
 		return dimStyle.Render(glyphPrompt) + padLeft(dimStyle.Render(age), width-1)
@@ -799,7 +825,40 @@ func touchedBody(l journey.Leg, width int) string {
 	if len(l.Files) == 0 {
 		return ""
 	}
+	if len(l.Files) == 1 && sameFile(l.Files[0], l.Label) {
+		// "build router.py" over "touched router.py" is the label restated.
+		return ""
+	}
 	return dimStyle.Render(clip("touched "+strings.Join(l.Files, " · "), width))
+}
+
+// sameFile reports whether a label is the file, by full path or by name.
+func sameFile(file, label string) bool {
+	if file == label {
+		return true
+	}
+	if i := strings.LastIndex(file, "/"); i >= 0 {
+		return file[i+1:] == label
+	}
+	return false
+}
+
+// wrapTwo breaks a sentence over at most two rows of width: the first at the
+// last word that fits, the second clipped. A finding cut at "two are the sa…"
+// was the half a reader came for.
+func wrapTwo(text string, width int) []string {
+	r := []rune(text)
+	if len(r) <= width {
+		return []string{text}
+	}
+	cut := width
+	for i := width; i > width/2; i-- {
+		if r[i] == ' ' {
+			cut = i
+			break
+		}
+	}
+	return []string{string(r[:cut]), clip(strings.TrimSpace(string(r[cut:])), width)}
 }
 
 // branches draws the subagent lanes that forked off leg index after (-1 for the
@@ -846,7 +905,11 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 				report = "came back with no report"
 			}
 			if body := width - trailWayWidth; body >= trailMinLabel {
-				b.details([]detailRow{{text: dimStyle.Render(clip(report, body)), sel: -1}})
+				var rows []detailRow
+				for _, line := range wrapTwo(report, body) {
+					rows = append(rows, detailRow{text: dimStyle.Render(line), sel: -1})
+				}
+				b.details(rows)
 			}
 		}
 	}
@@ -881,9 +944,14 @@ func (m *Model) trailColumn(w, h int) []string {
 
 // trailOpts is the model's state as the renderer wants it.
 func (m *Model) trailOpts(w, h int) TrailOpts {
+	head := ""
+	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
+		head = m.headFor(s)
+	}
 	return TrailOpts{
 		Todos:      m.todos,
 		Labels:     m.labels,
+		Head:       head,
 		SessionKey: m.selectedKey,
 		Now:        m.now,
 		Width:      w,
