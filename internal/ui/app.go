@@ -727,18 +727,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	default: // levelTrail, and the board
 		switch key {
-		case "j", "down":
+		case "j", "down", "l", "right":
+			// The board runs sideways: h/l and the arrows say so, and j/k
+			// keep working for hands that reach for them.
 			if m.level == levelBoard && m.boardShown() {
 				m.boardMove(1)
-			} else {
+			} else if key == "j" || key == "down" {
 				m.move(1)
+			} else {
+				return m, nil
 			}
 			return m, m.refresh()
-		case "k", "up":
+		case "k", "up", "h", "left":
 			if m.level == levelBoard && m.boardShown() {
 				m.boardMove(-1)
-			} else {
+			} else if key == "k" || key == "up" {
 				m.move(-1)
+			} else {
+				return m, nil
 			}
 			return m, m.refresh()
 		case "ctrl+d", "ctrl+u":
@@ -1534,9 +1540,9 @@ func (m *Model) footerLine(w int) string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.level == levelBoard && m.boardShown():
-		keys = "j/k columns · " + m.enterKeymap() + " · tab one trail · g grab · ? help · q quit"
+		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
+			keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · ⇧tab board · g grab · ? help · q quit"

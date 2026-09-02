@@ -10,7 +10,7 @@ import (
 // here only when they already do something.
 var helpKeys = [][2]string{
 	{"1 – 9", "select a session"},
-	{"j / k", "move down / up (↓ ↑ too)"},
+	{"j / k", "move down / up (↓ ↑ too) — on the board, h / l or ← → across"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
 	{"g", "grab the session waiting longest, and attach"},
 	{"A", "browse the archive — every past session, by project"},

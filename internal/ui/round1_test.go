@@ -2150,3 +2150,27 @@ func TestLegendExplainsChapters(t *testing.T) {
 		t.Errorf("the legend does not explain the chapter counter:\n%s", got)
 	}
 }
+
+// The board runs sideways: h/l and the arrows move across its columns.
+func TestBoardMovesSideways(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	was := m.selectedKey
+	press(m, "l")
+	if m.selectedKey == was {
+		t.Errorf("l did not move across the board")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.selectedKey != was {
+		t.Errorf("← did not move back")
+	}
+	if !strings.Contains(m.View(), "h/l columns") {
+		t.Errorf("the board's footer does not name h/l")
+	}
+	// Off the board, h and l do nothing to the selection.
+	openTrail(m)
+	press(m, "l")
+	if m.selectedKey != was {
+		t.Errorf("l moved the selection at Lv1")
+	}
+}

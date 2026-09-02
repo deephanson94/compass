@@ -27,4 +27,4 @@
 
  +1 more · 5 ○ scratch 22m   5 archived · A browses
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k columns · enter attach (prefix d returns) · tab one trail · g grab · ? help · q quit
+ h/l columns · enter attach (prefix d returns) · tab one trail · g grab · ? help · q quit
