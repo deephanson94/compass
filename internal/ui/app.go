@@ -1639,6 +1639,11 @@ func overlay(rows, panel []string, left, top int) {
 		// column's tail sliced at the border read as a leg with no label.
 		line := rows[top+i]
 		before := ansi.Truncate(line, left, "")
+		if lipgloss.Width(line) > left && left > 1 {
+			// A row cut by the panel's edge says it was cut: "✗ red
+			// 310✓ 2✗ · shipped" alone inverted "shipped on red".
+			before = ansi.Truncate(line, left-1, "") + "…"
+		}
 		if w := lipgloss.Width(before); w < left {
 			before += strings.Repeat(" ", left-w)
 		}
@@ -1906,7 +1911,12 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	for _, drop := range []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · [ ] chapters", " · [ ] turns", " · r reply", " · ? help"} {
+	drops := []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
+	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
+		// A chapter note keeps the chapter keys over everything.
+		drops = []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · space unfold", " · [ ] chapters", " · [ ] turns"}
+	}
+	for _, drop := range drops {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
 			break
 		}

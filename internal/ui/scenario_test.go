@@ -513,8 +513,11 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "pytest", 5 * time.Minute, nil, "20✓", nil},
 		legSpec{journey.Build, "implement s6e encoder tests", 25 * time.Minute, []string{"test_s6e.py"}, "", nil},
 	)
-	t.Prompts = append(t.Prompts, journey.Prompt{Text: "the encoder is in; now the tests, then measure DLA", At: n.Add(-70 * time.Minute)})
-	t.Compactions = []time.Time{n.Add(-95 * time.Minute)}
+	// The second prompt and the compaction fall between the test and the
+	// last build — the build the lanes fork from — so the column reads in
+	// time order.
+	t.Prompts = append(t.Prompts, journey.Prompt{Text: "the encoder is in; now the tests, then measure DLA", At: n.Add(-133 * time.Minute)})
+	t.Compactions = []time.Time{n.Add(-134 * time.Minute)}
 	t = withBranch(t, 0, "Score encoder gates vs oracle defects", n.Add(-165*time.Minute), true, "3 defects found against the oracle; two are the same root cause")
 	t = withBranch(t, 3, "Measure moe_by_andy DLA on dx6", n.Add(-20*time.Minute), false, "")
 	t = withBranch(t, 3, "Review /auto-resume skill design", n.Add(-18*time.Minute), false, "")

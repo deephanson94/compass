@@ -94,7 +94,8 @@ func (m *Model) transcriptBody(w, h int) []string {
 	// which is exactly what is wanted here.
 	frame := RenderReader(m.events, ReaderOpts{
 		Width: w, Height: h, Scroll: readerEnd,
-		Unfolded: m.unfolded,
+		Unfolded: m.unfolded, Anchor: -1,
+		Now: m.now, CWD: m.readerCWD(), // the same document the reader draws, clocks and all
 	})
 	if strings.TrimSpace(frame) == "" {
 		return m.transcriptFacts(w)

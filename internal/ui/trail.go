@@ -1446,16 +1446,19 @@ func (m *Model) cardSecond(w int) string {
 		// the question, the present — not the last finished leg. The
 		// board's column says the present; zooming in lost it.
 		if r, ok := m.boardRows()[m.selectedKey]; ok {
-			if lines := m.entryLines(r, room); len(lines) > 1 {
-				if head := strings.TrimSpace(ansi.Strip(lines[1])); head != "" {
+			// entryLines indents its rows by four: give it the card's
+			// full width so the sentence is not cut for a margin it
+			// then does not draw.
+			if lines := m.entryLines(r, room+4); len(lines) > 1 {
+				if head := oneSpace(ansi.Strip(lines[1])); head != "" {
 					verdict = []string{head}
 				}
 			}
 		}
 	} else if s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou {
 		if r, ok := m.boardRows()[m.selectedKey]; ok {
-			if lines := m.entryLines(r, room); len(lines) > 1 {
-				if head := strings.TrimSpace(ansi.Strip(lines[1])); head != "" {
+			if lines := m.entryLines(r, room+4); len(lines) > 1 {
+				if head := oneSpace(ansi.Strip(lines[1])); head != "" {
 					verdict = []string{head}
 				}
 			}
@@ -1496,6 +1499,13 @@ func (m *Model) cardSecond(w int) string {
 		best = pad(best, fit+2) + tmux
 	}
 	return "    " + dimStyle.Render(best)
+}
+
+// oneSpace is a fleet row's sentence with its column padding taken out:
+// "◍ fix    Bash: … --all        silent 4m" is one clause, and the padding
+// made it wider than the card and clipped it to "sile…".
+func oneSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // withoutPrefix drops the clauses that begin with prefix.

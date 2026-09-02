@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/state"
 )
 
 // doc is the flattened reader document, cached between keypresses — scrolling,
@@ -227,6 +228,12 @@ func (m *Model) anchorReader() {
 			// plan's name for HEAD — not the heuristic label beneath it.
 			w, h := m.trailBox()
 			m.anchorText, _ = legLabel(m.trail.Legs[row.Leg], m.trailOpts(w, h))
+			if o := m.trailOpts(w, h); m.trail.Legs[row.Leg].Current && o.HeadState == state.NeedsYou && o.Head != "" {
+				// HEAD's row carries the first clause of the question and
+				// spells the rest beneath it; the title gets the whole
+				// question and clips it with a mark, not the row's cut.
+				m.anchorText = o.Head
+			}
 		}
 	}
 }

@@ -481,11 +481,11 @@ func TestTheVerdictNamesARepeatedFailure(t *testing.T) {
 	}
 	tr := journey.Trail{Legs: []journey.Leg{leg(base, 1), leg(base.Add(10*time.Minute), 3)}}
 	s := fleet.Session{Snap: state.Snapshot{State: state.Idle}}
-	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); !strings.Contains(got, "✗ red 18✓ 1✗ · same test 3rd failure") {
+	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); !strings.Contains(got, "✗ red 18✓ 1✗ · 3rd failure") {
 		t.Errorf("the verdict should name the loop: %q", got)
 	}
 	tr.Legs = tr.Legs[:1]
-	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); strings.Contains(got, "same test") {
+	if got := boardVerdict(s, tr, base.Add(20*time.Minute)); strings.Contains(got, "failure") {
 		t.Errorf("a first failure is not a loop: %q", got)
 	}
 }
@@ -677,5 +677,36 @@ func TestTheDayCountsFromAnHour(t *testing.T) {
 	}
 	if got := trailDay(tr, base.Add(40*time.Minute), false); got != "" {
 		t.Errorf("forty minutes is not a day: %q", got)
+	}
+}
+
+// ---- round eleven
+
+// A row the panel's edge cuts says it was cut, and the footer keeps the
+// key a chapter note is about.
+func TestThePanelsCutIsMarkedAndAChapterNoteKeepsItsKey(t *testing.T) {
+	forceASCII(t)
+	rows := []string{"✗ red 310✓ 2✗ · shipped on red                    ⌁ work"}
+	overlay(rows, []string{"│ x │"}, 30, 0)
+	if cut := strings.Index(rows[0], "…│ x │"); cut < 0 || !strings.HasPrefix("✗ red 310✓ 2✗ · shipped on red", rows[0][:cut]) {
+		t.Errorf("the cut row should end in an ellipsis at the panel's edge: %q", rows[0])
+	}
+	rows = []string{"short"}
+	overlay(rows, []string{"│ x │"}, 30, 0)
+	if strings.Contains(rows[0], "…") {
+		t.Errorf("a row the panel does not cut wears no mark: %q", rows[0])
+	}
+
+	m := boardModel(100, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)
+	toLv3(m)
+	m.note = "❯ 3/12 · \"now the audit log\" · 14:02"
+	if foot := m.footerLine(98); !strings.Contains(foot, "[ ] turns") {
+		t.Errorf("a chapter note should keep the chapter key: %q", foot)
+	}
+	m.note = "no waypoints · reader at the present"
+	if foot := m.footerLine(98); !strings.Contains(foot, "space unfold") {
+		t.Errorf("another note should keep the reader's own key: %q", foot)
 	}
 }

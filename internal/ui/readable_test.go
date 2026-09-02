@@ -138,10 +138,10 @@ func TestFoldRowsLeadWithTheOutput(t *testing.T) {
 	}
 	got = RenderReader(ev, ReaderOpts{Width: 70, Height: 20})
 	for _, want := range []string{
-		"⎿ 3 lines",                    // a file is counted, not quoted
+		"⎿ 3 lines",                        // a file is counted, not quoted
 		"⎿ 1 passed in 0.4s · 1 more line", // the dots are not what the run said
-		"⎿ Everything up-to-date",      // one line is the line
-		"⎿ ✗ FAILED test_a.py::test_x", // a failure leads with what failed, not its dots
+		"⎿ Everything up-to-date",          // one line is the line
+		"⎿ ✗ FAILED test_a.py::test_x",     // a failure leads with what failed, not its dots
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
