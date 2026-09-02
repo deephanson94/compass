@@ -44,7 +44,11 @@ HEAD at the bottom of each column wears the fleet's glyph: `● build  wiring th
 filter    for 1h` while it works, `◍ build  Bash: python backfill.py --all
 silent 4m` when it has hung, `▲ design asks you   waiting 4m` with the question
 spelled out beneath, `● build  encoder.py   ◈3 out 20m · quiet 15m` when it is
-parked on agents it sent out — and the fleet row says the same sentence. A trail
+parked on agents it sent out — and the fleet row says the same sentence, and
+keeps it over its label when it is narrow. A subagent lane reads `⋯ 20m out`,
+`✓ 7m ago` with its finding beneath, or `⌀ 7m ago` when it came back with
+nothing; a lane whose label begins another live session's prompt is marked
+`→3`, a hedge that `3` goes and checks. A trail
 longer than its column is drawn without the air between legs, with the hour on
 the rail where it turns; a tall board packs its columns into bands, each as tall
 as its tallest trail. `Tab` opens one trail; `Shift+Tab` comes back. The deck
