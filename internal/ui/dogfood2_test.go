@@ -8,7 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
@@ -169,11 +171,15 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 	if !m.replying {
 		t.Fatal("r did not offer the replies")
 	}
-	foot := m.footerLine(150)
-	for _, want := range []string{"reply to api", "1 please continue", "2 report status", "3 you were stuck", "esc"} {
-		if !strings.Contains(foot, want) {
-			t.Errorf("the footer should offer %q:\n%s", want, foot)
+	view := m.View()
+	for _, want := range []string{"┌ reply to api · ⌁ dev:1.0", "1  please continue", "2  report status", "3  you were stuck", "esc closes"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the panel should offer %q:\n%s", want, view)
 		}
+	}
+	// A panel, not a takeover: the deck is still there around it.
+	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 sends") {
+		t.Errorf("the deck should stay under the panel, and the footer name the keys:\n%s", view)
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
 	if m.replying {
@@ -252,8 +258,8 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 	m, _ = build()
 	m.replies = []string{"ship it"}
 	press(m, "r")
-	if foot := m.footerLine(150); !strings.Contains(foot, "1 ship it") || strings.Contains(foot, "please continue") {
-		t.Errorf("configured replies should be what is offered:\n%s", foot)
+	if view := m.View(); !strings.Contains(view, "1  ship it") || strings.Contains(view, "please continue") {
+		t.Errorf("configured replies should be what is offered:\n%s", view)
 	}
 }
 
@@ -303,5 +309,60 @@ func TestTheSegmenterCountsRepeatsAndCompactions(t *testing.T) {
 	}
 	if len(tr.Prompts) != 1 {
 		t.Errorf("the compaction became a prompt: %d prompts", len(tr.Prompts))
+	}
+}
+
+// The time a session spent waiting for your next prompt is added up over
+// the trail and said on the board, the day's totals and the prompt row.
+// A gap over three hours is you being away and is not counted; a live
+// session still waiting adds the open wait.
+func TestWaitedOnYouCountsTheGapsBeforeYourPrompts(t *testing.T) {
+	forceASCII(t)
+
+	base := fixtureBase
+	tr := journey.Trail{
+		Prompts: []journey.Prompt{
+			{Text: "start", At: base},
+			{Text: "now the tests", At: base.Add(50 * time.Minute)},            // 40m after the leg ended
+			{Text: "back from lunch", At: base.Add(5 * time.Hour)},             // 4h: away, not waited on
+			{Text: "and the docs", At: base.Add(5*time.Hour + 32*time.Minute)}, // 2m: not worth a word
+		},
+		Legs: []journey.Leg{
+			{Class: journey.Build, Label: "tokens.py", Start: base.Add(time.Minute), End: base.Add(10 * time.Minute)},
+			{Class: journey.Test, Label: "pytest", Start: base.Add(51 * time.Minute), End: base.Add(60 * time.Minute)},
+			{Class: journey.Fix, Label: "expiry", Start: base.Add(5*time.Hour + 1*time.Minute), End: base.Add(5*time.Hour + 30*time.Minute)},
+			{Class: journey.Docs, Label: "README.md", Start: base.Add(5*time.Hour + 33*time.Minute), End: base.Add(5*time.Hour + 40*time.Minute), Current: true},
+		},
+	}
+	if got := promptWaits(tr); got != 42*time.Minute {
+		t.Errorf("promptWaits = %v, want 42m (40m, and the 2m before the docs)", got)
+	}
+	now := base.Add(6 * time.Hour)
+	idle := fleet.Session{Live: true, Snap: state.Snapshot{State: state.Idle}, Info: fleet.SessionInfo{LastEventAt: base.Add(5*time.Hour + 40*time.Minute)}}
+	if got := youWaited(tr, now, idle); got != 62*time.Minute {
+		t.Errorf("youWaited with 20m still open = %v, want 1h2m", got)
+	}
+	working := fleet.Session{Live: true, Snap: state.Snapshot{State: state.Working}, Info: idle.Info}
+	if got := youWaited(tr, now, working); got != 42*time.Minute {
+		t.Errorf("a working session is not waiting: %v", got)
+	}
+	if got := boardVerdict(idle, tr, now); !strings.Contains(got, "on you 1h") {
+		t.Errorf("the board's verdict should carry the wait: %q", got)
+	}
+	if got := trailDay(tr, now, false); !strings.Contains(got, "waited on you 42m") {
+		t.Errorf("the day's totals should carry the wait: %q", got)
+	}
+	if got := trailDay(tr, now, true); !strings.Contains(got, "on you 42m") {
+		t.Errorf("the compact totals should carry the wait: %q", got)
+	}
+	got := renderLv(tr, now, 1, 100, 30)
+	if !strings.Contains(got, "waited 40m · ") {
+		t.Errorf("the prompt row should say how long it waited:\n%s", got)
+	}
+	if strings.Count(got, "waited") != 1 {
+		t.Errorf("only the notable wait under three hours is a word:\n%s", got)
+	}
+	if got := renderLv(tr, now, 1, 50, 30); strings.Contains(got, "waited") {
+		t.Errorf("a narrow row has no room for the wait:\n%s", got)
 	}
 }

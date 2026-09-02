@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
@@ -1243,24 +1244,6 @@ func (m *Model) offerReplies() {
 	m.replying = true
 }
 
-// replyMenu is the footer while the replies are up: who it goes to, the
-// numbered lines, and the way out.
-func (m *Model) replyMenu() string {
-	name := "—"
-	if s, ok := m.selected(); ok {
-		name = sessionName(s.Info)
-	}
-	parts := []string{"reply to " + name + " →"}
-	for i, r := range m.replies {
-		if i >= 9 {
-			break
-		}
-		parts = append(parts, fmt.Sprintf("%d %s", i+1, r))
-	}
-	parts = append(parts, "esc")
-	return strings.Join(parts, " · ")
-}
-
 // replyKey handles a key while the replies are up: a digit sends its line,
 // anything else closes the menu and sends nothing.
 func (m *Model) replyKey(key string) tea.Cmd {
@@ -1583,6 +1566,13 @@ func (m *Model) View() string {
 	out = append(out, rule(inner))
 	out = append(out, m.footerLine(inner))
 
+	if m.replying {
+		// The quick replies float over the deck as a small panel: a line
+		// of footer was too easy to miss, and the person pressing `r`
+		// expected something to pop up.
+		overlay(out[3:3+bodyHeight], m.replyPanel(inner), inner)
+	}
+
 	for i, line := range out {
 		if line == "" {
 			continue
@@ -1590,6 +1580,94 @@ func (m *Model) View() string {
 		out[i] = strings.Repeat(" ", edgePad) + line
 	}
 	return strings.Join(out, "\n")
+}
+
+// overlay draws panel centred over rows, leaving what is around it: the
+// deck stays where it was, with the panel on top.
+func overlay(rows, panel []string, width int) {
+	if len(panel) == 0 || len(rows) == 0 {
+		return
+	}
+	pw := 0
+	for _, p := range panel {
+		if w := lipgloss.Width(p); w > pw {
+			pw = w
+		}
+	}
+	top := (len(rows) - len(panel)) / 2
+	if top < 0 {
+		top = 0
+	}
+	left := (width - pw) / 2
+	if left < 0 {
+		left = 0
+	}
+	for i, p := range panel {
+		if top+i >= len(rows) {
+			break
+		}
+		line := rows[top+i]
+		before := ansi.Truncate(line, left, "")
+		if w := lipgloss.Width(before); w < left {
+			before += strings.Repeat(" ", left-w)
+		}
+		after := ansi.TruncateLeft(line, left+pw, "")
+		rows[top+i] = before + pad(p, pw) + after
+	}
+}
+
+// replyPanel is the quick replies as a boxed list: who it goes to, the
+// numbered lines, and the two keys that matter.
+func (m *Model) replyPanel(inner int) []string {
+	name, target := "—", ""
+	if s, ok := m.selected(); ok {
+		name = sessionName(s.Info)
+	}
+	if pane, ok := m.selectedPane(); ok {
+		target = pane.Target
+	}
+	title := " reply to " + name
+	if target != "" {
+		title += " · " + mirrorMark + " " + target
+	}
+	title += " "
+	rows := []string{}
+	body := 0
+	for i, r := range m.replies {
+		if i >= 9 {
+			break
+		}
+		rows = append(rows, fmt.Sprintf("%d  %s", i+1, r))
+	}
+	for _, r := range rows {
+		if w := lipgloss.Width(r); w > body {
+			body = w
+		}
+	}
+	hint := "a digit sends the line and presses enter · esc closes"
+	if w := lipgloss.Width(hint); w > body {
+		body = w
+	}
+	if w := lipgloss.Width(title) + 2; w > body {
+		body = w
+	}
+	if max := inner - 6; body > max {
+		body = max
+	}
+	if body < 20 {
+		body = 20
+	}
+	box := func(s string, style lipgloss.Style) string {
+		return ruleStyle.Render("│") + " " + style.Render(pad(clip(s, body), body)) + " " + ruleStyle.Render("│")
+	}
+	top := "┌" + title + strings.Repeat("─", body+2-lipgloss.Width(title)) + "┐"
+	out := []string{ruleStyle.Render(clip(top, body+4))}
+	for _, r := range rows {
+		out = append(out, box(r, textStyle))
+	}
+	out = append(out, box("", dimStyle), box(hint, dimStyle))
+	out = append(out, ruleStyle.Render("└"+strings.Repeat("─", body+2)+"┘"))
+	return out
 }
 
 // headerLine: the product mark on the left, the fleet's pulse on the right.
@@ -1689,7 +1767,7 @@ func (m *Model) footerLine(w int) string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.replying:
-		keys = m.replyMenu()
+		keys = fmt.Sprintf("reply: 1–%d sends · esc closes", min(len(m.replies), 9))
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · g grab · ? help · q quit"
 		if m.archiveView {

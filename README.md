@@ -171,7 +171,7 @@ run and nothing else.
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
-| `r` | quick reply: the footer offers stock lines ("please continue", "report status", the quota one), a digit types the line into the session's tmux pane and presses Enter. `reply = "…"` lines in the config replace them. Off under `-readonly` |
+| `r` | quick reply: a small panel offers stock lines ("please continue", "report status", the quota one), a digit types the line into the session's tmux pane and presses Enter. `reply = "…"` lines in the config replace them. Off under `-readonly` |
 | `?` | help |
 
 ## Design docs

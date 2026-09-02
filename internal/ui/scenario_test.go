@@ -679,7 +679,7 @@ func pressKey(m *Model, key string) {
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "tab", "shift+tab", "A", "A", "m", "?"}
+var canonicalKeys = []string{"r", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "tab", "shift+tab", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder

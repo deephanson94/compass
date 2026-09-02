@@ -536,7 +536,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		} else {
 			// Selectable from Lv2, like a leg: it is the row you wrote, and the
 			// reader anchors to it as readily as to any leg's first line.
-			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, n.prompt+1, len(tr.Prompts)))
+			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, n.prompt+1, len(tr.Prompts), promptWait(tr, n.prompt)))
 			forked = false
 		}
 	}
@@ -1099,10 +1099,15 @@ func withoutClassVerb(label, class string) string {
 
 // promptRow quotes the human turn — the only words on the trail that are not
 // ours.
-func promptRow(p journey.Prompt, now time.Time, width, nth, total int) string {
+func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited time.Duration) string {
 	// "2h ago", where a leg says "12m": the prompt is when, the leg is how
 	// long, and without the word a column of figures reads as one kind.
 	age := relAge(now, p.At) + " ago"
+	if waited >= waitNotable && width >= trailInlineWidth {
+		// How long the session sat waiting for this prompt, where the row
+		// has the room: "waited 40m · 2h ago".
+		age = "waited " + relDuration(waited) + " · " + age
+	}
 	// The chapter: "◉ 9/13" is what `[` and `]` step through, and on a
 	// trail with a dozen prompts it is the readout to steer by.
 	lead := glyphPrompt
@@ -1501,6 +1506,9 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 		if n := len(tr.Compactions); n > 0 {
 			out += fmt.Sprintf(" %d%s", n, glyphCompact)
 		}
+		if d := promptWaits(tr); d >= waitNotable {
+			out += " · on you " + relDuration(d)
+		}
 		return out
 	}
 	if ships > 0 {
@@ -1512,7 +1520,81 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 	if n := len(tr.Compactions); n > 0 {
 		out += " · " + plural(n, "compaction")
 	}
+	if d := promptWaits(tr); d >= waitNotable {
+		out += " · waited on you " + relDuration(d)
+	}
 	return out
+}
+
+// Waiting on you. A session that has finished its turn is waiting for your
+// next prompt, and the gap between the two is time the session spent on
+// you — the number that says which of a fleet your own turns are the
+// bottleneck of. It is summed over the trail's prompts (promptWaits), with
+// the wait still open added on the board (youWaited), and a gap longer
+// than waitAway is not counted at all: that is you being away, not the
+// session waiting.
+const (
+	waitNotable = 5 * time.Minute // below this a wait is not worth a word
+	waitAway    = 3 * time.Hour   // above this you were away, not waited on
+)
+
+// promptWait is how long the trail sat idle before its i-th prompt: from the
+// last thing that happened before it — a leg's end, a lane's return, the
+// prompt before — to the prompt. Zero for the first prompt, for a gap the
+// trail cannot see, and for one longer than waitAway.
+func promptWait(tr journey.Trail, i int) time.Duration {
+	if i < 0 || i >= len(tr.Prompts) {
+		return 0
+	}
+	at := tr.Prompts[i].At
+	var last time.Time
+	if i > 0 {
+		last = tr.Prompts[i-1].At
+	}
+	for _, l := range tr.Legs {
+		if !l.End.IsZero() && !l.End.After(at) && l.End.After(last) {
+			last = l.End
+		}
+	}
+	for _, b := range tr.Branches {
+		if b.Done && !b.End.After(at) && b.End.After(last) {
+			last = b.End
+		}
+	}
+	if last.IsZero() {
+		return 0
+	}
+	if d := at.Sub(last); d > 0 && d <= waitAway {
+		return d
+	}
+	return 0
+}
+
+// promptWaits is the trail's waits on you added up: every prompt's.
+func promptWaits(tr journey.Trail) time.Duration {
+	var total time.Duration
+	for i := range tr.Prompts {
+		total += promptWait(tr, i)
+	}
+	return total
+}
+
+// youWaited is promptWaits with the wait still open on top: a live session
+// that has finished its turn — idle, or asking you something — has been
+// waiting since its last event, and that wait is on you too.
+func youWaited(tr journey.Trail, now time.Time, s fleet.Session) time.Duration {
+	total := promptWaits(tr)
+	if s.Live && (s.Snap.State == state.Idle || s.Snap.State == state.NeedsYou) && !s.Info.LastEventAt.IsZero() {
+		if d := now.Sub(s.Info.LastEventAt); d > 0 && d <= waitAway {
+			total += d
+		}
+	}
+	return total
+}
+
+// relDuration is a duration the way the trail says ages: "40m", "1h20".
+func relDuration(d time.Duration) string {
+	return state.ShortDuration(d)
 }
 
 // trailTitle: whose trail this is, and how deep we are in it.

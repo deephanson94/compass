@@ -173,6 +173,7 @@ func helpLegendLines(w int, roomy bool) []string {
 		dimStyle.Render(clip("        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them", w)),
 		dimStyle.Render(clip("        ⟲ compacted — the conversation was folded into a summary here", w)),
 		dimStyle.Render(clip("        ✗ test · 3rd time — the same test has failed in three legs", w)),
+		dimStyle.Render(clip("        on you 40m — today's wait for your next prompt (gaps over 3h are you away)", w)),
 		dimStyle.Render(clip("board:  bright = something unread · dim = read, or a day old", w)),
 		"",
 		dimStyle.Render(clip("every leg is one of seven classes, named on its row:", w)),

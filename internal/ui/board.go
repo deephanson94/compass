@@ -446,6 +446,12 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 			}
 		}
 	}
+	if d := youWaited(tr, now, s); d >= waitNotable {
+		// The day's wait on you, the open one included: the number that
+		// says which session your own turns are the bottleneck of. Last,
+		// so it is the first clause a narrow column sheds.
+		parts = append(parts, "on you "+relDuration(d))
+	}
 	return strings.Join(parts, " · ")
 }
 
@@ -647,6 +653,9 @@ func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 		if n := len(tr.Compactions); n > 0 {
 			out += fmt.Sprintf(" %d%s", n, glyphCompact)
 		}
+		if d := promptWaits(tr); d >= waitNotable {
+			out += " · on you " + relDuration(d)
+		}
 		return out
 	}
 	if ships > 0 {
@@ -657,6 +666,9 @@ func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 	}
 	if n := len(tr.Compactions); n > 0 {
 		out += " · " + plural(n, "compaction")
+	}
+	if d := promptWaits(tr); d >= waitNotable {
+		out += " · waited on you " + relDuration(d)
 	}
 	return out
 }
