@@ -94,7 +94,7 @@ func TestT42ReadItemsAndActiveFormFallback(t *testing.T) {
 
 	assertItems(t, mustRead(t, root, sid),
 		todo.Item{Text: "write parser", Status: todo.Pending},
-		todo.Item{Text: "Writing tests", Status: todo.InProgress},
+		todo.Item{Text: "Writing tests", Status: todo.InProgress, Active: "Writing tests"},
 	)
 }
 
@@ -106,8 +106,8 @@ func TestT42ContentWinsOverActiveForm(t *testing.T) {
 			`{"content":"","activeForm":"Reading the tailer","status":"in_progress"}]`, 0)
 
 	assertItems(t, mustRead(t, root, sid),
-		todo.Item{Text: "write parser", Status: todo.Pending},
-		todo.Item{Text: "Reading the tailer", Status: todo.InProgress},
+		todo.Item{Text: "write parser", Status: todo.Pending, Active: "Writing parser"},
+		todo.Item{Text: "Reading the tailer", Status: todo.InProgress, Active: "Reading the tailer"},
 	)
 }
 
@@ -318,7 +318,7 @@ func TestT42UnknownFieldsAreIgnored(t *testing.T) {
 		 "id":"t1","priority":"high","metadata":{"source":"plan"}}
 	]`, 0)
 
-	assertItems(t, mustRead(t, root, sid), todo.Item{Text: "write parser", Status: todo.Pending})
+	assertItems(t, mustRead(t, root, sid), todo.Item{Text: "write parser", Status: todo.Pending, Active: "Writing parser"})
 }
 
 // Text is kept verbatim: no clipping, no case folding — the renderer decides.

@@ -131,8 +131,9 @@ func TestT43TrailLv2Viewport(t *testing.T) {
 func TestT44TrailGhostsGolden(t *testing.T) {
 	forceASCII(t)
 
-	// in_progress and completed items are not drawn: HEAD and the legs already
-	// tell that story.
+	// Completed items are not drawn: the legs already tell that story. The
+	// in-progress one is not a ghost either — it is HEAD's label, the plan's
+	// own words for what the session is doing now.
 	items := []todo.Item{
 		{Text: "read middleware.py", Status: todo.Completed},
 		{Text: "fix the token refresh", Status: todo.InProgress},
@@ -155,9 +156,18 @@ func TestT44TrailGhostsGolden(t *testing.T) {
 	case !(head < first && first < later):
 		t.Errorf("the plan is out of order: it runs downward from HEAD, first pending nearest\n%s", got)
 	}
-	for _, gone := range []string{"read middleware.py", "fix the token refresh"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("a non-pending todo was drawn as a ghost: %q", gone)
+	if strings.Contains(got, "read middleware.py") {
+		t.Error("a completed todo was drawn as a ghost")
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.Contains(line, "fix the token refresh") {
+			continue
+		}
+		if strings.Contains(line, glyphGhost) {
+			t.Errorf("the in-progress todo was drawn as a ghost: %q", line)
+		}
+		if !strings.Contains(line, "● fix") {
+			t.Errorf("the in-progress todo is not HEAD's label: %q", line)
 		}
 	}
 
@@ -703,5 +713,66 @@ func TestAClosedLegShowsItsDuration(t *testing.T) {
 	// The prompt keeps its age (17h); the leg must not.
 	if strings.Contains(legRow, "17h") {
 		t.Errorf("the leg still shows its age: %q", legRow)
+	}
+}
+
+// The plan reaches the trail from the transcript when the session kept one
+// there, and from the todo file only when it did not.
+func TestThePlanFromTheTranscriptFeedsTheGhosts(t *testing.T) {
+	forceASCII(t)
+	m := New(nil)
+	m.SetSize(120, 30)
+	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
+	m.point(sessionKey("s-api"))
+
+	tr := fixtureTrail(fixtureBase)
+	tr.Tasks = []journey.Task{
+		{ID: "1", Subject: "Read middleware.py", Status: "completed"},
+		{ID: "2", Subject: "Fix the token refresh", Active: "Fixing the token refresh", Status: "in_progress"},
+		{ID: "3", Subject: "Add a regression test", Status: "pending"},
+		{ID: "4", Subject: "Rewrite everything", Status: "deleted"},
+	}
+	fileTodos := []todo.Item{{Text: "from the todo file", Status: todo.Pending}}
+	m.Update(fleetMsg{sessions: m.sessions, at: fixtureBase.Add(40 * time.Minute),
+		trailFor: sessionKey("s-api"), hasTrail: true, trail: tr, todos: fileTodos})
+
+	got := m.View()
+	if !strings.Contains(got, "◌ Add a regression test") {
+		t.Errorf("the pending task is not a ghost:\n%s", got)
+	}
+	if !strings.Contains(got, "Fixing the token refresh") {
+		t.Errorf("the in-progress task does not name HEAD:\n%s", got)
+	}
+	for _, gone := range []string{"Rewrite everything", "from the todo file", "◌ Read middleware.py"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%q reached the trail; deleted tasks, the todo file and completed tasks must not", gone)
+		}
+	}
+
+	// No tasks in the transcript: the todo file still counts.
+	m.Update(fleetMsg{sessions: m.sessions, at: fixtureBase.Add(41 * time.Minute),
+		trailFor: sessionKey("s-api"), hasTrail: true, trail: fixtureTrail(fixtureBase), todos: fileTodos})
+	if got := m.View(); !strings.Contains(got, "◌ from the todo file") {
+		t.Errorf("with no tasks in the transcript the todo file should feed the ghosts:\n%s", got)
+	}
+}
+
+// planItems is the seam between the transcript's tasks and what the trail
+// draws: deleted tasks drop out entirely — not as a ghost, not in a count —
+// and the rest keep both tenses.
+func TestPlanItemsDropDeletedTasks(t *testing.T) {
+	items := planItems([]journey.Task{
+		{ID: "1", Subject: "Fix it", Active: "Fixing it", Status: "in_progress"},
+		{ID: "2", Subject: "Never mind", Status: "deleted"},
+		{ID: "3", Subject: "Test it", Status: "pending"},
+	})
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2 (the deleted one gone): %+v", len(items), items)
+	}
+	if items[0].Text != "Fix it" || items[0].Active != "Fixing it" || items[0].Status != todo.InProgress {
+		t.Errorf("items[0] = %+v", items[0])
+	}
+	if items[1].Text != "Test it" || items[1].Status != todo.Pending {
+		t.Errorf("items[1] = %+v", items[1])
 	}
 }

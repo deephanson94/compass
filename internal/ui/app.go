@@ -234,6 +234,19 @@ func Run(mgr *fleet.Manager, readonly, mirror bool, build func(notify func()) Na
 	return err
 }
 
+// planItems turns the transcript's tasks into the shape the trail draws:
+// deleted ones drop out, the rest keep their status and both their tenses.
+func planItems(tasks []journey.Task) []todo.Item {
+	items := make([]todo.Item, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Status == "deleted" {
+			continue
+		}
+		items = append(items, todo.Item{Text: t.Subject, Status: todo.Status(t.Status), Active: t.Active})
+	}
+	return items
+}
+
 // SetNarrator hands the deck its narrator (a harness passes a fake one).
 func (m *Model) SetNarrator(n Narrator) {
 	m.narrator = n
@@ -449,12 +462,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.titleCmd(), m.relistPanes())
 		}
 		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
+			items := msg.todos
 			if msg.hasTrail {
 				m.trail = msg.trail
 				m.SetEvents(msg.events)
 				m.requestNarration()
+				// The plan comes from the transcript when the session kept one
+				// there; the todo file is the fallback for a Claude Code that
+				// still writes one.
+				if len(msg.trail.Tasks) > 0 {
+					items = planItems(msg.trail.Tasks)
+				}
 			}
-			m.SetTodos(msg.todos)
+			m.SetTodos(items)
 		}
 		return m, m.titleCmd()
 

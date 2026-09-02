@@ -46,12 +46,19 @@ Every line has `uuid`, `parentUuid` (the chain), `timestamp`, `sessionId`, `cwd`
 and its own chain. Fork point = the `tool_use` (Agent) in the main chain; merge
 point = its tool result. **The git-graph is not a metaphor — it's the on-disk shape.**
 
-### 2.3 Todos — the ghost waypoints
+### 2.3 The plan — the ghost waypoints
 
-`~/.claude/todos/<session>*.json` — Claude's own task list (pending / in_progress /
-completed). This is the "adventure it's going to do": pending items render as `◌`
-ghost nodes ahead of HEAD; in_progress maps to HEAD's label; completions animate a
-ghost solidifying into the trail.
+Claude's own task list, read from the transcript (2026-09-02): `TaskCreate` and
+`TaskUpdate` are `tool_use` blocks in assistant turns, and `TaskCreate`'s result
+line carries the id it was given as structured `toolUseResult`
+(`{"task":{"id":"1",…}}`). The segmenter folds them into `Trail.Tasks`. This is
+the "adventure it's going to do": pending tasks render as `◌` ghost nodes ahead of
+HEAD; the in-progress task's `activeForm` is HEAD's label.
+
+`~/.claude/todos/<session>*.json` was the source before this. Claude Code stopped
+writing it (the directory does not exist on a current install); `todo.Read` stays
+as the fallback for a transcript that has no task calls and a machine that still
+has the file.
 
 ### 2.4 Screen tail — the needs-you tripwire (herdr's one trick, borrowed cheaply)
 

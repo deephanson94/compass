@@ -34,6 +34,12 @@ type ToolResult struct {
 	ToolUseID string
 	IsError   bool
 	Text      string // result text, bounded: head and tail kept, middle elided
+
+	// Meta is the line's toolUseResult, verbatim: Claude Code's structured
+	// account of what the tool did, written beside the text the model saw.
+	// TaskCreate's says {"task":{"id":"1",…}}, which is how a task gets its
+	// id without anyone parsing "Task #1 created successfully".
+	Meta json.RawMessage
 }
 
 // resultTextCap bounds how much of a tool result's text survives, per end.
@@ -86,6 +92,7 @@ type rawLine struct {
 	Message     json.RawMessage `json:"message"`
 	Content     json.RawMessage `json:"content"` // queue-operation: a plain string
 	IsMeta      bool            `json:"isMeta"`
+	ToolResult  json.RawMessage `json:"toolUseResult"`
 }
 
 type rawMessage struct {
@@ -156,6 +163,11 @@ func ParseLine(line []byte) (Event, error) {
 			ev.APIError = msg.IsAPIError
 			ev.Status, ev.ErrorKey = msg.APIStatus, msg.APIErrorKey
 			parseContent(&ev, msg.Content)
+		}
+	}
+	if len(raw.ToolResult) > 0 {
+		for i := range ev.ToolResults {
+			ev.ToolResults[i].Meta = raw.ToolResult
 		}
 	}
 	return ev, nil
