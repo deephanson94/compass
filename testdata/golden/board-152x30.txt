@@ -2,14 +2,14 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra           needs you   2m │ ▸2 ● api                         3m │  3 ● webapp                     40s │  4 ○ tfstate                    15m
-     AskUserQuestion           ⌁ ops │     ● fix    tokens.py       for 3m │     ● fix    checkout.py    for 30m │     build state.tf            ⌁ ops
-                                     │                                     │                                     │
+     AskUserQuestion           ⌁ ops │     ✗ red 18✓ 2✗ · edited since ·…  │     ✗ red 18✓ 2✗ · edited since     │     build state.tf            ⌁ ops
+                                     │                               ⌁ dev │                               ⌁ dev │
  ◉ "tighten the vpc securit… 39m ago │ ◉ "fix the 401 bug"         38m ago │ ◉ "flake in the checkout s… 35m ago │ ◉ "reconcile the state fil… 37m ago
  ╷                                   │ ╷                                   │ ╷                                   │ ╷
  ◆ scout  main.tf                18m │ ◆ scout  middleware.py           5m │ ◆ test   pytest           18✓ 2✗ 3m │ ◆ build  state.tf               21m
  │                                   │ │                                   │ │                                   │
- ● design AskUserQuestion    for 19m │ ◆ build  tokens.py              12m │ ● fix    checkout.py        for 30m │
-                                     │ │                                   │                                     │
+ ▲ design asks you        waiting 2m │ ◆ build  tokens.py              12m │ ● fix    checkout.py        for 30m │
+ │  └ AskUserQuestion                │ │                                   │                                     │
                                      │ ◆ test   pytest           18✓ 2✗ 8m │                                     │
                                      │ ├─◈ scout the payments module  ✓ 7m │                                     │
                                      │ │  └ came back with no report       │                                     │

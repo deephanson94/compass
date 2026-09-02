@@ -2,13 +2,13 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra             needs you   2m │ ▸2 ● api                           3m │  3 ● webapp                       40s
-     AskUserQuestion             ⌁ ops │     ● fix    tokens.py         for 3m │     ● fix    checkout.py      for 30m
-                                       │                                       │
+     AskUserQuestion             ⌁ ops │     ✗ red 18✓ 2✗ · edited since · ◈1… │     ✗ red 18✓ 2✗ · edited since
+                                       │                                 ⌁ dev │                                 ⌁ dev
  ◉ "tighten the vpc security…  39m ago │ ◉ "fix the 401 bug"           38m ago │ ◉ "flake in the checkout sui… 35m ago
  ╷                                     │ ╷                                     │ ╷
  ◆ scout  main.tf                  18m │ ◆ scout  middleware.py             5m │ ◆ test   pytest             18✓ 2✗ 3m
  │                                     │ │                                     │ │
- ● design AskUserQuestion      for 19m │ ◆ build  tokens.py                12m │ ● fix    checkout.py          for 30m
+ ▲ design AskUserQuestion   waiting 2m │ ◆ build  tokens.py                12m │ ● fix    checkout.py          for 30m
                                        │ │                                     │
                                        │ ◆ test   pytest             18✓ 2✗ 8m │
                                        │ ├─◈ scout the payments module    ✓ 7m │

@@ -11,7 +11,7 @@
   2 ○ move dns to route53                2h │
      tf/dns                                 │
                                             │
-  api                                    3h │
+  api                                       │
   3 ○ add rate limiting                  3h │
      claude/rate-limit                      │
                                             │

@@ -83,37 +83,31 @@ func TestBoardVerdictReadsTheTrailsTail(t *testing.T) {
 	}
 }
 
-// The column's second row is the session as it stands: for a working one
-// its HEAD — class, what, how long — for a quiet one the verdict, and for
-// one that needs you the sentence that says why. The fleet row says the same
-// thing in the same words (journeyLine), so zooming in loses nothing.
-func TestSecondRowIsThePresentForAWorkingColumn(t *testing.T) {
+// The fleet row for a working session is its present: HEAD — class, what,
+// how long — with the agents it has out. (The board column's second row is
+// the verdict instead: see TestWorkingColumnHeaderSaysWhatHeadCannot.)
+func TestFleetRowIsThePresentForAWorkingSession(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
 	api := sessionKey("s-api")
-	col := m.boardColumn(api, rowFor(t, m, api), 40, 20)
-	if !strings.Contains(col[1], "● fix    tokens.py") {
-		t.Errorf("a working column's second row is not its HEAD:\n%s", strings.Join(col, "\n"))
-	}
 	if fleet := m.secondLine(m.sessions[rowFor(t, m, api).sess], 40); !strings.Contains(fleet, "● fix    tokens.py") || !strings.HasSuffix(fleet, "for 3m") {
-		t.Errorf("the fleet row disagrees with the column, or its figure is not flush right: %q", fleet)
+		t.Errorf("the fleet row is not HEAD with its figure flush right: %q", fleet)
 	}
-	// Agents out ride on the HEAD line.
 	tr := m.trails[api]
 	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
 	m.trails[api] = tr
-	if col := m.boardColumn(api, rowFor(t, m, api), 40, 20); !strings.Contains(col[1], "◈1 out · for 3m") {
-		t.Errorf("a working column with an agent out does not say so:\n%s", strings.Join(col, "\n"))
+	if fleet := m.secondLine(m.sessions[rowFor(t, m, api).sess], 40); !strings.Contains(fleet, "◈1 out · for 3m") {
+		t.Errorf("a working row with an agent out does not say so: %q", fleet)
 	}
-	// A quiet column: the verdict.
+	// A quiet session: the verdict.
 	tf := sessionKey("s-tfstate")
-	if col := m.boardColumn(tf, rowFor(t, m, tf), 40, 20); !strings.Contains(col[1], "build state.tf") {
-		t.Errorf("an idle column's second row is not its verdict:\n%s", strings.Join(col, "\n"))
+	if fleet := m.secondLine(m.sessions[rowFor(t, m, tf).sess], 40); !strings.Contains(fleet, "build state.tf") {
+		t.Errorf("an idle row's second line is not its verdict: %q", fleet)
 	}
 	// One that needs you: the question, whole, no class in front of it.
 	infra := sessionKey("s-infra")
-	col = m.boardColumn(infra, rowFor(t, m, infra), 40, 20)
-	if !strings.HasPrefix(strings.TrimSpace(col[1]), "AskUserQuestion") || strings.Contains(col[1], "scout") || strings.Contains(col[1], "◆") {
+	col := m.boardColumn(infra, rowFor(t, m, infra), 40, 20)
+	if !strings.HasPrefix(strings.TrimSpace(col[1]), "AskUserQuestion") || strings.Contains(col[1], "◆") {
 		t.Errorf("a needs-you column's second row is not its question:\n%s", strings.Join(col, "\n"))
 	}
 }
@@ -141,7 +135,7 @@ func TestNeverOpenedColumnKeepsTheRowAsAir(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
 	api := sessionKey("s-api")
-	col := m.boardColumn(api, rowFor(t, m, api), 40, 20)
+	col := m.boardColumn(api, rowFor(t, m, api), 70, 20)
 	if strings.TrimSpace(col[2]) != "" {
 		t.Errorf("a never-opened column spends its third row: %q", col[2])
 	}
@@ -188,10 +182,10 @@ func TestShipLegIsTheLandingNotATick(t *testing.T) {
 	if got := renderLv(tr, base.Add(30*time.Minute), 1, 44, 20); !strings.Contains(got, "ship   board: bright while unread") {
 		t.Errorf("a ship leg does not say what shipped:\n%s", got)
 	}
-	// A test leg with no verdict is a run with no verdict: "?".
+	// A test leg with no verdict is a row with "?": never a tick.
 	tr.Legs[1] = journey.Leg{Class: journey.Test, Label: "pytest", Start: base.Add(10 * time.Minute), End: base.Add(11 * time.Minute)}
-	if got := renderLv(tr, base.Add(30*time.Minute), 1, 44, 20); !strings.Contains(got, "test") || !strings.Contains(got, "?  1m") {
-		t.Errorf("a test tick has no '?' verdict:\n%s", got)
+	if got := renderLv(tr, base.Add(30*time.Minute), 1, 44, 20); !strings.Contains(got, "◆ test   pytest") || !strings.Contains(got, "? 1m") {
+		t.Errorf("a test leg with no verdict lost its row or its '?':\n%s", got)
 	}
 }
 
@@ -519,14 +513,14 @@ func TestTickRowIsFlushWithTheEdge(t *testing.T) {
 	base := fixtureBase
 	tr := journey.Trail{Legs: []journey.Leg{
 		{Class: journey.Build, Label: "a.go", Start: base, End: base.Add(5 * time.Minute), Files: []string{"a.go"}},
-		{Class: journey.Test, Label: "pytest", Start: base.Add(10 * time.Minute), End: base.Add(21 * time.Minute)},
+		{Class: journey.Design, Label: "design", Start: base.Add(10 * time.Minute), End: base.Add(21 * time.Minute)},
 		{Class: journey.Scout, Label: "b.go", Start: base.Add(30 * time.Minute), Current: true},
 	}}
 	var tick, leg string
 	for _, line := range strings.Split(renderLv(tr, base.Add(40*time.Minute), 1, 44, 20), "\n") {
 		switch {
-		case strings.Contains(line, "?  11m"):
-			tick = line
+		case strings.Contains(line, " design") && !strings.HasPrefix(line, "◆"):
+			tick = line // on the rail, under the cap
 		case strings.HasPrefix(line, "◆ build"):
 			leg = line
 		}
@@ -558,11 +552,27 @@ func TestLongTrailDrawsDense(t *testing.T) {
 	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 12, Level: 1, Cursor: -1, Pinned: true})); n != 0 {
 		t.Errorf("a trail that does not fit still has %d rail rows at Lv1", n)
 	}
-	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 12, Level: 2, Cursor: -1, Pinned: true})); n == 0 {
-		t.Errorf("Lv2 lost its rails")
+	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 12, Level: 2, Cursor: -1, Pinned: true})); n != 0 {
+		t.Errorf("a trail that does not fit still has %d rail rows at Lv2", n)
+	}
+	if n := rails(TrailLines(fixtureLv2Trail(fixtureBase), TrailOpts{Now: now, Width: 44, Height: 40, Level: 2, Cursor: -1, Pinned: true})); n == 0 {
+		t.Errorf("a Lv2 trail that fits lost its rails")
 	}
 	if n := rails(TrailLines(long, TrailOpts{Now: now, Width: 44, Height: 200, Level: 1, Cursor: -1, Pinned: true})); n == 0 {
 		t.Errorf("a trail that fits lost its rails")
+	}
+	// The plan drops its rails too: one dashed rail with the count, then
+	// the ghosts, where "◌ / ┊ / ◌ / ┊ / ◌" was five rows for three steps.
+	planned := longTrail(30)
+	planned.Tasks = []journey.Task{{ID: "1", Subject: "a", Status: "pending"}, {ID: "2", Subject: "b", Status: "pending"}, {ID: "3", Subject: "c", Status: "pending"}}
+	dashed := 0
+	for _, l := range TrailLines(planned, TrailOpts{Todos: planItems(planned.Tasks), Now: now, Width: 44, Height: 20, Level: 1, Cursor: -1, Pinned: true}) {
+		if strings.HasPrefix(l, "┊") {
+			dashed++
+		}
+	}
+	if dashed != 1 {
+		t.Errorf("a dense plan draws %d dashed rails, want 1", dashed)
 	}
 	// The rows that say something keep theirs: the hour rules survive.
 	hourly := hourlyTrail(fixtureBase.Add(-30*time.Hour), 30)
@@ -580,7 +590,7 @@ func TestPromptRowSaysAgo(t *testing.T) {
 	}
 }
 
-// A finding wraps to a second row rather than losing its second half.
+// A finding wraps to a second and third row rather than losing its second half.
 func TestFindingWrapsToTwoRows(t *testing.T) {
 	forceASCII(t)
 	tr := fixtureLv2Trail(fixtureBase)
@@ -597,8 +607,8 @@ func TestFindingWrapsToTwoRows(t *testing.T) {
 			rows++
 		}
 	}
-	if rows != 2 {
-		t.Errorf("a long finding takes %d rows, want 2", rows)
+	if rows != 3 {
+		t.Errorf("a long finding takes %d rows, want 3", rows)
 	}
 }
 
@@ -728,15 +738,18 @@ func TestStuckHeadNamesTheHungCall(t *testing.T) {
 		}
 	}
 	col := strings.Join(m.boardColumn(api, rowFor(t, m, api), 70, 20), "\n")
-	if !strings.Contains(col, "● fix    Bash: python backfill.py --all") {
-		t.Errorf("a stuck column's HEAD is not the hung call:\n%s", col)
+	if !strings.Contains(col, "◍ fix    Bash: python backfill.py --all") || !strings.Contains(col, "silent 4m") {
+		t.Errorf("a stuck column's HEAD is not the hung call, wearing the fleet's glyph and its silence:\n%s", col)
+	}
+	if strings.Contains(col, "for 3m") {
+		t.Errorf("a stuck HEAD still says 'for 3m' as if it were working:\n%s", col)
 	}
 	if !strings.Contains(col, "no output for 4m mid-turn · Bash: python backfill.py --all") {
 		t.Errorf("a stuck column's second row is not the reason and the call:\n%s", col)
 	}
 	m.point(api)
 	openTrail(m)
-	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "● fix    Bash: python backfill.py --all") {
+	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "◍ fix    Bash: python backfill.py --all") {
 		t.Errorf("the single trail's HEAD is not the hung call:\n%s", got)
 	}
 }
@@ -794,5 +807,304 @@ func TestPromptsAreChapters(t *testing.T) {
 	press(m, "[")
 	if !strings.Contains(m.note, "no earlier prompt") {
 		t.Errorf("note = %q, want the start of the chapters", m.note)
+	}
+}
+
+// ---- round three
+
+// A tall board with short trails wraps into a second band of columns; a
+// board whose first band holds a day-long trail keeps the whole height.
+func TestTallBoardWrapsIntoTwoBands(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 48)
+	got := strings.Join(m.boardLines(148, 43), "\n")
+	for _, name := range []string{"tfstate", "scratch"} {
+		if !strings.Contains(got, "○ "+name) {
+			t.Errorf("a 48-row board left %s in the strip:\n%s", name, got)
+		}
+	}
+	if strings.Contains(got, "+1 more") || strings.Contains(got, "+2 more") {
+		t.Errorf("the strip still names sessions the second band could hold:\n%s", got)
+	}
+	// Two bands: the second's headers sit below the first's trails.
+	lines := m.boardLines(148, 43)
+	second := -1
+	for i, l := range lines {
+		if strings.Contains(l, "○ scratch") {
+			second = i
+		}
+	}
+	if second < 15 {
+		t.Errorf("the second band's header is on row %d, want it below the first band", second)
+	}
+	// A short board: one band, the strip.
+	if got := strings.Join(boardModel(152, 30).boardLines(148, 25), "\n"); !strings.Contains(got, "+1 more") {
+		t.Errorf("a 30-row board wrapped where it had no room:\n%s", got)
+	}
+	// A long trail in the first band: one band, however tall.
+	tall := boardModel(152, 48)
+	tall.trails[sessionKey("s-api")] = longTrail(60)
+	if got := strings.Join(tall.boardLines(148, 43), "\n"); !strings.Contains(got, "+1 more") {
+		t.Errorf("a day-long trail was cut in half for a second band:\n%s", got)
+	}
+}
+
+// A working column's second row is its verdict when it has one — HEAD is
+// the trail's last row anyway — and the tmux session lands on the third
+// row when the second had no room for it.
+func TestWorkingColumnHeaderSaysWhatHeadCannot(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	col := m.boardColumn(api, rowFor(t, m, api), 40, 20)
+	if !strings.Contains(col[1], "✗ red 18✓ 2✗") {
+		t.Errorf("a working column's second row is not its verdict:\n%s", strings.Join(col, "\n"))
+	}
+	if !strings.Contains(col[2], "⌁ dev") {
+		t.Errorf("the tmux session did not fall to the third row:\n%s", strings.Join(col, "\n"))
+	}
+	// With room on the second row, it stays there and the third is air.
+	wide := m.boardColumn(api, rowFor(t, m, api), 70, 20)
+	if !strings.Contains(wide[1], "⌁ dev") || strings.TrimSpace(wide[2]) != "" {
+		t.Errorf("a wide column moved the tmux session off its second row:\n%s", strings.Join(wide, "\n"))
+	}
+	// No verdict: the present, as the fleet says it.
+	tr := m.trails[api]
+	tr.Legs[2].Waypoints = nil
+	tr.Branches = nil
+	m.trails[api] = tr
+	if col := m.boardColumn(api, rowFor(t, m, api), 40, 20); !strings.Contains(col[1], "● fix    tokens.py") {
+		t.Errorf("a working column with no verdict lost its HEAD line:\n%s", strings.Join(col, "\n"))
+	}
+}
+
+// Agents all back are a verdict too: how many, and how many said nothing.
+func TestVerdictCountsAgentsBack(t *testing.T) {
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{{Class: journey.Docs, Label: "SKILL.md", Start: base, End: base.Add(time.Minute), Files: []string{"SKILL.md"}}},
+		Branches: []journey.Branch{
+			{Label: "a", Start: base, End: base.Add(time.Minute), Done: true, Report: "found it"},
+			{Label: "b", Start: base, End: base.Add(time.Minute), Done: true},
+			{Label: "c", Start: base, End: base.Add(time.Minute), Done: true, Report: "nothing to add"},
+		}}
+	got := boardVerdict(fleet.Session{}, tr, base.Add(time.Hour))
+	if !strings.Contains(got, "◈3 back · 1 empty") {
+		t.Errorf("verdict = %q, want the agents back and the empty one", got)
+	}
+	tr.Branches[1].Report = "x"
+	if got := boardVerdict(fleet.Session{}, tr, base.Add(time.Hour)); !strings.Contains(got, "◈3 back") || strings.Contains(got, "empty") {
+		t.Errorf("verdict = %q, want '◈3 back' alone", got)
+	}
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "d", Start: base})
+	if got := boardVerdict(fleet.Session{}, tr, base.Add(time.Hour)); strings.Contains(got, "back") {
+		t.Errorf("verdict = %q, counts agents back while one is still out", got)
+	}
+}
+
+// A group header's clock never repeats the row beneath it.
+func TestGroupHeaderClockNeverRepeatsItsFirstRow(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	// Make the first dev row the freshest, so the header's clock would be
+	// its clock.
+	for i := range m.sessions {
+		switch m.sessions[i].Info.ID {
+		case "s-api":
+			m.sessions[i].Info.LastEventAt, m.sessions[i].Snap.Since = m.now.Add(-40*time.Second), m.now.Add(-40*time.Second)
+		case "s-webapp":
+			m.sessions[i].Info.LastEventAt, m.sessions[i].Snap.Since = m.now.Add(-3*time.Minute), m.now.Add(-3*time.Minute)
+		}
+	}
+	for _, r := range m.fleetRows() {
+		if r.header && r.label == "dev" && r.age != "" {
+			t.Errorf("dev header carries %q, the clock of the row beneath it", r.age)
+		}
+	}
+	// Freshest deeper in the group: the header's clock is information.
+	for i := range m.sessions {
+		if m.sessions[i].Info.ID == "s-webapp" {
+			m.sessions[i].Info.LastEventAt = m.now.Add(-10 * time.Second)
+		}
+	}
+	found := false
+	for _, r := range m.fleetRows() {
+		if r.header && r.label == "dev" && r.age == "10s" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a header over a group whose freshest row is not first lost its clock")
+	}
+}
+
+// A cut fleet never ends its window on a header.
+func TestCutFleetNeverEndsOnAHeader(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	openTrail(m)
+	rows := m.fleetRows()
+	full, selStart, selEnd := m.fleetBlock(rows, fleetWidth)
+	for h := 4; h < len(full); h++ {
+		m.fleetScroll = 0
+		out := m.scrollFleet(full, selStart, selEnd, h)
+		for i := len(out) - 1; i >= 0; i-- {
+			l := out[i]
+			if strings.HasPrefix(l, "▾") || l == "" {
+				continue
+			}
+			if isHeaderLine(l) {
+				t.Errorf("height %d: the window ends on the header %q", h, l)
+			}
+			break
+		}
+	}
+}
+
+// A from the live view with nothing remembered selects the first archived
+// row, and the trail beside it is that row's.
+func TestArchiveOpensOnItsFirstRow(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	press(m, "A")
+	first := ""
+	for _, r := range m.fleetRows() {
+		if !r.header {
+			first = m.sessions[r.sess].Info.Key()
+			break
+		}
+	}
+	if m.selectedKey != first {
+		t.Errorf("the archive opened on %q, want its first row %q", m.selectedKey, first)
+	}
+	if got := m.trailTitle(60); !strings.Contains(got, sessionName(m.sessions[m.selectedIndex()].Info)) {
+		t.Errorf("the trail beside the archive is not the selected row's: %q", got)
+	}
+}
+
+// Keys that move nothing say why.
+func TestDeadKeysSayWhy(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	pressTab(m) // Lv2, cursor on the newest row
+	press(m, "j")
+	if !strings.Contains(m.note, "at the present") {
+		t.Errorf("j on the newest row said %q", m.note)
+	}
+	m.cursor = 0
+	press(m, "k")
+	if !strings.Contains(m.note, "at the start") {
+		t.Errorf("k on the first row said %q", m.note)
+	}
+	narrow := boardModel(100, 30)
+	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	narrow.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if !strings.Contains(narrow.note, "no board under") {
+		t.Errorf("shift+tab without a board said %q", narrow.note)
+	}
+}
+
+// Prompt rows carry their chapter number when there is more than one.
+func TestPromptRowsCountTheirChapter(t *testing.T) {
+	forceASCII(t)
+	tr := fixtureTrail(fixtureBase)
+	if got := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 44, 20); strings.Contains(got, "◉ 1/1") {
+		t.Errorf("a lone prompt is numbered:\n%s", got)
+	}
+	tr.Prompts = append(tr.Prompts, journey.Prompt{Text: "now the tests", At: fixtureBase.Add(30 * time.Minute)})
+	got := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 44, 20)
+	if !strings.Contains(got, "◉ 1/2 \"fix the 401 bug\"") || !strings.Contains(got, "◉ 2/2 \"now the tests\"") {
+		t.Errorf("prompts are not numbered as chapters:\n%s", got)
+	}
+}
+
+// The first hour rule of a new day names the day.
+func TestHourRuleNamesANewDay(t *testing.T) {
+	forceASCII(t)
+	base := time.Date(2026, 9, 1, 22, 40, 0, 0, time.UTC)
+	got := renderLv(hourlyTrail(base, 4), base.Add(4*time.Hour), 1, 44, 30)
+	if !strings.Contains(got, "│ Wed 00:41") {
+		t.Errorf("the rule past midnight does not name the day:\n%s", got)
+	}
+	if !strings.Contains(got, "│ 23:41 ") {
+		t.Errorf("a rule inside the day carries a day name:\n%s", got)
+	}
+}
+
+// A Lv2 child never restates its parent: the run summary the badge carries,
+// the commit a ship leg is named by.
+func TestLv2ChildNeverRestatesItsParent(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{
+		{Class: journey.Test, Label: "pytest", Start: base, End: base.Add(2 * time.Minute),
+			Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "40 passed", Short: "40✓", At: base.Add(2 * time.Minute)}}},
+		{Class: journey.Ship, Label: "git commit", Start: base.Add(3 * time.Minute), End: base.Add(4 * time.Minute),
+			Waypoints: []journey.Waypoint{{Kind: journey.WaypointCommit, Text: "auth: audit every refresh", At: base.Add(4 * time.Minute)}}},
+		{Class: journey.Scout, Label: "x", Start: base.Add(5 * time.Minute), Current: true},
+	}}
+	got := RenderTrail(tr, TrailOpts{Now: base.Add(10 * time.Minute), Width: 44, Height: 30, Level: 2, Cursor: -1})
+	if strings.Contains(got, "└ 40 passed") || strings.Contains(got, "└ auth: audit every refresh") {
+		t.Errorf("a child restates its parent:\n%s", got)
+	}
+	if n := len(TrailRows(tr, levelWaypoints)); n != 3 {
+		t.Errorf("TrailRows counts %d rows, want the three legs only", n)
+	}
+	// An older run in the same leg is still a row: the badge is only the newest.
+	tr.Legs[0].Waypoints = append([]journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "38 passed · 2 failed", Short: "38✓ 2✗", At: base.Add(time.Minute)}}, tr.Legs[0].Waypoints...)
+	if got := RenderTrail(tr, TrailOpts{Now: base.Add(10 * time.Minute), Width: 44, Height: 30, Level: 2, Cursor: -1}); !strings.Contains(got, "38 passed · 2 failed") {
+		t.Errorf("an earlier run in the leg lost its row:\n%s", got)
+	}
+}
+
+// A wide Lv1 panel spends its width inside the row: the failing test, the
+// bug, the files beyond the label, beside the label.
+func TestWideTrailCarriesDetailOnTheRow(t *testing.T) {
+	forceASCII(t)
+	tr := fixtureLv2Trail(fixtureBase)
+	wide := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 100, 30)
+	for _, want := range []string{"pytest · ✗ test_refresh_expired_token · ✗ test_refresh_revoked_token", "token refresh · syntax error in tokens.py:88"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("a wide row lacks %q:\n%s", want, wide)
+		}
+	}
+	narrow := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 60, 30)
+	if strings.Contains(narrow, "· ✗ test_refresh") {
+		t.Errorf("a narrow row carries inline detail:\n%s", narrow)
+	}
+	lv2 := RenderTrail(tr, TrailOpts{Now: fixtureBase.Add(40 * time.Minute), Width: 100, Height: 30, Level: 2, Cursor: -1})
+	if strings.Contains(lv2, "pytest · ✗") {
+		t.Errorf("Lv2 carries the detail inline and beneath:\n%s", lv2)
+	}
+}
+
+// A question too long for HEAD's row is spelled out beneath it, options and
+// all, at every level.
+func TestLongQuestionIsSpelledOutUnderHead(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	infra := sessionKey("s-infra")
+	q := "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]"
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == infra {
+			m.sessions[i].Snap.Activity = q
+		}
+	}
+	col := strings.Join(m.boardColumn(infra, rowFor(t, m, infra), 40, 20), "\n")
+	if !strings.Contains(col, "▲ design asks you") || !strings.Contains(col, "waiting 2m") {
+		t.Errorf("HEAD does not wear the fleet's glyph and name the question:\n%s", col)
+	}
+	if !strings.Contains(col, "keep bastion]") {
+		t.Errorf("the question's options never reach the column:\n%s", col)
+	}
+	// One that fits rides on the row alone.
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == infra {
+			m.sessions[i].Snap.Activity = "Port 22 open?"
+		}
+	}
+	col = strings.Join(m.boardColumn(infra, rowFor(t, m, infra), 40, 20), "\n")
+	if !strings.Contains(col, "▲ design Port 22 open?") || strings.Contains(col, "asks you") {
+		t.Errorf("a short question is not on HEAD's row:\n%s", col)
 	}
 }

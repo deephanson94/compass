@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
@@ -179,6 +180,11 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 	if end > len(lines) {
 		end = len(lines)
 	}
+	// A window never ends on a header: "ops" over nothing but the notice
+	// beneath it named a group with no rows.
+	for end > off+1 && end < len(lines) && (isHeaderLine(lines[end-1]) || (lines[end-1] == "" && end > off+2 && isHeaderLine(lines[end-2]))) {
+		end--
+	}
 	var out []string
 	if top > 0 {
 		out = append(out, dimStyle.Render(fmt.Sprintf("▴ %d more above · k", countEntries(lines[:off]))))
@@ -210,8 +216,12 @@ func (m *Model) fleetRows() []fleetRow {
 		if headers {
 			hdr := fleetRow{header: true, label: g.name}
 			if len(g.entries) > 1 {
-				// A header over one row would only repeat it.
+				// A header over one row would only repeat it — and so
+				// would a clock equal to the first row's beneath it.
 				hdr.age, hdr.echo = m.groupAge(g), m.groupEcho(g)
+				if hdr.echo == "" && hdr.age == m.age(m.sessions[g.entries[0]].Snap.Since) {
+					hdr.age = ""
+				}
 			}
 			rows = append(rows, hdr)
 		}
@@ -371,6 +381,14 @@ func (m *Model) groupEcho(g fleetGroup) string {
 		}
 	}
 	return echo
+}
+
+// isHeaderLine recognises a group header among rendered fleet lines: it
+// opens with its name after one column of gutter, where an entry opens
+// with a mark or a number and a second line with four spaces.
+func isHeaderLine(l string) bool {
+	r := []rune(ansi.Strip(l))
+	return len(r) > 1 && r[0] == ' ' && unicode.IsLetter(r[1])
 }
 
 // countEntries counts the session rows among rendered fleet lines: the

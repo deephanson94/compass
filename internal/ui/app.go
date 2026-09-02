@@ -678,9 +678,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case levelWaypoints:
 		switch key {
 		case "j", "down":
+			// A key that moves nothing says why: two identical frames
+			// after `j` read as a dead key, and the cursor opens on the
+			// newest row, so the first `j` of every visit was that.
+			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 {
+				m.note = "at the present · k goes back"
+				return m, nil
+			}
 			m.cursorMove(1)
 			return m, nil
 		case "k", "up":
+			if m.cursor == 0 {
+				m.note = "at the start of the trail"
+				return m, nil
+			}
 			m.cursorMove(-1)
 			return m, nil
 		case "ctrl+d":
@@ -1075,6 +1086,8 @@ func (m *Model) zoomOut() {
 		m.cursor, m.anchor = -1, -1
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
+	case m.level == levelTrail:
+		m.note = fmt.Sprintf("no board under %d columns · this terminal has %d", deckWideCols, m.width)
 	}
 }
 

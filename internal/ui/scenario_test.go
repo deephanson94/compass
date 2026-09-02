@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,6 +66,10 @@ func trailOf(start time.Time, prompt string, current bool, legs ...legSpec) jour
 		for _, f := range l.fails {
 			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointTestFail, Text: f, At: leg.End})
 		}
+		if l.class == journey.Ship {
+			// A real ship leg carries its commit, and is named by it.
+			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointCommit, Text: commitSubject(prompt), At: leg.End})
+		}
 		if current && i == len(legs)-1 {
 			leg.Current = true
 		}
@@ -72,6 +77,15 @@ func trailOf(start time.Time, prompt string, current bool, legs ...legSpec) jour
 		at = leg.End.Add(30 * time.Second)
 	}
 	return tr
+}
+
+// commitSubject is the commit a session with this prompt would land.
+func commitSubject(prompt string) string {
+	words := strings.Fields(prompt)
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	return strings.Join(words, " ")
 }
 
 // runSummary spells a badge the way the parser would: "18✓ 2✗" → "18 passed · 2 failed".
@@ -89,26 +103,95 @@ func runSummary(short string) string {
 }
 
 // eventsFor writes a plausible conversation behind a trail, so Lv3 has a
-// document to open: the prompts as user turns, and for every leg an
-// assistant line saying what it did — enough to anchor on, not a transcript.
+// document to read: the prompts as user turns; for every leg the model's
+// own sentence, the tool call it made with its arguments, and the tool's
+// result — output for a run, the file for a read, an error for a failure —
+// so folding, scrolling and search have something to act on.
 func eventsFor(tr journey.Trail) []transcript.Event {
 	var evs []transcript.Event
 	n := 0
-	add := func(t transcript.EventType, at time.Time, text string) {
+	add := func(ev transcript.Event) {
 		n++
-		evs = append(evs, transcript.Event{Type: t, UUID: fmt.Sprintf("e%d", n), SessionID: "s", Timestamp: at, Text: text})
+		ev.UUID = fmt.Sprintf("e%d", n)
+		ev.SessionID = "s"
+		evs = append(evs, ev)
 	}
 	for _, p := range tr.Prompts {
-		add(transcript.EventUser, p.At, p.Text)
+		add(transcript.Event{Type: transcript.EventUser, Timestamp: p.At, Text: p.Text})
 	}
-	for _, l := range tr.Legs {
-		add(transcript.EventAssistant, l.Start, fmt.Sprintf("%s: %s", l.Class, l.Label))
+	for i, l := range tr.Legs {
+		id := fmt.Sprintf("toolu_%d", i)
+		file := l.Label
+		if len(l.Files) > 0 {
+			file = l.Files[0]
+		}
+		var said, tool, input, result string
+		isErr := false
+		switch l.Class {
+		case journey.Scout:
+			said = "Let me look at " + l.Label + " before changing anything."
+			tool, input = "Read", fmt.Sprintf(`{"file_path":"/home/user/src/%s"}`, file)
+			result = fmt.Sprintf("     1\tpackage main\n     2\t\n     3\timport \"os\"\n     4\t\n     5\tfunc main() {\n     6\t\t// %s\n     7\t}", l.Label)
+		case journey.Design:
+			said = "Two ways to do this. The narrower one keeps the current shape; the wider one touches every caller. I'll take the narrower one unless you say otherwise."
+			tool, input = "AskUserQuestion", `{"questions":[{"question":"Narrow or wide?","options":[{"label":"narrow"},{"label":"wide"}]}]}`
+			result = "narrow"
+		case journey.Build:
+			said = "Writing " + l.Label + "."
+			tool, input = "Edit", fmt.Sprintf(`{"file_path":"/home/user/src/%s","old_string":"return nil","new_string":"return s.store.Save(ctx, rec)"}`, file)
+			result = "The file /home/user/src/" + file + " has been updated."
+		case journey.Fix:
+			said = "The failure is " + l.Label + ". Fixing it at the source rather than in the test."
+			tool, input = "Edit", fmt.Sprintf(`{"file_path":"/home/user/src/%s","old_string":"time.Now()","new_string":"time.Now().UTC()"}`, file)
+			result = "The file /home/user/src/" + file + " has been updated."
+		case journey.Test:
+			said = "Running the suite."
+			tool, input = "Bash", `{"command":"pytest tests/ -x -q"}`
+			result = "............................................................\n" + runSummaryFor(l) + " in 4.21s"
+			isErr = strings.Contains(legBadge(l), "✗")
+		case journey.Ship:
+			said = "Committing."
+			tool, input = "Bash", `{"command":"git add -A && git commit -q -m '`+l.Label+`' && git push -u origin HEAD"}`
+			result = "[feat 3f2a9c1] " + l.Label + "\n 3 files changed, 42 insertions(+), 7 deletions(-)"
+		case journey.Docs:
+			said = "Writing it down in " + l.Label + "."
+			tool, input = "Write", fmt.Sprintf(`{"file_path":"/home/user/src/%s","content":"# %s\n"}`, file, l.Label)
+			result = "The file /home/user/src/" + file + " has been created."
+		}
+		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: l.Start, Text: said,
+			ToolUses: []transcript.ToolUse{{ID: id, Name: tool, Input: json.RawMessage(input)}}})
+		at := l.End
+		if at.IsZero() {
+			at = l.Start.Add(time.Minute)
+		}
+		add(transcript.Event{Type: transcript.EventUser, Timestamp: at,
+			ToolResults: []transcript.ToolResult{{ToolUseID: id, IsError: isErr, Text: result}}})
 		for _, w := range l.Waypoints {
-			add(transcript.EventAssistant, w.At, w.Text)
+			if w.Kind == journey.WaypointTestFail {
+				add(transcript.Event{Type: transcript.EventAssistant, Timestamp: w.At, Text: "FAILED " + w.Text + " — AssertionError: expected 200, got 401"})
+			}
 		}
 	}
-	sort.Slice(evs, func(i, j int) bool { return evs[i].Timestamp.Before(evs[j].Timestamp) })
+	for _, b := range tr.Branches {
+		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: b.Start, Text: "I'll send an agent to " + strings.ToLower(b.Label[:1]) + b.Label[1:] + " while I carry on.",
+			ToolUses: []transcript.ToolUse{{ID: b.ToolUseID, Name: "Agent", Input: json.RawMessage(fmt.Sprintf(`{"description":%q,"run_in_background":true}`, b.Label))}}})
+		if b.Done {
+			add(transcript.Event{Type: transcript.EventUser, Timestamp: b.End,
+				ToolResults: []transcript.ToolResult{{ToolUseID: b.ToolUseID, Text: b.Report}}})
+		}
+	}
+	sort.SliceStable(evs, func(i, j int) bool { return evs[i].Timestamp.Before(evs[j].Timestamp) })
 	return evs
+}
+
+// runSummaryFor is pytest's last line for a leg's newest run.
+func runSummaryFor(l journey.Leg) string {
+	for i := len(l.Waypoints) - 1; i >= 0; i-- {
+		if w := l.Waypoints[i]; w.Kind == journey.WaypointTestRun {
+			return w.Text
+		}
+	}
+	return "no tests ran"
 }
 
 func withPrompt(tr journey.Trail, at time.Time, text string) journey.Trail {
@@ -141,11 +224,21 @@ func sess(id, name, cwd, branch, title string, st state.State, since time.Time, 
 }
 
 func gone(id, name, title string, at time.Time) fleet.Session {
+	branch := []string{"main", "fix/" + name + "-timeouts", "feat/" + name + "-v2", "chore/deps", "spike/" + name}[len(id)%5]
 	return fleet.Session{
 		Info: fleet.SessionInfo{ID: id, TranscriptPath: sessionKey(id), ProjectSlug: "-home-user-" + name,
-			CWD: "/home/user/" + name, GitBranch: "main", Title: title, StartedAt: at.Add(-time.Hour), LastEventAt: at},
+			CWD: "/home/user/" + name, GitBranch: branch, Title: title, StartedAt: at.Add(-time.Hour), LastEventAt: at},
 		Snap: archivedSnap(at),
 	}
+}
+
+// pastTitles are what the archived sessions were asked for: a fleet of
+// "archived job N" told the reviewers nothing about the archive.
+var pastTitles = []string{
+	"why does the nightly build take 40 minutes", "add retries to the s3 client", "rename Customer to Account everywhere",
+	"upgrade to go 1.24", "write the incident postmortem", "flaky test in the scheduler", "cut the 2.3 release",
+	"make the cli print json", "remove the legacy auth path", "profile the import", "document the webhook contract",
+	"port the login screen", "clean the exploration notebooks", "migrate the docs to the new theme", "update the on-call runbook",
 }
 
 func pane(target, id string, pid int) tmuxop.Pane {
@@ -228,16 +321,25 @@ func sceneManyIdle() scene {
 		{"ops-runbook", "update the on-call runbook", 8 * 24 * time.Hour, journey.Docs},
 		{"infra", "tighten the vpc security groups", 10 * 24 * time.Hour, journey.Design},
 	}
-	for _, s := range idle {
+	for i, s := range idle {
 		ss = append(ss, sess(s.id, s.id, "/home/user/"+s.id, "main", s.title, state.Idle, n.Add(-s.age), s.class, "", "turn complete", "idle"))
-		tr[sessionKey(s.id)] = trailOf(n.Add(-s.age-time.Hour), s.title, false,
-			legSpec{journey.Scout, "the relevant files", 10 * time.Minute, []string{"a.go"}, "", nil},
-			legSpec{s.class, "the change", 30 * time.Minute, []string{"b.go"}, "", nil},
-			legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
-		)
+		scout := []string{"the invoice model", "LoginScreen.tsx", "cmd/root.go", "the notebooks dir", "the theme config", "the hot loop", "the users schema", "the runbook", "the security groups"}[i]
+		made := []string{"invoice.py", "LoginScreen.tsx", "cmd/json.go", "nb/cleanup.py", "theme.toml", "loop.go", "007_users.sql", "runbook.md", "sg.tf"}[i]
+		verdict := []string{"212✓", "18✓", "40✓", "", "9✓", "3✓ 1✗", "12✓", "", "40✓"}[i]
+		legs := []legSpec{
+			{journey.Scout, scout, 10 * time.Minute, []string{scout}, "", nil},
+			{s.class, made, time.Duration(12+7*i) * time.Minute, []string{made}, "", nil},
+		}
+		if verdict != "" {
+			legs = append(legs, legSpec{journey.Test, "go test", 3 * time.Minute, nil, verdict, nil})
+		}
+		if i%3 == 0 {
+			legs = append(legs, legSpec{journey.Ship, "commit", 2 * time.Minute, nil, "", nil})
+		}
+		tr[sessionKey(s.id)] = trailOf(n.Add(-s.age-time.Hour), s.title, false, legs...)
 	}
 	for i := 0; i < 300; i++ {
-		ss = append(ss, gone(fmt.Sprintf("a-%03d", i), []string{"api", "webapp", "etl", "infra"}[i%4], fmt.Sprintf("archived job %d", i), n.Add(-time.Duration(i+1)*3*time.Hour)))
+		ss = append(ss, gone(fmt.Sprintf("a-%03d", i), []string{"api", "webapp", "etl", "infra"}[i%4], pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+1)*3*time.Hour)))
 	}
 	panes, order := paneMap(ids, []string{"work:0.0", "work:1.0", "work:2.0", "work:3.0", "side:0.0", "side:1.0", "", "side:2.0", "ops:0.0", "ops:1.0", "", "ops:2.0"})
 	return scene{name: "many-idle", story: "Twelve sessions from a morning of fanning out; one still moving, two finished recently and unread, the rest done hours or days ago.", sessions: ss, trails: tr, panes: panes, order: order}
@@ -294,7 +396,7 @@ func sceneFewOngoing() scene {
 		)
 	}
 	for i := 0; i < 40; i++ {
-		ss = append(ss, gone(fmt.Sprintf("a-%03d", i), "api", fmt.Sprintf("archived job %d", i), n.Add(-time.Duration(i+1)*5*time.Hour)))
+		ss = append(ss, gone(fmt.Sprintf("a-%03d", i), "api", pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+1)*5*time.Hour)))
 	}
 	panes, order := paneMap([]string{"infra", "api", "webapp", "etl", "billing", "docs-site", "cli"}, []string{"ops:0.0", "work:0.0", "work:1.0", "work:2.0", "side:0.0", "", "side:1.0"})
 	return scene{name: "few-ongoing", story: "Four sessions alive at once: one asking a question, two working (one with a red suite), one gone quiet mid-turn; three finished earlier.", sessions: ss, trails: tr, panes: panes, order: order}

@@ -676,7 +676,7 @@ func TestAMovingHeadIsAgedFromItsStart(t *testing.T) {
 	now := fixtureBase.Add(40 * time.Minute)
 	l := journey.Leg{Class: journey.Fix, Label: "checkout.py",
 		Start: fixtureBase.Add(10 * time.Minute), End: fixtureBase.Add(11 * time.Minute), Current: true}
-	got := legRow(l, l.Label, false, now, 40, false)
+	got := legRow(l, l.Label, false, TrailOpts{Now: now, Width: 40, Level: 1})
 	if !strings.Contains(got, "for 30m") {
 		t.Errorf("HEAD is not aged from its start: %q", got)
 	}

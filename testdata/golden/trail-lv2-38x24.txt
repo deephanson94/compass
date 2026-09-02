@@ -3,7 +3,6 @@
 ◆ scout  middleware.py              5m
 │
 ◆ test   pytest             18✓ 2✗ 12m
-│  ├ 18 passed · 2 failed
 │  ├ ✗ test_refresh_expired_token
 │  └ ✗ test_refresh_revoked_token
 ├─◈ scout the payments module    ✓ 19m

@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/todo"
@@ -64,6 +65,14 @@ type TrailOpts struct {
 	// session is doing this minute: the call it is hung on, the question it
 	// is asking. "" leaves HEAD to the plan and then to the leg's own label.
 	Head string
+
+	// HeadState and HeadSince are the session's state as the state machine
+	// sees it, so HEAD can wear the fleet's glyph — ◍ for a hung session, ▲
+	// for one waiting on you — and say "silent 4m" or "waiting 4m" instead
+	// of "for 13m". A green ● on a stuck session's HEAD was the trail
+	// contradicting the fleet beside it.
+	HeadState state.State
+	HeadSince time.Time
 
 	// Dense drops the plain rail rows between legs. trailDoc sets it itself
 	// when a Lv1 trail does not fit its viewport: under pressure the rail
@@ -177,7 +186,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		return rows, noSel(len(rows))
 	}
 
-	b := trailBuilder{cursor: trailCursor(o), width: width}
+	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if len(tr.Legs) == 0 {
 		// A journey that has only been asked for: say what comes next rather
@@ -187,10 +196,9 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	}
 	b.ghosts(o.Todos, width, o.Height)
 	doc, sel := b.render()
-	if !o.Dense && o.Level <= levelTrail && o.Height > 0 && len(doc) > o.Height {
+	if !o.Dense && o.Height > 0 && len(doc) > o.Height {
 		// Too long for the panel: draw it again without the air, so the
-		// viewport holds twice the journey. Lv2 keeps its rails — the cursor
-		// and the details need the structure more than the rows.
+		// viewport holds twice the journey.
 		o.Dense = true
 		return trailDoc(tr, o)
 	}
@@ -237,9 +245,10 @@ type trailBuilder struct {
 	lines  []trailLine
 	groups int
 
-	cursor int // the selectable row to invert; -1 for none
-	picked int // how many selectable rows have been handed out so far
-	width  int // the panel's columns, so the cursor's bar spans all of them
+	cursor int  // the selectable row to invert; -1 for none
+	picked int  // how many selectable rows have been handed out so far
+	width  int  // the panel's columns, so the cursor's bar spans all of them
+	dense  bool // no air between rows: the ghosts drop their rails too
 }
 
 // pick hands out the next selectable row index. It is called wherever a
@@ -345,10 +354,10 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 	}
 
 	show := min(maxGhosts, len(pending))
-	for show > 0 && ghostCost(show, len(pending)) > height/2 {
+	for show > 0 && ghostCost(show, len(pending), b.dense) > height/2 {
 		show--
 	}
-	if ghostCost(show, len(pending)) > height/2 {
+	if ghostCost(show, len(pending), b.dense) > height/2 {
 		return
 	}
 
@@ -365,7 +374,9 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 		if i == 0 && total > 0 {
 			rail += " " + dimStyle.Render(clip(fmt.Sprintf("%d of %d tasks to go", len(pending), total), body))
 		}
-		b.node(rail)
+		if i == 0 || !b.dense {
+			b.node(rail)
+		}
 		b.node(dimStyle.Render(glyphGhost + " " + clip(pending[i], body)))
 	}
 	if more := len(pending) - show; more > 0 {
@@ -376,8 +387,11 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 
 // ghostCost is how many rows show ghosts (out of total pending) occupy: one
 // each, one dashed rail each, plus the "+N more" row when the plan is longer.
-func ghostCost(show, total int) int {
+func ghostCost(show, total int, dense bool) int {
 	rows := 2 * show
+	if dense && show > 1 {
+		rows = show + 1
+	}
 	if total > show {
 		rows++
 	}
@@ -431,7 +445,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// figure is a duration and every one looks alike. The rail row
 			// the hour turns on carries the hour, so "when" is readable by
 			// eye down a long column (a rule every hour, no extra rows).
-			b.node(hourRule(n.at, o.Width))
+			b.node(hourRule(n.at, nodes[i-1].at, o.Width))
 		case o.Dense:
 			// No air between legs: the trail is longer than its panel.
 		default:
@@ -442,15 +456,27 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		if n.leg >= 0 {
 			leg := tr.Legs[n.leg]
 			label, narrated := legLabel(leg, o)
-			b.selNode(b.pick(), legRow(leg, label, narrated, o.Now, o.Width, o.Pulse))
+			b.selNode(b.pick(), legRow(leg, label, narrated, o))
+			// A question that did not fit on HEAD's row is spelled out
+			// beneath it, options and all, at every level: it is the one
+			// line the deck exists to deliver, and clipping it at "the
+			// office CIDR only,…" left the decision one attach away.
+			var extra []detailRow
+			if leg.Current && o.HeadState == state.NeedsYou && o.Head != "" && label != o.Head {
+				for _, line := range wrapN(o.Head, o.Width-trailWayWidth, 3) {
+					extra = append(extra, detailRow{text: dimStyle.Render(line), sel: -1})
+				}
+			}
 			if o.Level >= levelWaypoints {
-				b.details(legDetails(leg, o.Width, b))
+				b.details(append(extra, legDetails(leg, o.Width, b)...))
+			} else {
+				b.details(extra)
 			}
 			forked = b.branches(tr, n.leg, o) > 0
 		} else {
 			// Selectable from Lv2, like a leg: it is the row you wrote, and the
 			// reader anchors to it as readily as to any leg's first line.
-			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width))
+			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, n.prompt+1, len(tr.Prompts)))
 			forked = false
 		}
 	}
@@ -467,9 +493,14 @@ func hourTurned(a, b time.Time) bool {
 	return a.Truncate(time.Hour) != b.Truncate(time.Hour)
 }
 
-// hourRule is the rail row an hour turns on: "│ 14:00 ────".
-func hourRule(at time.Time, width int) string {
+// hourRule is the rail row an hour turns on: "│ 14:00 ────" — and, on the
+// first rule of a new day, "│ Tue 00:12 ────", so a trail two days long has
+// its days as well as its hours.
+func hourRule(at, prev time.Time, width int) string {
 	stamp := at.Local().Format("15:04")
+	if at.Local().YearDay() != prev.Local().YearDay() {
+		stamp = at.Local().Format("Mon 15:04")
+	}
 	row := railStroke + " " + stamp + " "
 	if rest := width - len([]rune(row)); rest > 0 {
 		row += strings.Repeat("─", rest)
@@ -519,6 +550,9 @@ func TrailRows(tr journey.Trail, level int) []TrailRow {
 		out = append(out, TrailRow{Time: leg.Start, Kind: "leg", Text: leg.Label, Leg: n.leg})
 		if level >= levelWaypoints {
 			for _, w := range leg.Waypoints {
+				if restates(leg, w) {
+					continue
+				}
 				out = append(out, TrailRow{Time: w.At, Kind: "waypoint", Text: w.Text, Leg: n.leg})
 			}
 		}
@@ -581,11 +615,13 @@ func tickLeg(l journey.Leg, o TrailOpts) bool {
 	if l.Current || len(l.Waypoints) > 0 || len(l.Files) > 0 {
 		return false
 	}
-	if l.Class == journey.Ship {
+	if l.Class == journey.Ship || l.Class == journey.Test {
 		// A ship leg is the landing: the row that answers "is it done?".
 		// Demoting it to a word on the rail read as debris under the last
 		// test run, and the answer to the question the trail exists for was
-		// the one row nobody noticed.
+		// the one row nobody noticed. A test leg is the one class that can
+		// be red: a run whose verdict never parsed is a row that says "?",
+		// not a word on the rail.
 		return false
 	}
 	_, narrated := legLabel(l, o)
@@ -617,6 +653,11 @@ func tickRow(l journey.Leg, stroke string, width int) string {
 func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	if l.Current {
 		if o.Head != "" {
+			if o.HeadState == state.NeedsYou && len([]rune(o.Head)) > headLabelMax(o.Width) {
+				// Too long for the row: name it, and let the rows beneath
+				// carry it whole.
+				return "asks you", false
+			}
 			return o.Head, false
 		}
 		// HEAD is named by the plan when the plan has a name for it: the
@@ -647,25 +688,23 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	return l.Label, false
 }
 
+// headLabelMax is the longest label HEAD's row can carry whole at a width.
+func headLabelMax(width int) int {
+	return width - trailPrefixWidth - 1 - len("waiting 10m")
+}
+
 // legRow: glyph, class verb, label, and the age held at the right margin. HEAD
 // points at itself — `← 3m` — because it is the only line that is still moving.
 // The arrow is a "you are here", not a direction of travel: it means the same
 // thing with the past above it as it did with the past below.
 // A narrated leg spends the verb column on its own words: the prose already
 // says what the class was for, and the glyph keeps the class's tint.
-func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int, pulse bool) string {
+func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
+	width := o.Width
 	glyph := glyphLeg
 	age := legSpan(l)
 	if l.Current {
-		glyph = glyphHead
-		if pulse {
-			glyph = glyphBreath
-		}
-		// HEAD is still moving: its figure is how long it has been at this,
-		// measured from its start to now. "for 2h" — read beside the finished
-		// legs' durations it is the same kind of number, where "← 2h" was
-		// read by everyone who tried it as "two hours ago".
-		age = "for " + relAge(now, l.Start)
+		glyph, age = headMark(o, l)
 	}
 	head := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
 
@@ -699,9 +738,88 @@ func legRow(l journey.Leg, label string, narrated bool, now time.Time, width int
 		// Too narrow for a label: the verb and the age still answer "what, when".
 		return head + padLeft(dimStyle.Render(age), width-(trailPrefixWidth-1))
 	}
+	// A wide panel spends its width inside the row: the leg's own detail —
+	// the failing test, the bug, the files — beside the label, where a
+	// keypress used to be the only way to it. Only at Lv1: at Lv2 the
+	// details hang beneath the leg already.
 	labelText := textStyle.Render(pad(clip(label, labelWidth), labelWidth))
+	if o.Level < levelWaypoints && width >= trailInlineWidth {
+		if detail := legInline(l); detail != "" {
+			used := len([]rune(label))
+			if spare := labelWidth - used - 3; spare >= trailInlineMin {
+				labelText = textStyle.Render(label) + dimStyle.Render(pad(" · "+clip(detail, spare), labelWidth-used))
+			}
+		}
+	}
 	return head + " " + labelText + badgeStyle(badge).Render(padLeft(badge, badgeW)) +
 		" " + dimStyle.Render(age)
+}
+
+// trailInlineMin is the room a leg's detail needs before it rides on the
+// row, and trailInlineWidth the panel it takes to try: a wide deck's trail,
+// never a board column.
+const (
+	trailInlineMin   = 24
+	trailInlineWidth = 80
+)
+
+// legInline is the one detail a leg would show first at Lv2: its failing
+// tests, its bugs, its commit, or the files it touched beyond its label.
+func legInline(l journey.Leg) string {
+	var fails, bugs []string
+	for _, w := range l.Waypoints {
+		switch w.Kind {
+		case journey.WaypointTestFail:
+			fails = append(fails, wayFail+" "+w.Text)
+		case journey.WaypointBug:
+			bugs = append(bugs, w.Text)
+		}
+	}
+	switch {
+	case len(fails) > 0:
+		return strings.Join(fails, " · ")
+	case len(bugs) > 0:
+		return strings.Join(bugs, " · ")
+	}
+	switch l.Class {
+	case journey.Build, journey.Fix, journey.Docs:
+	default:
+		return "" // a ship leg's commit is its label; a scout's files are its label
+	}
+	var others []string
+	for _, f := range l.Files {
+		if !sameFile(f, l.Label) {
+			others = append(others, f)
+		}
+	}
+	if len(others) == 0 {
+		return ""
+	}
+	return "touched " + strings.Join(others, " · ")
+}
+
+// headMark is HEAD's glyph and figure: the fleet's glyph and wait when the
+// state machine says the session is hung or waiting on you, the breathing ●
+// and "for 2h" — how long it has been at this — when it is working.
+func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
+	since := o.HeadSince
+	if since.IsZero() {
+		since = l.Start
+	}
+	switch o.HeadState {
+	case state.NeedsYou:
+		return fleet.Glyph(state.NeedsYou), "waiting " + relAge(o.Now, since)
+	case state.Stuck:
+		return fleet.Glyph(state.Stuck), "silent " + relAge(o.Now, since)
+	}
+	glyph = glyphHead
+	if o.Pulse {
+		glyph = glyphBreath
+	}
+	// "for 2h" — read beside the finished legs' durations it is the same
+	// kind of number, where "← 2h" was read by everyone who tried it as
+	// "two hours ago".
+	return glyph, "for " + relAge(o.Now, l.Start)
 }
 
 func badgeStyle(badge string) lipgloss.Style {
@@ -734,6 +852,12 @@ func legBadge(l journey.Leg) string {
 			return w.Short
 		}
 	}
+	if l.Class == journey.Test && !l.Current {
+		// A run whose output never parsed is a run with no verdict, which
+		// is a fact, not an absence: "?" says so, where a bare row between
+		// a red run and a green one read as if the tests had skipped a beat.
+		return "?"
+	}
 	return ""
 }
 
@@ -757,16 +881,22 @@ func withoutClassVerb(label, class string) string {
 
 // promptRow quotes the human turn — the only words on the trail that are not
 // ours.
-func promptRow(p journey.Prompt, now time.Time, width int) string {
+func promptRow(p journey.Prompt, now time.Time, width, nth, total int) string {
 	// "2h ago", where a leg says "12m": the prompt is when, the leg is how
 	// long, and without the word a column of figures reads as one kind.
 	age := relAge(now, p.At) + " ago"
-	textWidth := width - 2 - 1 - len([]rune(age))
+	// The chapter: "◉ 9/13" is what `[` and `]` step through, and on a
+	// trail with a dozen prompts it is the readout to steer by.
+	lead := glyphPrompt
+	if total > 1 {
+		lead += fmt.Sprintf(" %d/%d", nth, total)
+	}
+	textWidth := width - len([]rune(lead)) - 1 - 1 - len([]rune(age))
 	if textWidth < trailMinLabel {
-		return dimStyle.Render(glyphPrompt) + padLeft(dimStyle.Render(age), width-1)
+		return dimStyle.Render(lead) + padLeft(dimStyle.Render(age), width-len([]rune(lead)))
 	}
 	text := textStyle.Render(pad(clip(`"`+p.Text+`"`, textWidth), textWidth))
-	return dimStyle.Render(glyphPrompt) + " " + text + " " + dimStyle.Render(age)
+	return dimStyle.Render(lead) + " " + text + " " + dimStyle.Render(age)
 }
 
 // legDetails is a leg's Lv2 body: its waypoints in the order they happened,
@@ -778,6 +908,9 @@ func legDetails(l journey.Leg, width int, b *trailBuilder) []detailRow {
 	out := make([]detailRow, 0, len(l.Waypoints)+1)
 	bugs := 0
 	for _, w := range l.Waypoints {
+		if restates(l, w) {
+			continue // TrailRows skips it too
+		}
 		// The index is spent whether or not the panel is wide enough to draw
 		// the row: TrailRows counts moments, not columns.
 		sel := b.pick()
@@ -796,6 +929,27 @@ func legDetails(l journey.Leg, width int, b *trailBuilder) []detailRow {
 		out = append(out, detailRow{text: row, sel: -1})
 	}
 	return out
+}
+
+// restates reports whether a waypoint is a row the leg's own row already
+// says: the run summary the badge carries ("18 passed · 2 failed" under
+// "18✓ 2✗"), the commit subject a ship leg is named by. A child that repeats
+// its parent costs a row and a keypress to say nothing.
+func restates(l journey.Leg, w journey.Waypoint) bool {
+	switch w.Kind {
+	case journey.WaypointTestRun:
+		return w.Short != "" && w.Short == legBadge(l)
+	case journey.WaypointCommit:
+		if l.Class != journey.Ship {
+			return false
+		}
+		for i := len(l.Waypoints) - 1; i >= 0; i-- {
+			if c := l.Waypoints[i]; c.Kind == journey.WaypointCommit && strings.TrimSpace(c.Text) != "" {
+				return c.Text == w.Text // the newest commit is the label
+			}
+		}
+	}
+	return false
 }
 
 // waypointBody decorates one waypoint: the Kind picks the prefix, the Text
@@ -843,22 +997,28 @@ func sameFile(file, label string) bool {
 	return false
 }
 
-// wrapTwo breaks a sentence over at most two rows of width: the first at the
-// last word that fits, the second clipped. A finding cut at "two are the sa…"
-// was the half a reader came for.
-func wrapTwo(text string, width int) []string {
-	r := []rune(text)
-	if len(r) <= width {
-		return []string{text}
-	}
-	cut := width
-	for i := width; i > width/2; i-- {
-		if r[i] == ' ' {
-			cut = i
+// wrapN breaks a sentence over at most n rows of width, each at the last
+// word that fits, the last clipped. A finding cut at "two are the sa…" was
+// the half a reader came for.
+func wrapN(text string, width, n int) []string {
+	var rows []string
+	rest := []rune(strings.TrimSpace(text))
+	for len(rest) > 0 {
+		if len(rows) == n-1 || len(rest) <= width {
+			rows = append(rows, clip(string(rest), width))
 			break
 		}
+		cut := width
+		for i := width; i > width/2; i-- {
+			if rest[i] == ' ' {
+				cut = i
+				break
+			}
+		}
+		rows = append(rows, string(rest[:cut]))
+		rest = []rune(strings.TrimSpace(string(rest[cut:])))
 	}
-	return []string{string(r[:cut]), clip(strings.TrimSpace(string(r[cut:])), width)}
+	return rows
 }
 
 // branches draws the subagent lanes that forked off leg index after (-1 for the
@@ -906,7 +1066,7 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 			}
 			if body := width - trailWayWidth; body >= trailMinLabel {
 				var rows []detailRow
-				for _, line := range wrapTwo(report, body) {
+				for _, line := range wrapN(report, body, 3) {
 					rows = append(rows, detailRow{text: dimStyle.Render(line), sel: -1})
 				}
 				b.details(rows)
@@ -944,14 +1104,16 @@ func (m *Model) trailColumn(w, h int) []string {
 
 // trailOpts is the model's state as the renderer wants it.
 func (m *Model) trailOpts(w, h int) TrailOpts {
-	head := ""
+	head, headState, headSince := "", state.Working, time.Time{}
 	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
-		head = m.headFor(s)
+		head, headState, headSince = m.headFor(s), s.Snap.State, s.Snap.Since
 	}
 	return TrailOpts{
 		Todos:      m.todos,
 		Labels:     m.labels,
 		Head:       head,
+		HeadState:  headState,
+		HeadSince:  headSince,
 		SessionKey: m.selectedKey,
 		Now:        m.now,
 		Width:      w,

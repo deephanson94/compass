@@ -196,20 +196,72 @@ func (m *Model) boardLines(w, h int) []string {
 	order := m.viewOrder()
 	n, cw := boardColumns(w, len(order))
 	rowOf := m.boardRows()
-	keys := m.boardKeys(n)
 	body := h - 2 // the strip and its line of air
 	if body < 1 {
 		body = 1
 	}
-	var cols []column
-	for _, key := range keys {
-		if r, ok := rowOf[key]; ok {
-			cols = append(cols, column{cw, m.boardColumn(key, r, cw, body)})
+	// A tall board with short trails wraps into a second band of columns
+	// rather than naming half the fleet in the strip over twenty blank
+	// rows. Only when the first band's columns all fit a half-height: a
+	// day-long trail keeps the whole height, because cutting it in half to
+	// show two idle sessions underneath would lose the morning.
+	bands, bh := 1, body
+	if len(order) > n && body >= 2*boardBandMin+1 {
+		half := (body - 1) / 2
+		fits := true
+		for _, key := range m.boardKeys(n) {
+			if m.boardColumnRows(key, cw) > half {
+				fits = false
+				break
+			}
+		}
+		if fits {
+			bands, bh = 2, half
 		}
 	}
-	lines := joinColumns(body, cols)
+	keys := m.boardKeys(n * bands)
+	var lines []string
+	for b := 0; b < bands; b++ {
+		var cols []column
+		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
+			if r, ok := rowOf[keys[i]]; ok {
+				cols = append(cols, column{cw, m.boardColumn(keys[i], r, cw, bh)})
+			}
+		}
+		if len(cols) == 0 {
+			break
+		}
+		if b > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, joinColumns(bh, cols)...)
+	}
+	lines = fit(lines, body)
 	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
 	return fit(lines, h)
+}
+
+// boardBandMin is the least height a band of columns is worth: the header's
+// three rows and enough trail to read.
+const boardBandMin = 12
+
+// boardColumnRows is how many rows a column would take to show its whole
+// trail: the header and the document.
+func (m *Model) boardColumnRows(key string, w int) int {
+	tr, ok := m.trails[key]
+	if !ok {
+		return 4
+	}
+	r, ok := m.boardRows()[key]
+	if !ok {
+		return 4
+	}
+	s := m.sessions[r.sess]
+	doc := TrailLines(tr, TrailOpts{
+		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: s.Snap.Since,
+		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
+	})
+	return 3 + len(doc)
 }
 
 // boardRows numbers the board's sessions in the board's own order — the
@@ -282,7 +334,23 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
 	entry := m.entryLines(r, w)
-	rows := []string{entry[0], m.boardSecondLine(s, entry[1], w), m.boardDelta(key, s, w)}
+	second := entry[1]
+	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
+		// A working column shows its HEAD row anyway — pinned, it is always
+		// the last row of the trail — so the header says what HEAD cannot:
+		// how the suite stands, what shipped, what is still out.
+		if parts := verdictParts(tr, m.now); len(parts) > 0 {
+			second = dimStyle.Render(clip("    "+strings.Join(parts, " · "), w))
+		}
+	}
+	second, marked := m.boardSecondLine(s, second, w)
+	third := m.boardDelta(key, s, w)
+	if third == "" && !marked {
+		// The tmux session is what `enter` spends; a column that never
+		// says where it lives is the one you attach to blind.
+		third, _ = m.boardSecondLine(s, "", w)
+	}
+	rows := []string{entry[0], second, third}
 	if h <= 3 {
 		return fit(rows, h)
 	}
@@ -299,6 +367,8 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Todos:      planItems(tr.Tasks),
 		Labels:     m.boardLabels[key],
 		Head:       m.headFor(s),
+		HeadState:  s.Snap.State,
+		HeadSince:  s.Snap.Since,
 		SessionKey: key,
 		Now:        m.now,
 		Width:      w,
@@ -334,6 +404,28 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 // "did it work" with zero keys and zero inference, which for eleven of twelve
 // sessions on an afternoon board is the only thing anyone needed.
 func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
+	parts := verdictParts(tr, now)
+	if len(parts) == 0 {
+		// Nothing countable: the newest completed leg, so a quiet column
+		// still says what it last did.
+		for i := len(tr.Legs) - 1; i >= 0; i-- {
+			if l := tr.Legs[i]; !l.Current {
+				label := l.Label
+				if label == "" {
+					label = l.Class.String()
+				}
+				parts = append(parts, l.Class.String()+" "+label)
+				break
+			}
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// verdictParts is the verdict without its fallback: only what the trail
+// can count. A working column's header uses this — its HEAD row already
+// says what it is doing, and "test pytest" over it said less.
+func verdictParts(tr journey.Trail, now time.Time) []string {
 	var parts []string
 
 	// Agents still out, oldest first: the number that changes what you do.
@@ -370,8 +462,8 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 	for i := len(tr.Legs) - 1; i >= 0; i-- {
 		l := tr.Legs[i]
 		badge := legBadge(l)
-		if badge == "" {
-			continue
+		if badge == "" || badge == "?" {
+			continue // no verdict is not a verdict
 		}
 		red := strings.Contains(badge, "✗")
 		word := "✓ green"
@@ -407,33 +499,44 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 	if verdict != "" {
 		parts = append(parts, verdict)
 	}
-
-	if len(parts) == 0 && last != nil {
-		label := last.Label
-		if label == "" {
-			label = last.Class.String()
+	// Agents all back: how many, and how many said nothing — the return
+	// that never reached a fleet row.
+	back, empty := 0, 0
+	for _, b := range tr.Branches {
+		if b.Done {
+			back++
+			if strings.TrimSpace(b.Report) == "" {
+				empty++
+			}
 		}
-		parts = append(parts, last.Class.String()+" "+label)
 	}
-	return strings.Join(parts, " · ")
+	if back > 0 && out == 0 {
+		line := fmt.Sprintf("◈%d back", back)
+		if empty > 0 {
+			line += fmt.Sprintf(" · %d empty", empty)
+		}
+		parts = append(parts, line)
+	}
+
+	return parts
 }
 
 // boardSecondLine is the fleet's second row for the session with, where the
 // fleet's grouping would have said it, the tmux session it lives in on the
 // right: the one fact the list carried that the column otherwise loses.
-func (m *Model) boardSecondLine(s fleet.Session, line string, w int) string {
+func (m *Model) boardSecondLine(s fleet.Session, line string, w int) (string, bool) {
 	group := ""
 	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
 		group = tmuxSessionName(pane.Target)
 	}
 	if group == "" {
-		return line
+		return line, true // nothing to say: nothing owed
 	}
 	group = "⌁ " + group // the pane mark, so "work" does not read as a state word
 	if lipgloss.Width(line)+2+lipgloss.Width(group) > w {
-		return line
+		return line, false
 	}
-	return pad(line, w-lipgloss.Width(group)) + dimStyle.Render(group)
+	return pad(line, w-lipgloss.Width(group)) + dimStyle.Render(group), true
 }
 
 // boardDelta is the header's third row: how much a column has grown since the
