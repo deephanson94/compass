@@ -505,22 +505,30 @@ func verdictParts(tr journey.Trail, now time.Time) []string {
 				rerunning = c.Start
 			}
 		}
+		// The caveat is a clause of its own, so a narrow row sheds it whole
+		// rather than cutting "edited sin…".
+		suffix := ""
 		switch {
 		case red && shippedSince:
-			verdict += " · shipped on red"
+			suffix = "shipped on red"
 			shipped = "" // the same fact, and this is the way to say it
 		case !rerunning.IsZero():
-			verdict += " · rerunning for " + relAge(now, rerunning)
+			suffix = "rerunning for " + relAge(now, rerunning)
 		case edited:
-			verdict += " · edited since"
+			suffix = "edited since"
+		}
+		if shipped != "" {
+			parts = append(parts, shipped)
+			shipped = ""
+		}
+		parts = append(parts, verdict)
+		if suffix != "" {
+			parts = append(parts, suffix)
 		}
 		break
 	}
 	if shipped != "" {
-		parts = append(parts, shipped)
-	}
-	if verdict != "" {
-		parts = append(parts, verdict)
+		parts = append(parts, shipped) // no run to stand beside: the ship alone
 	}
 	// Agents all back: how many, and how many said nothing — the return
 	// that never reached a fleet row.

@@ -71,6 +71,9 @@ func TestBoardVerdictReadsTheTrailsTail(t *testing.T) {
 			{Label: "a", Start: base.Add(50 * time.Minute)}, {Label: "b", Start: base.Add(55 * time.Minute)}, {Label: "c", Start: base, Done: true, End: base}}},
 			[]string{"◈2 out 10m"}, nil},
 		{"nothing countable", journey.Trail{Legs: []journey.Leg{fix}}, []string{"fix tokens.py"}, nil},
+		{"shipped, no run", journey.Trail{Legs: []journey.Leg{fix, ship}}, []string{"✓ shipped 19m ago"}, nil},
+		{"shipped with agents out", journey.Trail{Legs: []journey.Leg{fix, ship}, Branches: []journey.Branch{{Label: "a", Start: base.Add(50 * time.Minute)}}},
+			[]string{"◈1 out 10m", "✓ shipped 19m ago"}, nil},
 		{"only HEAD", journey.Trail{Legs: []journey.Leg{{Class: journey.Scout, Start: base, Current: true}}}, nil, []string{"scout"}},
 	} {
 		got := boardVerdict(s, tc.tr, now)
