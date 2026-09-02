@@ -16,7 +16,7 @@ and watches all of them at once.
 
 ```
 ┌ compass ──────────────────────────────────────────────────────────────────────────────────┐
-│ FLEET · live          │ ⌁ dev:1.0 · live                 │ TRAIL · api             [Lv1]  │
+│ FLEET · live          │ ⌁ dev:1.0 · live                 │ TRAIL · api           [trail]  │
 │ dev                   │                                  │ ◉ "fix the 401 bug"       38m  │
 │▸1 ● api    fixing  3m │  ● I'll fix the token refresh    │ ╷                              │
 │    :1.0 · auth-fx     │    bug. Let me look at the       │ ◆ scout  auth module map  31m  │
@@ -167,10 +167,11 @@ run and nothing else.
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
-| `ctrl+d`/`ctrl+u` | half a page: the trail at Lv1, the reader at Lv3 |
+| `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
-| `[` / `]` | previous / next prompt — the chapters of a trail, at Lv1 and Lv2; your turns, in the reader |
-| `Space` `/` `n`/`N` | Lv3: unfold a result · search · walk the matches |
+| `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
+| `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
+| `r` | quick reply: the footer offers stock lines ("please continue", "report status", the quota one), a digit types the line into the session's tmux pane and presses Enter. `reply = "…"` lines in the config replace them. Off under `-readonly` |
 | `?` | help |
 
 ## Design docs

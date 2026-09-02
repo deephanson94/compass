@@ -16,10 +16,11 @@ var helpKeys = [][2]string{
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: board → session → reader"},
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
-	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
+	{"ctrl+d/u", "half a page: the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
+	{"r", "quick reply: type a stock line into the session's pane (a digit picks)"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
 	{"/ n N", "reader: search, next, previous"},
@@ -72,6 +73,15 @@ func helpLinesFor(w, h int, board bool) []string {
 		// them and the line of air, before any key is cut. A reader who
 		// cannot reach the keys cannot leave the overlay.
 		legend = helpLegendCore(legend)
+		if len(lines)+len(legend) > h {
+			// Still too tall: the lane and plan glyphs share one row, and
+			// the compaction mark rides with them.
+			legend = helpLegendFold(legend, w)
+		}
+		if len(lines)+len(legend) > h && len(lines) > 1 && lines[1] == "" {
+			// And the line of air under "keys" goes before any glyph does.
+			lines = append(lines[:1], lines[2:]...)
+		}
 	} else {
 		lines = append(lines, "")
 	}
@@ -97,6 +107,25 @@ func helpLegendCore(legend []string) []string {
 		}
 	}
 	return core
+}
+
+// helpLegendFold puts the ⌀ and ◌ lines on one row, with ⟲ beside them: the
+// glyphs survive, the sentences around them do not.
+func helpLegendFold(legend []string, w int) []string {
+	var out []string
+	folded := false
+	for _, l := range legend {
+		switch {
+		case strings.Contains(l, "⌀ back") || strings.Contains(l, "◌ planned"):
+			if !folded {
+				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · ✗ · 3rd time", w)))
+				folded = true
+			}
+		default:
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func helpKeyLines(w int) []string {
@@ -142,6 +171,8 @@ func helpLegendLines(w int, roomy bool) []string {
 		dimStyle.Render(clip("        →3 a live session whose prompt is this lane's", w)),
 		dimStyle.Render(clip("        ◌ planned — Claude's own next moves", w)),
 		dimStyle.Render(clip("        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them", w)),
+		dimStyle.Render(clip("        ⟲ compacted — the conversation was folded into a summary here", w)),
+		dimStyle.Render(clip("        ✗ test · 3rd time — the same test has failed in three legs", w)),
 		dimStyle.Render(clip("board:  bright = something unread · dim = read, or a day old", w)),
 		"",
 		dimStyle.Render(clip("every leg is one of seven classes, named on its row:", w)),

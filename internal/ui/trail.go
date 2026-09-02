@@ -492,6 +492,11 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// to this node as well as right to the lane it opened.
 		case ticked:
 			// The tick above is a rail segment of its own too.
+		case compactedBetween(tr.Compactions, nodes[i-1].at, n.at):
+			// The conversation ran out of context here and was folded into
+			// a summary: everything below works from what the summary kept.
+			// A session compacted twice is the one to read closely.
+			b.node(compactRule(compactionIn(tr.Compactions, nodes[i-1].at, n.at), o.Width))
 		case i == 1:
 			b.node(ruleStyle.Render(railHead))
 		case long && hourTurned(nodes[i-1].at, n.at):
@@ -562,6 +567,42 @@ func hourRule(at, prev time.Time, width int) string {
 	}
 	return ruleStyle.Render(clip(row, width))
 }
+
+// compactedBetween reports whether a compaction fell in (after, upTo].
+func compactedBetween(compactions []time.Time, after, upTo time.Time) bool {
+	_, ok := compactionAt(compactions, after, upTo)
+	return ok
+}
+
+// compactionIn is the last compaction in (after, upTo]: the rail row names
+// one moment, and the newest is the summary the session is working from.
+func compactionIn(compactions []time.Time, after, upTo time.Time) time.Time {
+	at, _ := compactionAt(compactions, after, upTo)
+	return at
+}
+
+func compactionAt(compactions []time.Time, after, upTo time.Time) (time.Time, bool) {
+	var found time.Time
+	ok := false
+	for _, c := range compactions {
+		if c.After(after) && !c.After(upTo) {
+			found, ok = c, true
+		}
+	}
+	return found, ok
+}
+
+// compactRule is the rail row a compaction falls on: "│ ⟲ compacted 14:02 ────".
+func compactRule(at time.Time, width int) string {
+	row := railStroke + " " + glyphCompact + " compacted " + at.Local().Format("15:04") + " "
+	if rest := width - len([]rune(row)); rest > 0 {
+		row += strings.Repeat("─", rest)
+	}
+	return ruleStyle.Render(clip(row, width))
+}
+
+// glyphCompact marks a compaction on the rail and in the totals.
+const glyphCompact = "⟲"
 
 // TrailRow is one selectable row of the trail: what it is, what it says, and
 // the moment it stands for. Enter at Lv2 opens the reader at that moment
@@ -878,7 +919,7 @@ func legInline(l journey.Leg) string {
 	for _, w := range l.Waypoints {
 		switch w.Kind {
 		case journey.WaypointTestFail:
-			fails = append(fails, wayFail+" "+w.Text)
+			fails = append(fails, wayFail+" "+failText(w))
 		case journey.WaypointBug:
 			bugs = append(bugs, w.Text)
 		}
@@ -1143,13 +1184,40 @@ func restates(l journey.Leg, w journey.Waypoint) bool {
 func waypointBody(w journey.Waypoint, bug, width int) string {
 	switch w.Kind {
 	case journey.WaypointTestFail:
-		return stuckStyle.Render(wayFail) + " " + dimStyle.Render(clip(w.Text, width-2))
+		return stuckStyle.Render(wayFail) + " " + dimStyle.Render(clip(failText(w), width-2))
 	case journey.WaypointBug:
 		prefix := fmt.Sprintf("bug%d ", bug)
 		return dimStyle.Render(prefix + clip(w.Text, width-len(prefix)))
 	default:
 		return dimStyle.Render(clip(w.Text, width))
 	}
+}
+
+// failText is a failing test's name, and — when the session has been round
+// this failure before — how many legs it has now failed in: "✗
+// test_refresh_expired_token · 3rd time". It is the trail's plainest sign
+// of a loop, and a row that says it is worth more than a third red row that
+// looks like the first two.
+func failText(w journey.Waypoint) string {
+	if w.Runs >= 2 {
+		return w.Text + " · " + ordinal(w.Runs) + " time"
+	}
+	return w.Text
+}
+
+// ordinal is 2nd, 3rd, 4th … 11th, 12th, 13th, 21st.
+func ordinal(n int) string {
+	suffix := "th"
+	switch {
+	case n%100 >= 11 && n%100 <= 13:
+	case n%10 == 1:
+		suffix = "st"
+	case n%10 == 2:
+		suffix = "nd"
+	case n%10 == 3:
+		suffix = "rd"
+	}
+	return strconv.Itoa(n) + suffix
 }
 
 // touchedBody is the one Lv2 row no extractor produces: the files a leg that
@@ -1320,9 +1388,12 @@ func (m *Model) sessionCard(w int) []string {
 	if !ok {
 		return []string{m.trailTitle(w), ""}
 	}
-	level := "[Lv2]"
+	// Where the keys are, in the words the help uses — board, session,
+	// reader — not a level number: one Tab from the board read "[Lv2]",
+	// and the person pressing it asked whether that was expected.
+	level := "[session]"
 	if m.level >= levelReader {
-		level = "[Lv3]"
+		level = "[reader]"
 	}
 	right := level
 	if n := m.legsAbove(); n > 0 {
@@ -1427,6 +1498,9 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 		if red > 0 {
 			out += fmt.Sprintf(" %d✗", red)
 		}
+		if n := len(tr.Compactions); n > 0 {
+			out += fmt.Sprintf(" %d%s", n, glyphCompact)
+		}
 		return out
 	}
 	if ships > 0 {
@@ -1434,6 +1508,9 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 	}
 	if red > 0 {
 		out += fmt.Sprintf(" · %d red", red)
+	}
+	if n := len(tr.Compactions); n > 0 {
+		out += " · " + plural(n, "compaction")
 	}
 	return out
 }
@@ -1451,12 +1528,12 @@ func (m *Model) trailTitle(w int) string {
 			name = archiveHeadline(s)
 		}
 	}
-	level := "[Lv1]"
+	level := "[trail]"
 	switch {
 	case m.level >= levelReader:
-		level = "[Lv3]"
+		level = "[reader]"
 	case m.level >= levelWaypoints:
-		level = "[Lv2]"
+		level = "[legs]"
 	}
 	// Scrolled off the present, the title says so: the trail is no longer
 	// showing the newest work, and `G` is the way back to it.

@@ -1,8 +1,8 @@
  ⌂ compass                                                                                                ▲1 2m  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌ 2 ● api                                    3m [Lv2] │  ⌁ dev:1.0 · live
-     ◆ test   1216✓ 2✗                    ⌁ dev        │
+ ▌ 2 ● api                                3m [session] │  ⌁ dev:1.0 · live
+     ◆ test   1216✓ 2✗                ⌁ dev            │
  ◉ "fix the 401 bug"                           38m ago │
  ╷                                                     │
  ◆ scout  middleware.py                             5m │
@@ -27,4 +27,4 @@
                                                        │
                                                        │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k legs · h/l session · [ ] chapters · m live pane · tab reader · enter attach · esc board
+ j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board

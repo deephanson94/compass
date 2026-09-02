@@ -1,7 +1,7 @@
  ⌂ compass                                                                                     ▲1 2m  ●2  ○2  archive 5
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · archive                              │  TRAIL · update the readme                                       [Lv1]
+ ▌FLEET · archive                              │  TRAIL · update the readme                                     [trail]
                                                │
   docs                                         │ ◌ nothing yet
  ▸1 ○ update the readme                     1h │

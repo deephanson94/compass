@@ -38,6 +38,14 @@ var relayPrefixes = []string{
 // no flag, and eight thousand words of it.
 const compactionPreamble = "This session is being continued from a previous conversation"
 
+// Compaction reports whether a user turn is the summary the harness writes
+// when a conversation ran out of context: the moment the session's memory
+// was folded, which is worth a mark on the trail — a session that has been
+// compacted twice is working from a summary of a summary.
+func (e Event) Compaction() bool {
+	return e.Type == EventUser && strings.HasPrefix(strings.TrimSpace(e.Text), compactionPreamble)
+}
+
 // Machinery reports whether a user turn is the harness talking to Claude
 // rather than a person talking to either.
 func (e Event) Machinery() bool {

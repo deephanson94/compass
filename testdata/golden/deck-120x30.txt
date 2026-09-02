@@ -1,8 +1,8 @@
  ⌂ compass                                                                                                ▲1 2m  ●1  ○1
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌ 2 ● api                                    3m [Lv2] │  READER · api                                tokens.py · 12:37
-     ◆ test   1216✓ 2✗                    ⌁ dev        │
+ ▌ 2 ● api                                3m [session] │  READER · api                                tokens.py · 12:37
+     ◆ test   1216✓ 2✗                ⌁ dev            │
  ◉ "fix the 401 bug"                           38m ago │ moment16 sending a subagent at the payments module, in case it
  ╷                                                     │ shares the same refresh helper
  ◆ scout  middleware.py                             5m │
@@ -27,4 +27,4 @@
                                                        │ moment39 both refresh tests pass now; rerunning the whole auth
                                                        │ suite to be sure nothing else moved
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k legs · h/l session · [ ] chapters · m live pane · tab reader · enter attach · esc board
+ j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board

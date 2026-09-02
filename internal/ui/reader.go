@@ -472,7 +472,10 @@ func (d *docBuilder) result(event int, at time.Time, use transcript.ToolUse, res
 	kind, head := readerFold, plural(len(lines), "line")
 	switch {
 	case res.IsError:
-		kind, head = readerFoldErr, glyphErrRes+" "+lines[0]
+		// The first line that says something: a failed pytest opens with
+		// its row of dots, and "✗ ......" said nothing about what failed.
+		_, said := previewLine(lines)
+		kind, head = readerFoldErr, glyphErrRes+" "+d.shorten(said, cwd)
 	case open, countsOnly(use.Name):
 	default:
 		// The first line that says something, and how much more there is:

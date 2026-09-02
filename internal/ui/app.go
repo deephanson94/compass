@@ -106,6 +106,21 @@ type attachDoneMsg struct {
 	err    error
 }
 
+// replyDoneMsg says a quick reply was typed into a pane, or was not.
+type replyDoneMsg struct {
+	target string
+	text   string
+	err    error
+}
+
+// DefaultReplies are the quick replies `r` offers when the config names
+// none: the three lines a person keeps typing into a fleet of sessions.
+var DefaultReplies = []string{
+	"please continue",
+	"report status",
+	"you were stuck on the quota limit; it's back now — please resume where you left off",
+}
+
 // Model is the deck. It holds no session state of its own beyond what is on
 // screen: the fleet Manager owns the truth, the feeds own the trails, and tmux
 // owns the panes.
@@ -175,7 +190,9 @@ type Model struct {
 
 	showHelp  bool
 	searching bool
-	pulse     bool // HEAD's breath is on its off-beat
+	replying  bool     // the quick replies are on the footer; a digit picks one
+	replies   []string // what `r` offers, in order
+	pulse     bool     // HEAD's breath is on its off-beat
 	readonly  bool
 
 	// The board's data: one trail per column, and each column's narrated
@@ -222,6 +239,7 @@ func New(mgr *fleet.Manager) *Model {
 		mgr:          mgr,
 		feeds:        newFeedStore(),
 		runner:       tmuxop.RealRunner{},
+		replies:      DefaultReplies,
 		proc:         tmuxop.RealProc{},
 		now:          time.Now(),
 		level:        levelBoard,
@@ -243,10 +261,13 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, build func(notify func()) Narrator) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, build func(notify func()) Narrator) error {
 	m := New(mgr)
 	m.readonly = readonly
 	m.showMirror = mirror
+	if len(replies) > 0 {
+		m.replies = replies
+	}
 	if base, err := os.UserCacheDir(); err == nil {
 		// Beside the resume cache. What was read is a fact about the person,
 		// not the session, and it has to outlive the process for "bright
@@ -574,6 +595,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case replyDoneMsg:
+		if msg.err != nil {
+			m.note = "could not send: " + firstLine(msg.err.Error())
+		} else {
+			m.note = fmt.Sprintf("sent to %s %s · %s", mirrorMark, msg.target, clip(`"`+msg.text+`"`, 40))
+		}
+		return m, nil
 	case attachDoneMsg:
 		switch {
 		case msg.err != nil && msg.inside:
@@ -620,6 +648,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// While the quick replies are up, a digit picks one and anything else
+	// puts them away: a reply is typed into someone's session, and it is
+	// never sent by a key that meant something else.
+	if m.replying {
+		m.note = ""
+		return m, m.replyKey(key)
+	}
+
 	m.note = "" // a keypress answers the last note
 
 	switch key {
@@ -644,6 +680,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "a":
 		return m, m.ask()
+	case "r":
+		m.offerReplies()
+		return m, nil
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
 		// stays selected, per view, so coming back lands where you left. It is
@@ -670,7 +709,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.anchorReader()
 			m.note = "the live pane · m again for the conversation"
 		case !m.sessionView() && m.level != levelTrail:
-			m.note = "the mirror shows at Lv1 (esc to zoom out)"
+			m.note = "the mirror shows beside the trail (esc to zoom out)"
 		}
 		return m, m.capture()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -1184,6 +1223,76 @@ func (m *Model) zoomOut() {
 	}
 }
 
+// offerReplies is `r`: the quick replies go on the footer, numbered, for
+// the selected session's pane. Nothing is sent until a digit is pressed.
+// It is the second of compass's two writes, and like attach it is gated on
+// a keypress and switched off by read-only.
+func (m *Model) offerReplies() {
+	if m.readonly {
+		m.note = "read-only · replies are off"
+		return
+	}
+	if _, ok := m.selectedPane(); !ok {
+		m.note = "no tmux pane for this session · nothing to reply to"
+		return
+	}
+	if len(m.replies) == 0 {
+		m.note = "no replies configured (reply = \"…\" in config.toml)"
+		return
+	}
+	m.replying = true
+}
+
+// replyMenu is the footer while the replies are up: who it goes to, the
+// numbered lines, and the way out.
+func (m *Model) replyMenu() string {
+	name := "—"
+	if s, ok := m.selected(); ok {
+		name = sessionName(s.Info)
+	}
+	parts := []string{"reply to " + name + " →"}
+	for i, r := range m.replies {
+		if i >= 9 {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", i+1, r))
+	}
+	parts = append(parts, "esc")
+	return strings.Join(parts, " · ")
+}
+
+// replyKey handles a key while the replies are up: a digit sends its line,
+// anything else closes the menu and sends nothing.
+func (m *Model) replyKey(key string) tea.Cmd {
+	m.replying = false
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		i := int(key[0] - '1')
+		if i < len(m.replies) {
+			return m.sendReply(m.replies[i])
+		}
+		m.note = fmt.Sprintf("no reply %d", i+1)
+		return nil
+	}
+	if key == "ctrl+c" {
+		return tea.Quit
+	}
+	return nil // q included: a menu is closed, not quit from
+}
+
+// sendReply types one line into the selected session's pane, off the render
+// loop, and reports what happened in the footer.
+func (m *Model) sendReply(text string) tea.Cmd {
+	pane, ok := m.selectedPane()
+	if !ok {
+		m.note = "no tmux pane for this session · nothing to reply to"
+		return nil
+	}
+	runner, target := m.runner, pane.Target
+	return func() tea.Msg {
+		return replyDoneMsg{target: target, text: text, err: tmuxop.SendKeys(runner, pane.ID, text)}
+	}
+}
+
 // attach hands the terminal to the selected session — Enter's whole job (M6
 // contract). Outside tmux compass suspends itself the way `ask` does: the pane
 // owns the terminal until the user detaches with their own prefix `d`, and the
@@ -1579,8 +1688,10 @@ func (m *Model) footerLine(w int) string {
 		keys = "? or esc closes help"
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
+	case m.replying:
+		keys = m.replyMenu()
 	case m.level == levelBoard && m.boardShown():
-		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · g grab · ? help · q quit"
+		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · g grab · ? help · q quit"
 		if m.archiveView {
 			keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
 		}
@@ -1594,13 +1705,13 @@ func (m *Model) footerLine(w int) string {
 	case m.level >= levelReader:
 		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · h/l session · [ ] chapters · m live pane · tab reader · enter attach · esc board"
+		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back"
 	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · r reply", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -1613,7 +1724,7 @@ func (m *Model) footerLine(w int) string {
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
 	// clip the note before the keymap goes.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · m live pane", " · r reply", " · h/l session", " · tab deeper", " · a ask", " · g grab", " · ? help"} {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
 			break
 		}

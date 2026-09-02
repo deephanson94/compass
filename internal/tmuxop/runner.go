@@ -38,6 +38,20 @@ func Capture(r Runner, paneID string) (string, error) {
 	return string(out), nil
 }
 
+// SendKeys types text into a pane and presses Enter, the way a person at
+// that pane would: send-keys -l keeps the text literal (no key-name
+// parsing), and Enter goes as a second key so the CLI reads the line and
+// then the submit, as it would from a keyboard. It is compass's one write
+// besides attach, and like attach it only ever runs from a keypress — a
+// quick reply the person chose.
+func SendKeys(r Runner, paneID, text string) error {
+	if _, err := r.Output("send-keys", "-t", paneID, "-l", text); err != nil {
+		return err
+	}
+	_, err := r.Output("send-keys", "-t", paneID, "Enter")
+	return err
+}
+
 // Attach hands the terminal to a pane. Outside tmux that means attaching this
 // terminal to the pane's session; inside tmux it means switching this client to
 // it — the same intent, the shape the situation allows.

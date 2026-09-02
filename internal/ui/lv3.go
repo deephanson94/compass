@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -204,9 +205,9 @@ func (m *Model) readerChapter(key string) {
 	}
 	top := clampScroll(m.scroll, len(doc), m.readerHeight())
 	if key == "]" {
-		for _, t := range turns {
+		for i, t := range turns {
 			if t > top {
-				m.scroll = clampScroll(t, len(doc), m.readerHeight())
+				m.landOnTurn(doc, turns, i)
 				return
 			}
 		}
@@ -215,11 +216,27 @@ func (m *Model) readerChapter(key string) {
 	}
 	for i := len(turns) - 1; i >= 0; i-- {
 		if turns[i] < top {
-			m.scroll = clampScroll(turns[i], len(doc), m.readerHeight())
+			m.landOnTurn(doc, turns, i)
 			return
 		}
 	}
 	m.note = "no earlier turn"
+}
+
+// landOnTurn scrolls the reader to the i-th of your turns and marks it: the
+// inverse bar the trail's cursor uses, the title naming it, and a note
+// saying which turn of how many — `[` and `]` moved the page before, and
+// nothing on the page said what they had moved to.
+func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
+	t := turns[i]
+	m.scroll = clampScroll(t, len(doc), m.readerHeight())
+	m.anchor, m.anchorAt = t, doc[t].at
+	text := doc[t].text
+	if doc[t].dim > 0 {
+		text = string([]rune(text)[:doc[t].dim]) // without the clock
+	}
+	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid))
+	m.note = fmt.Sprintf("%s %d/%d · %s · %s", glyphSaid, i+1, len(turns), clip(`"`+m.anchorText+`"`, 40), doc[t].at.Local().Format("15:04"))
 }
 
 // readerHeight is the rows the document gets: the deck body minus the

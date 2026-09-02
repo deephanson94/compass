@@ -113,6 +113,12 @@ func eventsFor(tr journey.Trail) []transcript.Event {
 
 // eventsBehind is eventsFor with the session's activity: the call in flight
 // on a live session, written as a tool_use no result has answered.
+// withCompactions marks the moments a day-long session ran out of context.
+func withCompactions(tr journey.Trail, at ...time.Time) journey.Trail {
+	tr.Compactions = append(tr.Compactions, at...)
+	return tr
+}
+
 func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 	var evs []transcript.Event
 	n := 0
@@ -552,6 +558,7 @@ func sceneVeryLong() scene {
 		}
 		tr := journey.Trail{Prompts: []journey.Prompt{{Text: "rebuild session handling end to end: router, store, tokens, audit", At: start}}}
 		at := start.Add(time.Minute)
+		fails := 0
 		for i := 0; i < legs; i++ {
 			c := classes[i%len(classes)]
 			names := labels[c]
@@ -560,7 +567,8 @@ func sceneVeryLong() scene {
 			case journey.Test:
 				switch i % 3 {
 				case 0:
-					leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "310 passed · 2 failed", Short: "310✓ 2✗", At: leg.End}, {Kind: journey.WaypointTestFail, Text: "test_logout_nil_session", At: leg.End}}
+					fails++ // the same test, red again: Runs is what the segmenter would count
+					leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "310 passed · 2 failed", Short: "310✓ 2✗", At: leg.End}, {Kind: journey.WaypointTestFail, Text: "test_logout_nil_session", Runs: fails, At: leg.End}}
 				case 1:
 					leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "312 passed", Short: "312✓", At: leg.End}}
 				default:
@@ -592,11 +600,11 @@ func sceneVeryLong() scene {
 		return tr
 	}
 	ss = append(ss, sess("auth", "auth", "/home/user/auth", "feat/sessions", "rebuild session handling end to end", state.Working, n.Add(-90*time.Second), journey.Build, "312✓", "tool call in flight", "Edit: audit.py"))
-	tr[sessionKey("auth")] = withTasks(long("auth", 160, n.Add(-22*time.Hour), true),
+	tr[sessionKey("auth")] = withCompactions(withTasks(long("auth", 160, n.Add(-22*time.Hour), true),
 		journey.Task{ID: "1", Subject: "Router", Status: "completed"}, journey.Task{ID: "2", Subject: "Store", Status: "completed"},
 		journey.Task{ID: "3", Subject: "Tokens", Status: "completed"}, journey.Task{ID: "4", Subject: "Audit log", Active: "Wiring the audit log", Status: "in_progress"},
 		journey.Task{ID: "5", Subject: "Migrate existing sessions", Status: "pending"}, journey.Task{ID: "6", Subject: "Docs and changelog", Status: "pending"},
-		journey.Task{ID: "7", Subject: "Open the PR", Status: "pending"})
+		journey.Task{ID: "7", Subject: "Open the PR", Status: "pending"}), n.Add(-14*time.Hour), n.Add(-5*time.Hour))
 	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/dedupe", "dedupe the nightly load", state.Idle, n.Add(-3*time.Hour), journey.Ship, "", "turn complete", "idle"))
 	tr[sessionKey("etl")] = long("etl", 120, n.Add(-20*time.Hour), false)
 	ss = append(ss, sess("cli", "cli", "/home/user/cli", "main", "add --json to every command", state.Idle, n.Add(-40*time.Minute), journey.Test, "40✓", "turn complete", "idle"))

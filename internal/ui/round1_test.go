@@ -314,7 +314,7 @@ func TestPinnedTrailTitleCountsLegsAbove(t *testing.T) {
 	m := boardModel(100, 20) // Lv1 is a narrow deck's
 	openTrail(m)
 	m.SetTrail(hourlyTrail(fixtureBase.Add(-30*time.Hour), 30))
-	if got := m.trailTitle(60); !strings.Contains(got, "↑ ") || !strings.Contains(got, "legs  [Lv1]") {
+	if got := m.trailTitle(60); !strings.Contains(got, "↑ ") || !strings.Contains(got, "legs  [trail]") {
 		t.Errorf("a cut trail's title does not count what is above:\n%s", got)
 	}
 	m.SetTrail(fixtureTrail(fixtureBase))

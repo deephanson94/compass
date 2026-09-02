@@ -27,4 +27,4 @@
 
  +2 more · 4 ○ tfstate 15m · 5 ○ scratch 22m   5 archived · A browses
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- h/l columns · enter attach (prefix d returns) · tab one trail · g grab · ? help · q quit
+ h/l columns · enter attach (prefix d returns) · tab one trail · r reply · g grab · ? help · q quit

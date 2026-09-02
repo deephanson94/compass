@@ -132,12 +132,16 @@ func TestFoldRowsLeadWithTheOutput(t *testing.T) {
 		result("p", "..........\n1 passed in 0.4s", base.Add(3*time.Second)),
 		call("g", "Bash", `{"command":"git push"}`, base.Add(4*time.Second)),
 		result("g", "\nEverything up-to-date\n", base.Add(5*time.Second)),
+		call("f", "Bash", `{"command":"pytest -q"}`, base.Add(6*time.Second)),
+		{Type: transcript.EventUser, Timestamp: base.Add(7 * time.Second),
+			ToolResults: []transcript.ToolResult{{ToolUseID: "f", IsError: true, Text: "..........F\nFAILED test_a.py::test_x"}}},
 	}
 	got = RenderReader(ev, ReaderOpts{Width: 70, Height: 20})
 	for _, want := range []string{
 		"⎿ 3 lines",                    // a file is counted, not quoted
 		"⎿ 1 passed in 0.4s · 2 lines", // the dots are not what the run said
 		"⎿ Everything up-to-date",      // one line is the line
+		"⎿ ✗ FAILED test_a.py::test_x", // a failure leads with what failed, not its dots
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)

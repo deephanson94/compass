@@ -816,7 +816,7 @@ func TestScrolledTrailSaysItIsBehind(t *testing.T) {
 		t.Fatal("ctrl+u did not unpin the panel; nothing to announce")
 	}
 	title := m.trailTitle(30)
-	for _, want := range []string{"G", "[Lv1]"} {
+	for _, want := range []string{"G", "[trail]"} {
 		if !strings.Contains(title, want) {
 			t.Errorf("a scrolled trail's title %q is missing %q", title, want)
 		}

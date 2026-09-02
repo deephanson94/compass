@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +41,7 @@ this line is not a setting
 
 func TestLoadConfigMissingFileIsNothing(t *testing.T) {
 	t.Setenv("COMPASS_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
-	if c := loadConfig(); c != (config{}) {
+	if c := loadConfig(); !reflect.DeepEqual(c, config{}) {
 		t.Errorf("loadConfig() on a missing file = %+v, want zero", c)
 	}
 }
@@ -64,5 +66,23 @@ func TestConfigLine(t *testing.T) {
 		if key != tc.key || val != tc.val || ok != tc.ok {
 			t.Errorf("configLine(%q) = %q,%q,%v want %q,%q,%v", tc.in, key, val, ok, tc.key, tc.val, tc.ok)
 		}
+	}
+}
+
+// Quick replies come one `reply = "…"` line each, in order, at most nine;
+// none means the stock three.
+func TestLoadConfigReplies(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	var lines []string
+	for i := 0; i < 11; i++ {
+		lines = append(lines, `reply = "line `+string(rune('a'+i))+`"`)
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COMPASS_CONFIG", path)
+	c := loadConfig()
+	if len(c.Replies) != 9 || c.Replies[0] != "line a" || c.Replies[8] != "line i" {
+		t.Errorf("Replies = %q, want the first nine in order", c.Replies)
 	}
 }

@@ -36,6 +36,13 @@ type Waypoint struct {
 	// then only ever disagree by someone editing both. Empty for kinds that
 	// have no useful short form.
 	Short string
+
+	// Runs, on a WaypointTestFail, is how many legs this test has now failed
+	// in, this one included: 1 the first time, 3 when a session has been
+	// round the same failure three times. It is the trail's plainest sign
+	// of a loop, and it is counted here, where the failure is recorded,
+	// rather than by every renderer walking the legs again.
+	Runs int
 }
 
 // maxWaypoints caps how many waypoints a leg keeps; overflow drops silently.

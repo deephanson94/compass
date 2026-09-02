@@ -636,12 +636,16 @@ func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 	}
 	out := ""
 	if compact {
-		// "· 14⚑ 9✗" where "· 14 ships · 9 red" does not fit a column.
+		// "· 14⚑ 9✗ 2⟲" where "· 14 ships · 9 red · 2 compactions" does
+		// not fit a column.
 		if ships > 0 {
 			out += fmt.Sprintf(" · %d⚑", ships)
 		}
 		if red > 0 {
 			out += fmt.Sprintf(" %d✗", red)
+		}
+		if n := len(tr.Compactions); n > 0 {
+			out += fmt.Sprintf(" %d%s", n, glyphCompact)
 		}
 		return out
 	}
@@ -650,6 +654,9 @@ func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 	}
 	if red > 0 {
 		out += fmt.Sprintf(" · %d red", red)
+	}
+	if n := len(tr.Compactions); n > 0 {
+		out += " · " + plural(n, "compaction")
 	}
 	return out
 }
