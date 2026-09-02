@@ -186,6 +186,25 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 				ToolResults: []transcript.ToolResult{{ToolUseID: b.ToolUseID, Text: b.Report}}})
 		}
 	}
+	if q := activity; q != "" && !strings.HasPrefix(q, "Bash: ") && strings.Contains(q, "?") {
+		// The open question, at the very end, unanswered: what HEAD names
+		// is what the reader ends on.
+		at := sceneNow.Add(-4 * time.Minute)
+		if n := len(tr.Legs); n > 0 {
+			at = tr.Legs[n-1].Start.Add(time.Minute)
+		}
+		question, options := q, []string{}
+		if i := strings.Index(q, " ["); i >= 0 {
+			question = q[:i]
+			options = strings.Split(strings.Trim(q[i+2:], "[]"), " / ")
+		}
+		var opts []string
+		for _, o := range options {
+			opts = append(opts, fmt.Sprintf(`{"label":%q}`, o))
+		}
+		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: at, Text: "I need a decision before I change the rule.",
+			ToolUses: []transcript.ToolUse{{ID: "toolu_ask", Name: "AskUserQuestion", Input: json.RawMessage(fmt.Sprintf(`{"questions":[{"question":%q,"options":[%s]}]}`, question, strings.Join(opts, ",")))}}})
+	}
 	if cmd := strings.TrimPrefix(activity, "Bash: "); cmd != activity && cmd != "" {
 		// The hung call, at the very end: what HEAD names is what the
 		// reader ends on.
@@ -250,6 +269,29 @@ func gone(id, name, title string, at time.Time) fleet.Session {
 			CWD: "/home/user/" + name, GitBranch: branch, Title: title, StartedAt: at.Add(-time.Hour), LastEventAt: at},
 		Snap: archivedSnap(at),
 	}
+}
+
+// pastTrail is the journey behind an archived session: what it was asked,
+// a few legs, and how it came out — the archive is browsable, not a list of
+// names over "nothing yet".
+func pastTrail(s fleet.Session) journey.Trail {
+	n := 0
+	for _, r := range s.Info.ID {
+		n += int(r)
+	}
+	file := []string{"client.go", "sched.go", "auth.py", "release.md", "import.go"}[n%5]
+	verdict := []string{"40✓", "12✓ 1✗", "212✓", "", "9✓"}[n%5]
+	legs := []legSpec{
+		{journey.Scout, "the " + strings.TrimSuffix(strings.TrimSuffix(file, ".go"), ".py") + " path", 6 * time.Minute, []string{file}, "", nil},
+		{journey.Build, file, 20 * time.Minute, []string{file}, "", nil},
+	}
+	if verdict != "" {
+		legs = append(legs, legSpec{journey.Test, "go test", 3 * time.Minute, nil, verdict, nil})
+	}
+	if n%3 == 0 {
+		legs = append(legs, legSpec{journey.Ship, "commit", 2 * time.Minute, nil, "", nil})
+	}
+	return trailOf(s.Info.LastEventAt.Add(-time.Hour), s.Info.Title, false, legs...)
 }
 
 // pastTitles are what the archived sessions were asked for: a fleet of
@@ -359,7 +401,9 @@ func sceneManyIdle() scene {
 		tr[sessionKey(s.id)] = trailOf(n.Add(-s.age-time.Hour), s.title, false, legs...)
 	}
 	for i := 0; i < 300; i++ {
-		ss = append(ss, gone(fmt.Sprintf("a-%03d", i), []string{"api", "webapp", "etl", "infra"}[i%4], pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+1)*3*time.Hour)))
+		g := gone(fmt.Sprintf("a-%03d", i), []string{"api", "webapp", "etl", "infra"}[i%4], pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+1)*3*time.Hour))
+		ss = append(ss, g)
+		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap(ids, []string{"work:0.0", "work:1.0", "work:2.0", "work:3.0", "side:0.0", "side:1.0", "", "side:2.0", "ops:0.0", "ops:1.0", "", "ops:2.0"})
 	return scene{name: "many-idle", story: "Twelve sessions from a morning of fanning out; one still moving, two finished recently and unread, the rest done hours or days ago.", sessions: ss, trails: tr, panes: panes, order: order}
@@ -418,7 +462,9 @@ func sceneFewOngoing() scene {
 		)
 	}
 	for i := 0; i < 40; i++ {
-		ss = append(ss, gone(fmt.Sprintf("a-%03d", i), "api", pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+1)*5*time.Hour)))
+		g := gone(fmt.Sprintf("a-%03d", i), "api", pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+1)*5*time.Hour))
+		ss = append(ss, g)
+		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap([]string{"infra", "api", "webapp", "etl", "billing", "docs-site", "cli"}, []string{"ops:0.0", "work:0.0", "work:1.0", "work:2.0", "side:0.0", "", "side:1.0"})
 	return scene{name: "few-ongoing", story: "Four sessions alive at once: one asking a question, two working (one with a red suite), one gone quiet mid-turn; three finished earlier.", sessions: ss, trails: tr, panes: panes, order: order}

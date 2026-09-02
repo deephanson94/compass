@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // These are the amendments the first operator review asked for — four
@@ -96,7 +99,7 @@ func TestFleetRowIsThePresentForAWorkingSession(t *testing.T) {
 	tr := m.trails[api]
 	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
 	m.trails[api] = tr
-	if fleet := m.secondLine(m.sessions[rowFor(t, m, api).sess], 40); !strings.Contains(fleet, "◈1 out · for 3m") {
+	if fleet := m.secondLine(m.sessions[rowFor(t, m, api).sess], 40); !strings.Contains(fleet, "◈1 out 10m · for 3m") {
 		t.Errorf("a working row with an agent out does not say so: %q", fleet)
 	}
 	// A quiet session: the verdict.
@@ -748,8 +751,8 @@ func TestStuckHeadNamesTheHungCall(t *testing.T) {
 	if strings.Contains(col, "for 3m") {
 		t.Errorf("a stuck HEAD still says 'for 3m' as if it were working:\n%s", col)
 	}
-	if !strings.Contains(col, "no output for 4m mid-turn · Bash: python backfill.py --all") {
-		t.Errorf("a stuck column's second row is not the reason and the call:\n%s", col)
+	if rows := strings.Split(col, "\n"); !strings.Contains(rows[1], "◍ fix    Bash: python backfill.py --all") || !strings.Contains(rows[1], "silent 4m") {
+		t.Errorf("a stuck column's second row is not HEAD verbatim — one clock, one sentence:\n%s", col)
 	}
 	m.point(api)
 	openTrail(m)
@@ -838,8 +841,15 @@ func TestTallBoardWrapsIntoTwoBands(t *testing.T) {
 			second = i
 		}
 	}
-	if second < 15 {
-		t.Errorf("the second band's header is on row %d, want it below the first band", second)
+	first := -1
+	for i, l := range lines {
+		if strings.Contains(l, "● api") {
+			first = i
+			break
+		}
+	}
+	if second <= first+3 {
+		t.Errorf("the second band's header is on row %d, want it below the first band's (row %d)", second, first)
 	}
 	// A short board: one band, the strip.
 	if got := strings.Join(boardModel(152, 30).boardLines(148, 25), "\n"); !strings.Contains(got, "+1 more") {
@@ -997,8 +1007,8 @@ func TestArchiveOpensOnItsFirstRow(t *testing.T) {
 	if m.selectedKey != first {
 		t.Errorf("the archive opened on %q, want its first row %q", m.selectedKey, first)
 	}
-	if got := m.trailTitle(60); !strings.Contains(got, sessionName(m.sessions[m.selectedIndex()].Info)) {
-		t.Errorf("the trail beside the archive is not the selected row's: %q", got)
+	if got := m.trailTitle(60); !strings.Contains(got, archiveHeadline(m.sessions[m.selectedIndex()])) {
+		t.Errorf("the trail beside the archive is not titled by the selected row: %q", got)
 	}
 }
 
@@ -1093,9 +1103,14 @@ func TestWideTrailCarriesDetailOnTheRow(t *testing.T) {
 	if strings.Contains(narrow, "· ✗ test_refresh") {
 		t.Errorf("a narrow row carries inline detail:\n%s", narrow)
 	}
+	// Lv2 keeps the row as Lv1 drew it and does not hang the same words
+	// beneath it again; what the row could not carry still hangs.
 	lv2 := RenderTrail(tr, TrailOpts{Now: fixtureBase.Add(40 * time.Minute), Width: 100, Height: 30, Level: 2, Cursor: -1})
-	if strings.Contains(lv2, "pytest · ✗") {
-		t.Errorf("Lv2 carries the detail inline and beneath:\n%s", lv2)
+	if !strings.Contains(lv2, "pytest · ✗ test_refresh_expired_token") || strings.Contains(lv2, "├ ✗ test_refresh_expired_token") {
+		t.Errorf("Lv2 re-splits the row's detail beneath it:\n%s", lv2)
+	}
+	if !strings.Contains(lv2, "payments never touches refresh") {
+		t.Errorf("Lv2 lost the finding the row does not carry:\n%s", lv2)
 	}
 }
 
@@ -1112,10 +1127,13 @@ func TestLongQuestionIsSpelledOutUnderHead(t *testing.T) {
 		}
 	}
 	col := strings.Join(m.boardColumn(infra, rowFor(t, m, infra), 40, 20), "\n")
-	if !strings.Contains(col, "▲ design asks you") || !strings.Contains(col, "waiting 2m") {
-		t.Errorf("HEAD does not wear the fleet's glyph and name the question:\n%s", col)
+	if !strings.Contains(col, "▲ design Open port 22") || !strings.Contains(col, "waiting 2m") {
+		t.Errorf("HEAD does not wear the fleet's glyph and begin the question:\n%s", col)
 	}
-	if !strings.Contains(col, "keep bastion]") {
+	if trail := strings.Join(strings.Split(col, "\n")[3:], "\n"); strings.Count(trail, "Open port 22") != 1 {
+		t.Errorf("the question's start is repeated beneath the row:\n%s", col)
+	}
+	if !strings.Contains(col, "bastion]") {
 		t.Errorf("the question's options never reach the column:\n%s", col)
 	}
 	// One that fits rides on the row alone.
@@ -1125,7 +1143,7 @@ func TestLongQuestionIsSpelledOutUnderHead(t *testing.T) {
 		}
 	}
 	col = strings.Join(m.boardColumn(infra, rowFor(t, m, infra), 40, 20), "\n")
-	if !strings.Contains(col, "▲ design Port 22 open?") || strings.Contains(col, "asks you") {
+	if !strings.Contains(col, "▲ design Port 22 open?") || strings.Contains(col, "└") {
 		t.Errorf("a short question is not on HEAD's row:\n%s", col)
 	}
 }
@@ -1144,12 +1162,12 @@ func TestHeadSaysWhenItIsWaitingOnAgents(t *testing.T) {
 		{Label: "b", Start: base.Add(12 * time.Minute), AfterLeg: 0},
 	}}
 	got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20)
-	if !strings.Contains(got, "waiting on ◈2 · 30m") {
-		t.Errorf("a parked parent does not say it is waiting:\n%s", got)
+	if !strings.Contains(got, "◈2 out 20m · quiet 25m") {
+		t.Errorf("a parked parent does not say how long it has been quiet:\n%s", got)
 	}
 	// A vote of its own after the dispatch: it is working.
 	tr.Legs[0].End = base.Add(15 * time.Minute)
-	if got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20); strings.Contains(got, "waiting on") || !strings.Contains(got, "for 30m") {
+	if got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20); strings.Contains(got, "quiet") || !strings.Contains(got, "◈2 out 20m · for 30m") {
 		t.Errorf("a parent working past its dispatch is called parked:\n%s", got)
 	}
 	// Lanes wear their words: out / ago.
@@ -1240,12 +1258,13 @@ func TestTabSkipsAnEmptyLv2(t *testing.T) {
 	if !strings.Contains(m.note, "no waypoints") {
 		t.Errorf("note = %q, want it to say why Lv2 was skipped", m.note)
 	}
+	// Shift+Tab skips the cursor on the way up too.
 	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.level != levelWaypoints {
-		t.Errorf("shift+tab from the reader did not reach the cursor: level %d", m.level)
+	if m.level != levelTrail {
+		t.Errorf("shift+tab from a reader Tab skipped to did not return to the trail: level %d", m.level)
 	}
-	// With detail beneath a leg, Tab stops at Lv2 as ever.
-	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	// With detail beneath a leg, Tab stops at Lv2 as ever — on a wide
+	// deck too, where the row carries that detail itself.
 	m.SetTrail(fixtureLv2Trail(fixtureBase))
 	pressTab(m)
 	if m.level != levelWaypoints {
@@ -1263,8 +1282,12 @@ func TestReaderTitleNamesItsMoment(t *testing.T) {
 	pressTab(m)
 	rows := TrailRows(m.trail, levelWaypoints)
 	want := rows[m.cursor].Time.Local().Format("15:04")
-	if got := m.readerTitle(60); !strings.Contains(got, want) {
+	got := m.readerTitle(80)
+	if !strings.Contains(got, want) {
 		t.Errorf("reader title %q does not carry the anchored moment %s", got, want)
+	}
+	if !strings.Contains(got, clip(rows[m.cursor].Text, 24)) {
+		t.Errorf("reader title %q does not name the anchored row %q", got, rows[m.cursor].Text)
 	}
 }
 
@@ -1307,29 +1330,243 @@ func TestFoldRowCountsShipsAndRedRuns(t *testing.T) {
 	}
 }
 
-// A band may fold one column a little; it never folds two, and never a
-// column that does not fit the whole height.
-func TestBandFoldsAtMostOneColumn(t *testing.T) {
+// Bands pack to their tallest trail: a first band of short trails leaves
+// the height below it to a second, and a day-long trail in the first band
+// takes it all.
+func TestBandsPackToTheirTallestTrail(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 48)
-	// Push a column a little past the half-height (21 + 4 rows of slack),
-	// but not past the body.
-	over := func(key string) {
-		tr := m.trails[key]
-		for i := 0; m.boardColumnRows(key, 34) <= 25; i++ {
-			tr.Prompts = append(tr.Prompts, journey.Prompt{Text: "and then", At: fixtureBase.Add(time.Duration(6+i) * time.Second)})
-			m.trails[key] = tr
-		}
-		if rows := m.boardColumnRows(key, 34); rows > 43 {
-			t.Fatalf("fixture: %s is %d rows, past the body", key, rows)
+	lines := m.boardLines(148, 43)
+	got := strings.Join(lines, "\n")
+	if strings.Contains(got, "+1 more") {
+		t.Fatalf("short trails left a session in the strip:\n%s", got)
+	}
+	// The first band is as tall as its tallest column, not half the screen.
+	tallest := 0
+	for _, key := range m.boardKeys(4) {
+		tallest = max(tallest, m.boardColumnRows(key, 34))
+	}
+	second := -1
+	for i, l := range lines {
+		if strings.Contains(l, "○ scratch") {
+			second = i
 		}
 	}
-	over(sessionKey("s-api"))
-	if got := strings.Join(m.boardLines(148, 43), "\n"); strings.Contains(got, "+1 more") {
-		t.Errorf("one column over the half kept the board to one band:\n%s", got)
+	if second != tallest+1 {
+		t.Errorf("the second band starts on row %d, want right under the first band's %d rows", second, tallest)
 	}
-	over(sessionKey("s-webapp"))
+	// A day-long trail in the first band takes the whole height.
+	m.trails[sessionKey("s-api")] = longTrail(60)
 	if got := strings.Join(m.boardLines(148, 43), "\n"); !strings.Contains(got, "+1 more") {
-		t.Errorf("two columns over the half still wrapped:\n%s", got)
+		t.Errorf("a day-long trail was cut for a second band:\n%s", got)
+	}
+}
+
+// ---- round five
+
+// A lane whose label begins a live session's first prompt is marked with
+// that session's number: a teammate that looks like this agent's.
+func TestLaneLinksToTheSessionThatLooksLikeIt(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "tighten the vpc security", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	m.trails[api] = tr
+	col := strings.Join(m.boardColumn(api, rowFor(t, m, api), 52, 20), "\n")
+	want := fmt.Sprintf("tighten the vpc security →%d", rowFor(t, m, sessionKey("s-infra")).num)
+	if !strings.Contains(col, want) {
+		t.Errorf("the lane is not linked to infra:\n%s", col)
+	}
+	tr.Branches[len(tr.Branches)-1].Label = "scout the payments"
+	m.trails[api] = tr
+	if col := strings.Join(m.boardColumn(api, rowFor(t, m, api), 52, 20), "\n"); strings.Contains(col, "→") {
+		t.Errorf("a lane no session's prompt begins with is linked:\n%s", col)
+	}
+}
+
+// The trail's title adds a long day up, and says nothing for a short one.
+func TestTrailTitleAddsTheDayUp(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(120, 30)
+	openTrail(m)
+	if got := m.trailTitle(70); strings.Contains(got, "ship") || strings.Count(got, " · ") != 1 {
+		t.Errorf("a short trail's title adds itself up: %q", got)
+	}
+	tr := longTrail(40)
+	for i := range tr.Legs {
+		switch i % 10 {
+		case 3:
+			tr.Legs[i].Class = journey.Ship
+		case 6:
+			tr.Legs[i].Class = journey.Test
+			tr.Legs[i].Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 passed · 1 failed", Short: "1✓ 1✗"}}
+		}
+	}
+	m.SetTrail(tr)
+	m.now = fixtureBase.Add(5 * time.Hour)
+	got := m.trailTitle(90)
+	if !strings.Contains(got, "TRAIL · api · 5h · 4 ships · 4 red") {
+		t.Errorf("a long trail's title does not add the day up: %q", got)
+	}
+	// Scrolled off the present it keeps the count beside the way back.
+	pressCtrl(m, tea.KeyCtrlU)
+	if got := m.trailTitle(90); !strings.Contains(got, "↓ G") || !strings.Contains(got, "↑ ") {
+		t.Errorf("a scrolled long trail lost its count or its way back: %q", got)
+	}
+}
+
+// "unread" is a word on the row, not only a brightness.
+func TestUnreadIsAWord(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	tf := sessionKey("s-tfstate")
+	row := rowFor(t, m, tf)
+	if got := strings.Join(m.entryLines(row, 40), "\n"); !strings.Contains(got, "unread") {
+		t.Errorf("an idle session finished within the day and never opened is not marked unread:\n%s", got)
+	}
+	m.markSeen(tf)
+	if got := strings.Join(m.entryLines(row, 40), "\n"); strings.Contains(got, "unread") {
+		t.Errorf("an opened session is still marked unread:\n%s", got)
+	}
+	// A day old: history, not unread.
+	sc := sessionKey("s-scratch")
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == sc {
+			m.sessions[i].Info.LastEventAt = m.now.Add(-30 * time.Hour)
+		}
+	}
+	if got := strings.Join(m.entryLines(rowFor(t, m, sc), 40), "\n"); strings.Contains(got, "unread") {
+		t.Errorf("a day-old session is marked unread:\n%s", got)
+	}
+}
+
+// A narrow working row drops the verdict before it clips the agents and
+// the wait.
+func TestNarrowWorkingRowKeepsTheAgents(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	m.trails[api] = tr
+	s := m.sessions[rowFor(t, m, api).sess]
+	wide := m.secondLine(s, 60)
+	if !strings.Contains(wide, "18✓ 2✗ · ◈1 out 10m · for 3m") {
+		t.Errorf("a wide row lacks the verdict before the agents: %q", wide)
+	}
+	narrow := m.secondLine(s, 34)
+	if strings.Contains(narrow, "18✓") || !strings.Contains(narrow, "◈1 out 10m · for 3m") {
+		t.Errorf("a narrow row kept the verdict and lost the agents: %q", narrow)
+	}
+}
+
+// The fold row goes compact where the long form does not fit.
+func TestFoldRowGoesCompactWhenNarrow(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := longTrail(40)
+	for i := range tr.Legs {
+		switch i % 10 {
+		case 3:
+			tr.Legs[i].Class = journey.Ship
+		case 6:
+			tr.Legs[i].Class = journey.Test
+			tr.Legs[i].Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 passed · 1 failed", Short: "1✓ 1✗"}}
+		}
+	}
+	m.trails[api] = tr
+	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 34, 12), "\n"); !strings.Contains(got, "⚑") || strings.Contains(got, "…") && strings.Contains(got, "legs above") {
+		t.Errorf("a narrow column's fold row is not compact:\n%s", got)
+	}
+	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 12), "\n"); !strings.Contains(got, "ships · ") {
+		t.Errorf("a wide column's fold row lost its words:\n%s", got)
+	}
+}
+
+// On a deck under 150 columns the reader takes the fleet's width at Lv3.
+func TestReaderTakesTheFleetsWidthOnANarrowDeck(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(120, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)
+	pressTab(m)
+	pressTab(m)
+	got := m.View()
+	if strings.Contains(got, "FLEET · live") {
+		t.Errorf("the fleet is still drawn beside the reader at 120 columns:\n%s", got)
+	}
+	if !strings.Contains(got, "READER · api") || !strings.Contains(got, "TRAIL · api") {
+		t.Errorf("the reader and the trail are not both drawn:\n%s", got)
+	}
+	fw, mw, _ := m.layout(m.width - 2*edgePad)
+	if fw != 0 || mw != m.readerWidth() {
+		t.Errorf("layout (%d, %d) and readerWidth %d disagree", fw, mw, m.readerWidth())
+	}
+	wide := boardModel(160, 30)
+	openTrail(wide)
+	wide.events = eventsFor(wide.trail)
+	pressTab(wide)
+	pressTab(wide)
+	if !strings.Contains(wide.View(), "FLEET · live") {
+		t.Errorf("a wide deck lost its fleet at Lv3")
+	}
+}
+
+// The first key in the reader after a Tab moves the page.
+func TestFirstReaderKeyMoves(t *testing.T) {
+	forceASCII(t)
+	m := followModel(120, 22)
+	pressTab(m)
+	walkTo(t, m, fixtureBase.Add(37*time.Minute))
+	pressTab(m)
+	before := m.View()
+	press(m, "k")
+	if m.View() == before && !strings.Contains(m.note, "start of the conversation") {
+		t.Errorf("the first k after a Tab neither moved nor said why")
+	}
+	// A scroll left past the last screenful — a terminal shrunk under it —
+	// moves on the first key too, rather than counting down invisibly.
+	m.scroll = 1000
+	m.note = ""
+	before = m.View()
+	press(m, "k")
+	if m.View() == before {
+		t.Errorf("k from past the end of the document drew the same frame")
+	}
+}
+
+// The reader spells an open question out on its call line.
+func TestReaderSpellsTheQuestion(t *testing.T) {
+	forceASCII(t)
+	ev := []transcript.Event{{Type: transcript.EventAssistant, UUID: "1", Timestamp: fixtureBase, Text: "One decision.",
+		ToolUses: []transcript.ToolUse{{ID: "q", Name: "AskUserQuestion", Input: json.RawMessage(`{"questions":[{"question":"Open port 22?","options":[{"label":"yes"},{"label":"no"}]}]}`)}}}}
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 20})
+	if !strings.Contains(got, "AskUserQuestion(Open port 22? [yes / no])") {
+		t.Errorf("the question is not on the call line:\n%s", got)
+	}
+	if !strings.Contains(got, "⋯ no answer yet") {
+		t.Errorf("an open question is not marked:\n%s", got)
+	}
+}
+
+// A parent parked on its agents keeps its own last work as HEAD's name:
+// the plan's task is the work it gave away.
+func TestParkedHeadKeepsItsOwnName(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := journey.Trail{
+		Legs:     []journey.Leg{{Class: journey.Build, Label: "test_s6e.py", Start: base, End: base.Add(5 * time.Minute), Files: []string{"test_s6e.py"}, Current: true}},
+		Branches: []journey.Branch{{Label: "Measure DLA on dx6", Start: base.Add(10 * time.Minute), AfterLeg: 0}},
+		Tasks:    []journey.Task{{ID: "1", Subject: "Measure DLA", Active: "Measuring DLA on dx6", Status: "in_progress"}},
+	}
+	got := RenderTrail(tr, TrailOpts{Todos: planItems(tr.Tasks), Now: base.Add(30 * time.Minute), Width: 70, Height: 20, Level: 1, Cursor: -1, Pinned: true})
+	if !strings.Contains(got, "● build  test_s6e.py") || strings.Contains(got, "● build  Measuring") {
+		t.Errorf("a parked HEAD is named after the work it gave away:\n%s", got)
+	}
+	tr.Legs[0].End = base.Add(15 * time.Minute)
+	if got := RenderTrail(tr, TrailOpts{Todos: planItems(tr.Tasks), Now: base.Add(30 * time.Minute), Width: 70, Height: 20, Level: 1, Cursor: -1, Pinned: true}); !strings.Contains(got, "● build  Measuring DLA on dx6") {
+		t.Errorf("a working HEAD lost the plan's name:\n%s", got)
 	}
 }

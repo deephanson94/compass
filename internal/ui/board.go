@@ -200,36 +200,40 @@ func (m *Model) boardLines(w, h int) []string {
 	if body < 1 {
 		body = 1
 	}
-	// A tall board with short trails wraps into a second band of columns
-	// rather than naming half the fleet in the strip over twenty blank
-	// rows. Only when the first band's columns all fit a half-height, give
-	// or take a few rows a pinned column can lose to its fold: a day-long
-	// trail keeps the whole height, because cutting it in half to show two
-	// idle sessions underneath would lose the morning.
-	bands, bh := 1, body
-	if len(order) > n && body >= 2*boardBandMin+1 {
-		half := (body - 1) / 2
-		fits, over := true, 0
-		for _, key := range m.boardKeys(n) {
-			rows := m.boardColumnRows(key, cw)
-			if rows > body {
-				fits = false // a day-long trail: the whole height is its
-				break
-			}
-			if rows > half+boardBandSlack {
-				over++
-			}
+	// A tall board packs its columns into bands, each as tall as its
+	// tallest trail: a day-long trail takes the height it needs, a band of
+	// short ones takes what they need, and the strip names only what no
+	// height was left for. Sized to the screen instead, a board of short
+	// trails ended every column in eight blank rows while naming four
+	// sessions in the strip.
+	var bands [][]string
+	heights := []int{}
+	rem := body
+	all := m.boardKeys(len(order))
+	for pos := 0; pos < len(all) && rem >= boardBandMin; pos += n {
+		band := all[pos:min(pos+n, len(all))]
+		tallest := 0
+		for _, key := range band {
+			tallest = max(tallest, m.boardColumnRows(key, cw))
 		}
-		if over > 1 {
-			fits = false // the band would fold most of what it shows
-		}
-		if fits {
-			bands, bh = 2, half
-		}
+		bh := min(max(tallest, boardBandMin), rem)
+		bands = append(bands, band)
+		heights = append(heights, bh)
+		rem -= bh + 1 // and the row of air under it
 	}
-	keys := m.boardKeys(n * bands)
+	shown := 0
+	for _, band := range bands {
+		shown += len(band)
+	}
+	// The selected column is always drawn: boardKeys puts it among the
+	// first shown, so pack once more over that order.
+	keys := m.boardKeys(shown)
+	if len(bands) == 1 {
+		// One band takes the whole height, whatever its tallest trail.
+		heights[0] = body
+	}
 	var lines []string
-	for b := 0; b < bands; b++ {
+	for b, bh := range heights {
 		var cols []column
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
@@ -250,12 +254,8 @@ func (m *Model) boardLines(w, h int) []string {
 }
 
 // boardBandMin is the least height a band of columns is worth: the header's
-// three rows and enough trail to read. boardBandSlack is how many rows a
-// column may lose to its fold for the sake of the band beneath it.
-const (
-	boardBandMin   = 12
-	boardBandSlack = 4
-)
+// three rows and enough trail to read.
+const boardBandMin = 12
 
 // boardColumnRows is how many rows a column would take to show its whole
 // trail: the header and the document.
@@ -378,6 +378,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	opts := TrailOpts{
 		Todos:      planItems(tr.Tasks),
 		Labels:     m.boardLabels[key],
+		LaneLinks:  m.laneLinks(tr),
 		Head:       m.headFor(s),
 		HeadState:  s.Snap.State,
 		HeadSince:  headSince(s),
@@ -401,7 +402,12 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		if len(tr.Prompts) > 0 {
 			began = " · began " + relAge(m.now, tr.Prompts[0].At) + " ago"
 		}
-		lines[0] = dimStyle.Render(clip(fmt.Sprintf("↑ %d legs above%s%s", hidden, began, foldTotals(tr, hidden)), w))
+		full := fmt.Sprintf("↑ %d legs above%s%s", hidden, began, foldTotals(tr, hidden, false))
+		if len([]rune(full)) > w {
+			full = fmt.Sprintf("↑ %d legs · %s%s", hidden, strings.TrimPrefix(began, " · began "), foldTotals(tr, hidden, true))
+			full = strings.Replace(full, " ago", "", 1)
+		}
+		lines[0] = dimStyle.Render(clip(full, w))
 	}
 	if m.boardMuted(s) {
 		for i, line := range lines {
@@ -590,7 +596,7 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 
 // foldTotals is what the legs above the fold add up to — the ships and the
 // red runs — so a day that scrolled off still answers "what did it ship".
-func foldTotals(tr journey.Trail, hidden int) string {
+func foldTotals(tr journey.Trail, hidden int, compact bool) string {
 	ships, red := 0, 0
 	for i := 0; i < hidden && i < len(tr.Legs); i++ {
 		l := tr.Legs[i]
@@ -602,6 +608,16 @@ func foldTotals(tr journey.Trail, hidden int) string {
 		}
 	}
 	out := ""
+	if compact {
+		// "· 14⚑ 9✗" where "· 14 ships · 9 red" does not fit a column.
+		if ships > 0 {
+			out += fmt.Sprintf(" · %d⚑", ships)
+		}
+		if red > 0 {
+			out += fmt.Sprintf(" %d✗", red)
+		}
+		return out
+	}
 	if ships > 0 {
 		out += " · " + plural(ships, "ship")
 	}

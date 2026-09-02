@@ -277,8 +277,11 @@ func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse) {
 // pending draws the stub under a call nothing has answered yet.
 func (d *docBuilder) pending(event int, at time.Time, use transcript.ToolUse) {
 	word := "⋯ no result yet"
-	if use.Name == "Agent" {
+	switch use.Name {
+	case "Agent":
 		word = "⋯ still out"
+	case "AskUserQuestion":
+		word = "⋯ no answer yet"
 	}
 	d.push(resultIndent+glyphResult+" "+clip(word, d.width-len(resultIndent)-2), readerBody, event, at)
 }
@@ -365,6 +368,10 @@ func toolSummary(use transcript.ToolUse) string {
 		return inputField(use.Input, "path")
 	case "Task", "Agent":
 		return inputField(use.Input, "description")
+	case "AskUserQuestion":
+		// The question is the call: "AskUserQuestion()" with the question
+		// folded beneath it hid the one line the session was waiting on.
+		return askedQuestion(use.Input)
 	case "WebFetch", "WebSearch":
 		if u := inputField(use.Input, "url"); u != "" {
 			return u
@@ -379,6 +386,34 @@ func toolSummary(use transcript.ToolUse) string {
 		}
 	}
 	return ""
+}
+
+// askedQuestion is an AskUserQuestion call's first question and its options,
+// on one line: "Open port 22 …? [office CIDR / keep bastion]".
+func askedQuestion(input json.RawMessage) string {
+	var in struct {
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil || len(in.Questions) == 0 {
+		return ""
+	}
+	q := in.Questions[0]
+	text := firstLine(q.Question)
+	var labels []string
+	for _, o := range q.Options {
+		if l := strings.TrimSpace(o.Label); l != "" {
+			labels = append(labels, l)
+		}
+	}
+	if len(labels) > 0 {
+		text += " [" + strings.Join(labels, " / ") + "]"
+	}
+	return text
 }
 
 // inputField pulls one string field out of a raw tool input object.

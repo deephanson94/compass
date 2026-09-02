@@ -154,8 +154,10 @@ type Model struct {
 	// anchor is the reader line the Lv2 cursor's row lands on — marked, so the
 	// two panels say they are showing the same moment. -1 when there is no
 	// cursor to follow.
-	anchor   int
-	anchorAt time.Time // the moment the anchor stands for; zero when none
+	anchor     int
+	anchorAt   time.Time // the moment the anchor stands for; zero when none
+	anchorText string    // what that row said
+	skippedLv2 bool      // Tab went Lv1 → reader over an empty Lv2
 
 	// selectedKey is the session the deck is pointed at, held by its Key() —
 	// its transcript path. The session id is a label two sessions can share
@@ -804,9 +806,15 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 			m.note = "start of the conversation"
 		}
 	case "ctrl+d":
-		m.scrollBy(m.readerHeight() / 2)
+		if !m.scrollBy(m.readerHeight() / 2) {
+			m.note = "end of the conversation"
+		}
 	case "ctrl+u":
-		m.scrollBy(-m.readerHeight() / 2)
+		if !m.scrollBy(-m.readerHeight() / 2) {
+			m.note = "start of the conversation"
+		}
+	case "[", "]":
+		m.readerChapter(key)
 	case "g":
 		m.scroll = 0
 	case "G":
@@ -914,6 +922,7 @@ func (m *Model) lv2AddsNothing() bool {
 	w, h := m.trailBox()
 	o := m.trailOpts(w, h)
 	o.Height = 1 << 20 // the whole document, whatever the panel
+	o.NoInline = true  // detail the row carries is still detail Lv2 has
 	o.Level = levelTrail
 	lv1 := len(TrailLines(m.trail, o))
 	o.Level = levelWaypoints
@@ -956,6 +965,30 @@ func (m *Model) cursorMove(delta int) {
 		c = len(rows) - 1
 	}
 	m.cursor = c
+	// A row the panel does not draw — a waypoint the leg's own row already
+	// carries — is not a place to stand: step over it, the way the key was
+	// going, and back the other way at the ends.
+	if !m.cursorDrawn() {
+		step := 1
+		if delta < 0 {
+			step = -1
+		}
+		for i := c + step; i >= 0 && i < len(rows); i += step {
+			m.cursor = i
+			if m.cursorDrawn() {
+				break
+			}
+		}
+		if !m.cursorDrawn() {
+			for i := c - step; i >= 0 && i < len(rows); i -= step {
+				m.cursor = i
+				if m.cursorDrawn() {
+					break
+				}
+			}
+		}
+		c = m.cursor
+	}
 	if c == len(rows)-1 {
 		// The newest row is the present: standing on it puts the panel back to
 		// following the journey.
@@ -963,6 +996,12 @@ func (m *Model) cursorMove(delta int) {
 	}
 	m.keepCursorVisible()
 	m.anchorReader()
+}
+
+// cursorDrawn reports whether the trail draws a row for the cursor.
+func (m *Model) cursorDrawn() bool {
+	w, h := m.trailBox()
+	return TrailCursorRow(m.trail, m.trailOpts(w, h)) >= 0
 }
 
 // cursorToPresent puts the Lv2 cursor on the newest row, wherever it stood.
@@ -1086,6 +1125,7 @@ func (m *Model) zoomIn() {
 			m.level = levelWaypoints
 			m.cursorMove(0)
 			m.enterReader()
+			m.skippedLv2 = true
 			m.note = "no waypoints · reader at the present"
 			return
 		}
@@ -1112,6 +1152,14 @@ func (m *Model) zoomOut() {
 	switch {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
+		if m.skippedLv2 {
+			// Tab skipped the cursor on the way down; the way up skips it
+			// too, or every exit from the reader pays for an empty screen.
+			m.skippedLv2 = false
+			m.level = levelTrail
+			m.cursor, m.anchor = -1, -1
+			return
+		}
 		// The reader goes back to following the cursor it left behind.
 		m.anchorReader()
 	case m.level > levelTrail:
@@ -1502,7 +1550,7 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "j/k move · " + m.enterKeymap() + " · g grab · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
@@ -1525,9 +1573,17 @@ func (m *Model) footerLine(w int) string {
 			keys = "j/k move · " + m.enterKeymap() + " · ⇧tab board · A live fleet · ? help · q quit"
 		}
 	case m.level >= levelReader:
-		keys = "j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back"
+		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back"
+	}
+	// The keymap sheds its optional fragments before it clips: a footer
+	// that ends in "· ? he" says less than one without the chapters.
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · g grab"} {
+		if lipgloss.Width(keys) <= w {
+			break
+		}
+		keys = strings.Replace(keys, drop, "", 1)
 	}
 	left := dimStyle.Render(clip(keys, w))
 	if m.note == "" {
@@ -1589,6 +1645,13 @@ func (m *Model) layout(inner int) (fleet, middle, trail int) {
 		return 0, 0, inner
 	}
 	if m.middleShown() {
+		if m.level >= levelReader && m.width < readerRoomCols {
+			// The keys are the reader's and the fleet is two Shift+Tabs
+			// away: on a deck too narrow for three panels the reader
+			// takes the fleet's width rather than wrapping at 46 columns
+			// beside eleven idle rows.
+			return 0, inner - trailWidth - gutterWidth, trailWidth
+		}
 		fleet, trail = sidePanelWidths(inner)
 		return fleet, inner - fleet - trail - 2*gutterWidth, trail
 	}
@@ -1625,6 +1688,14 @@ func (m *Model) deckLines(w, h int) []string {
 		return m.boardLines(w, h)
 	}
 	fw, mw, tw := m.layout(w)
+	if fw == 0 && mw > 0 {
+		// The reader has taken the fleet's width: two columns, the
+		// conversation and the trail beside it.
+		return joinColumns(h, []column{
+			{mw, m.readerColumn(mw, h)},
+			{tw, m.trailColumn(tw, h)},
+		})
+	}
 	if fw == 0 {
 		one := m.trailColumn
 		if m.level >= levelReader {

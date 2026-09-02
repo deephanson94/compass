@@ -77,8 +77,20 @@ type TrailOpts struct {
 	// HeadWaits is how many agents HEAD has out with nothing of its own
 	// written since it sent them: a parent parked on its children, which
 	// "● build … for 2h" over three ⋯ lanes could not distinguish from a
-	// parent working. trailDoc sets it from the trail.
+	// parent working. HeadTail is HEAD's figure when it is working — "for
+	// 2h", "◈3 out 20m · for 2h", "◈3 out 20m · quiet 15m" — the same
+	// words the fleet row uses. trailDoc sets both from the trail.
 	HeadWaits int
+	HeadTail  string
+
+	// LaneLinks maps a lane's label to the board number of a live session
+	// whose first prompt begins with it: a teammate that looks like this
+	// agent's, hedged as "→3" because the transcript carries no real link.
+	LaneLinks map[string]int
+
+	// NoInline keeps a leg's detail off its row whatever the width: for
+	// asking what Lv2 would hang beneath the legs, not for drawing.
+	NoInline bool
 
 	// Dense drops the plain rail rows between legs. trailDoc sets it itself
 	// when a Lv1 trail does not fit its viewport: under pressure the rail
@@ -193,6 +205,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	}
 
 	o.HeadWaits = headWaits(tr)
+	o.HeadTail = headTail(tr, o.Now)
 	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if len(tr.Legs) == 0 {
@@ -477,12 +490,13 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// office CIDR only,…" left the decision one attach away.
 			var extra []detailRow
 			if leg.Current && o.HeadState == state.NeedsYou && o.Head != "" && label != o.Head {
-				for _, line := range wrapN(o.Head, o.Width-trailWayWidth, 4) {
+				rest := strings.TrimSpace(strings.TrimPrefix(o.Head, label))
+				for _, line := range wrapN(rest, o.Width-trailWayWidth, 4) {
 					extra = append(extra, detailRow{text: dimStyle.Render(line), sel: -1})
 				}
 			}
 			if o.Level >= levelWaypoints {
-				b.details(append(extra, legDetails(leg, o.Width, b)...))
+				b.details(append(extra, legDetails(leg, label, o, b)...))
 			} else {
 				b.details(extra)
 			}
@@ -668,9 +682,9 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	if l.Current {
 		if o.Head != "" {
 			if o.HeadState == state.NeedsYou && len([]rune(o.Head)) > headLabelMax(o.Width) {
-				// Too long for the row: name it, and let the rows beneath
-				// carry it whole.
-				return "asks you", false
+				// Too long for the row: the row carries what fits at a word,
+				// and the rows beneath carry the rest.
+				return wrapN(o.Head, headLabelMax(o.Width), 100)[0], false
 			}
 			return o.Head, false
 		}
@@ -678,7 +692,9 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 		// in-progress task's own present tense is what the session is doing
 		// in its own words, and beats a file name — or nothing, which is what
 		// a build leg twenty minutes into unfamiliar files used to show.
-		if doing := inProgress(o.Todos); doing != "" {
+		// Unless it is parked on its agents: then the plan's task is the
+		// work it gave away, and its own last work is the honest name.
+		if doing := inProgress(o.Todos); doing != "" && o.HeadWaits == 0 {
 			return doing, false
 		}
 		return l.Label, false
@@ -757,16 +773,46 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 	// keypress used to be the only way to it. Only at Lv1: at Lv2 the
 	// details hang beneath the leg already.
 	labelText := textStyle.Render(pad(clip(label, labelWidth), labelWidth))
-	if o.Level < levelWaypoints && width >= trailInlineWidth {
-		if detail := legInline(l); detail != "" {
-			used := len([]rune(label))
-			if spare := labelWidth - used - 3; spare >= trailInlineMin {
-				labelText = textStyle.Render(label) + dimStyle.Render(pad(" · "+clip(detail, spare), labelWidth-used))
-			}
-		}
+	if inlineFits(l, label, labelWidth, o) {
+		detail := legInline(l)
+		used := len([]rune(label))
+		labelText = textStyle.Render(label) + dimStyle.Render(pad(" · "+clip(detail, labelWidth-used-3), labelWidth-used))
 	}
 	return head + " " + labelText + badgeStyle(badge).Render(padLeft(badge, badgeW)) +
 		" " + dimStyle.Render(age)
+}
+
+// inlineFits reports whether a leg's detail rides on its row: a wide enough
+// panel, and room beside the label. At Lv2 the same rule holds, and the
+// children the row already carries are not drawn beneath it again —
+// "Lv2 is Lv1 re-split onto more rows" was the complaint.
+func inlineFits(l journey.Leg, label string, labelWidth int, o TrailOpts) bool {
+	if o.NoInline || o.Width < trailInlineWidth {
+		return false
+	}
+	detail := legInline(l)
+	if detail == "" {
+		return false
+	}
+	return labelWidth-len([]rune(label))-3 >= trailInlineMin
+}
+
+// legLabelWidth is the room legRow gives a leg's label at a width: the
+// same arithmetic, so legDetails can ask whether the row took the detail.
+func legLabelWidth(l journey.Leg, o TrailOpts) int {
+	age := legSpan(l)
+	if l.Current {
+		_, age = headMark(o, l)
+	}
+	badgeW := lipgloss.Width(legBadge(l))
+	if badgeW > 0 {
+		badgeW++
+	}
+	w := o.Width - trailPrefixWidth - 1 - len([]rune(age)) - badgeW
+	if w < trailMinLabel {
+		w = o.Width - trailPrefixWidth - 1 - len([]rune(age))
+	}
+	return w
 }
 
 // trailInlineMin is the room a leg's detail needs before it rides on the
@@ -834,10 +880,48 @@ func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
 	// kind of number, where "← 2h" was read by everyone who tried it as
 	// "two hours ago".
 	figure = "for " + relAge(o.Now, l.Start)
-	if o.HeadWaits > 0 {
-		figure = fmt.Sprintf("waiting on ◈%d · %s", o.HeadWaits, relAge(o.Now, l.Start))
+	if o.HeadTail != "" {
+		figure = o.HeadTail
 	}
 	return glyph, figure
+}
+
+// headTail is a working HEAD's figure, in the words the fleet row uses too:
+// how long it has been at this, and — when it has agents out — how many,
+// how long the oldest has been away, and whether the parent is parked on
+// them ("quiet 15m": nothing of its own since the newest left) or still
+// working ("for 2h"). One sentence at every depth; zooming in must not
+// change the words.
+func headTail(tr journey.Trail, now time.Time) string {
+	var head *journey.Leg
+	for i := range tr.Legs {
+		if tr.Legs[i].Current {
+			head = &tr.Legs[i]
+		}
+	}
+	if head == nil {
+		return ""
+	}
+	out, oldest, newest := 0, time.Time{}, time.Time{}
+	for _, b := range tr.Branches {
+		if !b.Done {
+			out++
+			if oldest.IsZero() || b.Start.Before(oldest) {
+				oldest = b.Start
+			}
+			if b.Start.After(newest) {
+				newest = b.Start
+			}
+		}
+	}
+	if out == 0 {
+		return "for " + relAge(now, head.Start)
+	}
+	tail := fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
+	if head.End.After(newest) {
+		return tail + " · for " + relAge(now, head.Start)
+	}
+	return tail + " · quiet " + relAge(now, head.End)
 }
 
 // headWaits counts the open lanes HEAD is parked on: agents out, and no
@@ -948,10 +1032,15 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int) string {
 // then — for the classes that touch files — what it touched. Every row is dim:
 // at Lv2 the legs are still the structure and the waypoints are what hangs off
 // them.
-func legDetails(l journey.Leg, width int, b *trailBuilder) []detailRow {
+func legDetails(l journey.Leg, label string, o TrailOpts, b *trailBuilder) []detailRow {
+	width := o.Width
 	body := width - trailWayWidth
 	out := make([]detailRow, 0, len(l.Waypoints)+1)
 	bugs := 0
+	// What the row itself carries is not hung beneath it again. The picks
+	// are still spent — TrailRows counts moments, not columns — and the
+	// cursor steps over a row that is not drawn (cursorMove).
+	onRow := inlineFits(l, label, legLabelWidth(l, o), o)
 	for _, w := range l.Waypoints {
 		if restates(l, w) {
 			continue // TrailRows skips it too
@@ -965,12 +1054,15 @@ func legDetails(l journey.Leg, width int, b *trailBuilder) []detailRow {
 		if body < trailMinLabel {
 			continue
 		}
+		if onRow && (w.Kind == journey.WaypointTestFail || w.Kind == journey.WaypointBug) {
+			continue
+		}
 		out = append(out, detailRow{text: waypointBody(w, bugs, body), sel: sel})
 	}
 	if body < trailMinLabel {
 		return nil
 	}
-	if row := touchedBody(l, body); row != "" {
+	if row := touchedBody(l, body); row != "" && !onRow {
 		out = append(out, detailRow{text: row, sel: -1})
 	}
 	return out
@@ -1096,7 +1188,11 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		if labelWidth < trailMinLabel {
 			continue
 		}
-		label := dimStyle.Render(pad(clip(branchName(br.Label), labelWidth), labelWidth))
+		name := branchName(br.Label)
+		if n, ok := o.LaneLinks[br.Label]; ok && n > 0 {
+			name += fmt.Sprintf(" →%d", n) // a session that looks like this agent's
+		}
+		label := dimStyle.Render(pad(clip(name, labelWidth), labelWidth))
 		b.selNode(sel, ruleStyle.Render(railFork)+textStyle.Render(glyphBranch)+" "+
 			label+" "+dimStyle.Render(tail))
 		drawn++
@@ -1151,16 +1247,17 @@ func (m *Model) trailColumn(w, h int) []string {
 
 // trailOpts is the model's state as the renderer wants it.
 func (m *Model) trailOpts(w, h int) TrailOpts {
-	head, headState, headSince := "", state.Working, time.Time{}
+	head, headState, since := "", state.Working, time.Time{}
 	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
-		head, headState, headSince = m.headFor(s), s.Snap.State, s.Snap.Since
+		head, headState, since = m.headFor(s), s.Snap.State, headSince(s)
 	}
 	return TrailOpts{
 		Todos:      m.todos,
 		Labels:     m.labels,
+		LaneLinks:  m.laneLinks(m.trail),
 		Head:       head,
 		HeadState:  headState,
-		HeadSince:  headSince,
+		HeadSince:  since,
 		SessionKey: m.selectedKey,
 		Now:        m.now,
 		Width:      w,
@@ -1195,11 +1292,50 @@ func legsHiddenAbove(tr journey.Trail, level int, sel []int, top int) int {
 	return n
 }
 
+// trailDay is a long trail's sum: its span, its ships and its red runs.
+// "" for a trail under two hours, which has nothing to add up yet.
+func trailDay(tr journey.Trail, now time.Time) string {
+	if len(tr.Legs) == 0 {
+		return ""
+	}
+	start := tr.Legs[0].Start
+	if len(tr.Prompts) > 0 && tr.Prompts[0].At.Before(start) {
+		start = tr.Prompts[0].At
+	}
+	if now.Sub(start) <= longTrailSpan {
+		return ""
+	}
+	ships, red := 0, 0
+	for _, l := range tr.Legs {
+		switch {
+		case l.Class == journey.Ship:
+			ships++
+		case strings.Contains(legBadge(l), "✗"):
+			red++
+		}
+	}
+	out := " · " + relAge(now, start)
+	if ships > 0 {
+		out += " · " + plural(ships, "ship")
+	}
+	if red > 0 {
+		out += fmt.Sprintf(" · %d red", red)
+	}
+	return out
+}
+
 // trailTitle: whose trail this is, and how deep we are in it.
 func (m *Model) trailTitle(w int) string {
 	name := "—"
 	if s, ok := m.selected(); ok {
 		name = sessionName(s.Info)
+		if m.archiveView {
+			// The archive's rows are titled by what they asked for; the
+			// project is the group header. "TRAIL · api" over a row that
+			// read "why does the nightly build take 40 minutes" named the
+			// group, not the row.
+			name = archiveHeadline(s)
+		}
 	}
 	level := "[Lv1]"
 	switch {
@@ -1210,19 +1346,23 @@ func (m *Model) trailTitle(w int) string {
 	}
 	// Scrolled off the present, the title says so: the trail is no longer
 	// showing the newest work, and `G` is the way back to it.
+	// What the viewport hides, and where it stands: "↑ 128 legs" with a
+	// day above the fold, "↓ G" when scrolled off the present — both,
+	// because the hunt for an hour is exactly when the count matters.
 	right := level
-	switch {
-	case !m.trailPinned:
-		right = "↓ G  " + level
-	case m.legsAbove() > 0:
-		// Pinned to the present with a day above it: the title says so,
-		// because a trail cut at the fold and a trail that begins there
-		// were one rail stroke apart.
-		right = fmt.Sprintf("↑ %d legs  %s", m.legsAbove(), level)
+	if n := m.legsAbove(); n > 0 {
+		right = fmt.Sprintf("↑ %d legs  %s", n, right)
+	}
+	if !m.trailPinned {
+		right = "↓ G  " + right
 	}
 	mark := m.titleMark(panelTrail)
 	body := w - 1
-	left := m.titleStyleFor(panelTrail).Render(clip("TRAIL · "+name, body-lipgloss.Width(right)-1))
+	// A day-long trail adds itself up in the title — "· 22h · 13 ships ·
+	// 8 red" — at every level and while scrolled, where the board's fold
+	// row is not.
+	title := "TRAIL · " + name + trailDay(m.trail, m.now)
+	left := m.titleStyleFor(panelTrail).Render(clip(title, body-lipgloss.Width(right)-1))
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1

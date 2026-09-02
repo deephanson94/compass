@@ -41,6 +41,8 @@ func (m *Model) readerWidth() int {
 	switch {
 	case inner < minDeckCols:
 		return inner // one column, and at Lv3 it is the reader's
+	case m.width >= deckWideCols && m.width < readerRoomCols:
+		return inner - trailWidth - gutterWidth // the fleet's width is the reader's (layout)
 	case m.width >= deckWideCols:
 		fleet, trail := sidePanelWidths(inner)
 		return inner - fleet - trail - 2*gutterWidth
@@ -87,9 +89,12 @@ func (m *Model) readerTitle(w int) string {
 	case m.query != "":
 		right = "/" + m.query
 	case m.anchor >= 0 && !m.anchorAt.IsZero():
-		// Where the reader is: the moment it was anchored to, so a reader
-		// scrolled to an hour can tell it is the hour.
+		// Where the reader is: the row it was anchored to and its moment,
+		// so a reader scrolled to an hour can tell it is the hour.
 		right = m.anchorAt.Local().Format("15:04")
+		if m.anchorText != "" {
+			right = clip(m.anchorText, 24) + " · " + right
+		}
 	}
 	mark := m.titleMark(panelReader)
 	body := w - 1
@@ -124,7 +129,12 @@ func (m *Model) anchorReader() {
 	}
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
-		m.scroll, m.anchor, m.anchorAt = line, line, rows[m.cursor].Time
+		// The scroll is clamped to the last screenful at once: an offset
+		// past it drew the same frame, and the first j after it moved the
+		// number and nothing else.
+		doc := m.doc(opts.Width)
+		m.scroll, m.anchor, m.anchorAt = clampScroll(line, len(doc), m.readerHeight()), line, rows[m.cursor].Time
+		m.anchorText = rows[m.cursor].Text
 	}
 }
 
@@ -132,9 +142,44 @@ func (m *Model) anchorReader() {
 // the viewport moved at all, so a key at either end can say so.
 func (m *Model) scrollBy(delta int) bool {
 	doc := m.doc(m.readerWidth())
-	was := m.scroll
-	m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
+	was := clampScroll(m.scroll, len(doc), m.readerHeight())
+	m.scroll = clampScroll(was+delta, len(doc), m.readerHeight())
 	return m.scroll != was
+}
+
+// readerChapter is `[` / `]` in the reader: the previous or next turn of
+// yours — the ❯ rows — which are the conversation's chapters as the
+// prompts are the trail's.
+func (m *Model) readerChapter(key string) {
+	doc := m.doc(m.readerWidth())
+	var turns []int
+	for i, l := range doc {
+		if l.kind == readerSaid && (i == 0 || doc[i-1].kind != readerSaid) {
+			turns = append(turns, i)
+		}
+	}
+	if len(turns) == 0 {
+		m.note = "no turns of yours in this conversation"
+		return
+	}
+	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	if key == "]" {
+		for _, t := range turns {
+			if t > top {
+				m.scroll = clampScroll(t, len(doc), m.readerHeight())
+				return
+			}
+		}
+		m.note = "no later turn"
+		return
+	}
+	for i := len(turns) - 1; i >= 0; i-- {
+		if turns[i] < top {
+			m.scroll = clampScroll(turns[i], len(doc), m.readerHeight())
+			return
+		}
+	}
+	m.note = "no earlier turn"
 }
 
 // readerHeight is the rows the document gets: the deck body minus the

@@ -281,7 +281,10 @@ func walkTo(t *testing.T, m *Model, at time.Time) {
 func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 	forceASCII(t)
 
-	m := followModel(120, 30)
+	// Short enough that the conversation does not fit its panel: the
+	// reader at Lv3 takes the fleet's width on a deck this narrow, and at
+	// thirty rows the whole fixture fit on one screen.
+	m := followModel(120, 22)
 	if got := m.View(); strings.Contains(got, mirrorMark+" dev:1.0 · live") {
 		t.Fatalf("Lv1 opened the mirror unasked:\n%s", got)
 	}
@@ -323,11 +326,15 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 			t.Fatalf("step %d: the Lv2 cursor left the trail (%d of %d rows)", step, m.cursor, len(rows))
 		}
 		row := rows[m.cursor]
-		if want := ReaderAnchor(m.events, opts, row.Time); want >= 0 && m.scroll != want {
-			t.Fatalf("cursor on the %s %q: the reader is at line %d, want its moment at %d",
-				row.Kind, row.Text, m.scroll, want)
+		if want := ReaderAnchor(m.events, opts, row.Time); want >= 0 && m.anchor != want {
+			t.Fatalf("cursor on the %s %q: the reader is anchored at line %d, want its moment at %d",
+				row.Kind, row.Text, m.anchor, want)
 		}
-		anchors[m.scroll] = true
+		if doc := m.doc(opts.Width); m.scroll != clampScroll(m.anchor, len(doc), m.readerHeight()) {
+			t.Fatalf("cursor on the %s %q: the reader scrolled to %d, want the anchor %d clamped to the last screenful",
+				row.Kind, row.Text, m.scroll, m.anchor)
+		}
+		anchors[m.anchor] = true
 		press(m, "k") // the cursor enters at the present, so it walks backwards
 	}
 	if len(anchors) < 3 {

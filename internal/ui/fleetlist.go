@@ -504,8 +504,13 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		nameStyle = textStyle
 	}
 
-	age := padLeft(m.age(s.Snap.Since), ageWidth)
+	age := padLeft(m.age(headSince(s)), ageWidth)
 	head := headline(s)
+	if head == "" && m.unread(s) {
+		// Unread is a word, not only a brightness: monochrome has to read
+		// it, and below the board's width there is no brightness at all.
+		head = "unread"
+	}
 	if m.archiveView {
 		// The group header already names the project, and an archived session is
 		// named after its project: the row spends that width on the one thing the
@@ -627,14 +632,14 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 // agents it has out — and for a quiet one the verdict. "" when the trail is
 // not in hand, or the state owes the reader a sentence instead.
 func (m *Model) journeyLine(s fleet.Session, w int) string {
-	if m.archiveView || !s.Live || wantsAttention(s.Snap.State) || s.Snap.APIError {
+	if m.archiveView || !s.Live || s.Snap.State == state.NeedsYou || s.Snap.APIError {
 		return ""
 	}
 	tr, ok := m.trails[s.Info.Key()]
 	if !ok {
 		return ""
 	}
-	if s.Snap.State == state.Working {
+	if s.Snap.State == state.Working || s.Snap.State == state.Stuck {
 		head := -1
 		for i := len(tr.Legs) - 1; i >= 0; i-- {
 			if tr.Legs[i].Current {
@@ -646,31 +651,37 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 			return ""
 		}
 		l := tr.Legs[head]
-		label, _ := legLabel(l, TrailOpts{Todos: planItems(tr.Tasks), Head: m.headFor(s)})
-		// Laid out like the trail's own HEAD row: the figure flush right,
-		// the label clipped before it, so "for 1h" survives a narrow fleet.
-		tail := "for " + relAge(m.now, l.Start)
-		if out := agentsOut(tr); out > 0 {
-			tail = fmt.Sprintf("◈%d out · %s", out, tail)
-		}
+		// HEAD's own row, in HEAD's own words: the same glyph, label and
+		// figure the trail draws, so zooming in never changes the sentence.
+		o := TrailOpts{Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State,
+			HeadSince: headSince(s), HeadWaits: headWaits(tr), HeadTail: headTail(tr, m.now), Now: m.now, Width: 1000}
+		label, _ := legLabel(l, o)
+		glyph, tail := headMark(o, l)
 		// The newest verdict rides beside the present: below 110 columns
 		// there is no board, and a red suite was a board-only fact.
+		verdict := ""
 		for i := len(tr.Legs) - 1; i >= 0; i-- {
 			if badge := legBadge(tr.Legs[i]); badge != "" && badge != "?" {
-				tail = badge + " · " + tail
+				verdict = badge
 				break
 			}
 		}
-		labelW := w - 2 - trailVerbWidth - 1 - 1 - len([]rune(tail))
+		// Narrow rows lose the verdict first, then clip the label — the
+		// agents and the wait are what the row is for.
+		full := tail
+		if verdict != "" {
+			full = verdict + " · " + tail
+		}
+		labelW := w - 2 - trailVerbWidth - 1 - 1 - len([]rune(full))
 		if labelW < trailMinLabel {
-			tail = "for " + relAge(m.now, l.Start)
-			labelW = w - 2 - trailVerbWidth - 1 - 1 - len([]rune(tail))
+			full = tail
+			labelW = w - 2 - trailVerbWidth - 1 - 1 - len([]rune(full))
 		}
 		if labelW < 4 {
 			return ""
 		}
-		return classStyle(l.Class).Render(glyphHead+" "+pad(l.Class.String(), trailVerbWidth)) +
-			" " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(tail)
+		return classStyle(l.Class).Render(glyph+" "+pad(l.Class.String(), trailVerbWidth)) +
+			" " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(full)
 	}
 	if v := boardVerdict(s, tr, m.now); v != "" {
 		return dimStyle.Render(clip(v, w))
@@ -700,6 +711,54 @@ func agentsOut(tr journey.Trail) int {
 		}
 	}
 	return n
+}
+
+// unread is an idle session that finished within the day and has not been
+// opened since — the board's brightness, as a fact the fleet can spell.
+func (m *Model) unread(s fleet.Session) bool {
+	if m.archiveView || !s.Live || s.Snap.State != state.Idle {
+		return false
+	}
+	last := s.Info.LastEventAt
+	if last.IsZero() || m.now.Sub(last) > boardFresh {
+		return false
+	}
+	seen, ok := m.seen[s.Info.Key()]
+	return !ok || seen.Before(last)
+}
+
+// laneLinks pairs a trail's lanes with live sessions that look like them:
+// a session whose first prompt begins with the lane's label. The transcript
+// carries no real link between a lead and a teammate, so the mark is a
+// hedge — "→3" — and `3` is the key that goes and looks.
+func (m *Model) laneLinks(tr journey.Trail) map[string]int {
+	if len(tr.Branches) == 0 {
+		return nil
+	}
+	rows := m.boardRows()
+	links := map[string]int{}
+	for _, b := range tr.Branches {
+		label := strings.ToLower(strings.TrimSpace(b.Label))
+		if len([]rune(label)) < 12 {
+			continue
+		}
+		for _, s := range m.sessions {
+			if !s.Live {
+				continue
+			}
+			other, ok := m.trails[s.Info.Key()]
+			if !ok || len(other.Prompts) == 0 {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(other.Prompts[0].Text)), label) {
+				if r, ok := rows[s.Info.Key()]; ok && r.num > 0 {
+					links[b.Label] = r.num
+				}
+				break
+			}
+		}
+	}
+	return links
 }
 
 // wantsAttention is the pair of states that float to the top of their group.

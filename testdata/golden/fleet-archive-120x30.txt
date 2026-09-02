@@ -1,26 +1,26 @@
  ⌂ compass                                                                                     ▲1 2m  ●2  ○2  archive 5
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · archive                           │  TRAIL · docs                                                       [Lv1]
-                                            │
-  docs                                      │ ◌ nothing yet
- ▸1 ○ update the readme                  1h │
-     main                                   │ scouting will appear here
-                                            │
-  infra                                     │
-  2 ○ move dns to route53                2h │
-     tf/dns                                 │
-                                            │
-  api                                       │
-  3 ○ add rate limiting                  3h │
-     claude/rate-limit                      │
-                                            │
-  4 ○ port the client to httpx           1d │
-     main                                   │
-                                            │
-  scratch                                   │
-  5 ○ try the new sdk                    2d │
-     main                                   │
+ ▌FLEET · archive                              │  TRAIL · update the readme                                       [Lv1]
+                                               │
+  docs                                         │ ◌ nothing yet
+ ▸1 ○ update the readme                     1h │
+     main                                      │ scouting will appear here
+                                               │
+  infra                                        │
+  2 ○ move dns to route53                   2h │
+     tf/dns                                    │
+                                               │
+  api                                          │
+  3 ○ add rate limiting                     3h │
+     claude/rate-limit                         │
+                                               │
+  4 ○ port the client to httpx              1d │
+     main                                      │
+                                               │
+  scratch                                      │
+  5 ○ try the new sdk                       2d │
+     main                                      │
 
 
 

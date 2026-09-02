@@ -9,7 +9,7 @@
   2 ● api                      3m │
      ◆ test   1216✓ 2✗            │
                                   │
-  3 ○ docs                    22m │
+  3 ○ docs            unread  22m │
      ◆ docs   46✓                 │
 
 
