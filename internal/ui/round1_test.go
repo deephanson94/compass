@@ -667,8 +667,8 @@ func TestGroupHeaderClockIsTheEchoedWait(t *testing.T) {
 	// The needs-you row floats to the top of its group, so its wait is the
 	// row beneath the header: the header echoes the glyph, and its clock
 	// is the group's freshest only when that is a different row.
-	if ops.echo != "▲" || ops.age != "30s" {
-		t.Errorf("ops header = %q %q, want the needs-you echo and the freshest row's 30s", ops.echo, ops.age)
+	if ops.echo != "▲" || ops.age != "" {
+		t.Errorf("ops header = %q %q, want the needs-you echo and no clock beside it", ops.echo, ops.age)
 	}
 	for i := range m.sessions {
 		if m.sessions[i].Info.ID == "s-tfstate" {
@@ -901,7 +901,7 @@ func TestWorkingColumnHeaderSaysWhatHeadCannot(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
 	api := sessionKey("s-api")
-	col := m.boardColumn(api, rowFor(t, m, api), 40, 20)
+	col := m.boardColumn(api, rowFor(t, m, api), 34, 20)
 	if !strings.Contains(col[1], "✗ red 18✓ 2✗") {
 		t.Errorf("a working column's second row is not its verdict:\n%s", strings.Join(col, "\n"))
 	}
@@ -1633,7 +1633,7 @@ func TestNarrowestFleetRowKeepsTheSentence(t *testing.T) {
 	tr.Legs[3].End = fixtureBase.Add(29 * time.Minute) // parked: nothing since the dispatch
 	m.trails[api] = tr
 	s := m.sessions[rowFor(t, m, api).sess]
-	got := m.secondLine(s, 30)
+	got := m.secondLine(s, 32)
 	if !strings.HasPrefix(strings.TrimSpace(got), "● fix    ◈1 out 10m · quiet") || strings.Contains(got, "◆") {
 		t.Errorf("the narrowest row fell back to the past: %q", got)
 	}
@@ -1745,6 +1745,12 @@ func TestVerdictGoesBeforeTheSubject(t *testing.T) {
 	if got := m.secondLine(s, 40); strings.Contains(got, "18✓") || !strings.Contains(got, "the expiry comparison") {
 		t.Errorf("a narrow row kept the verdict over the subject: %q", got)
 	}
+	if got := m.secondLine(s, 60); !strings.Contains(got, "18✓") || !strings.Contains(got, "the expiry comparison in local time") {
+		t.Errorf("a row with room for both lost one: %q", got)
+	}
+	if got := m.secondLine(s, 52); strings.Contains(got, "18✓") || !strings.Contains(got, "the expiry comparison in local time") {
+		t.Errorf("a row with room for the subject but not the verdict cut the subject: %q", got)
+	}
 	if got := m.secondLine(s, 80); !strings.Contains(got, "18✓ 2✗ · for 3m") {
 		t.Errorf("a wide row lost the verdict: %q", got)
 	}
@@ -1829,5 +1835,177 @@ func TestTrailTitleGoesCompact(t *testing.T) {
 	m.now = fixtureBase.Add(5 * time.Hour)
 	if got := m.trailTitle(40); !strings.Contains(got, "⚑") || strings.Contains(got, "…") {
 		t.Errorf("a narrow title is not compact: %q", got)
+	}
+}
+
+// ---- round seven
+
+// Below the deck's wide width the reader's scroll arithmetic uses the width
+// it is drawn at: k moves the page.
+func TestNarrowReaderScrolls(t *testing.T) {
+	forceASCII(t)
+	m := followModel(100, 24)
+	pressTab(m)
+	walkTo(t, m, fixtureBase.Add(37*time.Minute))
+	pressTab(m)
+	if m.readerWidth() != 98 {
+		t.Fatalf("readerWidth = %d at 100 columns, want the whole inner width 98", m.readerWidth())
+	}
+	before := m.View()
+	press(m, "k")
+	if m.View() == before {
+		t.Errorf("k at 100 columns drew the same frame")
+	}
+}
+
+// The narrowest fleet row drops the class word before it clips the sentence.
+func TestNarrowestRowDropsTheClassWord(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	tr.Legs[3].End = fixtureBase.Add(29 * time.Minute)
+	m.trails[api] = tr
+	s := m.sessions[rowFor(t, m, api).sess]
+	got := m.secondLine(s, 26)
+	if strings.Contains(got, "fix") || !strings.Contains(got, "◈1 out 10m · quiet 11m") {
+		t.Errorf("the narrowest row clipped the sentence to keep the class word: %q", got)
+	}
+}
+
+// Verdict clauses are shed whole, never cut mid-number.
+func TestVerdictClausesAreShedWhole(t *testing.T) {
+	forceASCII(t)
+	if got := joinFit([]string{"✓ shipped 56m ago", "✓ green 1216✓"}, 24); got != "✓ shipped 56m ago" {
+		t.Errorf("joinFit = %q, want the first clause alone", got)
+	}
+	m := boardModel(152, 30)
+	tf := sessionKey("s-tfstate")
+	tr := m.trails[tf]
+	tr.Legs = append(tr.Legs,
+		journey.Leg{Class: journey.Test, Label: "go test", Start: fixtureBase.Add(26 * time.Minute), End: fixtureBase.Add(27 * time.Minute),
+			Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1216 passed", Short: "1216✓"}}},
+		journey.Leg{Class: journey.Ship, Label: "commit", Start: fixtureBase.Add(28 * time.Minute), End: fixtureBase.Add(29 * time.Minute)})
+	m.trails[tf] = tr
+	col := m.boardColumn(tf, rowFor(t, m, tf), 28, 12)
+	if strings.Contains(col[1], "…") || !strings.Contains(col[1], "✓ shipped") {
+		t.Errorf("a narrow column cut its verdict mid-clause: %q", col[1])
+	}
+	if row := m.secondLine(m.sessions[rowFor(t, m, tf).sess], 24); strings.Contains(row, "…") {
+		t.Errorf("a narrow fleet row cut its verdict mid-clause: %q", row)
+	}
+	// A working column's header sheds the same way.
+	api := sessionKey("s-api")
+	if col := m.boardColumn(api, rowFor(t, m, api), 30, 12); strings.Contains(col[1], "…") || !strings.Contains(col[1], "✗ red 18✓ 2✗") {
+		t.Errorf("a working column cut its verdict mid-clause: %q", col[1])
+	}
+}
+
+// The archive footer promises the depth the archive has, at every width.
+func TestArchiveFooterPromisesDepth(t *testing.T) {
+	forceASCII(t)
+	for _, w := range []int{100, 152} {
+		m := boardModel(w, 30)
+		press(m, "A")
+		got := m.View()
+		if !strings.Contains(got, "tab deeper") || !strings.Contains(got, "a ask") {
+			t.Errorf("%d columns: the archive footer forgets tab and a:\n%s", w, got)
+		}
+	}
+}
+
+// A header that reads "⌁ work" is still a header to the cut rule.
+func TestCutFleetNeverEndsOnATmuxHeader(t *testing.T) {
+	if !isHeaderLine(" ⌁ ops                    ▲") || !isHeaderLine(" elsewhere") || isHeaderLine(" 1 ● api") || isHeaderLine("    ◆ build  x") {
+		t.Errorf("isHeaderLine does not know the fleet's own headers")
+	}
+}
+
+// A header beside an echo carries no clock at all.
+func TestEchoingHeaderCarriesNoClock(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	for i := range m.sessions {
+		if m.sessions[i].Info.ID == "s-tfstate" {
+			m.sessions[i].Info.LastEventAt = m.now.Add(-30 * time.Second)
+		}
+	}
+	for _, r := range m.fleetRows() {
+		if r.header && r.echo != "" && r.age != "" {
+			t.Errorf("header %q echoes %q and carries a clock %q", r.label, r.echo, r.age)
+		}
+	}
+}
+
+// The reader's title gives the anchored row the room the name leaves.
+func TestReaderTitleUsesTheRoom(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)
+	m.anchor, m.anchorAt, m.anchorText = 1, fixtureBase, "Open port 22 to the office CIDR only, or keep the bastion?"
+	if got := m.readerTitle(100); !strings.Contains(got, "keep the bastion?") {
+		t.Errorf("a wide title clips the row it has room for: %q", got)
+	}
+}
+
+// A result that is not the last call's says whose it is.
+func TestLateResultNamesItsCall(t *testing.T) {
+	forceASCII(t)
+	ev := []transcript.Event{
+		{Type: transcript.EventAssistant, UUID: "1", Timestamp: fixtureBase, ToolUses: []transcript.ToolUse{{ID: "a", Name: "Agent", Input: json.RawMessage(`{"description":"score the gates"}`)}}},
+		{Type: transcript.EventAssistant, UUID: "2", Timestamp: fixtureBase.Add(time.Minute), ToolUses: []transcript.ToolUse{{ID: "b", Name: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}}},
+		{Type: transcript.EventUser, UUID: "3", Timestamp: fixtureBase.Add(2 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "b", Text: "x"}}},
+		{Type: transcript.EventUser, UUID: "4", Timestamp: fixtureBase.Add(3 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "a", Text: "3 defects"}}},
+	}
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 30})
+	if !strings.Contains(got, "↩ Agent(score the gates)") {
+		t.Errorf("a late result does not name its call:\n%s", got)
+	}
+	if strings.Count(got, "↩") != 1 {
+		t.Errorf("a result under its own call is annotated:\n%s", got)
+	}
+}
+
+// The lane's link survives a clipped label.
+func TestLaneLinkSurvivesTheClip(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "tighten the vpc security", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	m.trails[api] = tr
+	col := strings.Join(m.boardColumn(api, rowFor(t, m, api), 30, 20), "\n")
+	if !strings.Contains(col, "… →") {
+		t.Errorf("a narrow lane lost its link:\n%s", col)
+	}
+}
+
+// The trail's title sheds the day whole when even the compact form does
+// not fit.
+func TestTrailTitleShedsTheDayWhole(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(120, 30)
+	openTrail(m)
+	tr := longTrail(40)
+	for i := range tr.Legs {
+		if i%10 == 3 {
+			tr.Legs[i].Class = journey.Ship
+		}
+	}
+	m.SetTrail(tr)
+	m.now = fixtureBase.Add(5 * time.Hour)
+	if got := m.trailTitle(34); strings.Contains(got, "…") || strings.Contains(got, "⚑") || strings.Contains(got, "5h") {
+		t.Errorf("a title too narrow for the compact day clipped it: %q", got)
+	}
+}
+
+// The narrow help keeps ⌀ and ◌.
+func TestNarrowHelpKeepsTheTrailGlyphs(t *testing.T) {
+	forceASCII(t)
+	got := strings.Join(helpLinesFor(76, 24, false), "\n")
+	if !strings.Contains(got, "⌀ back") || !strings.Contains(got, "◌ planned") {
+		t.Errorf("the narrow help dropped the trail's marks:\n%s", got)
 	}
 }

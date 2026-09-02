@@ -164,18 +164,23 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 	if end < top {
 		end = top
 	}
-	rows := append([]string(nil), doc[top:end]...)
 	// A detail row never leads the viewport: "│  └ ✗ test_logout" under
-	// the title with its leg above the fold is a child with no parent.
+	// the title with its leg above the fold is a child with no parent. A
+	// scrolled viewport opens on the parent instead, child and all; a
+	// pinned one, which cannot give up its last row, puts the parent's
+	// own row where the child was.
 	// The parent's own row takes the top row's place, dim, so the child
-	// beneath it has a name.
+	// beneath it has a name. (Opening the viewport on the parent instead
+	// would move every offset by a row, and the offsets are a contract:
+	// each draws exactly its slice, and the cursor's row is where
+	// TrailCursorRow says.)
+	rows := append([]string(nil), doc[top:end]...)
 	if len(rows) > 0 && top > 0 && isDetailRow(rows[0]) {
-		for i := top - 1; i >= 0; i-- {
-			if !isDetailRow(doc[i]) {
-				rows[0] = dimStyle.Render(ansi.Strip(doc[i]))
-				break
-			}
+		parent := top - 1
+		for parent > 0 && isDetailRow(doc[parent]) {
+			parent--
 		}
+		rows[0] = dimStyle.Render(ansi.Strip(doc[parent]))
 	}
 	return rows
 }
@@ -1220,11 +1225,14 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		if labelWidth < trailMinLabel {
 			continue
 		}
-		name := branchName(br.Label)
+		name := clip(branchName(br.Label), labelWidth)
 		if n, ok := o.LaneLinks[br.Label]; ok && n > 0 {
-			name += fmt.Sprintf(" →%d", n) // a session that looks like this agent's
+			// A session that looks like this agent's: the link survives
+			// the clip, because it is the three characters that go somewhere.
+			link := fmt.Sprintf(" →%d", n)
+			name = clip(branchName(br.Label), labelWidth-len([]rune(link))) + link
 		}
-		label := dimStyle.Render(pad(clip(name, labelWidth), labelWidth))
+		label := dimStyle.Render(pad(name, labelWidth))
 		b.selNode(sel, ruleStyle.Render(railFork)+textStyle.Render(glyphBranch)+" "+
 			label+" "+dimStyle.Render(tail))
 		drawn++
@@ -1406,6 +1414,9 @@ func (m *Model) trailTitle(w int) string {
 	title := "TRAIL · " + name + trailDay(m.trail, m.now, false)
 	if len([]rune(title)) > room {
 		title = "TRAIL · " + name + trailDay(m.trail, m.now, true) // "· 22h · 16⚑ 10✗"
+	}
+	if len([]rune(title)) > room {
+		title = "TRAIL · " + name // the day goes whole, never "· 22h ·…"
 	}
 	left := m.titleStyleFor(panelTrail).Render(clip(title, room))
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)

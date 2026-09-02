@@ -208,6 +208,8 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 			answered[res.ToolUseID] = true
 		}
 	}
+	calls := map[string]transcript.ToolUse{}
+	lastCall := ""
 	for i, ev := range events {
 		if ev.IsSidechain {
 			continue
@@ -218,6 +220,14 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 				d.said(i, ev.Timestamp, text)
 			}
 			for _, res := range ev.ToolResults {
+				if res.ToolUseID != lastCall {
+					// A result that is not the last call's — a background
+					// agent's, back long after other calls — says whose it
+					// is, or it reads as the call above it answering twice.
+					if use, ok := calls[res.ToolUseID]; ok {
+						d.push(resultIndent+glyphResult+" "+clip("↩ "+use.Name+"("+toolSummary(use)+")", d.width-len(resultIndent)-2), readerBody, i, ev.Timestamp)
+					}
+				}
 				d.result(i, ev.Timestamp, res, unfolded[i])
 			}
 		case transcript.EventAssistant:
@@ -225,6 +235,8 @@ func readerDoc(events []transcript.Event, width int, unfolded map[int]bool) []re
 				d.text(i, ev.Timestamp, text)
 			}
 			for _, use := range ev.ToolUses {
+				calls[use.ID] = use
+				lastCall = use.ID
 				d.call(i, ev.Timestamp, use)
 				if !answered[use.ID] {
 					// Dispatched and not back, or hung: the reader said

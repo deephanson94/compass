@@ -41,6 +41,8 @@ func (m *Model) readerWidth() int {
 	switch {
 	case inner < minDeckCols:
 		return inner // one column, and at Lv3 it is the reader's
+	case m.width < deckWideCols:
+		return inner // the reader alone at Lv3 (layout): the deck is too narrow for a middle panel
 	case m.width >= deckWideCols && m.width < readerRoomCols:
 		return inner - trailWidth - gutterWidth // the fleet's width is the reader's (layout)
 	case m.width >= deckWideCols:
@@ -90,10 +92,14 @@ func (m *Model) readerTitle(w int) string {
 		right = "/" + m.query
 	case m.anchor >= 0 && !m.anchorAt.IsZero():
 		// Where the reader is: the row it was anchored to and its moment,
-		// so a reader scrolled to an hour can tell it is the hour.
+		// so a reader scrolled to an hour can tell it is the hour. The row
+		// gets whatever the name leaves, not half the panel.
 		right = m.anchorAt.Local().Format("15:04")
 		if m.anchorText != "" {
-			right = clip(m.anchorText, max(24, w/2)) + " · " + right
+			room := w - 1 - len([]rune("READER · "+name)) - 1 - len([]rune(right)) - 3
+			if room >= 8 {
+				right = clip(m.anchorText, room) + " · " + right
+			}
 		}
 	}
 	mark := m.titleMark(panelReader)

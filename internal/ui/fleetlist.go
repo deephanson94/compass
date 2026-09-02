@@ -224,8 +224,11 @@ func (m *Model) fleetRows() []fleetRow {
 				// A header over one row would only repeat it — and so
 				// would a clock equal to the first row's beneath it.
 				hdr.age, hdr.echo = m.groupAge(g), m.groupEcho(g)
-				if hdr.age == m.age(headSince(m.sessions[g.entries[0]])) {
-					hdr.age = "" // the row beneath says it; the echo's glyph stays
+				if hdr.echo != "" || hdr.age == m.age(headSince(m.sessions[g.entries[0]])) {
+					// The row beneath says it. And beside an echo, any
+					// clock reads as the echo's — "◍ 1m" over "stuck 4m"
+					// was three numbers for one fact.
+					hdr.age = ""
 				}
 			}
 			rows = append(rows, hdr)
@@ -393,7 +396,7 @@ func (m *Model) groupEcho(g fleetGroup) string {
 // with a mark or a number and a second line with four spaces.
 func isHeaderLine(l string) bool {
 	r := []rune(ansi.Strip(l))
-	return len(r) > 1 && r[0] == ' ' && unicode.IsLetter(r[1])
+	return len(r) > 1 && r[0] == ' ' && (unicode.IsLetter(r[1]) || r[1] == '⌁')
 }
 
 // isEntryFirstLine recognises the first of an entry's two lines: a window
@@ -674,9 +677,9 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 			full = verdict + " · " + tail
 		}
 		labelW := w - 2 - trailVerbWidth - 1 - 1 - len([]rune(full))
-		if labelW < min(len([]rune(label)), fleetLabelKeep) {
-			// The verdict goes before the label is cut short: "Fixing…
-			// 1214✓ 2✗" kept the result and lost the subject.
+		if labelW < len([]rune(label)) {
+			// The verdict goes before the label is cut at all: "Wiring the
+			// filter into the l… 215✓" kept the result and lost the subject.
 			full = tail
 			labelW = w - 2 - trailVerbWidth - 1 - 1 - len([]rune(full))
 		}
@@ -685,14 +688,39 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 			// The narrowest row keeps the sentence and loses the label:
 			// "◆ build  20✓" on a session parked on three agents was the
 			// one row, at the one width with no board, that said nothing.
+			// And when even that does not fit, the class word goes too.
+			if len([]rune(full)) > w-2-trailVerbWidth-1 {
+				return classStyle(l.Class).Render(glyph) + " " + dimStyle.Render(clip(full, w-2))
+			}
 			return lead + " " + dimStyle.Render(clip(full, w-2-trailVerbWidth-1))
 		}
 		return lead + " " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(full)
 	}
 	if v := boardVerdict(s, tr, m.now); v != "" {
-		return dimStyle.Render(clip(v, w))
+		return dimStyle.Render(joinFit(strings.Split(v, " · "), w))
 	}
 	return ""
+}
+
+// joinFit joins clauses with " · " as far as they fit the width, dropping
+// the trailing ones whole: "✓ green 12…" told the reader less than
+// "✓ shipped 56m ago" alone.
+func joinFit(parts []string, w int) string {
+	out := ""
+	for i, p := range parts {
+		next := p
+		if i > 0 {
+			next = out + " · " + p
+		}
+		if len([]rune(next)) > w {
+			if i == 0 {
+				return clip(p, w)
+			}
+			return out
+		}
+		out = next
+	}
+	return out
 }
 
 // headFor is what HEAD is called when the state machine knows: the call a

@@ -2,7 +2,7 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra             needs you   2m │ ▸2 ● api                           3m │  3 ● webapp                       40s
-     AskUserQuestion             ⌁ ops │     ✗ red 18✓ 2✗ · edited since · ◈1… │     ✗ red 18✓ 2✗ · edited since
+     AskUserQuestion             ⌁ ops │     ✗ red 18✓ 2✗ · edited since       │     ✗ red 18✓ 2✗ · edited since
                                        │                                 ⌁ dev │                                 ⌁ dev
  ◉ "tighten the vpc security…  39m ago │ ◉ "fix the 401 bug"           38m ago │ ◉ "flake in the checkout sui… 35m ago
  ╷                                     │ ╷                                     │ ╷

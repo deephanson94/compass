@@ -53,7 +53,7 @@ func helpLinesFor(w, h int, board bool) []string {
 			{w - left - gutterWidth, helpLegendLines(w-left-gutterWidth, true)},
 		})
 	}
-	lines := append(helpKeyLinesFor(w, board), "")
+	lines := helpKeyLinesFor(w, board)
 	legend := helpLegendLines(w, false)
 	if !board {
 		// No board on this terminal: its legend line would describe a
@@ -66,12 +66,14 @@ func helpLinesFor(w, h int, board bool) []string {
 		}
 		legend = kept
 	}
-	if h > 0 && len(lines)+len(legend) > h {
+	if h > 0 && len(lines)+1+len(legend) > h {
 		// Too short for the whole legend: keep what a reader cannot infer —
 		// the glyphs and the class names — and drop the sentences around
-		// them, before any key is cut. A reader who cannot reach the keys
-		// cannot leave the overlay.
+		// them and the line of air, before any key is cut. A reader who
+		// cannot reach the keys cannot leave the overlay.
 		legend = helpLegendCore(legend)
+	} else {
+		lines = append(lines, "")
 	}
 	lines = append(lines, legend...)
 	if h > 0 && len(lines) > h {
@@ -87,7 +89,7 @@ func helpLinesFor(w, h int, board bool) []string {
 func helpLegendCore(legend []string) []string {
 	var core []string
 	for _, l := range legend {
-		for _, keep := range []string{"fleet:", "trail:  ", "seven classes", "scout"} {
+		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "scout"} {
 			if strings.Contains(l, keep) {
 				core = append(core, l)
 				break
@@ -131,7 +133,7 @@ func helpLegendLines(w int, roomy bool) []string {
 		dimStyle.Render(clip(focusMark+" marks the panel your keys are in — tab moves it", w)),
 		dimStyle.Render(clip("fleet:  ● working  ▲ needs you  ◍ stuck  ○ idle", w)),
 		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent", w)),
-		dimStyle.Render(clip("        ◈ ⋯ still out · ✓ back, with its finding · ⌀ back, empty", w)),
+		dimStyle.Render(clip("        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty", w)),
 		dimStyle.Render(clip("        →3 a live session whose prompt is this lane's", w)),
 		dimStyle.Render(clip("        ◌ planned — Claude's own next moves", w)),
 		dimStyle.Render(clip("board:  bright = something unread · dim = read, or a day old", w)),

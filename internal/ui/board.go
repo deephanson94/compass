@@ -352,7 +352,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		// the last row of the trail — so the header says what HEAD cannot:
 		// how the suite stands, what shipped, what is still out.
 		if parts := verdictParts(tr, m.now); len(parts) > 0 {
-			second = dimStyle.Render(clip("    "+strings.Join(parts, " · "), w))
+			second = "    " + dimStyle.Render(joinFit(parts, w-4))
 		}
 	}
 	second, marked := m.boardSecondLine(s, second, w)

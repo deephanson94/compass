@@ -1570,7 +1570,7 @@ func (m *Model) footerLine(w int) string {
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · " + m.enterKeymap() + " · ⇧tab board · A live fleet · ? help · q quit"
+			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · ⇧tab board · A live fleet · ? help · q quit"
 		}
 	case m.level >= levelReader:
 		keys = "j/k scroll · space fold · / search · n/N · [ ] turns · a ask · enter attach · esc back"

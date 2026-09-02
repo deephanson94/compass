@@ -211,11 +211,14 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 			ToolUses: []transcript.ToolUse{{ID: "toolu_ask", Name: "AskUserQuestion", Input: json.RawMessage(fmt.Sprintf(`{"questions":[{"question":%q,"options":[%s]}]}`, question, strings.Join(opts, ",")))}}})
 	}
 	if cmd := strings.TrimPrefix(activity, "Bash: "); cmd != activity && cmd != "" {
-		// The hung call, at the very end: what HEAD names is what the
-		// reader ends on.
+		// The hung call, at the very end — after the leg's own result, as
+		// a transcript has it: what HEAD names is what the reader ends on.
 		at := sceneNow.Add(-4 * time.Minute)
 		if n := len(tr.Legs); n > 0 {
 			at = tr.Legs[n-1].Start.Add(time.Minute)
+			if end := tr.Legs[n-1].End; !end.IsZero() {
+				at = end.Add(30 * time.Second)
+			}
 		}
 		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: at, Text: "Running the backfill over every shard.",
 			ToolUses: []transcript.ToolUse{{ID: "toolu_hung", Name: "Bash", Input: json.RawMessage(fmt.Sprintf(`{"command":%q}`, cmd))}}})
