@@ -27,6 +27,11 @@ var envelopeTags = []string{
 	"<wake",
 	"<local-command-caveat",
 	"<teammate-message",
+	// Two shapes seen on a dogfooded trail, rendered as if the person had
+	// said them: a teammate's relayed message, and a background agent's own
+	// instructions echoed back. Neither carries isMeta.
+	"Another Claude session sent a message",
+	`Background agent "`,
 }
 
 // compactionPreamble opens the turn that carries a summary of a conversation
@@ -95,4 +100,32 @@ func tagBody(text, tag string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(rest[:j]), true
+}
+
+// TaskNotification is what a background agent leaves behind when it stops.
+// It does not come back as a tool_result — the tool_result was the launch
+// acknowledgement, minutes earlier — but as a user turn wrapped in tags, and
+// the tool-use-id inside is what ties it to the Agent call that started it.
+type TaskNotification struct {
+	TaskID    string
+	ToolUseID string
+	Status    string // "completed", "failed", …; "" when the envelope had none
+	Summary   string // one line, e.g. `Agent "Implement tmuxop pane layer" finished`
+	Result    string // the agent's own final words; may be long, may be empty
+}
+
+// ParseTaskNotification reads a task-notification turn. It reports false for
+// anything that is not one, so a caller can hand it every user turn.
+func ParseTaskNotification(text string) (TaskNotification, bool) {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "<task-notification") {
+		return TaskNotification{}, false
+	}
+	var n TaskNotification
+	n.TaskID, _ = tagBody(t, "task-id")
+	n.ToolUseID, _ = tagBody(t, "tool-use-id")
+	n.Status, _ = tagBody(t, "status")
+	n.Summary, _ = tagBody(t, "summary")
+	n.Result, _ = tagBody(t, "result")
+	return n, true
 }

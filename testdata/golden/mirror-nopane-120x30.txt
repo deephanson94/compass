@@ -5,13 +5,13 @@
                                 │                                              │
   1 ▲ infra      needs you   2m │ moment26 eighteen passed and two failed,     │ ◉ "fix the 401 bug"                38m
      ◆ design AskUserQuestion   │ both of them in the refresh path and both    │ ╷
-                                │ about an expired token                       │ ◆ scout  middleware.py             31m
+                                │ about an expired token                       │ ◆ scout  middleware.py              5m
  ▸2 ● api                    3m │                                              │ │
-     ◆ test   1216✓ 2✗          │ moment28 opening tokens.py, which is where   │ ◆ build  tokens.py                 25m
+     ◆ test   1216✓ 2✗          │ moment28 opening tokens.py, which is where   │ ◆ build  tokens.py                 12m
                                 │ the expiry comparison the failing tests      │ │
-  3 ○ docs                  22m │ object to actually lives                     │ ◆ test   pytest             18✓ 2✗ 12m
+  3 ○ docs                  22m │ object to actually lives                     │ ◆ test   pytest              18✓ 2✗ 8m
      ◆ docs   46✓               │                                              │ ├─◈ scout the payments module        ✓
-                                │ moment30 a syntax error at tokens.py line 88 │ ● fix    tokens.py                ← 3m
+                                │ moment30 a syntax error at tokens.py line 88 │ ● fix    tokens.py                ← 2m
                                 │ was hiding the real fault; fixing that first │
                                 │ and rerunning                                │
                                 │                                              │

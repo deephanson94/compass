@@ -5,13 +5,13 @@
                                 │                                              │
   dev                        1m │                                              │ ◉ "fix the 401 bug"                38m
  ▸1 ● api                    3m │                                              │ ╷
-     ◆ test   1216✓ 2✗          │                                              │ ◆ scout  middleware.py             31m
+     ◆ test   1216✓ 2✗          │                                              │ ◆ scout  middleware.py              5m
                                 │                                              │ │
-  elsewhere               ▲  2m │                                              │ ◆ build  tokens.py                 25m
+  elsewhere               ▲  2m │                                              │ ◆ build  tokens.py                 12m
   2 ▲ infra      needs you   2m │                                              │ │
-     ◆ design AskUserQuestion   │                                              │ ◆ test   pytest             18✓ 2✗ 12m
+     ◆ design AskUserQuestion   │                                              │ ◆ test   pytest              18✓ 2✗ 8m
                                 │                                              │ ├─◈ scout the payments module        ✓
-  3 ○ docs                  22m │                                              │ ● fix    tokens.py                ← 3m
+  3 ○ docs                  22m │                                              │ ● fix    tokens.py                ← 2m
      ◆ docs   46✓               │                                              │
                                 │                                              │
                                 │                                              │

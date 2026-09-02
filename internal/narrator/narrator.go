@@ -183,6 +183,13 @@ func (n *Narrator) digests(sessionID string, tr journey.Trail, prompt string, co
 func (n *Narrator) run(digests []Digest) {
 	labels, err := n.runner.Narrate(digests)
 
+	// The instruction says "name the work, not the class", and the model does
+	// not always listen: "build" under build, "scout" under scout. Such a label
+	// says nothing the verb column did not, so it is treated as declined —
+	// never cached, and the leg cools off like any other the model would not
+	// name. The heuristic label stays on the row.
+	labels = withoutClassNames(labels, digests)
+
 	landed := 0
 	if err == nil {
 		for _, l := range labels {
@@ -215,6 +222,22 @@ func (n *Narrator) run(digests []Digest) {
 	if landed > 0 && n.notify != nil {
 		n.notify()
 	}
+}
+
+// withoutClassNames drops every label that is only its leg's class name.
+func withoutClassNames(labels []Label, digests []Digest) []Label {
+	class := make(map[string]string, len(digests))
+	for _, d := range digests {
+		class[d.Key] = d.Class
+	}
+	out := labels[:0]
+	for _, l := range labels {
+		if strings.EqualFold(strings.TrimSpace(l.Text), class[l.Key]) {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
 }
 
 // missingKeys are the batch's keys the run did not answer: all of them when the

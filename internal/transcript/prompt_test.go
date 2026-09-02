@@ -82,3 +82,59 @@ func TestSlashCommandReadsAsTyped(t *testing.T) {
 		t.Error("ordinary prose was read as a slash command")
 	}
 }
+
+// The shape is the one a real background agent left in a transcript. The
+// tool-use-id is the whole point: it is what ties the agent's last words back
+// to the Agent call that started it.
+func TestATaskNotificationIsReadByItsFields(t *testing.T) {
+	const text = "<task-notification>\n" +
+		"<task-id>a3bee81fef2254386</task-id>\n" +
+		"<tool-use-id>toolu_01H6pnwSzNJaABvYPerZAnsh</tool-use-id>\n" +
+		"<output-file>/tmp/x.output</output-file>\n" +
+		"<status>completed</status>\n" +
+		"<summary>Agent \"Implement tmuxop pane layer\" finished</summary>\n" +
+		"<note>A task-notification fires each time this agent stops.</note>\n" +
+		"<result>`go build ./...` is clean.\n\nMore detail below.</result>\n" +
+		"</task-notification>"
+
+	n, ok := transcript.ParseTaskNotification(text)
+	if !ok {
+		t.Fatal("a task-notification was not recognised as one")
+	}
+	if n.ToolUseID != "toolu_01H6pnwSzNJaABvYPerZAnsh" {
+		t.Errorf("ToolUseID = %q", n.ToolUseID)
+	}
+	if n.Status != "completed" || n.TaskID != "a3bee81fef2254386" {
+		t.Errorf("Status/TaskID = %q/%q", n.Status, n.TaskID)
+	}
+	if n.Summary != `Agent "Implement tmuxop pane layer" finished` {
+		t.Errorf("Summary = %q", n.Summary)
+	}
+	if want := "`go build ./...` is clean.\n\nMore detail below."; n.Result != want {
+		t.Errorf("Result = %q, want %q", n.Result, want)
+	}
+
+	if _, ok := transcript.ParseTaskNotification("please look at the task-notification format"); ok {
+		t.Error("prose mentioning the tag was read as a notification")
+	}
+}
+
+// Two more of the harness's voices, seen on a dogfooded trail quoted as if the
+// person had said them. Neither carries isMeta, so the opening words are all
+// there is to go on.
+func TestRelayedMessagesAreNotPrompts(t *testing.T) {
+	for _, text := range []string{
+		"Another Claude session sent a message:\n\nhey, the quota is back",
+		`Background agent "You are measuring, not summarizing. Every…" finished`,
+	} {
+		ev := transcript.Event{Type: transcript.EventUser, Text: text}
+		if !ev.Machinery() {
+			t.Errorf("Machinery() = false for %q", text)
+		}
+	}
+	// And the same words later in a prompt are still a prompt.
+	ev := transcript.Event{Type: transcript.EventUser, Text: "why does Another Claude session sent a message show up?"}
+	if ev.Machinery() {
+		t.Error("a prompt that mentions the phrase mid-sentence was called machinery")
+	}
+}

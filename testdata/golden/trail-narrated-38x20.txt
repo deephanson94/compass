@@ -1,9 +1,9 @@
 ◉ "fix the 401 bug"                38m
 ╷
-◆ scout  maps the auth module      31m
+◆ scout  maps the auth module       5m
 │
-◆ build  wires the token refresh   25m
+◆ build  wires the token refresh   12m
 │
-◆ test   pytest             18✓ 2✗ 12m
+◆ test   pytest              18✓ 2✗ 8m
 ├─◈ scout the payments module        ✓
-● fix    tokens.py                ← 3m
+● fix    tokens.py                ← 2m

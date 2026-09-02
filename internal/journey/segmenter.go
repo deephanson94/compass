@@ -128,10 +128,19 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		s.observeResult(res, ev.Timestamp)
 	}
 
+	// A background agent's verdict arrives the same way a person's words do —
+	// as a user turn — but it is the harness relaying, not the person, so it
+	// is read here and never becomes a prompt.
+	if ev.Type == transcript.EventUser {
+		if n, ok := transcript.ParseTaskNotification(ev.Text); ok {
+			s.observeNotification(n, ev.Timestamp)
+		}
+	}
+
 	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
 	// that never reached three stays with the leg it interrupted.
 	if substantivePrompt(ev) {
-		s.prompts = append(s.prompts, Prompt{Text: clip(firstLine(ev.Text), 60), At: ev.Timestamp})
+		s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp})
 		s.flushPress()
 		s.closeLeg()
 	}
@@ -210,12 +219,18 @@ func substantivePrompt(ev transcript.Event) bool {
 func (s *Segmenter) observeResult(res transcript.ToolResult, at time.Time) {
 	if i, ok := s.byBranch[res.ToolUseID]; ok {
 		b := &s.branches[i]
-		b.Done = true
-		b.End = at
-		if line := firstNonEmptyLine(res.Text); line != "" {
-			// An async agent answers twice — a launch acknowledgement first,
-			// its verdict later. The latest thing it actually said wins.
-			b.Report = clip(line, waypointText)
+		// A background agent's tool_result is only its launch acknowledgement:
+		// the agent is still running, and its verdict comes later as a
+		// task-notification (observeNotification). Treating the ack as the
+		// result put "Spawned successfully. (This tool result is internal
+		// metadata…" on the trail as the agent's finding, and drew the lane
+		// merged while the agent was minutes from done.
+		if !launchAck(res.Text) {
+			b.Done = true
+			b.End = at
+			if line := firstNonEmptyLine(res.Text); line != "" {
+				b.Report = clip(line, waypointText)
+			}
 		}
 	}
 	if res.IsError && s.open {
@@ -227,6 +242,43 @@ func (s *Segmenter) observeResult(res transcript.ToolResult, at time.Time) {
 		}
 	}
 	s.attach(res, at)
+}
+
+// observeNotification merges a background agent's lane when the harness says it
+// stopped. The notification names the Agent call by its tool-use id, so this
+// is a join, not a guess; a notification for an agent this trail never forked
+// is ignored.
+func (s *Segmenter) observeNotification(n transcript.TaskNotification, at time.Time) {
+	i, ok := s.byBranch[n.ToolUseID]
+	if !ok {
+		return
+	}
+	b := &s.branches[i]
+	b.Done = true
+	b.End = at
+	// The agent's own last words are the report; the harness's one-line
+	// summary is the fallback for an agent that said nothing.
+	if line := firstNonEmptyLine(n.Result); line != "" {
+		b.Report = clip(line, waypointText)
+	} else if line := firstNonEmptyLine(n.Summary); line != "" {
+		b.Report = clip(line, waypointText)
+	}
+}
+
+// launchAck recognises the tool_result Claude Code writes the moment a
+// background agent is spawned. The wording is Claude Code's own, not the
+// agent's, and it is the same for every agent.
+func launchAck(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "Spawned successfully")
+}
+
+// promptText is the one line of a prompt the trail quotes. A slash command is
+// read as typed rather than as the tags it expands into.
+func promptText(ev transcript.Event) string {
+	if cmd, ok := transcript.SlashCommand(ev.Text); ok {
+		return cmd
+	}
+	return firstLine(ev.Text)
 }
 
 // attach hangs a result's waypoints on the leg it came back to (M2 rule 1):
