@@ -92,8 +92,8 @@ the transcript is the code.
 | Level | One Tab away | Shows |
 |-------|--------------|-------|
 | **Lv1 — Trail** | default | The journey as a git graph: scout → build → test → fix, subagents as branches, plan as ghost nodes |
-| **Lv2 — Waypoints** | `Tab` | Legs expanded: each bug, each test run (18✓ 2✗), files touched, commits, subagent findings |
-| **Lv3 — Deep dive** | `Tab` `Tab` | The reader takes focus: scroll, unfold tool output, search. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
+| **Lv2 — Waypoints** | `Tab` | Legs expanded — each bug, each test run (18✓ 2✗), files touched, commits, subagent findings — with the conversation open beside them, following your cursor |
+| **Lv3 — Deep dive** | `Tab` `Tab` | The reader takes the keys: scroll, unfold tool output, search, `[ ]` between your turns. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
 
 ## Using it
 
