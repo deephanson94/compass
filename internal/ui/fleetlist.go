@@ -182,7 +182,7 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 	}
 	// A window never ends on a header: "ops" over nothing but the notice
 	// beneath it named a group with no rows.
-	for end > off+1 && end < len(lines) && (isHeaderLine(lines[end-1]) || (lines[end-1] == "" && end > off+2 && isHeaderLine(lines[end-2]))) {
+	for end > off+1 && end < len(lines) && (isHeaderLine(lines[end-1]) || (lines[end-1] == "" && end > off+2 && isHeaderLine(lines[end-2])) || isEntryFirstLine(lines[end-1])) {
 		end--
 	}
 	var out []string
@@ -224,8 +224,8 @@ func (m *Model) fleetRows() []fleetRow {
 				// A header over one row would only repeat it — and so
 				// would a clock equal to the first row's beneath it.
 				hdr.age, hdr.echo = m.groupAge(g), m.groupEcho(g)
-				if hdr.echo == "" && hdr.age == m.age(m.sessions[g.entries[0]].Snap.Since) {
-					hdr.age = ""
+				if hdr.age == m.age(headSince(m.sessions[g.entries[0]])) {
+					hdr.age = "" // the row beneath says it; the echo's glyph stays
 				}
 			}
 			rows = append(rows, hdr)
@@ -396,6 +396,13 @@ func isHeaderLine(l string) bool {
 	return len(r) > 1 && r[0] == ' ' && unicode.IsLetter(r[1])
 }
 
+// isEntryFirstLine recognises the first of an entry's two lines: a window
+// that ends on it shows a name with its second line cut off.
+func isEntryFirstLine(l string) bool {
+	plain := []rune(strings.TrimLeft(ansi.Strip(l), " ▸0123456789"))
+	return len(plain) > 0 && strings.ContainsRune("●▲◍○", plain[0])
+}
+
 // countEntries counts the session rows among rendered fleet lines: the
 // first line of each entry is the one that opens, past its cursor mark and
 // number, with a state glyph. Headers open with a name and second lines
@@ -417,19 +424,9 @@ func countEntries(lines []string) int {
 // scan for the recent one. Hoisting the freshest to the header restores that
 // without disturbing the order underneath it.
 func (m *Model) groupAge(g fleetGroup) string {
-	// When the header echoes a state, the clock is that session's wait:
-	// "◍ 1m" over a session stuck for six read as the stuck one, one minute.
-	if m.groupEcho(g) != "" {
-		var oldest time.Time
-		for _, i := range g.entries {
-			if s := m.sessions[i]; wantsAttention(s.Snap.State) && (oldest.IsZero() || headSince(s).Before(oldest)) {
-				oldest = headSince(s) // the row's own clock: silence for a hung one
-			}
-		}
-		if !oldest.IsZero() {
-			return m.age(oldest)
-		}
-	}
+	// The echo's own clock is never here: the row it echoes floats to the
+	// top of its group, so its wait is the row beneath the header, and
+	// fleetRows drops a clock that repeats that row.
 	var newest time.Time
 	for _, i := range g.entries {
 		if at := m.sessions[i].Info.LastEventAt; at.After(newest) {
@@ -627,6 +624,10 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	return head + " " + dimStyle.Render(clip(withoutClassVerb(act, class), rest))
 }
 
+// fleetLabelKeep is the label a working row keeps before it gives up its
+// verdict for room.
+const fleetLabelKeep = 20
+
 // journeyLine is a live session's second line read off its trail: for a
 // working session its HEAD — the class, what it is doing, how long, and the
 // agents it has out — and for a quiet one the verdict. "" when the trail is
@@ -673,15 +674,20 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 			full = verdict + " · " + tail
 		}
 		labelW := w - 2 - trailVerbWidth - 1 - 1 - len([]rune(full))
-		if labelW < trailMinLabel {
+		if labelW < min(len([]rune(label)), fleetLabelKeep) {
+			// The verdict goes before the label is cut short: "Fixing…
+			// 1214✓ 2✗" kept the result and lost the subject.
 			full = tail
 			labelW = w - 2 - trailVerbWidth - 1 - 1 - len([]rune(full))
 		}
+		lead := classStyle(l.Class).Render(glyph + " " + pad(l.Class.String(), trailVerbWidth))
 		if labelW < 4 {
-			return ""
+			// The narrowest row keeps the sentence and loses the label:
+			// "◆ build  20✓" on a session parked on three agents was the
+			// one row, at the one width with no board, that said nothing.
+			return lead + " " + dimStyle.Render(clip(full, w-2-trailVerbWidth-1))
 		}
-		return classStyle(l.Class).Render(glyph+" "+pad(l.Class.String(), trailVerbWidth)) +
-			" " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(full)
+		return lead + " " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(full)
 	}
 	if v := boardVerdict(s, tr, m.now); v != "" {
 		return dimStyle.Render(clip(v, w))

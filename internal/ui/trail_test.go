@@ -491,6 +491,9 @@ func TestT73NothingIsDropped(t *testing.T) {
 		at.Scroll = top
 		frame := strings.Split(RenderTrail(tr, at), "\n")
 		for i := 0; i < o.Height; i++ {
+			if i == 0 && isDetailRow(doc[top]) {
+				continue // the parent stands in for a child at the top
+			}
 			if frame[i] != doc[top+i] {
 				t.Fatalf("offset %d row %d is %q, want %q", top, i, frame[i], doc[top+i])
 			}

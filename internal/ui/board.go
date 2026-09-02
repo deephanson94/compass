@@ -255,7 +255,7 @@ func (m *Model) boardLines(w, h int) []string {
 
 // boardBandMin is the least height a band of columns is worth: the header's
 // three rows and enough trail to read.
-const boardBandMin = 12
+const boardBandMin = 10
 
 // boardColumnRows is how many rows a column would take to show its whole
 // trail: the header and the document.
@@ -457,7 +457,12 @@ func verdictParts(tr journey.Trail, now time.Time) []string {
 		}
 	}
 	if out > 0 {
-		parts = append(parts, fmt.Sprintf("◈%d out %s", out, relAge(now, oldest)))
+		// The same words HEAD uses, parked or not: "◈3 out 20m · quiet
+		// 15m" is the header's to say as much as the trail's.
+		parts = append(parts, strings.TrimPrefix(headTail(tr, now), "for "))
+		if !strings.HasPrefix(parts[len(parts)-1], "◈") {
+			parts[len(parts)-1] = fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
+		}
 	}
 
 	// The newest completed leg: shipped, or what it was.

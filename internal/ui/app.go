@@ -1495,8 +1495,8 @@ func (m *Model) statusChips() string {
 		}
 		counts[s.Snap.State]++
 		if st := s.Snap.State; st == state.NeedsYou || st == state.Stuck {
-			if at, ok := oldest[st]; !ok || s.Snap.Since.Before(at) {
-				oldest[st] = s.Snap.Since
+			if at, ok := oldest[st]; !ok || headSince(s).Before(at) {
+				oldest[st] = headSince(s) // a hung row's silence, as the row counts it
 			}
 		}
 	}
@@ -1555,7 +1555,7 @@ func (m *Model) footerLine(w int) string {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
 		// on the fleet's own last row: "N archived · A browses".
-		keys = "j/k move · " + m.enterKeymap() + " · A live fleet · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · A live fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -1579,7 +1579,7 @@ func (m *Model) footerLine(w int) string {
 	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
-	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · g grab"} {
+	for _, drop := range []string{" · [ ] chapters", " · [ ] turns", " · tab deeper", " · a ask", " · g grab"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -1642,6 +1642,12 @@ func (m *Model) middleShown() bool {
 // the deck itself — asks here, so none of them can disagree.
 func (m *Model) layout(inner int) (fleet, middle, trail int) {
 	if inner < minDeckCols {
+		return 0, 0, inner
+	}
+	if m.level >= levelReader && m.width < deckWideCols {
+		// A deck too narrow for a middle panel gives the reader the whole
+		// width at Lv3: beside a 41-column fleet it wrapped every line,
+		// and the fleet is two Shift+Tabs away.
 		return 0, 0, inner
 	}
 	if m.middleShown() {

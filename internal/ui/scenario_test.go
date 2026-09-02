@@ -68,7 +68,7 @@ func trailOf(start time.Time, prompt string, current bool, legs ...legSpec) jour
 		}
 		if l.class == journey.Ship {
 			// A real ship leg carries its commit, and is named by it.
-			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointCommit, Text: commitSubject(prompt), At: leg.End})
+			leg.Waypoints = append(leg.Waypoints, journey.Waypoint{Kind: journey.WaypointCommit, Text: commitSubject(prompt) + " (" + l.label + ")", At: leg.End})
 		}
 		if current && i == len(legs)-1 {
 			leg.Current = true
@@ -142,6 +142,11 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 			said = "Two ways to do this. The narrower one keeps the current shape; the wider one touches every caller. I'll take the narrower one unless you say otherwise."
 			tool, input = "AskUserQuestion", `{"questions":[{"question":"Narrow or wide?","options":[{"label":"narrow"},{"label":"wide"}]}]}`
 			result = "narrow"
+			if l.Current && strings.Contains(activity, "?") {
+				// The open question is added below, unanswered; this leg
+				// is that question, not one before it.
+				continue
+			}
 		case journey.Build:
 			said = "Writing " + l.Label + "."
 			tool, input = "Edit", fmt.Sprintf(`{"file_path":"/home/user/src/%s","old_string":"return nil","new_string":"return s.store.Save(ctx, rec)"}`, file)
@@ -530,6 +535,7 @@ func sceneVeryLong() scene {
 	var ss []fleet.Session
 
 	long := func(id string, legs int, start time.Time, current bool) journey.Trail {
+		project := id // the commits are the session's own, not another's
 		classes := []journey.Class{journey.Scout, journey.Build, journey.Test, journey.Fix, journey.Test, journey.Build, journey.Docs, journey.Ship, journey.Scout, journey.Design}
 		labels := map[journey.Class][]string{
 			journey.Scout:  {"the router", "the session store", "how tokens are minted", "the audit log", "the old migration"},
@@ -558,9 +564,9 @@ func sceneVeryLong() scene {
 				}
 			case journey.Ship:
 				subject := map[string]string{
-					"commit":      []string{"auth: route sessions through the store", "auth: mint tokens from the store", "auth: audit every refresh"}[(i/10)%3],
-					"push":        "auth: push feat/sessions",
-					"open the pr": "auth: open the pr for review",
+					"commit":      project + ": " + []string{"route sessions through the store", "mint tokens from the store", "audit every refresh", "migrate the old sessions", "drop the legacy path"}[(i/10)%5],
+					"push":        project + ": push " + []string{"feat/sessions", "feat/audit", "feat/migrate"}[(i/10)%3],
+					"open the pr": project + ": open the pr for review",
 				}[leg.Label]
 				leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointCommit, Text: subject, At: leg.End}}
 			case journey.Build:

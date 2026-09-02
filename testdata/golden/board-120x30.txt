@@ -11,7 +11,7 @@
  ▲ design AskUserQuestion   waiting 2m │ ◆ build  tokens.py                12m │ ● fix    checkout.py          for 30m
                                        │ │                                     │
                                        │ ◆ test   pytest             18✓ 2✗ 8m │
-                                       │ ├─◈ scout the payments modu… ✓ 7m ago │
+                                       │ ├─◈ scout the payments modu… ⌀ 7m ago │
                                        │ │  └ came back with no report         │
                                        │ ● fix    tokens.py             for 3m │
                                        │                                       │

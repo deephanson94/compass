@@ -271,7 +271,15 @@ func (d *docBuilder) call(event int, at time.Time, use transcript.ToolUse) {
 	} else {
 		line += "()"
 	}
-	d.push(clip(line, d.width), readerCall, event, at)
+	// A call line wraps rather than clips: the question on an
+	// AskUserQuestion is the one line the session is waiting on, and the
+	// trail beside the reader was showing more of it than the reader.
+	for i, row := range wrapPrefix(line, "", "  ", d.width) {
+		if i >= 3 {
+			break
+		}
+		d.push(row, readerCall, event, at)
+	}
 }
 
 // pending draws the stub under a call nothing has answered yet.

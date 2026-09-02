@@ -182,9 +182,11 @@ func TestT58LiveFleetGolden(t *testing.T) {
 	}
 	// The header's right edge is the age, in the column the session rows put
 	// theirs; the echo sits just left of it. Both facts, neither displaced.
+	// The clock is the row beneath's — infra, floated to the top at 2m —
+	// so the header carries the echo and no clock of its own.
 	opsHeader := strings.TrimRight(fleetCol[ops], " ")
-	if !strings.HasSuffix(opsHeader, "2m") {
-		t.Errorf("the ops header should end with its freshest age: %q", opsHeader)
+	if strings.HasSuffix(opsHeader, "2m") {
+		t.Errorf("the ops header repeats the clock of the row beneath it: %q", opsHeader)
 	}
 	if !strings.Contains(opsHeader, fleet.Glyph(state.NeedsYou)) {
 		t.Errorf("the ops header should echo its needs-you session: %q", opsHeader)

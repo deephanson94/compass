@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
@@ -663,8 +664,21 @@ func TestGroupHeaderClockIsTheEchoedWait(t *testing.T) {
 			dev = r
 		}
 	}
-	if ops.echo != "▲" || ops.age != "2m" {
-		t.Errorf("ops header = %q %q, want the needs-you echo and its 2m wait", ops.echo, ops.age)
+	// The needs-you row floats to the top of its group, so its wait is the
+	// row beneath the header: the header echoes the glyph, and its clock
+	// is the group's freshest only when that is a different row.
+	if ops.echo != "▲" || ops.age != "30s" {
+		t.Errorf("ops header = %q %q, want the needs-you echo and the freshest row's 30s", ops.echo, ops.age)
+	}
+	for i := range m.sessions {
+		if m.sessions[i].Info.ID == "s-tfstate" {
+			m.sessions[i].Info.LastEventAt = m.now.Add(-15 * time.Minute)
+		}
+	}
+	for _, r := range m.fleetRows() {
+		if r.header && r.label == "⌁ ops" && r.age != "" {
+			t.Errorf("ops header repeats the row beneath it: %q", r.age)
+		}
 	}
 	_ = dev
 	// A header over one row: nothing but the name.
@@ -1174,7 +1188,7 @@ func TestHeadSaysWhenItIsWaitingOnAgents(t *testing.T) {
 	if !strings.Contains(got, "⋯ 20m out") {
 		t.Errorf("an open lane's clock has no word:\n%s", got)
 	}
-	tr.Branches[0].Done, tr.Branches[0].End = true, base.Add(20*time.Minute)
+	tr.Branches[0].Done, tr.Branches[0].End, tr.Branches[0].Report = true, base.Add(20*time.Minute), "found it"
 	if got := renderLv(tr, base.Add(30*time.Minute), 1, 60, 20); !strings.Contains(got, "✓ 10m ago") {
 		t.Errorf("a returned lane's clock has no word:\n%s", got)
 	}
@@ -1571,17 +1585,17 @@ func TestParkedHeadKeepsItsOwnName(t *testing.T) {
 	}
 }
 
-// A narrow column keeps HEAD's label and the first clause of its figure
-// rather than the whole figure and no label.
-func TestNarrowHeadKeepsItsLabel(t *testing.T) {
+// A narrow column keeps HEAD's whole figure — the wait is the sentence —
+// and drops the label before it.
+func TestNarrowHeadKeepsItsWait(t *testing.T) {
 	forceASCII(t)
 	base := fixtureBase
 	tr := journey.Trail{Legs: []journey.Leg{
 		{Class: journey.Build, Label: "encoder.py", Start: base, End: base.Add(5 * time.Minute), Files: []string{"encoder.py"}, Current: true},
 	}, Branches: []journey.Branch{{Label: "a", Start: base.Add(10 * time.Minute), AfterLeg: 0}, {Label: "b", Start: base.Add(12 * time.Minute), AfterLeg: 0}, {Label: "c", Start: base.Add(12 * time.Minute), AfterLeg: 0}}}
 	narrow := renderLv(tr, base.Add(30*time.Minute), 1, 35, 10)
-	if !strings.Contains(narrow, "● build  encoder.py") || !strings.Contains(narrow, "◈3 out 20m") {
-		t.Errorf("a narrow HEAD lost its label or its agents:\n%s", narrow)
+	if strings.Contains(narrow, "encoder.py") || !strings.Contains(narrow, "● build  ◈3 out 20m · quiet 25m") {
+		t.Errorf("a narrow HEAD kept its label over the wait:\n%s", narrow)
 	}
 	wide := renderLv(tr, base.Add(30*time.Minute), 1, 60, 10)
 	if !strings.Contains(wide, "encoder.py") || !strings.Contains(wide, "◈3 out 20m · quiet 25m") {
@@ -1600,9 +1614,220 @@ func TestGroupHeaderClockIsTheRowsOwn(t *testing.T) {
 			m.sessions[i].Info.LastEventAt = m.now.Add(-4 * time.Minute)
 		}
 	}
+	// The stuck row is the first beneath the header at 4m: no clock on the
+	// header, and never the 6m its call began at.
 	for _, r := range m.fleetRows() {
-		if r.header && r.label == "⌁ ops" && r.age != "4m" {
-			t.Errorf("ops header clock = %q, want the stuck row's own 4m", r.age)
+		if r.header && r.label == "⌁ ops" && r.age != "" {
+			t.Errorf("ops header clock = %q, want none beside the stuck row's own 4m", r.age)
 		}
+	}
+}
+
+// The narrowest fleet row keeps the parked sentence and loses the label.
+func TestNarrowestFleetRowKeepsTheSentence(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Branches = append(tr.Branches, journey.Branch{Label: "measure", Start: fixtureBase.Add(30 * time.Minute), AfterLeg: 3})
+	tr.Legs[3].End = fixtureBase.Add(29 * time.Minute) // parked: nothing since the dispatch
+	m.trails[api] = tr
+	s := m.sessions[rowFor(t, m, api).sess]
+	got := m.secondLine(s, 30)
+	if !strings.HasPrefix(strings.TrimSpace(got), "● fix    ◈1 out 10m · quiet") || strings.Contains(got, "◆") {
+		t.Errorf("the narrowest row fell back to the past: %q", got)
+	}
+}
+
+// The column's verdict says "quiet" for a parked parent, as HEAD does.
+func TestColumnVerdictSaysQuiet(t *testing.T) {
+	base := fixtureBase
+	tr := journey.Trail{Legs: []journey.Leg{{Class: journey.Build, Label: "x", Start: base, End: base.Add(5 * time.Minute), Current: true}},
+		Branches: []journey.Branch{{Label: "a", Start: base.Add(10 * time.Minute), AfterLeg: 0}}}
+	if got := boardVerdict(fleet.Session{}, tr, base.Add(30*time.Minute)); !strings.Contains(got, "◈1 out 20m · quiet 25m") {
+		t.Errorf("verdict = %q, want the parked wait", got)
+	}
+	tr.Legs[0].End = base.Add(15 * time.Minute)
+	if got := boardVerdict(fleet.Session{}, tr, base.Add(30*time.Minute)); !strings.Contains(got, "◈1 out 20m") || strings.Contains(got, "quiet") {
+		t.Errorf("verdict = %q, want the agents without a wait", got)
+	}
+}
+
+// A returned agent with nothing to say wears ⌀, never the tick.
+func TestEmptyReturnIsNotATick(t *testing.T) {
+	forceASCII(t)
+	tr := fixtureLv2Trail(fixtureBase)
+	tr.Branches[0].Report = ""
+	got := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 60, 24)
+	if !strings.Contains(got, "⌀ 19m ago") || strings.Contains(got, "✓ 19m ago") {
+		t.Errorf("an empty return wears a tick:\n%s", got)
+	}
+	tr.Branches[0].Report = "found it"
+	if got := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 60, 24); !strings.Contains(got, "✓ 19m ago") {
+		t.Errorf("a return with a finding lost its tick:\n%s", got)
+	}
+	if help := strings.Join(helpLegendLines(90, true), "\n"); !strings.Contains(help, "⌀ back, empty") || !strings.Contains(help, "→3") {
+		t.Errorf("the legend does not explain ⌀ or →N:\n%s", help)
+	}
+}
+
+// ---- round six
+
+// The reader's title carries the row as it was drawn.
+func TestReaderTitleUsesTheDrawnLabel(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	tr := fixtureTrail(fixtureBase)
+	tr.Legs = append(tr.Legs[:3], journey.Leg{Class: journey.Ship, Label: "push", Start: fixtureBase.Add(37 * time.Minute), End: fixtureBase.Add(38 * time.Minute),
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointCommit, Text: "auth: push feat/sessions", At: fixtureBase.Add(38 * time.Minute)}}},
+		journey.Leg{Class: journey.Scout, Label: "x.go", Start: fixtureBase.Add(39 * time.Minute), Current: true})
+	m.SetTrail(tr)
+	m.events = eventsFor(m.trail)
+	pressTab(m)
+	press(m, "k") // onto the ship leg
+	pressTab(m)
+	if got := m.readerTitle(90); !strings.Contains(got, "auth: push feat/sessions") || strings.Contains(got, "push ·") {
+		t.Errorf("reader title %q does not carry the ship's commit", got)
+	}
+}
+
+// A detail row never leads the trail's viewport.
+func TestOrphanDetailNeverLeadsTheViewport(t *testing.T) {
+	forceASCII(t)
+	tr := longTrail(30)
+	for i := range tr.Legs {
+		if i%3 == 2 {
+			tr.Legs[i].Class = journey.Test
+			tr.Legs[i].Waypoints = []journey.Waypoint{
+				{Kind: journey.WaypointTestRun, Text: "1 passed · 1 failed", Short: "1✓ 1✗"},
+				{Kind: journey.WaypointTestFail, Text: "test_a"}, {Kind: journey.WaypointTestFail, Text: "test_b"}}
+		}
+	}
+	o := TrailOpts{Now: fixtureBase.Add(3 * time.Hour), Width: 38, Height: 12, Level: 2, Cursor: -1}
+	doc := TrailLines(tr, o)
+	for top := 1; top < len(doc)-o.Height; top++ {
+		o.Scroll = top
+		rows := trailRows(tr, o)
+		if isDetailRow(rows[0]) {
+			t.Fatalf("offset %d: a child leads the viewport: %q", top, rows[0])
+		}
+		if isDetailRow(doc[top]) && !strings.ContainsAny(string([]rune(ansi.Strip(rows[0]))[:1]), "◆●◉├") {
+			t.Fatalf("offset %d: the top row %q is not a parent for %q", top, rows[0], doc[top])
+		}
+	}
+}
+
+// The header's stuck chip counts the row's own silence.
+func TestHeaderChipCountsTheSilence(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	for i := range m.sessions {
+		if m.sessions[i].Info.ID == "s-api" {
+			m.sessions[i].Snap = state.Snapshot{State: state.Stuck, Since: m.now.Add(-6 * time.Minute), Reason: "no output for 4m mid-turn", Activity: "Bash: sleep"}
+			m.sessions[i].Info.LastEventAt = m.now.Add(-4 * time.Minute)
+		}
+	}
+	if got := m.statusChips(); !strings.Contains(got, "◍1 4m") {
+		t.Errorf("chips = %q, want the stuck row's 4m", got)
+	}
+}
+
+// A working row gives up its verdict before its subject is cut short.
+func TestVerdictGoesBeforeTheSubject(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	api := sessionKey("s-api")
+	tr := m.trails[api]
+	tr.Legs[3].Label = "the expiry comparison in local time"
+	m.trails[api] = tr
+	s := m.sessions[rowFor(t, m, api).sess]
+	if got := m.secondLine(s, 40); strings.Contains(got, "18✓") || !strings.Contains(got, "the expiry comparison") {
+		t.Errorf("a narrow row kept the verdict over the subject: %q", got)
+	}
+	if got := m.secondLine(s, 80); !strings.Contains(got, "18✓ 2✗ · for 3m") {
+		t.Errorf("a wide row lost the verdict: %q", got)
+	}
+}
+
+// The reader wraps a call line rather than clipping the question.
+func TestReaderWrapsTheCallLine(t *testing.T) {
+	forceASCII(t)
+	q := "Open port 22 to the office CIDR only, or keep the bastion host and its jump rules as they are today?"
+	ev := []transcript.Event{{Type: transcript.EventAssistant, UUID: "1", Timestamp: fixtureBase,
+		ToolUses: []transcript.ToolUse{{ID: "q", Name: "AskUserQuestion", Input: json.RawMessage(fmt.Sprintf(`{"questions":[{"question":%q,"options":[{"label":"office CIDR"},{"label":"keep bastion"}]}]}`, q))}}}}
+	got := RenderReader(ev, ReaderOpts{Width: 60, Height: 20})
+	if !strings.Contains(got, "keep bastion]") {
+		t.Errorf("the call line clipped the question:\n%s", got)
+	}
+}
+
+// A conversation that fits says so, at either end.
+func TestFittingConversationSaysSo(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)[:2]
+	pressTab(m)
+	pressTab(m)
+	press(m, "j")
+	if !strings.Contains(m.note, "whole conversation is on screen") {
+		t.Errorf("j on a fitting conversation said %q", m.note)
+	}
+}
+
+// Below the deck's wide width the reader has the whole width at Lv3.
+func TestNarrowDeckReaderHasTheWidth(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(100, 30)
+	openTrail(m)
+	m.events = eventsFor(m.trail)
+	pressTab(m)
+	pressTab(m)
+	got := m.View()
+	if strings.Contains(got, "FLEET · live") || strings.Contains(got, "TRAIL · api") || !strings.Contains(got, "READER · api") {
+		t.Errorf("at 100 columns the reader shares its width:\n%s", got)
+	}
+	if fw, mw, tw := m.layout(98); fw != 0 || mw != 0 || tw != 98 {
+		t.Errorf("layout = (%d, %d, %d), want the reader alone", fw, mw, tw)
+	}
+}
+
+// A cut fleet never ends on an entry's first line.
+func TestCutFleetNeverSplitsAnEntry(t *testing.T) {
+	forceASCII(t)
+	m := groupedModel(120, 30)
+	openTrail(m)
+	full, a, b := m.fleetBlock(m.fleetRows(), fleetWidth)
+	for h := 4; h < len(full); h++ {
+		m.fleetScroll = 0
+		out := m.scrollFleet(full, a, b, h)
+		for i := len(out) - 1; i >= 0; i-- {
+			if strings.HasPrefix(out[i], "▾") || out[i] == "" {
+				continue
+			}
+			if isEntryFirstLine(out[i]) {
+				t.Errorf("height %d: the window ends on an entry's first line %q", h, out[i])
+			}
+			break
+		}
+	}
+}
+
+// The trail's title goes compact where the long day does not fit.
+func TestTrailTitleGoesCompact(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(120, 30)
+	openTrail(m)
+	tr := longTrail(40)
+	for i := range tr.Legs {
+		if i%10 == 3 {
+			tr.Legs[i].Class = journey.Ship
+		}
+	}
+	m.SetTrail(tr)
+	m.now = fixtureBase.Add(5 * time.Hour)
+	if got := m.trailTitle(40); !strings.Contains(got, "⚑") || strings.Contains(got, "…") {
+		t.Errorf("a narrow title is not compact: %q", got)
 	}
 }

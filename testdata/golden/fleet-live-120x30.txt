@@ -10,7 +10,7 @@
   3 ● webapp                               40s │ ◆ build  tokens.py                                                 12m
      ◆ test   18✓ 2✗                           │ │
                                                │ ◆ test   pytest                                              18✓ 2✗ 8m
-  ⌁ ops                                  ▲  2m │ ├─◈ scout the payments module                                 ✓ 7m ago
+  ⌁ ops                                      ▲ │ ├─◈ scout the payments module                                 ⌀ 7m ago
   1 ▲ infra                     needs you   2m │ │  └ came back with no report
      AskUserQuestion                           │ ● fix    tokens.py                                              for 3m
                                                │

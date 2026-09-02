@@ -93,7 +93,7 @@ func (m *Model) readerTitle(w int) string {
 		// so a reader scrolled to an hour can tell it is the hour.
 		right = m.anchorAt.Local().Format("15:04")
 		if m.anchorText != "" {
-			right = clip(m.anchorText, 24) + " · " + right
+			right = clip(m.anchorText, max(24, w/2)) + " · " + right
 		}
 	}
 	mark := m.titleMark(panelReader)
@@ -135,6 +135,12 @@ func (m *Model) anchorReader() {
 		doc := m.doc(opts.Width)
 		m.scroll, m.anchor, m.anchorAt = clampScroll(line, len(doc), m.readerHeight()), line, rows[m.cursor].Time
 		m.anchorText = rows[m.cursor].Text
+		if row := rows[m.cursor]; row.Kind == "leg" && row.Leg >= 0 && row.Leg < len(m.trail.Legs) {
+			// The row as drawn — the commit a ship leg is named by, the
+			// plan's name for HEAD — not the heuristic label beneath it.
+			w, h := m.trailBox()
+			m.anchorText, _ = legLabel(m.trail.Legs[row.Leg], m.trailOpts(w, h))
+		}
 	}
 }
 
@@ -142,6 +148,10 @@ func (m *Model) anchorReader() {
 // the viewport moved at all, so a key at either end can say so.
 func (m *Model) scrollBy(delta int) bool {
 	doc := m.doc(m.readerWidth())
+	if len(doc) <= m.readerHeight() {
+		m.note = "the whole conversation is on screen"
+		return true // said; nothing more to say
+	}
 	was := clampScroll(m.scroll, len(doc), m.readerHeight())
 	m.scroll = clampScroll(was+delta, len(doc), m.readerHeight())
 	return m.scroll != was

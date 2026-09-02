@@ -247,7 +247,7 @@ func TestT80BoardGolden(t *testing.T) {
 		"1 ▲ infra", "▸2 ● api", "3 ● webapp", "4 ○ tfstate",
 		"◉ \"tighten the vpc", "◉ \"fix the 401 bug\"", "◉ \"flake in the checkout", "◉ \"reconcile the state fil",
 		"● fix    checkout.py",
-		"+1 more · 5 ○ scratch",
+		"+1 more · 5 ○ scratch", // thirty rows hold one band; the rest is the strip
 		"5 archived · A browses",
 		"⌂ compass · board",
 	} {
