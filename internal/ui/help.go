@@ -112,6 +112,8 @@ func helpKeyLinesFor(w int, board bool) []string {
 		key, what := k[0], k[1]
 		if !board {
 			switch key {
+			case "j / k":
+				what = "move down / up (↓ ↑ too)"
 			case "tab":
 				what = "zoom in: trail → legs → reader"
 			case "⇧ tab":
