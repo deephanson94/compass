@@ -245,6 +245,8 @@ type Model struct {
 	// labels. The selected session's trail is here as well as in trail.
 	trails      map[string]journey.Trail
 	boardLabels map[string]map[string]string
+	fleetQuery  string               // the fleet search in force; "" = none
+	searchFleet bool                 // the search being typed is the fleet's, not the reader's
 	hidden      map[string]bool      // sessions taken off the board with `x`, by Key()
 	hiddenFile  string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
@@ -728,8 +730,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = ""
 			return m, nil
 		}
+		if m.level < levelReader && m.fleetQuery != "" {
+			m.fleetQuery = ""
+			m.clampSelection()
+			m.note = "search cleared"
+			return m, nil
+		}
 		m.zoomOut()
 		return m, nil
+	case "/":
+		if m.level < levelReader {
+			// The fleet's search: the board, the list and the archive
+			// narrow to what matches; the reader keeps its own `/`.
+			m.searching, m.searchFleet, m.draft = true, true, ""
+			return m, nil
+		}
 	case "a":
 		return m, m.ask()
 	case "r":
@@ -1294,6 +1309,38 @@ func (m *Model) zoomOut() {
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	}
+}
+
+// matchesQuery says whether a session answers the fleet search: its name,
+// its opening prompt, its branch, any prompt of its trail, a leg's label,
+// or a file a leg touched. Three hundred archived sessions are a corpus,
+// and a scroll was the only way through it.
+func (m *Model) matchesQuery(s fleet.Session) bool {
+	q := strings.ToLower(strings.TrimSpace(m.fleetQuery))
+	if q == "" {
+		return true
+	}
+	has := func(text string) bool { return strings.Contains(strings.ToLower(text), q) }
+	if has(sessionName(s.Info)) || has(s.Info.Title) || has(s.Info.GitBranch) {
+		return true
+	}
+	tr := m.trails[s.Info.Key()]
+	for _, p := range tr.Prompts {
+		if has(p.Text) {
+			return true
+		}
+	}
+	for _, l := range tr.Legs {
+		if has(l.Label) {
+			return true
+		}
+		for _, f := range l.Files {
+			if has(f) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // onBoard says whether a live session is shown in the live view: hidden
@@ -2063,6 +2110,16 @@ func (m *Model) headerLine(w int) string {
 	left := titleStyle.Render("⌂ compass")
 	if m.level == levelBoard && m.boardShown() {
 		left += dimStyle.Render(" · board")
+	}
+	if m.fleetQuery != "" {
+		// The search in force, and how much of the fleet answers it.
+		total := 0
+		for _, s := range m.sessions {
+			if s.Live != m.archiveView {
+				total++
+			}
+		}
+		left += dimStyle.Render(fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total))
 	}
 	right := m.statusChips()
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)

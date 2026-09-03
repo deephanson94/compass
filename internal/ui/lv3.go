@@ -389,6 +389,16 @@ func (m *Model) jumpMatch(dir int) {
 func (m *Model) searchKey(msg tea.KeyMsg) {
 	switch msg.String() {
 	case "enter":
+		if m.searchFleet {
+			m.fleetQuery = strings.TrimSpace(m.draft)
+			m.draft, m.searching, m.searchFleet = "", false, false
+			m.fleetScroll = 0
+			m.clampSelection()
+			if n := len(m.viewOrder()); m.fleetQuery != "" {
+				m.note = fmt.Sprintf("/%s · %s", m.fleetQuery, plural(n, "session"))
+			}
+			return
+		}
 		m.query = strings.TrimSpace(m.draft)
 		m.draft = ""
 		m.searching = false
@@ -398,7 +408,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 		}
 	case "esc":
 		m.draft = ""
-		m.searching = false
+		m.searching, m.searchFleet = false, false
 	case "backspace":
 		if r := []rune(m.draft); len(r) > 0 {
 			m.draft = string(r[:len(r)-1])

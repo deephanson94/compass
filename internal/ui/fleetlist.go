@@ -57,6 +57,9 @@ func (m *Model) fleetColumn(w, h int) []string {
 	if m.archiveView {
 		title = "FLEET · archive"
 	}
+	if m.fleetQuery != "" {
+		title += " · /" + m.fleetQuery
+	}
 	rows := []string{m.titleMark(panelFleet) + m.titleStyleFor(panelFleet).Render(clip(title, w-1)), ""}
 	if h > 2 {
 		rows = append(rows, m.fleetLines(w, h-2)...)
@@ -270,7 +273,7 @@ func (m *Model) liveGroups() []fleetGroup {
 
 	members := map[string][]int{}
 	for i, s := range m.sessions {
-		if !m.onBoard(s) {
+		if !m.onBoard(s) || !m.matchesQuery(s) {
 			continue
 		}
 		name := elsewhereGroup
@@ -332,7 +335,7 @@ func (m *Model) archiveGroups() []fleetGroup {
 	members := map[string][]int{}
 	var names []string
 	for i, s := range m.sessions {
-		if m.onBoard(s) {
+		if m.onBoard(s) || !m.matchesQuery(s) {
 			continue // the archive also lists what `x` took off the board
 		}
 		name := sessionName(s.Info)

@@ -178,6 +178,7 @@ run and nothing else.
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it; `x` there brings it back; a hidden session that needs you or hangs comes back on its own |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
+| `/` | on the board, the list or the archive: search the fleet — name, opening prompt, branch, any prompt, a leg, a file a leg touched. The header says `/query · 3 of 40`; `esc` clears it |
 | `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status", the quota one; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A digit sends; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` until the transcript shows the prompt landed. Off under `-readonly` |
 | `?` | help |
 

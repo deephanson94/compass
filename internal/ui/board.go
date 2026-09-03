@@ -90,7 +90,7 @@ func (m *Model) viewOrder() []int {
 	}
 	var out []int
 	for i, s := range m.sessions {
-		if m.onBoard(s) {
+		if m.onBoard(s) && m.matchesQuery(s) {
 			out = append(out, i)
 		}
 	}
@@ -355,6 +355,84 @@ func (m *Model) boardSelect(i int) bool {
 	return true
 }
 
+// overlaps is what two live sessions are doing to the same thing: a file
+// both touched in the last twenty minutes, a test both are failing. The
+// only thing in the room reading every transcript had two columns and let
+// the person diff them by eye.
+func (m *Model) overlaps() []string {
+	const recent = 20 * time.Minute
+	files := map[string][]string{}
+	tests := map[string][]string{}
+	for _, i := range m.viewOrder() {
+		s := m.sessions[i]
+		if !s.Live {
+			continue
+		}
+		name := sessionName(s.Info)
+		tr := m.trails[s.Info.Key()]
+		seenFile := map[string]bool{}
+		for _, l := range tr.Legs {
+			end := l.End
+			if l.Current || end.IsZero() {
+				end = m.now
+			}
+			if m.now.Sub(end) > recent {
+				continue
+			}
+			for _, f := range l.Files {
+				if !seenFile[f] {
+					seenFile[f] = true
+					files[f] = append(files[f], name)
+				}
+			}
+		}
+		if test := failingNow(tr); test != "" {
+			tests[test] = append(tests[test], name)
+		}
+	}
+	var out []string
+	for _, f := range sortedKeys(files) {
+		if names := files[f]; len(names) > 1 {
+			out = append(out, "⚠ "+strings.Join(names, " and ")+" both touched "+f+" in the last 20m")
+		}
+	}
+	for _, t := range sortedKeys(tests) {
+		if names := tests[t]; len(names) > 1 {
+			out = append(out, "⚠ "+strings.Join(names, " and ")+" are both failing "+t)
+		}
+	}
+	return out
+}
+
+// failingNow is the test the trail's newest red run failed, or "".
+func failingNow(tr journey.Trail) string {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		badge := legBadge(tr.Legs[i])
+		if badge == "" || badge == "?" {
+			continue
+		}
+		if !strings.Contains(badge, "✗") {
+			return ""
+		}
+		for _, w := range tr.Legs[i].Waypoints {
+			if w.Kind == journey.WaypointTestFail {
+				return w.Text
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // boardStrip is the board's last row: the sessions without a column, in the
 // board's order with their fleet numbers, then the way to the other view.
 func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) string {
@@ -380,6 +458,11 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		rest = append(rest, name)
 	}
 	var parts []string
+	if !m.archiveView {
+		// The overlaps first: two sessions on one file is the fact the
+		// strip exists to carry when it has one.
+		parts = append(parts, m.overlaps()...)
+	}
 	if len(rest) > 0 {
 		parts = append(parts, fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · ")))
 	}
@@ -582,6 +665,9 @@ func (m *Model) obligation(s fleet.Session) int {
 	}
 	if s.Snap.State == state.Working {
 		return 3
+	}
+	if !s.Info.LastEventAt.IsZero() && m.now.Sub(s.Info.LastEventAt) > boardFresh {
+		return 6 // a day old owes nothing today, red or not
 	}
 	if redNow(tr) || unfinished(tr) {
 		return 4

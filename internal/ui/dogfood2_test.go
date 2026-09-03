@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -1028,5 +1029,93 @@ func TestHidingASession(t *testing.T) {
 	}
 	if !found {
 		t.Error("a hidden session that needs you should come back on its own")
+	}
+}
+
+// `/` below the reader searches the fleet: the board, the list and the
+// archive narrow to the sessions whose name, prompt, branch, leg or file
+// matches; esc clears it. The reader keeps its own `/`.
+func TestTheFleetSearch(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 40)
+	all := len(m.viewOrder())
+	if all < 3 {
+		t.Skip("the fixture is too small to narrow")
+	}
+	press(m, "/")
+	if !m.searching || !m.searchFleet {
+		t.Fatal("/ on the board should start the fleet search")
+	}
+	for _, r := range "401" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.fleetQuery != "401" || m.searching {
+		t.Fatalf("enter should set the query: %q searching %v", m.fleetQuery, m.searching)
+	}
+	got := m.viewOrder()
+	if len(got) == 0 || len(got) >= all {
+		t.Errorf("the query should narrow the fleet: %d of %d", len(got), all)
+	}
+	for _, i := range got {
+		if !m.matchesQuery(m.sessions[i]) {
+			t.Errorf("%s does not match /401", sessionName(m.sessions[i].Info))
+		}
+	}
+	if head := ansi.Strip(m.headerLine(150)); !strings.Contains(head, "/401 · ") || !strings.Contains(head, fmt.Sprintf("%d of %d", len(got), all)) {
+		t.Errorf("the header should carry the query and the count: %q", head)
+	}
+	press(m, "esc")
+	if m.fleetQuery != "" || len(m.viewOrder()) != all {
+		t.Errorf("esc should clear the query: %q, %d shown", m.fleetQuery, len(m.viewOrder()))
+	}
+	// A file a leg touched answers too.
+	m.fleetQuery = "tokens.py"
+	if len(m.viewOrder()) == 0 {
+		t.Error("a touched file should match")
+	}
+	m.fleetQuery = ""
+
+	// The reader's `/` is untouched.
+	toLv3(m)
+	press(m, "/")
+	if !m.searching || m.searchFleet {
+		t.Error("/ in the reader should be the reader's search")
+	}
+}
+
+// Two live sessions on one file, or one failing test, are named in the
+// strip: the only thing reading every transcript should say so.
+func TestOverlapsAreNamed(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 40)
+	base := fixtureBase
+	m.now = base.Add(40 * time.Minute)
+	shared := func(name string) journey.Trail {
+		return journey.Trail{Legs: []journey.Leg{
+			{Class: journey.Build, Label: name, Start: base.Add(30 * time.Minute), End: base.Add(35 * time.Minute), Files: []string{"tokens.py"}},
+			{Class: journey.Test, Label: "pytest", Start: base.Add(36 * time.Minute), End: base.Add(37 * time.Minute),
+				Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 failed", Short: "1✗"}, {Kind: journey.WaypointTestFail, Text: "test_refresh"}}},
+		}}
+	}
+	m.trails[sessionKey("s-api")] = shared("api")
+	m.trails[sessionKey("s-webapp")] = shared("webapp")
+	got := m.overlaps()
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"both touched tokens.py in the last 20m", "are both failing test_refresh"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in %v", want, got)
+		}
+	}
+	if !strings.Contains(joined, "api and webapp") && !strings.Contains(joined, "webapp and api") {
+		t.Errorf("the overlap should name both sessions: %v", got)
+	}
+	if strip := ansi.Strip(m.boardStrip(nil, m.boardRows(), 200)); !strings.Contains(strip, "⚠") {
+		t.Errorf("the strip should carry the overlap: %q", strip)
+	}
+	// Old work is not an overlap.
+	m.now = base.Add(3 * time.Hour)
+	if got := m.overlaps(); strings.Contains(strings.Join(got, "\n"), "touched") {
+		t.Errorf("a file touched hours ago is not an overlap: %v", got)
 	}
 }
