@@ -155,10 +155,10 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 	// tag's own row did not survive, and gives that lead to the trace when
 	// it did — `↪` stood on thirty-two rows and was defined at no width
 	// below the board's.
-	if joined := strings.Join(legend, "\n"); strings.Contains(joined, "dev:1.0") {
+	if joined := strings.Join(legend, "\n"); strings.Contains(joined, "— its tmux pane") {
 		for i, l := range legend {
-			if plain := ansi.Strip(l); strings.Contains(plain, "⌁ pane · unread · ") {
-				legend[i] = dimStyle.Render(shedClauses(strings.Replace(plain, "⌁ pane · unread · ", "", 1), w))
+			if plain := ansi.Strip(l); strings.Contains(plain, "⌁ dev:1.0 pane · unread — not opened · ") {
+				legend[i] = dimStyle.Render(shedClauses(strings.Replace(plain, "⌁ dev:1.0 pane · unread — not opened · ", "", 1), w))
 			}
 		}
 	}
@@ -263,7 +263,9 @@ func helpLegendCore(legend []string) []string {
 	for _, l := range legend {
 		// The class names are not here: they are plain words on every leg
 		// row, and their row cost the narrow help the lanes.
-		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "you were here"} {
+		// `▌` marks the panel the keys are in and is drawn on all but one
+		// frame at every width: a mark that constant is never the one cut.
+		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "you were here", "▌ marks"} {
 			if strings.Contains(l, keep) {
 				core = append(core, l)
 				break
@@ -297,7 +299,7 @@ func helpLegendFold(legend []string, w int) []string {
 				// every finished row wears — and the clauses go whole.
 				// The tag and unread lead: every row wears one or says "no
 				// pane", where the lanes belong to a lead that delegates.
-				fold := "        ⌁ pane · unread · ↪ sent · ⟲ compacted · ◈ ⋯ out · ✓ back · ⌀ empty · ◌ planned · │ you were here"
+				fold := "        ⌁ dev:1.0 pane · unread — not opened · ↪ sent · ⟲ compacted · ◈ ⋯ out · ✓ back · ⌀ empty · ◌ planned · │ you were here"
 				if strings.Contains(strings.Join(legend, "\n"), "dev:1.0") {
 					// The tag's own row survived: this one need not say it
 					// twice, and the room goes to the marks below it.
@@ -408,7 +410,7 @@ func helpLegendRaw() []string {
 		"        on\u00a0you\u00a040m\u00a0today — its waits for your next prompt (3h+\u00a0=\u00a0away)",
 		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit · ↩ result of X — landed late; it is X's",
 		"        │\u00a0you\u00a0were\u00a0here — the read-line · ↳\u00a0what\u00a0came\u00a0after · ⚠\u00a0two\u00a0sessions, one thing",
-		"board:  columns for what owes you, in that order; the rest in the strip",
+		"board:  columns for what owes you, in that order; the rest in a band below",
 		"",
 		"every leg is one of seven classes, named on its row:",
 	}

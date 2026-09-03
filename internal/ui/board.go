@@ -365,6 +365,12 @@ func bandWidth(w, k, cw int) int {
 	if k == 1 && bw > boardColMax && cw <= boardColMax {
 		bw = boardColMax // a lone column under a full band: wider, capped like any other
 	}
+	if k > 1 && bw > cw+boardBandSlack {
+		// A short band keeps the board a grid: the idlest columns were
+		// given twenty-two cells of rail while the needs-you column above
+		// them truncated.
+		bw = cw + boardBandSlack
+	}
 	if bw < cw {
 		return cw
 	}
@@ -391,6 +397,11 @@ func (m *Model) drawnCount(order []int) int {
 // boardBandMin is the least height a band of columns is worth: the header's
 // three rows and enough trail to read.
 const boardBandMin = 10
+
+// boardBandSlack is how much wider than the board's own column a short
+// band may draw: enough to use a little of the room its missing columns
+// leave, not enough to stop the board reading as a grid.
+const boardBandSlack = 4
 
 // boardBandFloor is the least height a band of short trails needs to be
 // worth drawing whole: its two header rows, the tag's row, and a leg.
