@@ -270,7 +270,7 @@ func (m *Model) liveGroups() []fleetGroup {
 
 	members := map[string][]int{}
 	for i, s := range m.sessions {
-		if !s.Live {
+		if !m.onBoard(s) {
 			continue
 		}
 		name := elsewhereGroup
@@ -332,8 +332,8 @@ func (m *Model) archiveGroups() []fleetGroup {
 	members := map[string][]int{}
 	var names []string
 	for i, s := range m.sessions {
-		if s.Live {
-			continue
+		if m.onBoard(s) {
+			continue // the archive also lists what `x` took off the board
 		}
 		name := sessionName(s.Info)
 		if _, ok := members[name]; !ok {

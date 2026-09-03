@@ -247,7 +247,7 @@ func TestT80BoardGolden(t *testing.T) {
 		"1 ▲ infra", "▸2 ● api", "3 ● webapp", "4 ○ tfstate",
 		"◉ \"tighten the vpc", "◉ \"fix the 401 bug\"", "◉ \"flake in the checkout", "◉ \"reconcile the state fil",
 		"● fix    checkout.py",
-		"+1 more · 5 ○ scratch", // thirty rows hold one band; the rest is the strip
+		"5 ○ scratch", // packed trails leave thirty rows a second band for it
 		"5 archived · A browses",
 		"⌂ compass · board",
 	} {
@@ -255,7 +255,7 @@ func TestT80BoardGolden(t *testing.T) {
 			t.Errorf("the board is missing %q:\n%s", want, got)
 		}
 	}
-	for _, gone := range []string{"TRAIL · api", "FLEET · live", "try the streaming api", "nothing yet"} {
+	for _, gone := range []string{"TRAIL · api", "FLEET · live", "nothing yet", "+1 more"} {
 		if strings.Contains(got, gone) {
 			t.Errorf("%q is on the board:\n%s", gone, got)
 		}
@@ -283,13 +283,16 @@ func TestT80bBoardThreeColumnsGolden(t *testing.T) {
 	if *update {
 		return
 	}
-	for _, want := range []string{"fix the 401 bug", "tighten the vpc", "flake in the checkout", "+2 more · 4 ○ tfstate 15m · 5 ○ scratch 22m"} {
+	// Three columns to a band; the two idle sessions that still owe
+	// something — one red, one unread — take a second band now that the
+	// trails are packed, and nothing is left for the strip.
+	for _, want := range []string{"fix the 401 bug", "tighten the vpc", "flake in the checkout", "4 ○ tfstate", "5 ○ scratch", "reconcile the state file"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the board is missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "reconcile the state file") {
-		t.Error("a fourth column appeared on a three-column board")
+	if strings.Contains(got, "+2 more") {
+		t.Error("the strip names sessions the packed board had room for")
 	}
 	assertBoardFits(t, m, got, 120)
 }
@@ -733,7 +736,7 @@ func TestABrightColumnSaysWhatIsNewSinceTheLastLook(t *testing.T) {
 	// No: the look is placed mid-journey, after the scout leg started.
 	m.seen = map[string]time.Time{key: fixtureBase.Add(10 * time.Minute)}
 	got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n")
-	if !strings.Contains(got, "3 new legs · looked 30m ago") {
+	if !strings.Contains(got, "3 new legs · 1 red · looked 30m ago") {
 		t.Errorf("the delta line is missing or wrong (want 3 legs after +10m, looked 30m before now):\n%s", got)
 	}
 

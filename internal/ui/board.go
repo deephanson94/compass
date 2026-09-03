@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -89,10 +90,15 @@ func (m *Model) viewOrder() []int {
 	}
 	var out []int
 	for i, s := range m.sessions {
-		if s.Live != m.archiveView {
+		if m.onBoard(s) {
 			out = append(out, i)
 		}
 	}
+	// By obligation, then the fleet's own order within a rank (the longest
+	// wait first among the alarms, the freshest first among the calm).
+	sort.SliceStable(out, func(a, b int) bool {
+		return m.obligation(m.sessions[out[a]]) < m.obligation(m.sessions[out[b]])
+	})
 	return out
 }
 
@@ -105,7 +111,20 @@ func (m *Model) boardKeys(n int) []string {
 		return nil
 	}
 	keys := make([]string, 0, n)
-	for _, i := range m.viewOrder() {
+	order := m.viewOrder()
+	// Only what owes you gets a column; the shipped-and-read go to the
+	// strip, however many columns are free. A board of nothing owed shows
+	// everything, as before.
+	owed := 0
+	for _, i := range order {
+		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+			owed++
+		}
+	}
+	for _, i := range order {
+		if owed > 0 && !m.archiveView && m.obligation(m.sessions[i]) > owedRank {
+			break
+		}
 		keys = append(keys, m.sessions[i].Info.Key())
 		if len(keys) == n {
 			break
@@ -304,6 +323,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	doc := TrailLines(tr, TrailOpts{
 		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
+		Dense: true, Looked: m.seen[key],
 	})
 	return 3 + len(doc)
 }
@@ -365,8 +385,13 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	}
 	if m.archiveView {
 		parts = append(parts, "A live fleet")
-	} else if n := m.archivedCount(); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d archived · A browses", n))
+	} else {
+		if n := m.hiddenCount(); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d hidden · A lists them", n))
+		}
+		if n := m.archivedCount(); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d archived · A browses", n))
+		}
 	}
 	return dimStyle.Render(clip(strings.Join(parts, "   "), w))
 }
@@ -405,6 +430,8 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Cursor:     -1,
 		Pulse:      m.pulse && working,
 		Pinned:     true,
+		Dense:      true, // the board always packs: a rail row between every leg halved what fit
+		Looked:     m.seen[key],
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
@@ -489,6 +516,85 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 	}
 	return strings.Join(parts, " · ")
 }
+
+// circling reports whether a trail is going round the same failure: its
+// newest run is red and the test it fails has failed in three legs or
+// more. Stuck covers the session that went quiet; this is the one that
+// fails loudly and keeps going, which the state machine calls healthy.
+func circling(tr journey.Trail) (test string, runs int, ok bool) {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		l := tr.Legs[i]
+		badge := legBadge(l)
+		if badge == "" || badge == "?" {
+			continue
+		}
+		if !strings.Contains(badge, "✗") {
+			return "", 0, false
+		}
+		for _, w := range l.Waypoints {
+			if w.Kind == journey.WaypointTestFail && w.Runs > runs {
+				test, runs = w.Text, w.Runs
+			}
+		}
+		return test, runs, runs >= 3
+	}
+	return "", 0, false
+}
+
+// unfinished reports whether the session's plan has steps left.
+func unfinished(tr journey.Trail) bool {
+	for _, t := range tr.Tasks {
+		if t.Status == "pending" || t.Status == "in_progress" {
+			return true
+		}
+	}
+	return false
+}
+
+// redNow reports whether the trail's newest verdict is red.
+func redNow(tr journey.Trail) bool {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		badge := legBadge(tr.Legs[i])
+		if badge == "" || badge == "?" {
+			continue
+		}
+		return strings.Contains(badge, "✗")
+	}
+	return false
+}
+
+// obligation ranks a live session by what it owes you, for the board's
+// order: a question, a hang, a loop, work in flight, an idle session that
+// stopped red or with steps left, one you have not read, and the rest.
+// The header's alarms sort first; among the calm, what stopped short of
+// done comes before what shipped clean — "all calm" should mean nothing
+// owes you, not merely nothing is amber.
+func (m *Model) obligation(s fleet.Session) int {
+	tr := m.trails[s.Info.Key()]
+	switch s.Snap.State {
+	case state.NeedsYou:
+		return 0
+	case state.Stuck:
+		return 1
+	}
+	if _, _, ok := circling(tr); ok {
+		return 2
+	}
+	if s.Snap.State == state.Working {
+		return 3
+	}
+	if redNow(tr) || unfinished(tr) {
+		return 4
+	}
+	if m.unread(s) {
+		return 5
+	}
+	return 6
+}
+
+// owedRank is the last obligation rank that earns a column of its own;
+// past it a session is named in the strip.
+const owedRank = 5
 
 // repeatRuns is how many legs the leg's most-repeated failing test has now
 // failed in — 0 when nothing in it has failed before.
@@ -684,21 +790,54 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	if !seen.Before(s.Info.LastEventAt) {
 		return ""
 	}
-	n := 0
-	for _, l := range m.trails[key].Legs {
-		if l.Start.After(seen) {
-			n++
-		}
-	}
-	if n == 0 {
+	legs, ships, red, same := sinceLooked(m.trails[key], seen)
+	if legs == 0 {
 		return ""
 	}
-	word := "legs"
-	if n == 1 {
-		word = "leg"
+	// "↳ 38 legs · 1 ship · 6 red, all test_x · looked 4h ago": the
+	// sentence a person back from lunch assembles by hand.
+	parts := []string{"↳ " + plural(legs, "new leg")}
+	if ships > 0 {
+		parts = append(parts, plural(ships, "ship"))
 	}
-	line := fmt.Sprintf("↳ %d new %s · looked %s ago", n, word, state.ShortDuration(m.now.Sub(seen)))
-	return dimStyle.Render(clip(line, w))
+	if red > 0 {
+		clause := fmt.Sprintf("%d red", red)
+		if same != "" && red > 1 {
+			clause += ", all " + same
+		}
+		parts = append(parts, clause)
+	}
+	parts = append(parts, "looked "+state.ShortDuration(m.now.Sub(seen))+" ago")
+	return dimStyle.Render(joinFit(parts, w))
+}
+
+// sinceLooked adds up what happened after the last look: legs, ships, red
+// runs — and the one test every red run failed, when it was one.
+func sinceLooked(tr journey.Trail, looked time.Time) (legs, ships, red int, sameTest string) {
+	tests := map[string]bool{}
+	for _, l := range tr.Legs {
+		if !l.Start.After(looked) {
+			continue
+		}
+		legs++
+		switch {
+		case l.Class == journey.Ship:
+			ships++
+		case strings.Contains(legBadge(l), "✗"):
+			red++
+			for _, w := range l.Waypoints {
+				if w.Kind == journey.WaypointTestFail {
+					tests[w.Text] = true
+				}
+			}
+		}
+	}
+	if len(tests) == 1 {
+		for t := range tests {
+			sameTest = t
+		}
+	}
+	return legs, ships, red, sameTest
 }
 
 // foldTotals is what the day adds up to — the ships and the red runs of

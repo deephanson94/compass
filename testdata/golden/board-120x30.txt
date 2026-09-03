@@ -7,24 +7,24 @@
  ◉ "tighten the vpc security…  39m ago │ ◉ "fix the 401 bug"           38m ago │ ◉ "flake in the checkout sui… 35m ago
  ╷                                     │ ╷                                     │ ╷
  ◆ scout  main.tf                  18m │ ◆ scout  middleware.py             5m │ ◆ test   pytest             18✓ 2✗ 3m
- │                                     │ │                                     │ │
  ▲ design AskUserQuestion   waiting 2m │ ◆ build  tokens.py                12m │ ● fix    checkout.py          for 30m
-                                       │ │                                     │
                                        │ ◆ test   pytest             18✓ 2✗ 8m │
                                        │ ├─◈ scout the payments modu… ⌀ 7m ago │
                                        │ │  └ came back with no report         │
                                        │ ● fix    tokens.py             for 3m │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
-                                       │                                       │
 
- +2 more · 4 ○ tfstate 15m · 5 ○ scratch 22m   5 archived · A browses
+  4 ○ tfstate              unread  15m │  5 ○ scratch              unread  22m
+     build state.tf              ⌁ ops │     ◆ scout  try the streaming api
+                                       │
+ ◉ "reconcile the state file"  37m ago │ ◉ "try the streaming api"     23m ago
+ ╷                                     │
+ ◆ build  state.tf                 21m │ scouting will appear here
+                                       │
+                                       │
+                                       │
+                                       │
+
+
+ 5 archived · A browses
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  h/l columns · enter attach (prefix d returns) · tab one trail · r reply · g grab · ? help · q quit

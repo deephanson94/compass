@@ -37,6 +37,34 @@ func (m *Model) LoadSeen(path string) {
 
 // saveSeen writes the map back, pruning what no longer earns its line. It
 // runs on markSeen only — an explicit keypress — never on a tick.
+// LoadHidden reads the sessions the person took off the board (`x`), kept
+// beside the seen-times so a restart forgets nothing.
+func (m *Model) LoadHidden(path string) {
+	m.hiddenFile = path
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var hidden map[string]bool
+	if json.Unmarshal(raw, &hidden) == nil {
+		m.hidden = hidden
+	}
+}
+
+func (m *Model) saveHidden() {
+	if m.hiddenFile == "" {
+		return
+	}
+	raw, err := json.Marshal(m.hidden)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(m.hiddenFile), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(m.hiddenFile, raw, 0o644)
+}
+
 func (m *Model) saveSeen() {
 	if m.seenFile == "" {
 		return

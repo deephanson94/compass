@@ -99,6 +99,12 @@ type TrailOpts struct {
 	// something — forks, ticks, hour rules — keep theirs.
 	Dense bool
 
+	// Looked is when the person last opened this trail: a rule on the
+	// rail says "you were here", so a return after hours away reads what
+	// is new from that line down rather than reconstructing it. Zero
+	// draws nothing.
+	Looked time.Time
+
 	Now           time.Time
 	Width, Height int
 	Level         int  // 1, 2 or 3 (the trail renders identically at 2 and 3)
@@ -494,6 +500,10 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// even under a fork or a tick — the one rule that means "the
 			// memory changed here" is not the one to skip.
 			b.node(compactRule(compactionIn(tr.Compactions, nodes[i-1].at, n.at), o.Width))
+		case lookedBetween(o.Looked, nodes[i-1].at, n.at):
+			// The read-line: everything above it was seen, everything
+			// below is new since.
+			b.node(lookRule(o.Looked, o.Now, o.Width))
 		case forked:
 			// The fork row above is a rail segment of its own: `├` reaches down
 			// to this node as well as right to the lane it opened.
@@ -594,7 +604,21 @@ func compactionAt(compactions []time.Time, after, upTo time.Time) (time.Time, bo
 	return found, ok
 }
 
-// compactRule is the rail row a compaction falls on: "│ ⟲ compacted 14:02 ────".
+// lookedBetween reports whether the last look fell in (after, upTo].
+func lookedBetween(looked, after, upTo time.Time) bool {
+	return !looked.IsZero() && looked.After(after) && !looked.After(upTo)
+}
+
+// lookRule is the read-line: "│ you were here · 4h ago ────".
+func lookRule(looked, now time.Time, width int) string {
+	row := railStroke + " you were here · " + relAge(now, looked) + " ago "
+	if rest := width - len([]rune(row)); rest > 0 {
+		row += strings.Repeat("─", rest)
+	}
+	return ruleStyle.Render(clip(row, width))
+}
+
+// compactRule is the rail row a compaction falls on: "│ ⟲ context compacted 14:02 ────".
 func compactRule(at time.Time, width int) string {
 	row := railStroke + " " + glyphCompact + " context compacted " + at.Local().Format("15:04") + " "
 	if rest := width - len([]rune(row)); rest > 0 {

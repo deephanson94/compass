@@ -868,9 +868,10 @@ func TestTallBoardWrapsIntoTwoBands(t *testing.T) {
 	if second <= first+3 {
 		t.Errorf("the second band's header is on row %d, want it below the first band's (row %d)", second, first)
 	}
-	// A short board: one band, the strip.
-	if got := strings.Join(boardModel(152, 30).boardLines(148, 25), "\n"); !strings.Contains(got, "+1 more") {
-		t.Errorf("a 30-row board wrapped where it had no room:\n%s", got)
+	// A short board still wraps once its trails are packed: thirty rows
+	// hold two bands of the fixture, and the strip is empty.
+	if got := strings.Join(boardModel(152, 30).boardLines(148, 25), "\n"); !strings.Contains(got, "5 ○ scratch") || strings.Contains(got, "+1 more") {
+		t.Errorf("a packed 30-row board should hold its second band:\n%s", got)
 	}
 	// A column a few rows over the half still wraps — pinned, it loses
 	// those rows to its fold and says so.
@@ -879,9 +880,11 @@ func TestTallBoardWrapsIntoTwoBands(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		tr.Tasks = append(tr.Tasks, journey.Task{ID: string(rune('1' + i)), Subject: "step", Status: "pending"})
 	}
-	tr.Prompts = append(tr.Prompts,
-		journey.Prompt{Text: "and the revoked case", At: fixtureBase.Add(16 * time.Minute)},
-		journey.Prompt{Text: "now run it", At: fixtureBase.Add(28 * time.Minute)})
+	// The board packs its trails, so it takes more prompts than it did to
+	// push the column past the half.
+	for i, text := range []string{"and the revoked case", "now run it", "and the docs", "then the changelog", "commit it", "push it", "open the pr"} {
+		tr.Prompts = append(tr.Prompts, journey.Prompt{Text: text, At: fixtureBase.Add(time.Duration(16+2*i) * time.Minute)})
+	}
 	over.trails[sessionKey("s-api")] = tr
 	if rows := over.boardColumnRows(sessionKey("s-api"), 34); rows <= 21 || rows > 25 {
 		t.Fatalf("fixture: the api column is %d rows, want a few over the half of 21", rows)

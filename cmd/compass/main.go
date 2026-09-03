@@ -78,7 +78,7 @@ func main() {
 	case "help":
 		fs.Usage()
 	default:
-		if err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, build); err != nil {
+		if err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build); err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
 		}

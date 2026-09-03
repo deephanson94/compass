@@ -116,6 +116,14 @@ type replyDoneMsg struct {
 	err    error
 }
 
+// hookState is what the hook compares a session against between refreshes.
+type hookState struct {
+	state    state.State
+	apiError bool
+	circling bool
+	back     int // lanes returned
+}
+
 // sentReply is the last line compass typed into a session, so the board
 // can say so until the transcript shows the session took it.
 type sentReply struct {
@@ -222,13 +230,23 @@ type Model struct {
 	replyDraft  string               // the line so far
 	replies     []string             // the stock lines `r` offers, in order
 	sent        map[string]sentReply // the last line sent to each session, by Key()
-	pulse       bool                 // HEAD's breath is on its off-beat
-	readonly    bool
+
+	// The event hook: a command the config names, run on the moments that
+	// matter while nobody is looking at the deck — a question, a hang, a
+	// refusal, a loop, agents returning. hookRun is the seam a harness
+	// replaces; before is what each session was at the last refresh.
+	hook     string
+	hookRun  func(event, session, tmux, detail string)
+	before   map[string]hookState
+	pulse    bool // HEAD's breath is on its off-beat
+	readonly bool
 
 	// The board's data: one trail per column, and each column's narrated
 	// labels. The selected session's trail is here as well as in trail.
 	trails      map[string]journey.Trail
 	boardLabels map[string]map[string]string
+	hidden      map[string]bool      // sessions taken off the board with `x`, by Key()
+	hiddenFile  string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
 	seenFile    string               // where the seen-times persist; "" = memory only (harness)
 	boardForced bool                 // the deck left the board only because the terminal narrowed
@@ -248,7 +266,7 @@ type Model struct {
 	// Enter built, with no tmux server anywhere near the test.
 	spawn func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd
 
-	lastNeedsYou int
+	lastTitle string // the terminal title last set
 }
 
 // readerCache holds the flattened document between keypresses: scrolling,
@@ -266,19 +284,18 @@ type readerCache struct {
 // New returns a deck bound to a fleet Manager.
 func New(mgr *fleet.Manager) *Model {
 	return &Model{
-		mgr:          mgr,
-		feeds:        newFeedStore(),
-		runner:       tmuxop.RealRunner{},
-		replies:      DefaultReplies,
-		sent:         map[string]sentReply{},
-		proc:         tmuxop.RealProc{},
-		now:          time.Now(),
-		level:        levelBoard,
-		cursor:       -1,
-		trailPinned:  true,
-		anchor:       -1,
-		unfolded:     map[int]bool{},
-		lastNeedsYou: -1,
+		mgr:         mgr,
+		feeds:       newFeedStore(),
+		runner:      tmuxop.RealRunner{},
+		replies:     DefaultReplies,
+		sent:        map[string]sentReply{},
+		proc:        tmuxop.RealProc{},
+		now:         time.Now(),
+		level:       levelBoard,
+		cursor:      -1,
+		trailPinned: true,
+		anchor:      -1,
+		unfolded:    map[int]bool{},
 	}
 }
 
@@ -292,10 +309,11 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, build func(notify func()) Narrator) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, build func(notify func()) Narrator) error {
 	m := New(mgr)
 	m.readonly = readonly
 	m.showMirror = mirror
+	m.hook = hook
 	if len(replies) > 0 {
 		m.replies = replies
 	}
@@ -304,6 +322,7 @@ func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, build func
 		// not the session, and it has to outlive the process for "bright
 		// means unread" to mean anything across restarts.
 		m.LoadSeen(filepath.Join(base, "compass", "seen.json"))
+		m.LoadHidden(filepath.Join(base, "compass", "hidden.json"))
 	}
 	m.inTmux = os.Getenv("TMUX") != ""
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -397,7 +416,7 @@ func (m *Model) SetMirror(frame string) {
 // Init kicks off the first refresh and the three cadences.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.refresh(), tick(), paneTick(), captureTick(), breathTick(),
-		m.relistPanes(), tea.SetWindowTitle(tabTitle(0)))
+		m.relistPanes(), tea.SetWindowTitle(tabTitle(0, 0, 0)))
 }
 
 func tick() tea.Cmd {
@@ -601,6 +620,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// After the selected session's own narration request, so the column
 		// being read is never starved of the one batch in flight.
 		m.refreshBoard(msg.trails)
+		m.fireHooks()
 		return m, m.titleCmd()
 
 	case narratedMsg:
@@ -714,6 +734,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.ask()
 	case "r":
 		m.offerReplies()
+		return m, nil
+	case "x":
+		m.toggleHidden()
 		return m, nil
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
@@ -1273,6 +1296,126 @@ func (m *Model) zoomOut() {
 	}
 }
 
+// onBoard says whether a live session is shown in the live view: hidden
+// ones are not, unless they need you or are stuck — a session taken off
+// the board comes back the moment it has something to say.
+func (m *Model) onBoard(s fleet.Session) bool {
+	if !s.Live {
+		return false
+	}
+	if !m.hidden[s.Info.Key()] {
+		return true
+	}
+	return s.Snap.State == state.NeedsYou || s.Snap.State == state.Stuck
+}
+
+// hiddenCount is how many live sessions are off the board right now.
+func (m *Model) hiddenCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if s.Live && !m.onBoard(s) {
+			n++
+		}
+	}
+	return n
+}
+
+// toggleHidden is `x`: the selected session leaves the board — a test
+// session, a /resume you are done with — and stays off it until `x` again
+// in the archive, where hidden sessions are listed, or until it needs you.
+func (m *Model) toggleHidden() {
+	s, ok := m.selected()
+	if !ok {
+		return
+	}
+	key := s.Info.Key()
+	if m.hidden == nil {
+		m.hidden = map[string]bool{}
+	}
+	if m.hidden[key] {
+		delete(m.hidden, key)
+		m.saveHidden()
+		m.note = sessionName(s.Info) + " is back on the board"
+		return
+	}
+	if !s.Live {
+		m.note = "the archive is already off the board"
+		return
+	}
+	m.hidden[key] = true
+	m.saveHidden()
+	m.note = sessionName(s.Info) + " hidden · A lists it · x there brings it back"
+	if !m.archiveView {
+		// The selection moves on: the board no longer has this column.
+		if order := m.viewOrder(); len(order) > 0 {
+			m.point(m.sessions[order[0]].Info.Key())
+		}
+		m.clampSelection()
+	}
+}
+
+// fireHooks runs the event hook for every session whose state crossed a
+// line since the last refresh: into needs-you (an API error named as such),
+// into stuck, into circling, or lanes coming back. The first refresh sets
+// the baseline and fires nothing — a launch is not an event.
+func (m *Model) fireHooks() {
+	run := m.hookRun
+	if run == nil && m.hook != "" {
+		hook := m.hook
+		run = func(event, session, tmux, detail string) {
+			cmd := exec.Command("sh", "-c", hook)
+			cmd.Env = append(os.Environ(),
+				"COMPASS_EVENT="+event, "COMPASS_SESSION="+session, "COMPASS_TMUX="+tmux, "COMPASS_DETAIL="+detail)
+			go func() { _ = cmd.Run() }()
+		}
+	}
+	first := m.before == nil
+	if first {
+		m.before = map[string]hookState{}
+	}
+	for _, s := range m.sessions {
+		if !s.Live {
+			continue
+		}
+		key := s.Info.Key()
+		tr := m.trails[key]
+		now := hookState{state: s.Snap.State, apiError: s.Snap.APIError}
+		_, _, now.circling = circling(tr)
+		for _, b := range tr.Branches {
+			if b.Done {
+				now.back++
+			}
+		}
+		was, known := m.before[key]
+		m.before[key] = now
+		if first || !known || run == nil {
+			continue
+		}
+		tmux := ""
+		if pane, ok := m.panes[key]; ok {
+			tmux = pane.Target
+		}
+		name := sessionName(s.Info)
+		switch {
+		case now.state == state.NeedsYou && (was.state != state.NeedsYou || now.apiError && !was.apiError):
+			event := "needs_you"
+			if now.apiError {
+				event = "api_error"
+			}
+			run(event, name, tmux, strings.TrimSpace(m.headFor(s)))
+		case now.state == state.Stuck && was.state != state.Stuck:
+			run("stuck", name, tmux, strings.TrimSpace(m.headFor(s)))
+		}
+		if now.circling && !was.circling {
+			test, runs, _ := circling(tr)
+			run("circling", name, tmux, fmt.Sprintf("%s · %s failure", test, ordinal(runs)))
+		}
+		if now.back > was.back {
+			run("agents_back", name, tmux, plural(now.back-was.back, "lane")+" returned")
+		}
+	}
+}
+
 // offerReplies is `r`: the quick replies go on the footer, numbered, for
 // the selected session's pane. Nothing is sent until a digit is pressed.
 // It is the second of compass's two writes, and like attach it is gated on
@@ -1621,19 +1764,48 @@ func (m *Model) needsYouCount() int {
 // titleCmd emits an OSC 2 tab title only when the attention count changes, so
 // an unfocused terminal tab carries the fleet's health (SPEC §2.4).
 func (m *Model) titleCmd() tea.Cmd {
-	n := m.needsYouCount()
-	if n == m.lastNeedsYou {
+	title := tabTitle(m.needsYouCount(), m.stuckCount(), m.circlingCount())
+	if title == m.lastTitle {
 		return nil
 	}
-	m.lastNeedsYou = n
-	return tea.SetWindowTitle(tabTitle(n))
+	m.lastTitle = title
+	return tea.SetWindowTitle(title)
 }
 
-func tabTitle(needsYou int) string {
+// tabTitle is the terminal's title: the alarms, so a tab bar says what
+// the deck says without the deck being looked at.
+func tabTitle(needsYou, stuck, loops int) string {
+	title := "⌂ compass"
 	if needsYou > 0 {
-		return fmt.Sprintf("⌂ compass ▲%d", needsYou)
+		title += fmt.Sprintf(" ▲%d", needsYou)
 	}
-	return "⌂ compass"
+	if stuck > 0 {
+		title += fmt.Sprintf(" ◍%d", stuck)
+	}
+	if loops > 0 {
+		title += fmt.Sprintf(" ↻%d", loops)
+	}
+	return title
+}
+
+func (m *Model) stuckCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if s.Live && s.Snap.State == state.Stuck {
+			n++
+		}
+	}
+	return n
+}
+
+func (m *Model) circlingCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if _, _, ok := circling(m.trails[s.Info.Key()]); ok && s.Live {
+			n++
+		}
+	}
+	return n
 }
 
 // View renders the whole deck.
@@ -1910,7 +2082,7 @@ func (m *Model) statusChips() string {
 	counts := map[state.State]int{}
 	oldest := map[state.State]time.Time{}
 	for _, s := range m.sessions {
-		if !s.Live {
+		if !m.onBoard(s) {
 			continue
 		}
 		counts[s.Snap.State]++
@@ -1934,11 +2106,17 @@ func (m *Model) statusChips() string {
 		}
 		parts = append(parts, stateStyle(st).Render(chip))
 	}
+	// A session going round the same failure: the loop the state machine
+	// calls healthy and busy, counted where "all calm" can see it.
+	loops := m.circlingCount()
+	if loops > 0 {
+		parts = append(parts, stuckStyle.Render(fmt.Sprintf("↻%d circling", loops)))
+	}
 	// Agents out are work in flight nobody's glyph shows: "●2 ○2 all calm"
 	// over four lanes still out twenty minutes in was a claim, and wrong.
 	out, oldestOut := 0, time.Time{}
 	for _, s := range m.sessions {
-		if !s.Live || s.Snap.State == state.Idle {
+		if !m.onBoard(s) || s.Snap.State == state.Idle {
 			continue // an idle session's open lanes are lost, not out
 		}
 		for _, b := range m.trails[s.Info.Key()].Branches {
@@ -1959,7 +2137,7 @@ func (m *Model) statusChips() string {
 	if len(parts) == 0 {
 		return dimStyle.Render("○ all quiet")
 	}
-	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && out == 0 && !m.archiveView {
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && out == 0 && !m.archiveView {
 		// Calm, said aloud: the absence of a warm glyph is the design, and
 		// in monochrome an absence is also what a clipped header looks like.
 		parts = append(parts, dimStyle.Render("all calm"))

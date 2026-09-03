@@ -816,3 +816,217 @@ func TestRepliesAnswerTypeAndStop(t *testing.T) {
 		t.Errorf("a prompt that landed clears the trace: %q", got)
 	}
 }
+
+// ---- round twelve: the read-line, the digest, circling, obligation, hooks, hiding
+
+// The board carries a read-line where the person last looked, and its
+// third row adds up what came after: legs, ships, red runs, and the one
+// test every red run failed.
+func TestTheReadLineAndTheDigest(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	tr := hourlyTrail(base, 6)
+	for i := 3; i < 6; i++ {
+		tr.Legs[i].Class = journey.Test
+		tr.Legs[i].Waypoints = []journey.Waypoint{
+			{Kind: journey.WaypointTestRun, Text: "18 passed · 1 failed", Short: "18✓ 1✗", At: tr.Legs[i].End},
+			{Kind: journey.WaypointTestFail, Text: "test_x", Runs: i - 2, At: tr.Legs[i].End},
+		}
+	}
+	looked := base.Add(2*time.Hour + 40*time.Minute) // after leg 2, before leg 3
+	got := RenderTrail(tr, TrailOpts{Now: base.Add(7 * time.Hour), Width: 60, Height: 40, Level: levelTrail, Cursor: -1, Pinned: true, Looked: looked})
+	if !strings.Contains(got, "│ you were here · 4h ago") {
+		t.Errorf("the read-line is missing:\n%s", got)
+	}
+	if got := RenderTrail(tr, TrailOpts{Now: base.Add(7 * time.Hour), Width: 60, Height: 40, Level: levelTrail, Cursor: -1, Pinned: true}); strings.Contains(got, "you were here") {
+		t.Error("no look, no line")
+	}
+
+	m := boardModel(152, 40)
+	key := sessionKey("s-api")
+	m.trails[key] = tr
+	if m.seen == nil {
+		m.seen = map[string]time.Time{}
+	}
+	m.seen[key] = looked
+	m.now = base.Add(7 * time.Hour)
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == key {
+			m.sessions[i].Info.LastEventAt = base.Add(6 * time.Hour)
+		}
+	}
+	r := m.boardRows()[key]
+	if got := ansi.Strip(m.boardDelta(key, m.sessions[r.sess], 70)); got != "↳ 3 new legs · 3 red, all test_x · looked 4h ago" {
+		t.Errorf("the digest should add the day up: %q", got)
+	}
+}
+
+// A session going round the same failure is counted in the header and the
+// title, and sorts with the alarms.
+func TestCirclingIsAnAlarm(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	loop := hourlyTrail(base, 3)
+	for i := range loop.Legs {
+		loop.Legs[i].Class = journey.Test
+		loop.Legs[i].Current = false
+		loop.Legs[i].Waypoints = []journey.Waypoint{
+			{Kind: journey.WaypointTestRun, Text: "18 passed · 1 failed", Short: "18✓ 1✗", At: loop.Legs[i].End},
+			{Kind: journey.WaypointTestFail, Text: "test_x", Runs: i + 1, At: loop.Legs[i].End},
+		}
+	}
+	if test, runs, ok := circling(loop); !ok || test != "test_x" || runs != 3 {
+		t.Fatalf("three red runs of one test should circle: %q %d %v", test, runs, ok)
+	}
+	green := loop
+	green.Legs = append(green.Legs, journey.Leg{Class: journey.Test, Label: "pytest", Start: base.Add(4 * time.Hour), End: base.Add(4*time.Hour + time.Minute),
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "19 passed", Short: "19✓"}}})
+	if _, _, ok := circling(green); ok {
+		t.Error("a green run ends the loop")
+	}
+
+	m := boardModel(152, 40)
+	key := sessionKey("s-api")
+	m.trails[key] = loop
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == key {
+			m.sessions[i].Snap = state.Snapshot{State: state.Working, Since: base}
+		}
+	}
+	if chips := ansi.Strip(m.statusChips()); !strings.Contains(chips, "↻1 circling") || strings.Contains(chips, "all calm") {
+		t.Errorf("the header should count the loop and not be calm: %q", chips)
+	}
+	if got := tabTitle(0, 1, 2); got != "⌂ compass ◍1 ↻2" {
+		t.Errorf("tabTitle = %q", got)
+	}
+	if got := m.obligation(m.sessions[m.boardRows()[key].sess]); got != 2 {
+		t.Errorf("a circling session ranks with the alarms: %d", got)
+	}
+}
+
+// The board is ordered by what is owed, and sessions that owe nothing go
+// to the strip however many columns are free.
+func TestTheBoardIsRankedByObligation(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(220, 40)
+	base := fixtureBase
+	ranks := map[string]int{}
+	for _, i := range m.viewOrder() {
+		s := m.sessions[i]
+		ranks[sessionName(s.Info)] = m.obligation(s)
+	}
+	last := -1
+	for _, i := range m.viewOrder() {
+		if r := m.obligation(m.sessions[i]); r < last {
+			t.Fatalf("the view order is not by obligation: %v", ranks)
+		} else {
+			last = r
+		}
+	}
+	// Make one session owe nothing: shipped green, read, old.
+	key := sessionKey("s-api")
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == key {
+			m.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: base}
+			m.sessions[i].Info.LastEventAt = base.Add(-30 * time.Hour)
+		}
+	}
+	m.trails[key] = journey.Trail{Legs: []journey.Leg{{Class: journey.Ship, Label: "commit", Start: base.Add(-31 * time.Hour), End: base.Add(-30 * time.Hour)}}}
+	if m.seen == nil {
+		m.seen = map[string]time.Time{}
+	}
+	m.seen[key] = base
+	if got := m.obligation(m.sessions[m.boardRows()[key].sess]); got != 6 {
+		t.Fatalf("a shipped, read, day-old session owes nothing: rank %d", got)
+	}
+	m.boardSelect(0) // the selection always has a column; look from somewhere else
+	if m.selectedKey == key {
+		t.Fatal("the fixture's first session should not be api")
+	}
+	n, _ := boardColumns(220-2*edgePad, len(m.viewOrder()))
+	for _, k := range m.boardKeys(n) {
+		if k == key {
+			t.Errorf("a session that owes nothing took a column: %v", m.boardKeys(n))
+		}
+	}
+	if strip := ansi.Strip(m.boardStrip(m.boardKeys(n), m.boardRows(), 200)); !strings.Contains(strip, "api") {
+		t.Errorf("the strip should name it: %q", strip)
+	}
+}
+
+// The hook fires on the crossings that matter and never on the launch.
+func TestTheHookFiresOnCrossings(t *testing.T) {
+	m := boardModel(152, 40)
+	var fired []string
+	m.hookRun = func(event, session, tmux, detail string) { fired = append(fired, event+" "+session) }
+	m.fireHooks()
+	if len(fired) != 0 {
+		t.Fatalf("the first refresh is a baseline, not an event: %v", fired)
+	}
+	key := sessionKey("s-api")
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == key {
+			m.sessions[i].Snap = state.Snapshot{State: state.NeedsYou, Since: m.now, Activity: "Narrow or wide?"}
+		}
+	}
+	m.fireHooks()
+	m.fireHooks() // the same state again is not a second crossing
+	if len(fired) != 1 || fired[0] != "needs_you api" {
+		t.Errorf("fired %v, want one needs_you", fired)
+	}
+	tr := m.trails[key]
+	tr.Branches = append(tr.Branches, journey.Branch{ToolUseID: "b", Label: "scout", Start: m.now, End: m.now, Done: true})
+	m.trails[key] = tr
+	m.fireHooks()
+	if len(fired) != 2 || fired[1] != "agents_back api" {
+		t.Errorf("fired %v, want agents_back", fired)
+	}
+}
+
+// `x` takes a session off the board; the archive lists it; `x` there
+// brings it back; and a hidden session that needs you comes back on its own.
+func TestHidingASession(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 40)
+	key := sessionKey("s-api")
+	m.point(key)
+	before := len(m.viewOrder())
+	press(m, "x")
+	if !m.hidden[key] || len(m.viewOrder()) != before-1 || m.selectedKey == key {
+		t.Fatalf("x should hide the session and move on: hidden %v, %d of %d shown, selected %q", m.hidden[key], len(m.viewOrder()), before, m.selectedKey)
+	}
+	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A lists them") {
+		t.Errorf("the strip should count the hidden: %s", strip)
+	}
+	press(m, "A")
+	if !m.archiveView {
+		t.Fatal("A should open the archive, which lists hidden sessions")
+	}
+	if !strings.Contains(m.View(), "api") {
+		t.Errorf("the archive should list the hidden session:\n%s", m.View())
+	}
+	m.point(key)
+	press(m, "x")
+	if m.hidden[key] {
+		t.Error("x in the archive should unhide")
+	}
+	press(m, "x")
+	if !m.hidden[key] {
+		t.Fatal("x again should hide")
+	}
+	press(m, "A")
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == key {
+			m.sessions[i].Snap = state.Snapshot{State: state.NeedsYou, Since: m.now}
+		}
+	}
+	found := false
+	for _, i := range m.viewOrder() {
+		if m.sessions[i].Info.Key() == key {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a hidden session that needs you should come back on its own")
+	}
+}

@@ -140,6 +140,12 @@ root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root ov
 narrator = "haiku"      # narration model; "off" disables
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
+reply = "please continue"   # the stock lines `r` offers, one per line, up to nine
+reply = "report status"
+hook = "tmux display-message \"compass: $COMPASS_SESSION $COMPASS_EVENT\""
+                        # run when a session crosses a line while nobody is looking:
+                        # COMPASS_EVENT is needs_you, api_error, stuck, circling or
+                        # agents_back; COMPASS_SESSION, COMPASS_TMUX, COMPASS_DETAIL say which
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:
@@ -170,6 +176,7 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
+| `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it; `x` there brings it back; a hidden session that needs you or hangs comes back on its own |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status", the quota one; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A digit sends; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` until the transcript shows the prompt landed. Off under `-readonly` |
 | `?` | help |
