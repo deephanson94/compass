@@ -84,3 +84,47 @@ func TestTheBoardMirrorNoteIsAState(t *testing.T) {
 		t.Errorf("the empty state cuts mid-word:\n%s", view)
 	}
 }
+
+// A step past a call-and-result block lands on a line, never on the air
+// after it: a page whose first row is blank opened on nothing.
+func TestAStepPastABlockLandsOnALine(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 80, 24)
+	pressKey(m, "tab")
+	pressKey(m, "tab")
+	doc := m.doc(m.readerWidth())
+	m.scroll = 0
+	for i := 0; i < 40; i++ {
+		if !m.scrollBy(1) {
+			break
+		}
+		if top := m.readerTop(doc); top < len(doc) && doc[top].kind == readerBlank {
+			t.Fatalf("step %d landed the page on a line of air at row %d", i, top)
+		}
+	}
+}
+
+// The pane clause outranks the attach hint: the parenthetical stood where
+// the hidden session's pane should have been.
+func TestThePaneClauseOutranksTheAttachHint(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 152, 40)
+	m.inTmux = false
+	m.note = "3 webapp hidden · A, then x · ⌁ work:2.0"
+	foot := ansi.Strip(m.footerLine(150))
+	if !strings.Contains(foot, "⌁ work:2.0") || strings.Contains(foot, "prefix d") {
+		t.Errorf("the hint stands where the pane should: %q", foot)
+	}
+}
+
+// The reader's above-row keeps the turn count when it names an owner.
+func TestTheAboveRowKeepsItsTurnCount(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 100, 30)
+	pressKey(m, "tab")
+	pressKey(m, "tab")
+	doc := m.doc(m.readerWidth())
+	if top := m.readerTop(doc); top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
+		above := ansi.Strip(m.readerAbove(98))
+		if !strings.Contains(above, "of yours") || !strings.Contains(above, "⏺") {
+			t.Errorf("the above-row drops one of the two facts: %q", above)
+		}
+	}
+}

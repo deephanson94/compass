@@ -818,7 +818,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Not flipped: a mirror switched on out of sight appeared
 			// unbidden when the terminal widened, and the second press
 			// was a silent key.
-			m.note = fmt.Sprintf("the mirror needs %d columns", deckWideCols)
+			m.note = fmt.Sprintf("mirror needs %d columns", deckWideCols)
 			return m, nil
 		}
 		if m.archiveView {
@@ -2842,11 +2842,12 @@ func (m *Model) footerLine(w int) string {
 		}
 		return shedKeys(whole, order, func(k string) bool { return fitsWith(k, n) })
 	}
+	pane := "" // the clause the note gave up, if the keys leave room for it after all
 	if i := strings.LastIndex(note, " · "); i > 0 && !fits(note) {
 		// The note's pane clause — a fact the card's third row carries
 		// too — goes before any key does.
 		if tail := note[i+len(" · "):]; strings.HasPrefix(tail, mirrorMark) {
-			note = note[:i]
+			note, pane = note[:i], note[i:]
 		}
 	}
 	if strings.HasPrefix(note, "↪ answered") && !fits(note) {
@@ -2886,6 +2887,15 @@ func (m *Model) footerLine(w int) string {
 			keys = shed(minimal, "")
 		}
 	}
+	if pane != "" && strings.Contains(keys, attachHint) {
+		// The pane clause goes before a key — not before the attach
+		// hint, which #31 ranks beneath a key or a note: the parenthetical
+		// stood where the hidden session's pane should have been.
+		if bare := strings.Replace(keys, attachHint, "", 1); fitsWith(bare, note+pane) {
+			keys, note = bare, note+pane
+			forms = noteForms(note)
+		}
+	}
 	left = dimStyle.Render(clip(keys, w))
 	room := w - lipgloss.Width(left) - 2
 	if room < 12 {
@@ -2914,6 +2924,10 @@ func (m *Model) footerLine(w int) string {
 // noteForms is a footer note at every length it can be shown, fullest
 // first: whole; a chapter note without its quote (the clock stays); then
 // each trailing clause shed in turn, down to the first.
+// attachHint is the parenthetical the footer carries outside tmux: the
+// lowest-ranked fragment on the row (#31), beneath a key or a note.
+const attachHint = " (prefix d returns)"
+
 // shedKeys gives up the keymap's optional fragments in order until fits
 // holds, then puts back, most recently shed first, each one that fits
 // after all: a greedy shed left a list with 14 free cells and none of

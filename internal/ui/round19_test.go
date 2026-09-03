@@ -15,7 +15,7 @@ import (
 func TestEnterAndEscYieldToTheHelpUnderANote(t *testing.T) {
 	m := sceneModel(sceneFewOngoing(), 80, 24)
 	pressKey(m, "tab")
-	for _, note := range []string{"at the start of the trail", "the mirror needs 110 columns", "the deepest level"} {
+	for _, note := range []string{"at the start of the trail", "mirror needs 110 columns", "the deepest level"} {
 		m.note = note
 		foot := ansi.Strip(m.footerLine(78))
 		if !strings.Contains(foot, "? help") || !strings.Contains(foot, note) {

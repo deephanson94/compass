@@ -140,12 +140,15 @@ func (m *Model) readerAbove(w int) string {
 		}
 	}
 	text := "↑ " + plural(top, "line") + " above"
+	if turns > 0 {
+		text += " · " + plural(turns, "turn") + " of yours"
+	}
 	if isResultRow(doc[top]) && doc[top-1].kind == readerCall {
 		// The page opens on a result whose owner is the last line above:
-		// the owner is named here, so "⎿ 20 passed" has one.
+		// the owner is named here too, so "⎿ 20 passed" has one. The
+		// count says how many of your prompts are above the fold, and
+		// shedClauses gives up the owner first if the row is tight.
 		text += " · " + strings.TrimSpace(doc[top-1].text)
-	} else if turns > 0 {
-		text += " · " + plural(turns, "turn") + " of yours"
 	}
 	return dimStyle.Render(shedClauses(" "+text, w))
 }
@@ -296,6 +299,11 @@ func (m *Model) scrollBy(delta int) bool {
 	// the page kept its top on the call and `j` moved nothing.
 	for delta > 0 && m.readerTop(doc) == was && m.scroll < len(doc)-m.readerHeight() {
 		m.scroll++
+	}
+	// And what the step past that block lands on is a line, not the air
+	// after it: a page whose first row is blank opened on nothing.
+	for (delta == 1 || delta == -1) && m.scroll > 0 && m.scroll < len(doc)-m.readerHeight() && doc[m.readerTop(doc)].kind == readerBlank {
+		m.scroll += delta
 	}
 	return m.readerTop(doc) != was
 }
