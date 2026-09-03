@@ -27,4 +27,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- h/l columns · enter attach (prefix d returns) · tab session · r reply · / search · x hide · g grab · ? help · q quit
+ h/l columns · enter attach · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit

@@ -27,4 +27,4 @@
                                                        │
                                                        │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k legs · [ ] chapters · m conversation · r reply · enter attach · esc board · ? help · q quit          the live pane
+ j/k legs · [ ] chapters · r reply · a ask · tab reader · enter attach · esc board · ? help · q quit      the live pane

@@ -144,6 +144,11 @@ func (m *Model) readerAbove(w int) string {
 	doc := m.doc(w)
 	top := readerTopIn(doc, m.scroll, m.readerHeight())
 	if top == 0 {
+		if len(doc) > m.readerHeight() {
+			// The row that says where you are says it here too: the
+			// answer is "the beginning", and a blank said nothing.
+			return dimStyle.Render(clip(" the start of the conversation", w))
+		}
 		return ""
 	}
 	turns := 0
@@ -158,10 +163,14 @@ func (m *Model) readerAbove(w int) string {
 	}
 	if isResultRow(doc[top]) && doc[top-1].kind == readerCall {
 		// The page opens on a result whose owner is the last line above:
-		// the owner is named here too, so "⎿ 20 passed" has one. The
-		// count says how many of your prompts are above the fold, and
-		// shedClauses gives up the owner first if the row is tight.
-		text += " · " + strings.TrimSpace(doc[top-1].text)
+		// the owner is named here, so "⎿ 20 passed" has one. It is the
+		// one clause the row cannot shed — a result with no owner is what
+		// the row is for — so a tight row clips it and drops the count.
+		owner := " · " + strings.TrimSpace(doc[top-1].text)
+		if lipgloss.Width(" "+text+owner) > w {
+			text = "↑ " + plural(top, "line") + " above"
+		}
+		return dimStyle.Render(clip(" "+text+owner, w))
 	}
 	return dimStyle.Render(shedClauses(" "+text, w))
 }

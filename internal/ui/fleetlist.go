@@ -654,7 +654,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 	if m.isCircling(s) && !m.archiveView {
 		head = "circling"
-		if st == state.Idle && lipgloss.Width("circling · idle")+1 <= w-5-1-ageWidth-6 {
+		if st == state.Idle && w-5-1-ageWidth-lipgloss.Width("circling · idle") >= 8 {
 			head = "circling · idle" // the loop, and whether a turn is in flight — whole, or not at all
 		}
 		// The age beside the word is the state's own, here as everywhere:

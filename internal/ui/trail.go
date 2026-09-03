@@ -1960,9 +1960,13 @@ func (m *Model) trailTitle(w int) string {
 		title = "TRAIL · " + name // the day goes whole, never "· 22h ·…"
 	}
 	if s, ok := m.selected(); ok && m.archiveView && title == "TRAIL" {
-		// An archived row's prompt that does not fit: the project it
-		// ran in, rather than "TRAIL" over nothing.
-		if t := "TRAIL · " + sessionName(s.Info); len([]rune(t)) <= room {
+		// An archived row's prompt that does not fit: the project it ran
+		// in, rather than "TRAIL" over nothing — and the day it added up,
+		// which the live header carries in the same slot at the same
+		// width.
+		if t := "TRAIL · " + sessionName(s.Info) + trailDay(m.trail, m.now, true); len([]rune(t)) <= room {
+			title = t
+		} else if t := "TRAIL · " + sessionName(s.Info); len([]rune(t)) <= room {
 			title = t
 		}
 	}

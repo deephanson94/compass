@@ -2233,7 +2233,7 @@ func (m *Model) View() string {
 	var body []string
 	switch {
 	case m.showHelp:
-		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymap()})
+		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymapAt(inner)})
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -2760,7 +2760,7 @@ func (m *Model) footerLine(w int) string {
 // is shed for width: the row's promise, and what the help asks when it has
 // to choose which key rows a short body keeps.
 func (m *Model) keymap() string {
-	keys := "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · / search · x hide · g grab · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x hide · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
@@ -2779,12 +2779,12 @@ func (m *Model) keymap() string {
 	case m.replying:
 		keys = fmt.Sprintf("reply: 1–%d · t types a line · esc closes", len(m.replyChoices()))
 	case m.level == levelBoard && m.boardShown():
-		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · / search · x hide · g grab · ? help · q quit"
+		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
 			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
-		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · ⇧tab board · g grab · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
 			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
 		}
@@ -2793,7 +2793,7 @@ func (m *Model) keymap() string {
 	case m.level >= levelReader:
 		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · a ask · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
 	}
@@ -2818,6 +2818,13 @@ func (m *Model) keymap() string {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
 	return keys
+}
+
+// keymapAt is the keymap as the footer draws it at this width, its
+// optional keys shed: what the person can actually see being offered,
+// which is what the help asks before it cuts a key row.
+func (m *Model) keymapAt(w int) string {
+	return shedKeys(m.keymap(), m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
 }
 
 // footerWith renders the keymap and the note into one row w wide.
@@ -3016,7 +3023,14 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// and every level keeps its own keys longest: the chapter keys are the
 	// trail's and the reader's, not the list's, and `space unfold` is the
 	// reader's alone.
-	order := []string{attachHint, " · m live pane", " · h/l session"}
+	// `m` ranks the same whichever side the toggle is on: its label
+	// changes with the mirror's state, and a rank that changed with it
+	// made the row's order flip under one keypress.
+	mirror := " · m live pane"
+	if m.showMirror {
+		mirror = " · m conversation" // the toggle's other label, the same rank
+	}
+	order := []string{attachHint, mirror, " · h/l session"}
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
 	// this level — so they stand with the level's own keys below, ranked
@@ -3024,9 +3038,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 	var own []string
 	switch {
 	case m.level >= levelReader:
-		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · space unfold", " · [ ] turns"}
+		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · [ ] turns", " · space unfold"}
 	case m.level >= levelWaypoints:
-		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · tab deeper", " · tab reader", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · [ ] chapters"}
+		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
 	default:
 		// The board and the list: the chapters belong to a trail that is
 		// not open, and the way in outlasts the keys that act on a row.

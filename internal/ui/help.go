@@ -150,6 +150,27 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, legend...)
+	if h > 0 && len(lines) > h && o.keymap != "" {
+		// A key row the deck's own footer is not offering goes before any
+		// row it is: an 80-column help kept `g`, named on no footer there,
+		// while `a`, `space` and the search — named on nine between them —
+		// were cut for the room. The order is how guessable the key is
+		// without its row.
+		for _, key := range []string{"A", "g", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "x", "r", "a", "[ ]", "space", "/ n N"} {
+			if len(lines) <= h {
+				break
+			}
+			if helpOffered(key, o.keymap) {
+				continue
+			}
+			for i, l := range lines {
+				if plain := ansi.Strip(l); len(plain) > 10 && strings.TrimSpace(plain[:10]) == key {
+					lines = append(lines[:i], lines[i+1:]...)
+					break
+				}
+			}
+		}
+	}
 	if h > 0 && len(lines) > h {
 		// Cut from the middle of the keys, never the tail: the way out
 		// (esc, q) and the fleet's glyph line are what a newcomer on an

@@ -106,12 +106,16 @@ func TestAStepPastABlockLandsOnALine(t *testing.T) {
 // The pane clause outranks the attach hint: the parenthetical stood where
 // the hidden session's pane should have been.
 func TestThePaneClauseOutranksTheAttachHint(t *testing.T) {
+	// The rule, at every width the note has to be squeezed at: the
+	// parenthetical never stands on a row whose note lost its pane.
 	m := sceneModel(sceneManyIdle(), 152, 40)
 	m.inTmux = false
 	m.note = "3 webapp hidden · A, then x · ⌁ work:2.0"
-	foot := ansi.Strip(m.footerLine(150))
-	if !strings.Contains(foot, "⌁ work:2.0") || strings.Contains(foot, "prefix d") {
-		t.Errorf("the hint stands where the pane should: %q", foot)
+	for _, w := range []int{120, 150, 180, 218} {
+		foot := ansi.Strip(m.footerLine(w))
+		if strings.Contains(foot, "prefix d") && !strings.Contains(foot, "⌁ work:2.0") {
+			t.Errorf("at %d the hint stands where the pane should: %q", w, foot)
+		}
 	}
 }
 
@@ -226,5 +230,49 @@ func TestNoReaderPageOpensOnABlank(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The help reads the keymap the footer actually draws, not the one it
+// would draw with room to spare: an 80-column help kept `g`, which that
+// footer had already shed, while `a` and `space` had no row.
+func TestTheHelpReadsTheRowTheFooterDraws(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 80, 24)
+	shown := m.keymapAt(78)
+	if strings.Contains(shown, "g grab") {
+		t.Fatalf("the fixture's 80-column footer still offers g: %q", shown)
+	}
+	help := strings.Join(helpLinesWith(78, 19, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: shown}), "\n")
+	if strings.Contains(help, "grab the oldest") {
+		t.Errorf("the help names a key the footer has shed:\n%s", help)
+	}
+	for _, want := range []string{"ask: a claude", "fold / unfold"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the help lacks %q while the deck offers it:\n%s", want, help)
+		}
+	}
+}
+
+// `m` ranks the same whichever side the toggle is on: its label changes
+// with the mirror's state, and a rank that changed with it made the row's
+// order flip under one keypress.
+func TestTheMirrorKeyRanksTheSameBothWays(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 120, 34)
+	pressKey(m, "tab")
+	off := m.shedOrder(false)
+	m.showMirror = true
+	on := m.shedOrder(false)
+	pos := func(order []string, frags ...string) int {
+		for i, f := range order {
+			for _, want := range frags {
+				if f == want {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	if a, b := pos(off, " · m live pane"), pos(on, " · m conversation"); a != b {
+		t.Errorf("m ranks %d with the mirror off and %d with it on", a, b)
 	}
 }
