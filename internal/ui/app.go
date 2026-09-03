@@ -3076,6 +3076,18 @@ func (m *Model) shedOrder(chapter bool) []string {
 		}
 		order = append(order, keep...)
 	}
+	// The way out is the last key to go before the help: a reader row that
+	// kept the key it had just refused and shed `esc back` left the one
+	// width where the reader is the whole screen with no exit but `q`.
+	var out []string
+	for i := 0; i < len(order); i++ {
+		if order[i] == " · esc back" || order[i] == " · esc board" {
+			out = append(out, order[i])
+			order = append(order[:i], order[i+1:]...)
+			i--
+		}
+	}
+	order = append(order, out...)
 	return append(order, " · ? help")
 }
 

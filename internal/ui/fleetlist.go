@@ -654,8 +654,16 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 	if m.isCircling(s) && !m.archiveView {
 		head = "circling"
-		if st == state.Idle && w-5-1-ageWidth-lipgloss.Width("circling · idle") >= 8 {
-			head = "circling · idle" // the loop, and whether a turn is in flight — whole, or not at all
+		// The loop, and whether a turn is in flight — §2.4 asks the row
+		// for both. The floor is the name's own width, not the column's:
+		// a column wide enough for a long name dropped the clause for a
+		// short one, and "circling 3h" beside "circling 20h" says nothing
+		// about which is a wait and which is a loop.
+		if word := circlingState(st); word != "" {
+			full := "circling · " + word
+			if w-5-1-ageWidth-lipgloss.Width(full)-1 >= 6 { // the name's own floor, below
+				head = full
+			}
 		}
 		// The age beside the word is the state's own, here as everywhere:
 		// hoisting the loop's age where "· idle" would not fit put
@@ -1038,6 +1046,20 @@ func apiWord(s fleet.Session) string {
 		return "quota"
 	}
 	return "api error"
+}
+
+// circlingState is the word a circling row adds for what the session is
+// doing under the loop: waiting for you, or in a turn. A state the loop
+// does not qualify (a question, a hang, a dead API) says itself and adds
+// nothing here.
+func circlingState(st state.State) string {
+	switch st {
+	case state.Idle:
+		return "idle"
+	case state.Working:
+		return "working"
+	}
+	return ""
 }
 
 // archiveHeadline is what an archived session is remembered for: what you asked

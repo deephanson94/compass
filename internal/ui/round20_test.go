@@ -243,10 +243,9 @@ func TestTheHelpReadsTheRowTheFooterDraws(t *testing.T) {
 		t.Fatalf("the fixture's 80-column footer still offers g: %q", shown)
 	}
 	help := strings.Join(helpLinesWith(78, 19, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: shown}), "\n")
-	if strings.Contains(help, "grab the oldest") {
-		t.Errorf("the help names a key the footer has shed:\n%s", help)
-	}
-	for _, want := range []string{"ask: a claude", "fold / unfold"} {
+	// A row for a key the footer offers is never cut while a row for one
+	// it has shed stands: with rows to spare both are welcome.
+	for _, want := range []string{"ask: a claude", "fold / unfold", "hide a session"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("the help lacks %q while the deck offers it:\n%s", want, help)
 		}
@@ -286,7 +285,7 @@ func TestTheHelpCountsWhatTheDeckOffersAnywhere(t *testing.T) {
 		t.Fatalf("the fixture has no archive to offer: %q", m.keymapAt(78))
 	}
 	help := strings.Join(helpLinesWith(78, 19, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymapAt(78)}), "\n")
-	if !strings.Contains(help, "browse the archive") {
+	if !strings.Contains(help, "browses the archive") {
 		t.Errorf("the help drops the archive key the strip offers:\n%s", help)
 	}
 }

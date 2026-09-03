@@ -71,7 +71,7 @@ func helpOffered(key, keymap string) bool {
 	for _, f := range map[string][]string{
 		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"},
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
-		"G": {"G is the present"},
+		"G": {"G is the present"}, "? / q": {"? help"}, "x / A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
 		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
@@ -158,7 +158,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		for _, key := range []string{"A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "x", "r", "a", "[ ]", "space"} {
+		for _, key := range []string{"A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space"} {
 			if len(lines) <= h {
 				break
 			}
@@ -283,7 +283,15 @@ func helpLegendFold(legend []string, w int) []string {
 			if !folded {
 				// The tag and unread first — the words every namesake and
 				// every finished row wears — and the clauses go whole.
-				out = append(out, dimStyle.Render(shedClauses("        ◈ ⋯ out · ✓ back · ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · →3 · ↪ sent · │ you were here", w)))
+				// The tag and unread lead: every row wears one or says "no
+				// pane", where the lanes belong to a lead that delegates.
+				fold := "        ⌁ its pane · unread · ◈ ⋯ out · ✓ back · ⌀ back, empty · ◌ planned · ⟲ compacted · ↪ sent · │ you were here"
+				if strings.Contains(strings.Join(legend, "\n"), "dev:1.0") {
+					// The tag's own row survived: this one need not say it
+					// twice, and the room goes to the marks below it.
+					fold = "        ◈ ⋯ out · ✓ back · ⌀ back, empty · ◌ planned · ⟲ compacted · ↪ sent · │ you were here"
+				}
+				out = append(out, dimStyle.Render(shedClauses(fold, w)))
 				folded = true
 			}
 		default:
@@ -323,14 +331,32 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 		}
 		if !board {
 			switch key {
-			case "j / k":
-				what = "move down / up (↓ ↑ too)"
 			case "tab":
-				what = "zoom in: trail → legs → reader"
+				// One row for both ways through the levels: below the
+				// board's width the rows are scarce, and the row the
+				// merge frees goes to a key the deck is offering.
+				key, what = "tab/⇧tab", "zoom in / out: trail → legs → reader (esc out too)"
 			case "⇧ tab":
-				what = "zoom out (esc too)"
+				what = ""
 			case "esc":
 				what = "one level out · from a list, a standing search clears first"
+			case "j / k":
+				// Paired rows below the board's width: eighteen keys do
+				// not fit fourteen rows, and a key with no row is a key
+				// the person cannot learn.
+				what = "move down / up (↓ ↑ too) · ctrl+d/u a page · G the newest"
+			case "ctrl+d/u":
+				what = ""
+			case "G":
+				what = "" // the newest row: named on the j / k row below
+			case "x":
+				key, what = "x / A", "hide a session · A browses the archive, x there brings it back"
+			case "A":
+				what = ""
+			case "?":
+				key, what = "? / q", "this help · quit"
+			case "q":
+				what = ""
 			case "m":
 				what = "" // the mirror needs the board's width
 			}
