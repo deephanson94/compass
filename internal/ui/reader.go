@@ -84,7 +84,21 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 	if len(doc) == 0 {
 		doc = readerEmptyDoc(o.Width)
 	}
-	top := clampScroll(o.Scroll, len(doc), h)
+	// The caller has already chosen the first row — never a blank, never a
+	// result without its owner — so a tail page may begin one row past the
+	// last screenful and end on air rather than open on it.
+	top := o.Scroll
+	if lim := len(doc) - h + 2; top > lim {
+		// A stale scroll is still clamped to the last screenful; the two
+		// rows of slack are the nudge the caller is allowed, no more.
+		top = clampScroll(o.Scroll, len(doc), h)
+	}
+	if top > len(doc)-1 {
+		top = max(len(doc)-1, 0)
+	}
+	if top < 0 {
+		top = 0
+	}
 
 	rows := make([]string, 0, h)
 	for i := top; i < len(doc) && len(rows) < h; i++ {

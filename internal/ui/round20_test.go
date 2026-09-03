@@ -202,3 +202,29 @@ func TestEveryLevelAsksWhatEnterDoes(t *testing.T) {
 		}
 	}
 }
+
+// No reader page opens on a transcript blank, at any width: the top is
+// chosen against the document the panel renders, and the renderer honours
+// it — a tail page ends on air rather than opening on it.
+func TestNoReaderPageOpensOnABlank(t *testing.T) {
+	for _, sc := range []scene{sceneManyIdle(), sceneSubagents(), sceneVeryLong()} {
+		for _, w := range []int{120, 152, 220} {
+			m := sceneModel(sc, w, 34)
+			for _, k := range []string{"tab", "tab", "j", "G", "["} {
+				pressKey(m, k)
+				poll(m, sc)
+				view := ansi.Strip(m.View())
+				lines := strings.Split(view, "\n")
+				for i, l := range lines {
+					if !strings.Contains(l, "lines above") && !strings.Contains(l, "line above") {
+						continue
+					}
+					parts := strings.Split(lines[i+1], "│")
+					if strings.TrimSpace(parts[len(parts)-1]) == "" {
+						t.Fatalf("%s at %d after %q opens the page on a blank:\n%s", sc.name, w, k, strings.Join(lines[i:i+3], "\n"))
+					}
+				}
+			}
+		}
+	}
+}
