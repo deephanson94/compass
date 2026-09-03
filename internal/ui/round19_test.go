@@ -15,7 +15,7 @@ import (
 func TestEnterAndEscYieldToTheHelpUnderANote(t *testing.T) {
 	m := sceneModel(sceneFewOngoing(), 80, 24)
 	pressKey(m, "tab")
-	for _, note := range []string{"at the start of the trail", "mirror: 110 columns", "the deepest level"} {
+	for _, note := range []string{"at the start of the trail", "the mirror needs 110 columns", "the deepest level"} {
 		m.note = note
 		foot := ansi.Strip(m.footerLine(78))
 		if !strings.Contains(foot, "? help") || !strings.Contains(foot, note) {
@@ -89,10 +89,13 @@ func TestTheReaderPageKeepsAResultWithItsOwner(t *testing.T) {
 	doc := m.doc(m.readerWidth())
 	top := m.readerTop(doc)
 	if top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
-		t.Errorf("the page opens on a bare result: %q under %q", doc[top].text, doc[top-1].text)
+		// The tail page keeps its last row: the row above names the owner.
+		if above := ansi.Strip(m.readerAbove(96)); !strings.Contains(above, "result of Bash") {
+			t.Errorf("the page opens on a bare result and the row above does not name its owner: %q", above)
+		}
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "↩ result of Bash") && top > 0 && isResultRow(doc[top]) {
-		t.Errorf("a result at the top of the page has no owner on it")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "result of Bash") {
+		t.Errorf("a result at the top of the page has no owner on it:\n%s", view)
 	}
 }
 

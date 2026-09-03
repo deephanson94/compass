@@ -121,7 +121,11 @@ func (m *Model) fleetLines(w, h int) []string {
 	if m.archiveView && m.archivedCount() == 0 {
 		// Only the hidden on this list: the empty archive says so under
 		// them rather than leaving the floor to say it.
-		tail = []string{"", dimStyle.Render(clip("no finished sessions yet — they land here", w))}
+		empty := "no finished sessions yet — they land here"
+		if lipgloss.Width(empty) > w {
+			empty = "no finished sessions yet" // the clause goes whole, never "they land h…"
+		}
+		tail = []string{"", dimStyle.Render(clip(empty, w))}
 	}
 
 	body := h - len(tail)

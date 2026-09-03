@@ -939,13 +939,11 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 	// clipped to the deck's inner width, and eighty columns is the floor.
 	t.Run("the footers promise it", func(t *testing.T) {
 		m := groupedModel(80, 24)
-		for _, want := range []string{
-			"j/k move · enter attach · tab deeper · r reply · ? help · q quit",
-			"j/k rows · [ ] chapters · r reply · enter attach · esc back · ? help · q quit",
-			"j/k scroll · space unfold · enter attach · esc back · ? help · q quit",
-		} {
-			if got := m.View(); !strings.Contains(got, want) {
-				t.Errorf("the Lv%d footer does not fit an 80-column deck: %q", m.level, want)
+		for _, own := range []string{"tab deeper", "[ ] chapters", "space unfold"} {
+			lines := strings.Split(m.View(), "\n")
+			foot := strings.TrimSpace(lines[len(lines)-1])
+			if lipgloss.Width(foot) > 78 || !strings.Contains(foot, "enter attach") || !strings.HasSuffix(foot, "? help · q quit") || !strings.Contains(foot, own) {
+				t.Errorf("the Lv%d footer does not fit an 80-column deck whole: %q", m.level, foot)
 			}
 			pressTab(m)
 		}

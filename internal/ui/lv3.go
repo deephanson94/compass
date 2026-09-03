@@ -105,6 +105,11 @@ func (m *Model) readerColumn(w, h int) []string {
 // and the first thing on the page was a test result with no owner.
 func (m *Model) readerTop(doc []readerLine) int {
 	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	if top >= len(doc)-m.readerHeight() {
+		// The tail page: its last row is the present and outranks its
+		// first — the row above names the owner instead (readerAbove).
+		return top
+	}
 	for top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
 		top--
 	}
@@ -135,10 +140,14 @@ func (m *Model) readerAbove(w int) string {
 		}
 	}
 	text := "↑ " + plural(top, "line") + " above"
-	if turns > 0 {
+	if isResultRow(doc[top]) && doc[top-1].kind == readerCall {
+		// The page opens on a result whose owner is the last line above:
+		// the owner is named here, so "⎿ 20 passed" has one.
+		text += " · " + strings.TrimSpace(doc[top-1].text)
+	} else if turns > 0 {
 		text += " · " + plural(turns, "turn") + " of yours"
 	}
-	return dimStyle.Render(clip(" "+text, w))
+	return dimStyle.Render(shedClauses(" "+text, w))
 }
 
 // readerTitle mirrors the trail's: READER · <name>, with the search state —
@@ -283,7 +292,12 @@ func (m *Model) scrollBy(delta int) bool {
 	if (delta == 1 || delta == -1) && m.scroll < len(doc) && doc[m.scroll].kind == readerBlank {
 		m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
 	}
-	return m.scroll != was
+	// Nor does a step down stall on a call whose result is the next row:
+	// the page kept its top on the call and `j` moved nothing.
+	for delta > 0 && m.readerTop(doc) == was && m.scroll < len(doc)-m.readerHeight() {
+		m.scroll++
+	}
+	return m.readerTop(doc) != was
 }
 
 // readerChapter is `[` / `]` in the reader: the previous or next turn of

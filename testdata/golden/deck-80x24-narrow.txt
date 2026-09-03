@@ -21,4 +21,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach · tab deeper · r reply · ? help · q quit
+ j/k move · enter attach · tab deeper · r reply · x hide · ? help · q quit

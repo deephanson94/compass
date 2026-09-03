@@ -27,4 +27,4 @@
                                          │
  5 archived · A browses                  │
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach · tab deeper · [ ] chapters · r reply · x hide · ? help · q quit
+ j/k move · enter attach · tab deeper · [ ] chapters · r reply · x hide · g grab · ? help · q quit

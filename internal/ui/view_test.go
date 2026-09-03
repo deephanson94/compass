@@ -202,13 +202,12 @@ func TestT16DeckViewGolden(t *testing.T) {
 	// overflowed would silently lose its tail rather than wrap. Eighty columns
 	// is the floor, and the attach hint is the longest thing it carries: both
 	// keymaps have to survive the clip whole.
-	for _, want := range []string{
-		"j/k move · enter · no pane · tab deeper · r reply · ? help · q quit",
-		"j/k move · enter · no pane · tab deeper · A live fleet · ? help · q quit",
-	} {
-		m.archiveView = strings.Contains(want, "A live fleet")
-		if frame := m.View(); !strings.Contains(frame, want) {
-			t.Errorf("the footer does not fit an 80-column deck: %q", want)
+	for _, archive := range []bool{false, true} {
+		m.archiveView = archive
+		lines := strings.Split(m.View(), "\n")
+		foot := strings.TrimSpace(lines[len(lines)-1])
+		if lipgloss.Width(foot) > 78 || !strings.HasSuffix(foot, "? help · q quit") || !strings.Contains(foot, "enter · no pane") || (archive && !strings.Contains(foot, "A live fleet")) {
+			t.Errorf("the footer does not fit an 80-column deck whole (archive %v): %q", archive, foot)
 		}
 	}
 	m.archiveView = false

@@ -818,7 +818,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Not flipped: a mirror switched on out of sight appeared
 			// unbidden when the terminal widened, and the second press
 			// was a silent key.
-			m.note = fmt.Sprintf("mirror: %d columns", deckWideCols) // short enough to stand beside the help at 80
+			m.note = fmt.Sprintf("the mirror needs %d columns", deckWideCols)
 			return m, nil
 		}
 		if m.archiveView {
@@ -833,7 +833,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.sessionView() && m.level == levelWaypoints:
 			m.note = "the live pane"
 		case m.level == levelBoard:
-			m.note = "the mirror shows beside a session (tab)"
+			m.note = "mirror on · beside a session (tab)" // the flag flipped: said as a state, not a refusal
 		case m.sessionView() && m.level >= levelReader:
 			// The live pane has no keys: they go back to the trail.
 			m.level = levelWaypoints
@@ -2810,14 +2810,7 @@ func (m *Model) footerLine(w int) string {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
 	if m.note == "" {
-		// `n/N` goes before `/ search`: the walk keys without the search
-		// they walk were a wrong clause boundary.
-		for _, drop := range m.shedOrder(false) {
-			if lipgloss.Width(keys) <= w {
-				break
-			}
-			keys = strings.Replace(keys, drop, "", 1)
-		}
+		keys = shedKeys(keys, m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
 		return dimStyle.Render(clip(keys, w))
 	}
 	var left string
@@ -2838,14 +2831,16 @@ func (m *Model) footerLine(w int) string {
 	// `r reply` had been.
 	whole := keys
 	shed := func(n, upto string) string {
-		k := whole
-		for _, drop := range drops {
-			if fitsWith(k, n) || drop == upto {
-				break
+		order := drops
+		if upto != "" {
+			for i, drop := range drops {
+				if drop == upto {
+					order = drops[:i]
+					break
+				}
 			}
-			k = strings.Replace(k, drop, "", 1)
 		}
-		return k
+		return shedKeys(whole, order, func(k string) bool { return fitsWith(k, n) })
 	}
 	if i := strings.LastIndex(note, " · "); i > 0 && !fits(note) {
 		// The note's pane clause — a fact the card's third row carries
@@ -2919,10 +2914,53 @@ func (m *Model) footerLine(w int) string {
 // noteForms is a footer note at every length it can be shown, fullest
 // first: whole; a chapter note without its quote (the clock stays); then
 // each trailing clause shed in turn, down to the first.
+// shedKeys gives up the keymap's optional fragments in order until fits
+// holds, then puts back, most recently shed first, each one that fits
+// after all: a greedy shed left a list with 14 free cells and none of
+// `/ search`, `x hide`, `g grab` on it because `[ ] chapters` went last
+// for one cell.
+func shedKeys(whole string, order []string, fits func(string) bool) string {
+	gone := map[string]bool{}
+	build := func() string {
+		k := whole
+		for _, frag := range order {
+			if gone[frag] {
+				k = strings.Replace(k, frag, "", 1)
+			}
+		}
+		return k
+	}
+	var shed []string
+	for _, frag := range order {
+		if fits(build()) {
+			break
+		}
+		if strings.Contains(whole, frag) {
+			gone[frag] = true
+			shed = append(shed, frag)
+		}
+	}
+	for i := len(shed) - 1; i >= 0; i-- {
+		if shed[i] == " · n/N" && gone[" · / search"] {
+			continue // the walk keys ride only with the search they walk
+		}
+		gone[shed[i]] = false
+		if !fits(build()) {
+			gone[shed[i]] = true
+		}
+	}
+	return build()
+}
+
 // chapterNote says whether the note is a chapter key's: a chapter counted,
 // or a chapter key's refusal — either keeps the chapter keys (#24).
 func (m *Model) chapterNote() bool {
-	return strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) || strings.HasPrefix(m.note, "no later prompt") || strings.HasPrefix(m.note, "no earlier prompt")
+	for _, p := range []string{glyphSaid, glyphPrompt, "no later prompt", "no earlier prompt", "no later turn", "no earlier turn"} {
+		if strings.HasPrefix(m.note, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // shedOrder is the order the footer gives up its optional keys in, first
@@ -2945,7 +2983,16 @@ func (m *Model) shedOrder(chapter bool) []string {
 		order = append(order, " · tab deeper", " · [ ] chapters", " · [ ] turns", " · r reply", " · space unfold")
 		order = append(order, session...)
 	default:
+		// On the list `x unhide` is the archive's own key on a hidden row:
+		// it outlasts the way in.
 		order = append(order, " · [ ] chapters", " · [ ] turns", " · tab deeper", " · r reply", " · space unfold")
+		for i, frag := range order {
+			if frag == " · x unhide" {
+				order = append(order[:i], order[i+1:]...)
+				break
+			}
+		}
+		order = append(order, " · x unhide")
 	}
 	return append(order, " · ? help")
 }
