@@ -184,7 +184,7 @@ func helpLegendFold(legend []string, w int) []string {
 		switch {
 		case strings.Contains(l, "⌀ back") || strings.Contains(l, "◌ planned"):
 			if !folded {
-				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · →3 · ↳ since you looked · ↪ sent · │ you were here", w)))
+				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · →3 · ↳ since you looked · ↪ sent · │ you were here · ⌁ its pane · unread", w)))
 				folded = true
 			}
 		default:
@@ -222,6 +222,9 @@ func helpKeyLinesFor(w int, board bool) []string {
 		if what == "" {
 			continue // not a key on this terminal
 		}
+		if i := strings.Index(what, "; "); i > 0 && len([]rune(what)) > w-10 {
+			what = what[:i] // the aside goes whole before the sentence is cut
+		}
 		lines = append(lines, dimStyle.Render(pad(key, 10))+textStyle.Render(clip(what, w-10)))
 	}
 	return lines
@@ -237,7 +240,7 @@ func helpLegendRaw() []string {
 		"compass observes; enter hands you the session.",
 		"",
 		focusMark + " marks the panel your keys are in — tab moves it",
-		"fleet:  ● working  ▲ needs you  ◍ stuck  ↻ circling  ⊘ dead on the API  ○ idle",
+		"fleet:  ● working  ▲ needs\u00a0you  ◍ stuck  ↻ circling  ⊘ dead\u00a0on\u00a0the\u00a0API  ○ idle",
 		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",

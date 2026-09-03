@@ -212,7 +212,13 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 		// above" was a tag on nothing.
 		for next > 0 && next < len(lines) && lines[next] != "" && !isHeaderLine(lines[next]) && !isEntryFirstLine(lines[next]) {
 			if selEnd >= 0 && selEnd-(next-1) >= body {
-				break // the selection would fall off the bottom
+				// Backing up would drop the selection off the bottom:
+				// open on the next entry instead, the cut entry counted
+				// among the rows above.
+				for next < len(lines) && lines[next] != "" && !isHeaderLine(lines[next]) && !isEntryFirstLine(lines[next]) && (selStart < 0 || next < selStart) {
+					next++
+				}
+				break
 			}
 			next--
 		}
@@ -782,6 +788,13 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 	tr, ok := m.trails[s.Info.Key()]
 	if !ok {
 		return ""
+	}
+	if m.isCircling(s) {
+		// A loop's row says the loop: the count that makes it one was
+		// off the fleet at every width without a board.
+		if parts := verdictParts(tr, m.now, s.Snap.State != state.Idle); len(parts) > 0 {
+			return dimStyle.Render(joinFit(parts, w))
+		}
 	}
 	if s.Snap.State == state.Working || s.Snap.State == state.Stuck {
 		head := -1

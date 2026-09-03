@@ -274,6 +274,7 @@ type Model struct {
 	hookFired   map[string]time.Time // when each session+event last ran the hook, for the cool-off
 	hidden      map[string]bool      // sessions taken off the board with `x`, by Key()
 	digits      map[string]int       // each live session's number, kept from first sight
+	opened      map[string]bool      // sessions the person opened this run, by Key(): a look to commit on leaving
 	hiddenFile  string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
 	seenFile    string               // where the seen-times persist; "" = memory only (harness)
@@ -813,11 +814,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refresh()
 	case "m":
+		if m.width < deckWideCols {
+			// Not flipped: a mirror switched on out of sight appeared
+			// unbidden when the terminal widened, and the second press
+			// was a silent key.
+			m.note = fmt.Sprintf("the mirror needs %d columns", deckWideCols)
+			return m, nil
+		}
+		if m.archiveView {
+			m.note = "no mirror in the archive · A returns to the fleet"
+			return m, nil
+		}
 		m.showMirror = !m.showMirror
 		switch {
 		case !m.showMirror:
-		case m.width < deckWideCols:
-			m.note = fmt.Sprintf("the mirror needs %d columns", deckWideCols)
 		case m.level == levelBoard:
 			m.note = "the mirror shows beside a session (tab)"
 		case m.sessionView() && m.level >= levelReader:
@@ -901,6 +911,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// that travels — and landing on the newest row re-pins the panel.
 			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 && m.trailPinned {
 				m.note = "at the present"
+				if n <= 1 {
+					m.note = "the trail is one row"
+				}
 				return m, nil
 			}
 			m.cursorToPresent()
@@ -1359,6 +1372,9 @@ func (m *Model) zoomOut() {
 	case m.level > levelTrail:
 		if m.boardFits() && !m.archiveView && m.liveCount() == 1 {
 			m.note = "the only session · nothing to zoom out to"
+			if s, ok := m.selected(); ok && m.fleetQuery != "" && !m.matchesQuery(s) {
+				m.clearQuery() // no board to go out to: the query the session fails goes here instead
+			}
 			return
 		}
 		m.level = levelTrail
@@ -1417,6 +1433,7 @@ func (m *Model) commitLook(key string) {
 	}
 	m.seen[key] = m.now
 	delete(m.lastLook, key)
+	delete(m.opened, key)
 	m.saveSeen()
 }
 
@@ -1552,7 +1569,7 @@ func (m *Model) toggleHidden() {
 	if d := m.digits[key]; d > 0 {
 		name = strconv.Itoa(d) + " " + name
 	}
-	m.note = name + " hidden · A, then x brings it back"
+	m.note = name + " hidden · A, then x" // the strip's own form: it fits eighty columns beside the keys
 	if m.sharesTmux(s) {
 		if pane, ok := m.panes[key]; ok {
 			m.note += " · " + mirrorMark + " " + pane.Target // the last clause, the first shed
@@ -1947,10 +1964,11 @@ func (m *Model) toggleArchive() {
 		}
 	}
 	if m.selectedKey != "" {
-		// A remembered key is a fresh selection for everything downstream.
+		// A remembered key is a fresh selection for everything downstream
+		// — and not a look: compass chose where to land.
 		key := m.selectedKey
 		m.selectedKey = ""
-		m.point(key)
+		m.pointQuiet(key)
 	}
 	m.clampSelection()
 }
@@ -1971,13 +1989,13 @@ func (m *Model) pointAs(key string, quiet bool) {
 	if key == m.selectedKey {
 		return
 	}
-	if old := m.selectedKey; old != "" && m.level >= levelTrail && !m.boardShown() {
+	if old := m.selectedKey; old != "" && m.level >= levelTrail && !m.boardShown() && m.opened[old] {
 		// No board: the trail on screen was the old session's, and
 		// leaving it closes it — the look is over, and its digest was
-		// billing for legs the person had just read.
-		if _, opened := m.seen[old]; opened {
-			m.commitLook(old)
-		}
+		// billing for legs the person had just read. Only a session the
+		// person opened: a search's landing is not a look on the way out
+		// either.
+		m.commitLook(old)
 	}
 	m.selectedKey = key
 	if m.level >= levelTrail && !m.boardShown() && !(m.searching && m.searchFleet) && !quiet {
@@ -2482,10 +2500,15 @@ func (m *Model) panelPlace(inner, pw, ph int) (left, top int) {
 	if m.level == levelBoard && m.boardShown() {
 		if x, y, bh, ok := m.boardBand(inner); ok {
 			top := y + 3
-			if body := m.height - 5; bh < ph && y+bh+1+ph <= body {
+			body := m.height - 5
+			if bh < ph && y+bh+1+ph <= body {
 				// A band shorter than the panel, with free rows under it:
 				// the panel stands under the band rather than on the strip.
 				top = y + bh + 1
+			} else if top+ph > body && y >= ph {
+				// Lifting the box to fit would cover the row it is about:
+				// it stands above the row instead, where the rows are free.
+				top = y - ph
 			}
 			return min(x, max(inner-pw, 0)), top
 		}
@@ -2757,7 +2780,7 @@ func (m *Model) footerLine(w int) string {
 // beside each session, and the parenthetical is what the footer owes an
 // 80-column deck instead.
 func (m *Model) enterKeymap() string {
-	if s, ok := m.selected(); ok && s.Live {
+	if s, ok := m.selected(); ok {
 		if pane, has := m.panes[s.Info.Key()]; !has || pane.Target == "" {
 			return "enter · no pane" // an attach that cannot work is not promised
 		}

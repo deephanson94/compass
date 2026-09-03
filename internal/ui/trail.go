@@ -1578,8 +1578,8 @@ func (m *Model) trailColumn(w, h int) []string {
 	if m.sessionView() {
 		rows = m.sessionCard(w)
 	}
-	if h > 2 {
-		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-2))...)
+	if h > len(rows) {
+		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-len(rows)))...)
 	}
 	return rows
 }
@@ -1616,7 +1616,13 @@ func (m *Model) sessionCard(w int) []string {
 		gap = 1
 	}
 	first += strings.Repeat(" ", gap) + dimStyle.Render(right)
-	return []string{first, m.cardSecond(w)}
+	card := []string{first, m.cardSecond(w)}
+	if third := strings.TrimSpace(ansi.Strip(hdr[2])); third != "" && !strings.HasPrefix(third, mirrorMark) && third != "no pane" {
+		// What is new, or what was sent: the column's third row, since a
+		// fleet of one never draws the board that carries it.
+		card = append(card, "    "+m.boardDelta(m.selectedKey, m.sessions[r.sess], body-4))
+	}
+	return card
 }
 
 // cardSecond is the card's second row: the verdict, then the day added up
@@ -1675,6 +1681,11 @@ func (m *Model) cardSecond(w int) string {
 			parts = withoutPrefix(parts, "on you ")
 		}
 		parts = append(parts, day...)
+		if len(parts) == 1 {
+			if i := strings.Index(parts[0], " ["); i > 0 && len([]rune(parts[0])) > fit {
+				parts[0] = parts[0][:i] // the options go whole or not at all; HEAD carries them
+			}
+		}
 		text := joinFit(parts, fit)
 		if text == strings.Join(parts, " · ") {
 			best = text

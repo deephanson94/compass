@@ -584,9 +584,9 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	if len(rest) > 0 {
 		names := fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · "))
 		room := w - lipgloss.Width(tail) - 3
-		if room < 12 {
+		if lipgloss.Width(names) > room {
 			// The overlap sentence goes compact before a session loses
-			// its row on the screen: "+N more" is never shed.
+			// its name on the screen: "+N more" is never shed.
 			for i, f := range fixed {
 				if strings.HasPrefix(f, "⚠") {
 					fixed[i] = compactOverlap(f)
@@ -1143,19 +1143,40 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		if sent.answer > 0 {
 			verb = fmt.Sprintf("↪ answered %d · ", sent.answer)
 		}
-		// The clock is what says whether the key landed; the quote is the
-		// proof of what went. Both when they fit; a narrow row keeps the
-		// clock and shortens the quote, and the digit alone is a trace.
+		// The quote is the proof of what went and the clock says whether
+		// it landed. Both when they fit. Narrow, a typed line keeps its
+		// bytes over the clock (three dead rows reading "↪ sent · 0s ago"
+		// could not tell /login from the resume turn) and an answer keeps
+		// its digit and the clock; the quote is never cut inside.
 		age := " · " + relAge(m.now, sent.at) + " ago"
 		quote := `"` + sent.text + `"`
-		room := w - len([]rune(verb)) - len([]rune(age))
-		if len([]rune(quote)) <= room {
-			return dimStyle.Render(verb + quote + age)
+		trace := ""
+		switch {
+		case len([]rune(verb+quote+age)) <= w:
+			trace = verb + quote + age
+		case sent.answer == 0 && len([]rune(verb+quote)) <= w:
+			trace = verb + quote
+		default:
+			trace = clip(strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")+age, w)
 		}
-		// Never cut inside the quotes: "office C…" is neither the answer
-		// nor absent. The digit, or the mark, and the clock are the trace.
-		return dimStyle.Render(clip(strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")+age, w))
+		// What is new rides after it when the row has room: the trace was
+		// evicting the digest for as long as it stood.
+		if digest := ansi.Strip(m.boardDigest(key, s, w)); digest != "" {
+			for _, clause := range strings.Split(digest, " · ") {
+				if len([]rune(trace+" · "+clause)) > w {
+					break // the digest's clauses ride whole, as many as fit
+				}
+				trace += " · " + clause
+			}
+		}
+		return dimStyle.Render(trace)
 	}
+	return m.boardDigest(key, s, w)
+}
+
+// boardDigest is the digest half of the third row: what came after the
+// look, when both halves of that are known.
+func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 	seen, ok := m.seen[key]
 	if at, had := m.lastLook[key]; had && key == m.selectedKey {
 		seen, ok = at, true // the look before this one, while the session is open
@@ -1365,6 +1386,10 @@ func (m *Model) markSeen(key string) {
 		m.lastLook[key] = prev
 	}
 	m.seen[key] = m.now
+	if m.opened == nil {
+		m.opened = map[string]bool{}
+	}
+	m.opened[key] = true
 	m.saveSeen()
 }
 
