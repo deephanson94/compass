@@ -1550,6 +1550,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		head, headState, since = m.headFor(s), s.Snap.State, headSince(s)
 	}
 	return TrailOpts{
+		Looked:     m.seen[m.selectedKey],
 		Todos:      m.todos,
 		Labels:     m.labels,
 		LaneLinks:  m.laneLinks(m.trail),

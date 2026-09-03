@@ -392,7 +392,7 @@ func sceneManyIdle() scene {
 	tr[sessionKey("webapp")] = trailOf(n.Add(-90*time.Minute), "the checkout suite flakes on CI but not locally", false,
 		legSpec{journey.Scout, "the CI logs", 6 * time.Minute, []string{"ci.log"}, "", nil},
 		legSpec{journey.Test, "pytest", 4 * time.Minute, nil, "18✓ 2✗", []string{"test_checkout_total"}},
-		legSpec{journey.Fix, "a timezone in the fixture", 11 * time.Minute, []string{"conftest.py"}, "", nil},
+		legSpec{journey.Fix, "a timezone in the fixture", 11 * time.Minute, []string{"conftest.py", "tokens.py"}, "", nil},
 		legSpec{journey.Test, "pytest", 4 * time.Minute, nil, "18✓ 2✗", []string{"test_checkout_total"}},
 	)
 
@@ -467,7 +467,7 @@ func sceneFewOngoing() scene {
 	tr[sessionKey("webapp")] = trailOf(n.Add(-25*time.Minute), "the checkout suite flakes on CI but not locally", true,
 		legSpec{journey.Scout, "the CI logs", 6 * time.Minute, []string{"ci.log"}, "", nil},
 		legSpec{journey.Test, "pytest", 4 * time.Minute, nil, "18✓ 2✗", []string{"test_checkout_total"}},
-		legSpec{journey.Fix, "a timezone in the fixture", 8 * time.Minute, []string{"conftest.py"}, "", nil},
+		legSpec{journey.Fix, "a timezone in the fixture", 8 * time.Minute, []string{"conftest.py", "tokens.py"}, "", nil},
 		legSpec{journey.Test, "pytest", 70 * time.Second, nil, "", nil},
 	)
 	etl := sess("etl", "etl", "/home/user/etl", "feat/dedupe", "dedupe the nightly load", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 4m mid-turn", "Bash: python backfill.py --all")
@@ -652,6 +652,20 @@ func sceneModel(sc scene, w, h int) *Model {
 	m.SetSessions(sc.sessions, sceneNow)
 	m.SetPanes(sc.panes)
 	m.SetPaneOrder(sc.order)
+	// The second live session was looked at halfway through its trail: its
+	// column carries the read-line and the digest.
+	m.seen = map[string]time.Time{}
+	live := 0
+	for _, s := range sc.sessions {
+		if s.Live {
+			live++
+			if live == 2 {
+				if tr := sc.trails[s.Info.Key()]; len(tr.Legs) > 2 {
+					m.seen[s.Info.Key()] = tr.Legs[len(tr.Legs)/2].Start.Add(time.Second)
+				}
+			}
+		}
+	}
 	first := ""
 	for _, s := range sc.sessions {
 		if s.Live {
@@ -701,7 +715,7 @@ func pressKey(m *Model, key string) {
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"r", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "esc", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "A", "A", "m", "?"}
+var canonicalKeys = []string{"r", "esc", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "esc", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder
