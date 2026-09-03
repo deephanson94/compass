@@ -1,21 +1,21 @@
- ⌂ compass                                                                            ▲1 2m  ●2  ○2
+ ⌂ compass                                                                  ▲1 2m  ●2  ○2  2 unread
  ──────────────────────────────────────────────────────────────────────────────────────────────────
 
  ▌FLEET · live                           │  TRAIL · api                                     [trail]
                                          │
-  ⌁ dev                              40s │ ◉ "fix the 401 bug"                              38m ago
- ▸2 ● api                             3m │ ╷
-     ◆ test   1216✓ 2✗                   │ ◆ scout  middleware.py                                5m
+  ⌁ ops                                ▲ │ ◉ "fix the 401 bug"                              38m ago
+  1 ▲ infra               needs you   2m │ ╷
+     AskUserQuestion                     │ ◆ scout  middleware.py                                5m
                                          │ │
-  3 ● webapp                         40s │ ◆ build  tokens.py                                   12m
-     ◆ test   18✓ 2✗                     │ │
+  4 ○ tfstate                unread  15m │ ◆ build  tokens.py                                   12m
+     ◆ build  1190✓                      │ │
                                          │ ◆ test   pytest                                18✓ 2✗ 8m
-  ⌁ ops                                ▲ │ ├─◈ scout the payments module                   ⌀ 7m ago
-  1 ▲ infra               needs you   2m │ │  └ came back with no report
-     AskUserQuestion                     │ ● fix    tokens.py                                for 3m
+  ⌁ dev                              40s │ ├─◈ scout the payments module                   ⌀ 7m ago
+ ▸2 ● api                             3m │ │  └ came back with no report
+     ◆ test   1216✓ 2✗                   │ ● fix    tokens.py                                for 3m
                                          │
-  4 ○ tfstate                unread  15m │
-     ◆ build  1190✓                      │
+  3 ● webapp                         40s │
+     ◆ test   18✓ 2✗                     │
                                          │
   elsewhere                              │
   5 ○ scratch                unread  22m │
@@ -27,4 +27,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · [ ] chapters · r reply · g grab · ? help · q quit
+ j/k move · enter attach (prefix d returns) · [ ] chapters · / search · g grab · ? help · q quit

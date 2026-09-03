@@ -297,6 +297,20 @@ func (m *Model) liveGroups() []fleetGroup {
 		}
 		groups = append(groups, fleetGroup{name: name, entries: m.orderLiveGroup(members[name])})
 	}
+	// A group holding an alarm — a question, a hang, a loop — floats
+	// above the rest: below the board's width the list is the board, and
+	// the circling session sat under a healthy one because of its tmux
+	// session's place in the pane list.
+	best := func(g fleetGroup) int {
+		b := 7
+		for _, i := range g.entries {
+			if r := m.obligation(m.sessions[i]); r < b {
+				b = r
+			}
+		}
+		return b
+	}
+	sort.SliceStable(groups, func(a, b int) bool { return best(groups[a]) < best(groups[b]) })
 	if e := members[elsewhereGroup]; len(e) > 0 {
 		groups = append(groups, fleetGroup{name: elsewhereGroup, entries: m.orderLiveGroup(e)})
 	}
@@ -311,7 +325,7 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 	att := make([]int, 0, len(idx))
 	rest := make([]int, 0, len(idx))
 	for _, i := range idx {
-		if wantsAttention(m.sessions[i].Snap.State) {
+		if wantsAttention(m.sessions[i].Snap.State) || m.isCircling(m.sessions[i]) {
 			att = append(att, i)
 			continue
 		}
@@ -328,6 +342,10 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 	return append(att, rest...)
 }
 
+// hiddenGroup is the archive's first group: live sessions `x` took off the
+// board, so the way back is where the strip said it was.
+const hiddenGroup = "hidden · x brings one back"
+
 // archiveGroups buckets the archived sessions by project — where you started
 // them, which is how you remember them — newest group first, newest first
 // inside.
@@ -336,9 +354,12 @@ func (m *Model) archiveGroups() []fleetGroup {
 	var names []string
 	for i, s := range m.sessions {
 		if m.onBoard(s) || !m.matchesQuery(s) {
-			continue // the archive also lists what `x` took off the board
+			continue
 		}
 		name := sessionName(s.Info)
+		if s.Live {
+			name = hiddenGroup // what `x` took off the board, first
+		}
 		if _, ok := members[name]; !ok {
 			names = append(names, name)
 		}
@@ -487,7 +508,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	s := m.sessions[r.sess]
 	selected := s.Info.Key() == m.selectedKey
 	st := s.Snap.State
-	if m.archiveView {
+	if m.archiveView && !s.Live {
 		st = state.Idle // the archive can never be amber (M5 contract, fleet rule 2)
 	}
 	accent := stateStyle(st)
@@ -519,6 +540,14 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		// named after its project: the row spends that width on the one thing the
 		// header cannot say — what you asked for.
 		age, head = padLeft(m.age(s.Info.LastEventAt), ageWidth), archiveHeadline(s)
+		if s.Live {
+			// A live session `x` took off the board: it keeps its glyph
+			// and says why it is here.
+			head = "hidden · " + head
+		}
+	}
+	if m.isCircling(s) && !m.archiveView {
+		head = "circling"
 	}
 
 	// Everything between the state glyph and the age. The name takes it, less
@@ -548,7 +577,11 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		body = midStyle.Render(pad(clip(head, avail), avail))
 	}
 
-	first := marker + indexStyled + " " + accent.Render(fleet.Glyph(st)) + " " +
+	glyph := fleet.Glyph(st)
+	if m.isCircling(s) {
+		glyph, accent = glyphCircling, stuckStyle
+	}
+	first := marker + indexStyled + " " + accent.Render(glyph) + " " +
 		body + " " + dimStyle.Render(age)
 
 	return []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}

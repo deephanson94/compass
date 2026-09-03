@@ -465,7 +465,7 @@ func TestTheReplyPanelNamesTheTargetsState(t *testing.T) {
 		}
 	}
 	press(m, "r")
-	if view := m.View(); !strings.Contains(view, "▲ on a question · Open port 22") || !strings.Contains(view, "typed into that prompt") {
+	if view := m.View(); !strings.Contains(view, "▲ on a question · Open port 22") || !strings.Contains(view, "pick an answer") {
 		t.Errorf("the panel should say the target is on a question:\n%s", view)
 	}
 }
@@ -750,7 +750,15 @@ func TestRepliesAnswerTypeAndStop(t *testing.T) {
 	asking(m)
 	press(m, "r")
 	view := m.View()
-	for _, want := range []string{"1  narrow", "2  wide", "3  please continue", "6  stop", "t  type a line"} {
+	for _, want := range []string{"answers · sent as the menu's own digit", "1  narrow", "2  wide", "lines · typed into the prompt and entered", "3  please continue", "t  type a line"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the panel should offer %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "stop") {
+		t.Errorf("a session on a question has no turn to interrupt:\n%s", view)
+	}
+	for _, want := range []string{} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the panel should offer %q:\n%s", want, view)
 		}
@@ -1117,5 +1125,167 @@ func TestOverlapsAreNamed(t *testing.T) {
 	m.now = base.Add(3 * time.Hour)
 	if got := m.overlaps(); strings.Contains(strings.Join(got, "\n"), "touched") {
 		t.Errorf("a file touched hours ago is not an overlap: %v", got)
+	}
+}
+
+// ---- round twelve amendments
+
+// The archive lists hidden sessions first, under their own header, with
+// their real glyph and the word "hidden"; `A` opens it for them even with
+// nothing archived; the header counts them.
+func TestTheArchiveListsTheHidden(t *testing.T) {
+	forceASCII(t)
+	m := followModel(152, 40)
+	live := 0
+	for i := range m.sessions {
+		if m.sessions[i].Live {
+			live++
+		}
+		if !m.sessions[i].Live {
+			m.sessions[i].Live = true // nothing archived at all
+		}
+	}
+	m.zoomOut()
+	m.zoomOut()
+	m.point(sessionKey("s-api"))
+	press(m, "x")
+	press(m, "A")
+	if !m.archiveView {
+		t.Fatalf("A should open the archive for a hidden session: %q", m.note)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, hiddenGroup) || !strings.Contains(view, "hidden · ") {
+		t.Errorf("the archive should list the hidden session under its own header:\n%s", view)
+	}
+	if strings.Contains(view, "nothing archived yet") {
+		t.Error("the archive said it was empty while it listed a hidden session")
+	}
+}
+
+// A circling session wears ↻ and the word on its row, floats with the
+// alarms in the list, and comes back from hiding on its own; a green run
+// smaller than the red one does not end the loop, one as big does.
+func TestCirclingHasARow(t *testing.T) {
+	forceASCII(t)
+	base := fixtureBase
+	loop := journey.Trail{}
+	for i := 0; i < 3; i++ {
+		at := base.Add(time.Duration(i) * 10 * time.Minute)
+		loop.Legs = append(loop.Legs, journey.Leg{Class: journey.Test, Label: "pytest", Start: at, End: at.Add(time.Minute),
+			Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "310 passed · 2 failed", Short: "310✓ 2✗"}, {Kind: journey.WaypointTestFail, Text: "test_x", Runs: i + 1}}})
+	}
+	subset := loop
+	subset.Legs = append(subset.Legs, journey.Leg{Class: journey.Test, Label: "pytest tests/auth", Start: base.Add(40 * time.Minute), End: base.Add(41 * time.Minute),
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "12 passed", Short: "12✓"}}})
+	if _, _, ok := circling(subset); !ok {
+		t.Error("a narrower green run does not end the loop")
+	}
+	whole := loop
+	whole.Legs = append(whole.Legs, journey.Leg{Class: journey.Test, Label: "pytest", Start: base.Add(40 * time.Minute), End: base.Add(41 * time.Minute),
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "312 passed", Short: "312✓"}}})
+	if _, _, ok := circling(whole); ok {
+		t.Error("a green run as big as the red one ends the loop")
+	}
+
+	m := boardModel(100, 30)
+	key := sessionKey("s-api")
+	m.trails[key] = loop
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == key {
+			m.sessions[i].Snap = state.Snapshot{State: state.Working, Since: base}
+		}
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "↻ api") || !strings.Contains(view, "circling") {
+		t.Errorf("the circling session should wear ↻ and the word:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	first := -1
+	for i, l := range lines {
+		if strings.Contains(l, "↻ api") {
+			first = i
+			break
+		}
+	}
+	for i, l := range lines[:max(first, 0)] {
+		if strings.Contains(l, "● ") && strings.Contains(l, "etl") {
+			t.Errorf("a working session (line %d) sits above the circling one (line %d)", i, first)
+		}
+	}
+	press(m, "x")
+	if !m.onBoard(m.sessions[m.boardRows()[key].sess]) {
+		t.Error("a circling session cannot be hidden away")
+	}
+}
+
+// The header is calm only when nothing owes you; the panel's groups name
+// their keys; stop is not offered where there is no turn; the search
+// echoes as it is typed and narrows live; esc puts the selection back.
+func TestCalmPanelsAndLiveSearch(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 40)
+	key := sessionKey("s-api")
+	m.trails[key] = journey.Trail{Legs: []journey.Leg{{Class: journey.Test, Label: "pytest", Start: fixtureBase, End: fixtureBase.Add(time.Minute),
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 failed", Short: "1✗"}}}}}
+	for i := range m.sessions {
+		if m.sessions[i].Live {
+			m.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: fixtureBase}
+		}
+	}
+	if chips := ansi.Strip(m.statusChips()); strings.Contains(chips, "all calm") || !strings.Contains(chips, "owe you") {
+		t.Errorf("a red idle session owes you; the header should say so, not calm: %q", chips)
+	}
+
+	m = followModel(152, 40)
+	for i := range m.sessions {
+		if m.sessions[i].Info.Key() == sessionKey("s-api") {
+			m.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: fixtureBase}
+		}
+	}
+	press(m, "r")
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "stop") {
+		t.Errorf("an idle session has no turn to stop:\n%s", view)
+	}
+	if !strings.Contains(view, "lines · typed into the prompt and entered") {
+		t.Errorf("the group should say what its keys press:\n%s", view)
+	}
+	press(m, "esc")
+
+	m.zoomOut()
+	m.zoomOut()
+	before := m.selectedKey
+	press(m, "/")
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zzz")})
+	if foot := ansi.Strip(m.footerLine(150)); !strings.Contains(foot, "/zzz▏") {
+		t.Errorf("the footer should echo the query: %q", foot)
+	}
+	if len(m.viewOrder()) != 0 {
+		t.Errorf("the fleet should narrow as the query is typed: %d shown", len(m.viewOrder()))
+	}
+	press(m, "esc")
+	if m.fleetQuery != "" || m.selectedKey != before {
+		t.Errorf("esc should clear the query and restore the selection: %q %q", m.fleetQuery, m.selectedKey)
+	}
+}
+
+// The read-line survives opening the trail: the look on the way in is
+// not the look the line is for.
+func TestTheReadLineSurvivesTheLook(t *testing.T) {
+	forceASCII(t)
+	m := boardModel(152, 40)
+	key := sessionKey("s-api")
+	tr := hourlyTrail(fixtureBase, 6)
+	m.trails[key] = tr
+	if m.seen == nil {
+		m.seen = map[string]time.Time{}
+	}
+	m.seen[key] = fixtureBase.Add(2*time.Hour + 40*time.Minute)
+	m.now = fixtureBase.Add(7 * time.Hour)
+	m.point(key)
+	pressTab(m)
+	m.SetTrail(tr)
+	if got := ansi.Strip(strings.Join(m.trailColumn(70, 40), "\n")); !strings.Contains(got, "you were here · 4h ago") {
+		t.Errorf("the read-line should still be where the last look was:\n%s", got)
 	}
 }

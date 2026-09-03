@@ -211,6 +211,15 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 				ToolResults: []transcript.ToolResult{{ToolUseID: b.ToolUseID, Text: b.Report}}})
 		}
 	}
+	if strings.Contains(activity, "API Error:") {
+		// The gateway refusing the call, as the CLI writes it: the last
+		// thing in the conversation, flagged and synthetic.
+		at := sceneNow.Add(-2 * time.Minute)
+		if n := len(tr.Legs); n > 0 && tr.Legs[n-1].End.After(at) {
+			at = tr.Legs[n-1].End.Add(time.Second)
+		}
+		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: at, Text: activity, APIError: true, Status: 403, ErrorKey: "authentication_failed"})
+	}
 	if q := activity; q != "" && !strings.HasPrefix(q, "Bash: ") && strings.Contains(q, "?") {
 		// The open question, at the very end, unanswered: what HEAD names
 		// is what the reader ends on.
@@ -639,7 +648,108 @@ func sceneVeryLong() scene {
 }
 
 func allScenes() []scene {
-	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong()}
+	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene()}
+}
+
+// quota is the refusal a session dead on its daily limit carries, in the
+// words the CLI prints (the words of this fixture are its own).
+const quota = "Please run /login · API Error: 403 your daily quota is exhausted, contact your administrator to increase it"
+
+// The first five minutes: one session, just prompted, nothing done yet.
+// Every empty state, every refused key, on the smallest terminal too.
+func sceneFirstSession() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+	ss = append(ss, sess("hello", "hello", "/home/user/hello", "main", "add a --version flag", state.Working, n.Add(-40*time.Second), journey.Scout, "", "starting turn", "thinking…"))
+	ss[0].Info.StartedAt = n.Add(-50 * time.Second)
+	tr[sessionKey("hello")] = journey.Trail{Prompts: []journey.Prompt{{Text: "add a --version flag", At: n.Add(-50 * time.Second)}}}
+	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
+	return scene{name: "first-session", story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
+}
+
+// The alarm storm: three sessions dead on quota at once, one asking a
+// question, one hung, one going round the same failure, and one fine.
+// The question is which to touch first.
+func sceneAlarmStorm() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+	dead := func(id, prompt string, since time.Duration, legs ...legSpec) {
+		s := sess(id, id, "/home/user/"+id, "main", prompt, state.NeedsYou, n.Add(-since), journey.Build, "", "api error 403 · authentication_failed", quota)
+		s.Snap.APIError = true
+		ss = append(ss, s)
+		tr[sessionKey(id)] = trailOf(n.Add(-since-40*time.Minute), prompt, false, legs...)
+	}
+	dead("billing", "reconcile the invoice totals", 18*time.Minute,
+		legSpec{journey.Scout, "the invoice model", 6 * time.Minute, []string{"invoice.py"}, "", nil},
+		legSpec{journey.Build, "invoice.py", 20 * time.Minute, []string{"invoice.py"}, "", nil})
+	dead("mobile", "fix the login crash on cold start", 9*time.Minute,
+		legSpec{journey.Scout, "the crash log", 4 * time.Minute, []string{"crash.log"}, "", nil},
+		legSpec{journey.Fix, "a nil session on cold start", 15 * time.Minute, []string{"login.swift"}, "", nil},
+		legSpec{journey.Test, "xcodebuild test", 8 * time.Minute, nil, "40✓ 1✗", []string{"testColdStart"}})
+	dead("docs-site", "regenerate the api reference", 2*time.Minute,
+		legSpec{journey.Build, "the generator", 30 * time.Minute, []string{"gen.py"}, "", nil})
+	ss = append(ss, sess("infra", "infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", state.NeedsYou, n.Add(-7*time.Minute), journey.Design, "", "question", "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]"))
+	tr[sessionKey("infra")] = trailOf(n.Add(-30*time.Minute), "tighten the vpc security groups without breaking the bastion", true,
+		legSpec{journey.Scout, "main.tf and the bastion rules", 14 * time.Minute, []string{"main.tf"}, "", nil},
+		legSpec{journey.Design, "Open port 22 to the office CIDR only, or keep the bastion?", 7 * time.Minute, nil, "", nil})
+	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/backfill", "backfill last week's shards", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 6m mid-turn", "Bash: python backfill.py --all"))
+	ss[len(ss)-1].Info.LastEventAt = n.Add(-6 * time.Minute)
+	tr[sessionKey("etl")] = trailOf(n.Add(-50*time.Minute), "backfill last week's shards", true,
+		legSpec{journey.Scout, "the shard layout", 8 * time.Minute, []string{"shards.py"}, "", nil},
+		legSpec{journey.Build, "backfill.py", 30 * time.Minute, []string{"backfill.py"}, "", nil})
+	ss = append(ss, sess("api", "api", "/home/user/api", "claude/auth-fx", "fix the 401 on token refresh", state.Working, n.Add(-30*time.Second), journey.Fix, "18✓ 2✗", "tool call in flight", "Edit: tokens.py"))
+	loop := []legSpec{legSpec{journey.Scout, "middleware.py", 5 * time.Minute, []string{"middleware.py"}, "", nil}}
+	for i := 0; i < 4; i++ {
+		loop = append(loop,
+			legSpec{journey.Fix, []string{"the expiry check", "the clock skew", "the refresh window", "the revoked path"}[i], 6 * time.Minute, []string{"tokens.py"}, "", nil},
+			legSpec{journey.Test, "pytest", 3 * time.Minute, nil, "18✓ 2✗", []string{"test_refresh_expired"}})
+	}
+	loop = append(loop, legSpec{journey.Fix, "tokens.py", 2 * time.Minute, []string{"tokens.py"}, "", nil})
+	tr[sessionKey("api")] = trailOf(n.Add(-80*time.Minute), "fix the 401 on token refresh", true, loop...)
+	ss = append(ss, sess("cli", "cli", "/home/user/cli", "main", "add --json to every command", state.Working, n.Add(-20*time.Second), journey.Build, "", "tool call in flight", "Edit: main.go"))
+	tr[sessionKey("cli")] = trailOf(n.Add(-25*time.Minute), "add --json to every command", true,
+		legSpec{journey.Scout, "the command table", 5 * time.Minute, []string{"main.go"}, "", nil},
+		legSpec{journey.Build, "the flag", 15 * time.Minute, []string{"main.go"}, "", nil})
+	panes, order := paneMap([]string{"billing", "mobile", "docs-site", "infra", "etl", "api", "cli"}, []string{"work:0.0", "work:1.0", "work:2.0", "ops:0.0", "work:3.0", "work:4.0", "tools:0.0"})
+	return scene{name: "alarm-storm", story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
+}
+
+// Fleet hygiene: two live sessions with one name in one tmux session, a
+// session outside tmux inside the live window, a session whose pane
+// closed and is over the archive cliff, a relayed message as a prompt,
+// and forty archived sessions with the same four names.
+func sceneFleetHygiene() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+	ss = append(ss, sess("harness-a", "harness", "/home/user/harness", "main", "add watch driver tests", state.Working, n.Add(-2*time.Minute), journey.Test, "", "tool call in flight", "Bash: pytest -q"))
+	tr[sessionKey("harness-a")] = trailOf(n.Add(-40*time.Minute), "add watch driver tests", true,
+		legSpec{journey.Build, "watch_driver.py", 20 * time.Minute, []string{"watch_driver.py"}, "", nil},
+		legSpec{journey.Test, "pytest", 3 * time.Minute, nil, "", nil})
+	ss = append(ss, sess("harness-b", "harness", "/home/user/harness", "spike/resume", "/resume", state.Idle, n.Add(-2*time.Hour), journey.Scout, "", "turn complete", "idle"))
+	tr[sessionKey("harness-b")] = trailOf(n.Add(-2*time.Hour-10*time.Minute), "/resume", false,
+		legSpec{journey.Scout, "the resume skill", 8 * time.Minute, []string{"SKILL.md"}, "", nil})
+	ss = append(ss, sess("relay", "porter", "/home/user/porter", "main", "Another Claude session sent a message: the encoder is in, run the gates", state.Working, n.Add(-90*time.Second), journey.Test, "", "tool call in flight", "Bash: pytest tests/gates -q"))
+	tr[sessionKey("relay")] = trailOf(n.Add(-12*time.Minute), "Another Claude session sent a message: the encoder is in, run the gates", true,
+		legSpec{journey.Scout, "the gates", 4 * time.Minute, []string{"gates.md"}, "", nil},
+		legSpec{journey.Test, "pytest tests/gates", 5 * time.Minute, nil, "", nil})
+	ss = append(ss, sess("nopane", "notebooks", "/home/user/notebooks", "main", "clean the eda notebook", state.Idle, n.Add(-3*time.Minute), journey.Docs, "", "turn complete", "idle"))
+	tr[sessionKey("nopane")] = trailOf(n.Add(-25*time.Minute), "clean the eda notebook", false,
+		legSpec{journey.Docs, "eda.ipynb", 18 * time.Minute, []string{"eda.ipynb"}, "", nil})
+	ss = append(ss, gone("closed", "api", "the pane I closed half an hour ago", n.Add(-32*time.Minute)))
+	tr[sessionKey("closed")] = trailOf(n.Add(-70*time.Minute), "fix the 401 on token refresh", false,
+		legSpec{journey.Fix, "tokens.py", 20 * time.Minute, []string{"tokens.py"}, "", nil},
+		legSpec{journey.Test, "pytest", 5 * time.Minute, nil, "1216✓", nil})
+	titles := []string{"fix the 401 on token refresh", "why does the nightly build take 40 minutes", "port the client to the new sdk", "add --json to every command", "reconcile the state file"}
+	for i := 0; i < 40; i++ {
+		g := gone(fmt.Sprintf("h-%03d", i), []string{"api", "harness", "porter", "notebooks"}[i%4], titles[i%len(titles)], n.Add(-time.Duration(i+2)*5*time.Hour))
+		ss = append(ss, g)
+		tr[g.Info.Key()] = pastTrail(g)
+	}
+	panes, order := paneMap([]string{"harness-a", "harness-b", "relay", "nopane"}, []string{"harness:1.0", "harness:0.0", "tinker:0.0", ""})
+	return scene{name: "fleet-hygiene", story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // ---------------------------------------------------------------- driver
@@ -648,6 +758,7 @@ func allScenes() []scene {
 func sceneModel(sc scene, w, h int) *Model {
 	fleet.SortFleet(sc.sessions) // the order Refresh would hand over
 	m := New(nil)
+	m.runner = &recordingTmux{} // a send in the walkthrough presses no real key
 	m.SetSize(w, h)
 	m.SetSessions(sc.sessions, sceneNow)
 	m.SetPanes(sc.panes)
@@ -708,14 +819,23 @@ func pressKey(m *Model, key string) {
 	case "space":
 		m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	default:
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		if cmd != nil {
+			// A reply's send runs off the loop and reports back: play the
+			// report in, so the trace it leaves is on the next frame.
+			if msg := cmd(); msg != nil {
+				if _, ok := msg.(replyDoneMsg); ok {
+					m.Update(msg)
+				}
+			}
+		}
 	}
 }
 
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"r", "esc", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "esc", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
+var canonicalKeys = []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "esc", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder
@@ -765,7 +885,7 @@ func TestScenarioWalkthrough(t *testing.T) {
 		}
 	}
 	for _, sc := range allScenes() {
-		for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			w, h := size[0], size[1]
 			m := sceneModel(sc, w, h)
 			for _, k := range append([]string{}, keys...) {

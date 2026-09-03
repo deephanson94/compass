@@ -1,4 +1,4 @@
- ⌂ compass · board                                                                                        ▲1 2m  ●2  ○2
+ ⌂ compass · board                                                                              ▲1 2m  ●2  ○2  2 unread
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra             needs you   2m │ ▸2 ● api                           3m │  3 ● webapp                       40s
@@ -24,7 +24,7 @@
                                        │
                                        │
 
-
  5 archived · A browses
+
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- h/l columns · enter attach (prefix d returns) · tab one trail · r reply · g grab · ? help · q quit
+ h/l columns · enter attach (prefix d returns) · tab one trail · r reply · / search · x hide · g grab · ? help · q quit

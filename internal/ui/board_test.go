@@ -153,8 +153,8 @@ func TestBoardColumnsShareTheWidth(t *testing.T) {
 		{116, 9, 3, 36}, // a 120-column terminal
 		{148, 9, 4, 34}, // 152
 		{196, 9, 5, 36}, // 200
-		{148, 2, 2, 52}, // two sessions: two columns, at the cap
-		{60, 9, 1, 52},  // one column, capped
+		{148, 2, 2, 64}, // two sessions: two columns, at the cap
+		{60, 9, 1, 60},  // one column, capped
 		{30, 9, 0, 0},   // nothing fits
 		{148, 0, 0, 0},  // nothing to show
 	} {
@@ -736,7 +736,7 @@ func TestABrightColumnSaysWhatIsNewSinceTheLastLook(t *testing.T) {
 	// No: the look is placed mid-journey, after the scout leg started.
 	m.seen = map[string]time.Time{key: fixtureBase.Add(10 * time.Minute)}
 	got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n")
-	if !strings.Contains(got, "3 new legs · 1 red · looked 30m ago") {
+	if !strings.Contains(got, "3 new legs · 1 red") || !strings.Contains(got, "you were here · 30m ago") {
 		t.Errorf("the delta line is missing or wrong (want 3 legs after +10m, looked 30m before now):\n%s", got)
 	}
 

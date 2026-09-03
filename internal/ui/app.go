@@ -118,10 +118,11 @@ type replyDoneMsg struct {
 
 // hookState is what the hook compares a session against between refreshes.
 type hookState struct {
-	state    state.State
-	apiError bool
-	circling bool
-	back     int // lanes returned
+	state        state.State
+	apiError     bool
+	circling     bool
+	shippedOnRed bool
+	back         int // lanes returned
 }
 
 // sentReply is the last line compass typed into a session, so the board
@@ -247,6 +248,9 @@ type Model struct {
 	boardLabels map[string]map[string]string
 	fleetQuery  string               // the fleet search in force; "" = none
 	searchFleet bool                 // the search being typed is the fleet's, not the reader's
+	querySel    string               // the selection before the search, restored when it is cancelled
+	lastLook    map[string]time.Time // the look before the current one, per session: the read-line while it is open
+	hookFired   map[string]time.Time // when each session+event last ran the hook, for the cool-off
 	hidden      map[string]bool      // sessions taken off the board with `x`, by Key()
 	hiddenFile  string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
@@ -730,10 +734,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = ""
 			return m, nil
 		}
-		if m.level < levelReader && m.fleetQuery != "" {
-			m.fleetQuery = ""
-			m.clampSelection()
-			m.note = "search cleared"
+		if m.level <= levelTrail && m.fleetQuery != "" {
+			// On the board or a list a standing search clears first; in a
+			// session esc is the way back to the board, search or not.
+			m.clearQuery()
 			return m, nil
 		}
 		m.zoomOut()
@@ -743,6 +747,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// The fleet's search: the board, the list and the archive
 			// narrow to what matches; the reader keeps its own `/`.
 			m.searching, m.searchFleet, m.draft = true, true, ""
+			m.querySel = m.selectedKey
 			return m, nil
 		}
 	case "a":
@@ -1311,6 +1316,27 @@ func (m *Model) zoomOut() {
 	}
 }
 
+// clearQuery drops the fleet search and puts the selection back where it
+// was before the search began, if that session is still on the board.
+func (m *Model) clearQuery() {
+	m.fleetQuery = ""
+	if m.querySel != "" {
+		m.point(m.querySel)
+		m.querySel = ""
+	}
+	m.clampSelection()
+	m.note = "search cleared"
+}
+
+// looked is the moment the trail's read-line stands for: the look before
+// the current one while the session is open, the last look otherwise.
+func (m *Model) looked(key string) time.Time {
+	if at, ok := m.lastLook[key]; ok && key == m.selectedKey {
+		return at
+	}
+	return m.seen[key]
+}
+
 // matchesQuery says whether a session answers the fleet search: its name,
 // its opening prompt, its branch, any prompt of its trail, a leg's label,
 // or a file a leg touched. Three hundred archived sessions are a corpus,
@@ -1353,6 +1379,9 @@ func (m *Model) onBoard(s fleet.Session) bool {
 	if !m.hidden[s.Info.Key()] {
 		return true
 	}
+	if _, _, loop := circling(m.trails[s.Info.Key()]); loop {
+		return true
+	}
 	return s.Snap.State == state.NeedsYou || s.Snap.State == state.Stuck
 }
 
@@ -1391,7 +1420,7 @@ func (m *Model) toggleHidden() {
 	}
 	m.hidden[key] = true
 	m.saveHidden()
-	m.note = sessionName(s.Info) + " hidden · A lists it · x there brings it back"
+	m.note = sessionName(s.Info) + " hidden · A brings it back"
 	if !m.archiveView {
 		// The selection moves on: the board no longer has this column.
 		if order := m.viewOrder(); len(order) > 0 {
@@ -1428,6 +1457,7 @@ func (m *Model) fireHooks() {
 		tr := m.trails[key]
 		now := hookState{state: s.Snap.State, apiError: s.Snap.APIError}
 		_, _, now.circling = circling(tr)
+		now.shippedOnRed = strings.Contains(boardVerdict(s, tr, m.now), "shipped on red")
 		for _, b := range tr.Branches {
 			if b.Done {
 				now.back++
@@ -1443,25 +1473,57 @@ func (m *Model) fireHooks() {
 			tmux = pane.Target
 		}
 		name := sessionName(s.Info)
+		// One firing per session and event every ten minutes: a session
+		// flapping across a line is one call, not a fork storm.
+		fire := func(event, detail string) {
+			if m.hookFired == nil {
+				m.hookFired = map[string]time.Time{}
+			}
+			if at, ok := m.hookFired[key+"|"+event]; ok && m.now.Sub(at) < hookCoolOff {
+				return
+			}
+			m.hookFired[key+"|"+event] = m.now
+			run(event, name, tmux, detail)
+		}
 		switch {
 		case now.state == state.NeedsYou && (was.state != state.NeedsYou || now.apiError && !was.apiError):
 			event := "needs_you"
 			if now.apiError {
 				event = "api_error"
 			}
-			run(event, name, tmux, strings.TrimSpace(m.headFor(s)))
+			fire(event, strings.TrimSpace(m.headFor(s)))
 		case now.state == state.Stuck && was.state != state.Stuck:
-			run("stuck", name, tmux, strings.TrimSpace(m.headFor(s)))
+			fire("stuck", strings.TrimSpace(m.headFor(s)))
 		}
 		if now.circling && !was.circling {
 			test, runs, _ := circling(tr)
-			run("circling", name, tmux, fmt.Sprintf("%s · %s failure", test, ordinal(runs)))
+			fire("circling", fmt.Sprintf("%s · %s failure", test, ordinal(runs)))
 		}
 		if now.back > was.back {
-			run("agents_back", name, tmux, plural(now.back-was.back, "lane")+" returned")
+			// One call for the set that came back this refresh, saying how
+			// many were empty: "returned" and "returned empty" are
+			// different phone calls.
+			empty := 0
+			for _, b := range tr.Branches {
+				if b.Done && strings.TrimSpace(b.Report) == "" {
+					empty++
+				}
+			}
+			detail := plural(now.back-was.back, "lane") + " returned"
+			if empty > 0 {
+				detail += fmt.Sprintf(" · %d empty", empty)
+			}
+			fire("agents_back", detail)
+		}
+		if now.shippedOnRed && !was.shippedOnRed {
+			fire("shipped_on_red", "a commit on top of a red run")
 		}
 	}
 }
+
+// hookCoolOff is the least time between two firings of one event for one
+// session.
+const hookCoolOff = 10 * time.Minute
 
 // offerReplies is `r`: the quick replies go on the footer, numbered, for
 // the selected session's pane. Nothing is sent until a digit is pressed.
@@ -1494,7 +1556,11 @@ func (m *Model) replyChoices() []replyChoice {
 	for _, r := range m.replies {
 		out = append(out, replyChoice{label: r, text: r, kind: replyLine})
 	}
-	out = append(out, replyChoice{label: "stop — interrupt the turn (escape)", kind: replyStop})
+	if s, ok := m.selected(); ok && (s.Snap.State == state.Working || s.Snap.State == state.Stuck) {
+		// Only where there is a turn to interrupt: an idle session
+		// offered "stop" under "waiting for a prompt".
+		out = append(out, replyChoice{label: "stop — interrupt the turn", kind: replyStop})
+	}
 	if len(out) > 9 {
 		out = out[:9]
 	}
@@ -1682,7 +1748,7 @@ func (m *Model) clampSelection() {
 // toggleArchive swaps the two fleets, and their selections with them: the live
 // view remembers where you were standing while you read an old journey.
 func (m *Model) toggleArchive() {
-	if !m.archiveView && m.archivedCount() == 0 {
+	if !m.archiveView && m.archivedCount() == 0 && m.hiddenCount() == 0 {
 		m.note = "nothing archived yet"
 		return
 	}
@@ -1801,7 +1867,7 @@ func (m *Model) selectOldestNeedsYou() bool {
 func (m *Model) needsYouCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if s.Live && s.Snap.State == state.NeedsYou {
+		if m.onBoard(s) && s.Snap.State == state.NeedsYou {
 			n++
 		}
 	}
@@ -1838,7 +1904,7 @@ func tabTitle(needsYou, stuck, loops int) string {
 func (m *Model) stuckCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if s.Live && s.Snap.State == state.Stuck {
+		if m.onBoard(s) && s.Snap.State == state.Stuck {
 			n++
 		}
 	}
@@ -1848,12 +1914,36 @@ func (m *Model) stuckCount() int {
 func (m *Model) circlingCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if _, _, ok := circling(m.trails[s.Info.Key()]); ok && s.Live {
+		if m.isCircling(s) {
 			n++
 		}
 	}
 	return n
 }
+
+// isCircling says whether a session on the board is going round the same
+// failure: the loop wears its own glyph and word on the row, so the
+// header's count has a referent. A session asking or hung keeps its own
+// alarm; a loop is the one the state machine called healthy.
+func (m *Model) isCircling(s fleet.Session) bool {
+	if !m.onBoard(s) || s.Snap.State == state.NeedsYou || s.Snap.State == state.Stuck {
+		return false
+	}
+	_, _, ok := circling(m.trails[s.Info.Key()])
+	return ok
+}
+
+// rowGlyph is the glyph a session's row wears: the fleet's own for its
+// state, ↻ for a session going round the same failure.
+func (m *Model) rowGlyph(s fleet.Session) string {
+	if m.isCircling(s) {
+		return glyphCircling
+	}
+	return fleet.Glyph(s.Snap.State)
+}
+
+// glyphCircling marks a session failing the same test leg after leg.
+const glyphCircling = "↻"
 
 // View renders the whole deck.
 func (m *Model) View() string {
@@ -2003,25 +2093,29 @@ func (m *Model) replyPanel(inner int) []string {
 		}
 		rows = append(rows, readerLine{kind: readerBlank})
 	}
+	// Each group says what its keys press: an answer is the CLI menu's
+	// own digit, a line is typed and entered, stop is escape. One sentence
+	// over the box described the dangerous one and not the other.
 	choices := m.replyChoices()
+	heads := map[replyKind]string{
+		replyAnswer: "answers · sent as the menu's own digit",
+		replyLine:   "lines · typed into the prompt and entered",
+		replyStop:   "stop · escape, which interrupts the turn",
+	}
 	lastKind := replyKind(-1)
 	for i, c := range choices {
-		if i > 0 && c.kind != lastKind {
-			rows = append(rows, readerLine{kind: readerBlank}) // answers, lines, stop: three groups
+		if c.kind != lastKind {
+			if i > 0 {
+				rows = append(rows, readerLine{kind: readerBlank})
+			}
+			rows = append(rows, readerLine{text: heads[c.kind], kind: readerBody})
 		}
 		lastKind = c.kind
-		label := c.label
-		if c.kind == replyAnswer {
-			label += "   ← answers the question"
-			if i > 0 && choices[i-1].kind == replyAnswer {
-				label = c.label
-			}
-		}
 		kind := readerText
 		if c.kind == replyStop {
 			kind = readerFoldErr
 		}
-		for _, line := range wrapPrefix(label, fmt.Sprintf("%d  ", i+1), "   ", body) {
+		for _, line := range wrapPrefix(c.label, fmt.Sprintf("%d  ", i+1), "   ", body) {
 			rows = append(rows, readerLine{text: line, kind: kind})
 		}
 	}
@@ -2031,7 +2125,7 @@ func (m *Model) replyPanel(inner int) []string {
 			readerLine{text: "enter sends the line · esc back to the menu", kind: readerBody})
 	} else {
 		rows = append(rows, readerLine{text: "t  type a line", kind: readerText},
-			readerLine{text: "a digit sends · esc closes", kind: readerBody})
+			readerLine{text: "a digit sends · t types · esc closes", kind: readerBody})
 	}
 
 	box := func(s string, style lipgloss.Style) string {
@@ -2061,7 +2155,7 @@ func (m *Model) replyState(s fleet.Session) string {
 		if q == "" {
 			q = "a question"
 		}
-		return "▲ on a question · " + q + " — the line is typed into that prompt"
+		return "▲ on a question · " + q + " — pick an answer below, or type a line into that prompt"
 	case state.Stuck:
 		return "◍ stuck · silent " + since + " — the line is typed under the hung call"
 	case state.Working:
@@ -2194,7 +2288,28 @@ func (m *Model) statusChips() string {
 	if len(parts) == 0 {
 		return dimStyle.Render("○ all quiet")
 	}
-	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && out == 0 && !m.archiveView {
+	// What owes you short of an alarm: sessions that stopped red or with
+	// steps left, and ones not read yet. "all calm" over four columns
+	// that owed something was the header contradicting the board.
+	owed, unread := 0, 0
+	for _, s := range m.sessions {
+		if !m.onBoard(s) {
+			continue
+		}
+		switch m.obligation(s) {
+		case 4:
+			owed++
+		case 5:
+			unread++
+		}
+	}
+	if owed > 0 {
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("%d owe you", owed)))
+	}
+	if unread > 0 {
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("%d unread", unread)))
+	}
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && out == 0 && owed == 0 && !m.archiveView {
 		// Calm, said aloud: the absence of a warm glyph is the design, and
 		// in monochrome an absence is also what a clipped header looks like.
 		parts = append(parts, dimStyle.Render("all calm"))
@@ -2205,7 +2320,7 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · g grab · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
@@ -2215,6 +2330,8 @@ func (m *Model) footerLine(w int) string {
 	switch {
 	case m.showHelp:
 		keys = "? or esc closes help"
+	case m.searching && m.searchFleet:
+		keys = "/" + m.draft + "▏ · enter keeps it · esc cancels"
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.replying && m.replyTyping:
@@ -2222,14 +2339,14 @@ func (m *Model) footerLine(w int) string {
 	case m.replying:
 		keys = fmt.Sprintf("reply: 1–%d sends · t types a line · esc closes", len(m.replyChoices()))
 	case m.level == levelBoard && m.boardShown():
-		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · g grab · ? help · q quit"
+		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · A live fleet · ? help · q quit"
+			keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · / search · x unhide · A live fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
-		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · ⇧tab board · g grab · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · ⇧tab board · A live fleet · ? help · q quit"
+			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A live fleet · ? help · q quit"
 		}
 	case m.level >= levelReader && m.sessionView():
 		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · enter attach · esc back"
@@ -2242,7 +2359,7 @@ func (m *Model) footerLine(w int) string {
 	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
-	for _, drop := range []string{" · r reply", " · [ ] chapters", " · [ ] turns", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
+	for _, drop := range []string{" · x hide", " · x unhide", " · r reply", " · [ ] chapters", " · [ ] turns", " · / search", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -2258,7 +2375,7 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
+	drops := []string{" · x hide", " · x unhide", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
 	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
 		// A chapter note keeps the chapter keys over everything.
 		drops = []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · space unfold", " · [ ] chapters", " · [ ] turns"}

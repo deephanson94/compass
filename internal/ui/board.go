@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +34,7 @@ import (
 // that are moving (SPEC §4).
 const (
 	boardColMin = 34 // narrower than this a trail row says nothing
-	boardColMax = trailWidthMax
+	boardColMax = 64 // wider than the single trail's cap: a column with the width carries its detail
 
 	// boardFresh is how long a finished session stays bright on the board
 	// while nobody has opened it: a day, the tier the person watching asked
@@ -213,7 +214,7 @@ func (m *Model) session(key string) (fleet.Session, bool) {
 // beyond selecting a session the columns do better.
 func (m *Model) boardLines(w, h int) []string {
 	order := m.viewOrder()
-	n, cw := boardColumns(w, len(order))
+	n, cw := boardColumns(w, m.drawnCount(order))
 	rowOf := m.boardRows()
 	body := h - 2 // the strip and its line of air
 	if body < 1 {
@@ -242,7 +243,8 @@ func (m *Model) boardLines(w, h int) []string {
 		}
 		lines = append(lines, joinColumns(bh, cols)...)
 	}
-	lines = fit(lines, body)
+	// The strip sits under the last band, not on the screen's floor: a
+	// calm board is a short board, and the strip is where the eye is.
 	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
 	return fit(lines, h)
 }
@@ -283,7 +285,7 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 // column's left edge and its band's top row, so a panel about that
 // session can sit beside it rather than over someone else's.
 func (m *Model) boardPlace(w int) (x, y int, ok bool) {
-	n, cw := boardColumns(w, len(m.viewOrder()))
+	n, cw := boardColumns(w, m.drawnCount(m.viewOrder()))
 	if n == 0 {
 		return 0, 0, false
 	}
@@ -302,6 +304,23 @@ func (m *Model) boardPlace(w int) (x, y int, ok bool) {
 		}
 	}
 	return 0, 0, false
+}
+
+// drawnCount is how many of the view's sessions earn a column: the ones
+// that owe you, or all of them when none does. The width is shared by
+// these, not by every session: three owed columns on a 220-column board
+// were 52 wide with 57 columns of air beside them.
+func (m *Model) drawnCount(order []int) int {
+	drawn := 0
+	for _, i := range order {
+		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+			drawn++
+		}
+	}
+	if drawn == 0 {
+		drawn = len(order)
+	}
+	return drawn
 }
 
 // boardBandMin is the least height a band of columns is worth: the header's
@@ -323,7 +342,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	doc := TrailLines(tr, TrailOpts{
 		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
-		Dense: true, Looked: m.seen[key],
+		Dense: true, Looked: m.looked(key),
 	})
 	return 3 + len(doc)
 }
@@ -447,36 +466,40 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		if shown[key] {
 			continue
 		}
-		st := s.Snap.State
-		if m.archiveView {
-			st = state.Idle
+		glyph := m.rowGlyph(s)
+		if m.archiveView && !s.Live {
+			glyph = fleet.Glyph(state.Idle)
 		}
-		name := fleet.Glyph(st) + " " + sessionName(s.Info) + " " + m.age(s.Info.LastEventAt)
+		name := glyph + " " + sessionName(s.Info) + " " + m.age(s.Info.LastEventAt)
 		if r, ok := rowOf[key]; ok && r.num > 0 {
 			name = fmt.Sprintf("%d %s", r.num, name)
 		}
 		rest = append(rest, name)
 	}
-	var parts []string
+	// The clauses that carry a key — the overlaps, the hidden count, the
+	// archive — are kept whole; the names of what owes nothing take the
+	// width that is left, and are the part that is cut.
+	var fixed []string
 	if !m.archiveView {
-		// The overlaps first: two sessions on one file is the fact the
-		// strip exists to carry when it has one.
-		parts = append(parts, m.overlaps()...)
-	}
-	if len(rest) > 0 {
-		parts = append(parts, fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · ")))
-	}
-	if m.archiveView {
-		parts = append(parts, "A live fleet")
-	} else {
+		fixed = append(fixed, m.overlaps()...)
 		if n := m.hiddenCount(); n > 0 {
-			parts = append(parts, fmt.Sprintf("%d hidden · A lists them", n))
+			fixed = append(fixed, fmt.Sprintf("%d hidden · A lists them", n))
 		}
 		if n := m.archivedCount(); n > 0 {
-			parts = append(parts, fmt.Sprintf("%d archived · A browses", n))
+			fixed = append(fixed, fmt.Sprintf("%d archived · A browses", n))
+		}
+	} else {
+		fixed = append(fixed, "A live fleet")
+	}
+	tail := strings.Join(fixed, "   ")
+	if len(rest) > 0 {
+		names := fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · "))
+		room := w - lipgloss.Width(tail) - 3
+		if room >= 12 {
+			return dimStyle.Render(clip(names, room)) + "   " + dimStyle.Render(tail)
 		}
 	}
-	return dimStyle.Render(clip(strings.Join(parts, "   "), w))
+	return dimStyle.Render(clip(tail, w))
 }
 
 // boardColumn is one session's column: its two fleet rows as the header, a
@@ -514,7 +537,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Pulse:      m.pulse && working,
 		Pinned:     true,
 		Dense:      true, // the board always packs: a rail row between every leg halved what fit
-		Looked:     m.seen[key],
+		Looked:     m.looked(key),
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
@@ -605,13 +628,27 @@ func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
 // more. Stuck covers the session that went quiet; this is the one that
 // fails loudly and keeps going, which the state machine calls healthy.
 func circling(tr journey.Trail) (test string, runs int, ok bool) {
-	for i := len(tr.Legs) - 1; i >= 0; i-- {
+	// The last three runs with a verdict: a red one among them whose test
+	// has failed in three legs is a loop, whatever a narrower green run
+	// beside it says — "pytest tests/auth 312✓" between two red full
+	// suites was reading as the loop ending.
+	seen, greenest := 0, 0
+	for i := len(tr.Legs) - 1; i >= 0 && seen < 3; i-- {
 		l := tr.Legs[i]
 		badge := legBadge(l)
 		if badge == "" || badge == "?" {
 			continue
 		}
+		seen++
 		if !strings.Contains(badge, "✗") {
+			// A green run as big as the red one ends the loop; a smaller
+			// one is a subset and says nothing about the failing test.
+			if n := badgeCount(badge); n > greenest {
+				greenest = n
+			}
+			continue
+		}
+		if badgeCount(badge) <= greenest {
 			return "", 0, false
 		}
 		for _, w := range l.Waypoints {
@@ -619,9 +656,23 @@ func circling(tr journey.Trail) (test string, runs int, ok bool) {
 				test, runs = w.Text, w.Runs
 			}
 		}
-		return test, runs, runs >= 3
+		if runs >= 3 {
+			return test, runs, true
+		}
 	}
 	return "", 0, false
+}
+
+// badgeCount is how many tests a badge counts: "310✓ 2✗" is 312.
+func badgeCount(badge string) int {
+	n := 0
+	for _, f := range strings.Fields(badge) {
+		digits := strings.TrimRight(f, "✓✗")
+		if v, err := strconv.Atoi(digits); err == nil {
+			n += v
+		}
+	}
+	return n
 }
 
 // unfinished reports whether the session's plan has steps left.
@@ -867,6 +918,9 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		return dimStyle.Render(clip("↪ sent "+clip(`"`+sent.text+`"`, w-14)+" · "+relAge(m.now, sent.at)+" ago", w))
 	}
 	seen, ok := m.seen[key]
+	if at, had := m.lastLook[key]; had && key == m.selectedKey {
+		seen, ok = at, true // the look before this one, while the session is open
+	}
 	if !ok {
 		// No baseline: the brightness already says it is unread, and "↳ 4
 		// legs · never opened" on every column of a fresh launch was a
@@ -893,8 +947,36 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		}
 		parts = append(parts, clause)
 	}
+	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
+		// The lanes dispatched since: a lead that sent three agents and
+		// wrote one leg had a digest that said "1 new leg".
+		switch {
+		case out > 0 && back == 0:
+			parts = append(parts, fmt.Sprintf("%d agents out, none back", out))
+		case out > 0:
+			parts = append(parts, fmt.Sprintf("%d agents out · %d back", out, back))
+		default:
+			parts = append(parts, plural(back, "agent")+" back")
+		}
+	}
 	parts = append(parts, "looked "+state.ShortDuration(m.now.Sub(seen))+" ago")
 	return dimStyle.Render(joinFit(parts, w))
+}
+
+// lanesSince counts the lanes dispatched after the look: still out, and
+// back.
+func lanesSince(tr journey.Trail, looked time.Time) (out, back int) {
+	for _, b := range tr.Branches {
+		if !b.Start.After(looked) {
+			continue
+		}
+		if b.Done {
+			back++
+		} else {
+			out++
+		}
+	}
+	return out, back
 }
 
 // sinceLooked adds up what happened after the last look: legs, ships, red
@@ -1030,6 +1112,15 @@ func (m *Model) markSeen(key string) {
 	}
 	if m.seen == nil {
 		m.seen = make(map[string]time.Time)
+	}
+	if m.lastLook == nil {
+		m.lastLook = map[string]time.Time{}
+	}
+	if prev, ok := m.seen[key]; ok && !prev.Equal(m.now) {
+		// The look before this one is the read-line while the trail is
+		// open: marking the look on the way in erased the line the way in
+		// was for.
+		m.lastLook[key] = prev
 	}
 	m.seen[key] = m.now
 	m.saveSeen()

@@ -390,12 +390,13 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 	switch msg.String() {
 	case "enter":
 		if m.searchFleet {
+			// The query narrowed the fleet as it was typed; enter keeps it.
 			m.fleetQuery = strings.TrimSpace(m.draft)
 			m.draft, m.searching, m.searchFleet = "", false, false
 			m.fleetScroll = 0
 			m.clampSelection()
-			if n := len(m.viewOrder()); m.fleetQuery != "" {
-				m.note = fmt.Sprintf("/%s · %s", m.fleetQuery, plural(n, "session"))
+			if m.fleetQuery == "" {
+				m.clearQuery()
 			}
 			return
 		}
@@ -408,16 +409,35 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 		}
 	case "esc":
 		m.draft = ""
-		m.searching, m.searchFleet = false, false
+		if m.searchFleet {
+			m.searching, m.searchFleet = false, false
+			m.clearQuery()
+			return
+		}
+		m.searching = false
 	case "backspace":
 		if r := []rune(m.draft); len(r) > 0 {
 			m.draft = string(r[:len(r)-1])
 		}
+		m.narrowLive()
 	default:
 		if msg.Type == tea.KeyRunes {
 			m.draft += string(msg.Runes)
 		}
+		m.narrowLive()
 	}
+}
+
+// narrowLive applies the fleet search as it is typed, so the header's
+// count is the feedback: six keystrokes with nothing on screen was a typo
+// found only by its wrong result.
+func (m *Model) narrowLive() {
+	if !m.searchFleet {
+		return
+	}
+	m.fleetQuery = strings.TrimSpace(m.draft)
+	m.fleetScroll = 0
+	m.clampSelection()
 }
 
 // requestNarration asks the narrator to name the trail's closed legs, at most
