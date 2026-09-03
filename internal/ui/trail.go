@@ -99,6 +99,12 @@ type TrailOpts struct {
 	// something — forks, ticks, hour rules — keep theirs.
 	Dense bool
 
+	// HeadClass is the class the fleet's state machine gives the session
+	// when the trail has no leg yet — "scout", from the first call — so a
+	// session fifty seconds old has a present on its trail, not a
+	// placeholder contradicting the fleet row beside it.
+	HeadClass string
+
 	// Looked is when the person last opened this trail: a rule on the
 	// rail says "you were here", so a return after hours away reads what
 	// is new from that line down rather than reconstructing it. Zero
@@ -234,6 +240,9 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	nodes := trailNodes(tr)
 	if len(nodes) == 0 {
 		rows := trailEmptyRows(width)
+		if row := bareHeadRow(o, width); row != "" {
+			rows = []string{row}
+		}
 		return rows, noSel(len(rows))
 	}
 
@@ -242,10 +251,15 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if len(tr.Legs) == 0 {
-		// A journey that has only been asked for: say what comes next rather
-		// than leaving the panel half empty (SPEC §4).
+		// A journey that has only been asked for: the present, when the
+		// fleet knows one ("● scout  thinking…  for 40s"), else say what
+		// comes next rather than leaving the panel half empty (SPEC §4).
 		b.node("")
-		b.node(dimStyle.Render(clip("scouting will appear here", width)))
+		if row := bareHeadRow(o, width); row != "" {
+			b.node(row)
+		} else {
+			b.node(dimStyle.Render(clip("scouting will appear here", width)))
+		}
 	}
 	b.ghosts(o.Todos, width, o.Height)
 	doc, sel := b.render()
@@ -256,6 +270,35 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		return trailDoc(tr, o)
 	}
 	return doc, sel
+}
+
+// bareHeadRow is HEAD before the trail has a leg to hang it on: the
+// fleet's glyph and class, what the session is doing, and for how long.
+// "" when the session is not doing anything.
+func bareHeadRow(o TrailOpts, width int) string {
+	if o.Head == "" || o.HeadState == state.Idle {
+		return ""
+	}
+	glyph := fleet.Glyph(o.HeadState)
+	class := o.HeadClass
+	if class == "" {
+		class = "scout"
+	}
+	tail := ""
+	if !o.HeadSince.IsZero() && !o.Now.IsZero() {
+		tail = "for " + relAge(o.Now, o.HeadSince)
+		if o.HeadState == state.Stuck {
+			tail = "silent " + relAge(o.Now, o.HeadSince)
+		} else if o.HeadState == state.NeedsYou {
+			tail = "waiting " + relAge(o.Now, o.HeadSince)
+		}
+	}
+	lead := stateStyle(o.HeadState).Render(glyph + " " + pad(class, trailVerbWidth))
+	room := width - 2 - trailVerbWidth - 1 - 1 - len([]rune(tail))
+	if room < trailMinLabel {
+		return lead + " " + dimStyle.Render(clip(o.Head, width-2-trailVerbWidth-1))
+	}
+	return lead + " " + textStyle.Render(pad(clip(o.Head, room), room)) + " " + dimStyle.Render(tail)
 }
 
 // noSel is the selection map of a block no cursor can land on.
@@ -1549,7 +1592,12 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
 		head, headState, since = m.headFor(s), s.Snap.State, headSince(s)
 	}
+	headClass := ""
+	if s, ok := m.selected(); ok && s.HasClass {
+		headClass = s.Class.String()
+	}
 	return TrailOpts{
+		HeadClass:  headClass,
 		Looked:     m.looked(m.selectedKey),
 		Todos:      m.todos,
 		Labels:     m.labels,

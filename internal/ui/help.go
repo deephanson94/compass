@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/deephanson94/compass/internal/journey"
 )
 
@@ -49,10 +51,20 @@ func helpLinesFor(w, h int, board bool) []string {
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
 	if w >= helpTwoCol && h >= len(keys) {
-		left := w/2 - gutterWidth
+		// The split follows the keys' longest line, not a fraction of the
+		// width: a fixed half pads one column while it clips the other.
+		left := helpKeysWidth(board)
+		if left > w/2 {
+			left = w/2 - gutterWidth
+		}
+		right := w - left - gutterWidth
+		legend := helpLegendLines(right, true)
+		if wrapped := helpLegendWrapped(right, true); len(wrapped) <= h {
+			legend = wrapped // a definition cut at "…" taught nothing; the rows were free
+		}
 		return joinColumns(h, []column{
 			{left, helpKeyLinesFor(left, board)},
-			{w - left - gutterWidth, helpLegendLines(w-left-gutterWidth, true)},
+			{right, legend},
 		})
 	}
 	lines := helpKeyLinesFor(w, board)
@@ -88,9 +100,39 @@ func helpLinesFor(w, h int, board bool) []string {
 	}
 	lines = append(lines, legend...)
 	if h > 0 && len(lines) > h {
-		lines = lines[:h]
+		// Cut from the middle of the keys, never the tail: the way out
+		// (esc, q) and the fleet's glyph line are what a newcomer on an
+		// 80x24 split needs from this screen before anything else.
+		keep := len(lines) - h
+		var tail []string
+		for _, l := range lines {
+			if strings.Contains(l, "fleet:") || strings.HasPrefix(ansi.Strip(l), "esc ") || strings.HasPrefix(ansi.Strip(l), "q ") || strings.HasPrefix(ansi.Strip(l), "? ") {
+				tail = append(tail, l)
+			}
+		}
+		cut := lines[:h-len(tail)]
+		var out []string
+		for _, l := range cut {
+			if !contains(tail, l) {
+				out = append(out, l)
+			}
+		}
+		lines = append(out, tail...)
+		_ = keep
+		if len(lines) > h {
+			lines = lines[:h]
+		}
 	}
 	return lines
+}
+
+func contains(list []string, s string) bool {
+	for _, l := range list {
+		if l == s {
+			return true
+		}
+	}
+	return false
 }
 
 // helpLegendCore is the legend with its prose removed: the fleet and trail
@@ -108,6 +150,17 @@ func helpLegendCore(legend []string) []string {
 		}
 	}
 	return core
+}
+
+// helpKeysWidth is the width of the keys column when nothing in it is cut.
+func helpKeysWidth(board bool) int {
+	w := 0
+	for _, l := range helpKeyLinesFor(1000, board) {
+		if n := ansi.StringWidth(l); n > w {
+			w = n
+		}
+	}
+	return w
 }
 
 // helpLegendFold puts the ⌀ and ◌ lines on one row, with ⟲ beside them: the
@@ -161,25 +214,70 @@ func helpKeyLinesFor(w int, board bool) []string {
 // helpLegendLines is what the glyphs and the class tints mean. Spelled out when
 // there is room; names only when there is not, because a reader who cannot see
 // which class a leg is has lost the whole point of Lv1 (SPEC §2.2).
-func helpLegendLines(w int, roomy bool) []string {
-	lines := []string{
-		dimStyle.Render(clip("compass observes; enter hands you the session.", w)),
+// helpLegendRaw is the legend's text, unclipped: the glyph lines carry their
+// indent so a wrapped continuation can hang under the glyph.
+func helpLegendRaw() []string {
+	return []string{
+		"compass observes; enter hands you the session.",
 		"",
-		dimStyle.Render(clip(focusMark+" marks the panel your keys are in — tab moves it", w)),
-		dimStyle.Render(clip("fleet:  ● working  ▲ needs you  ◍ stuck  ↻ circling  ○ idle", w)),
-		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent", w)),
-		dimStyle.Render(clip("        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty", w)),
-		dimStyle.Render(clip("        ◌ planned — Claude's own next moves · →3 a live session on this lane", w)),
-		dimStyle.Render(clip("        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them", w)),
-		dimStyle.Render(clip("        ⟲ context compacted — a summary below · 16⚑ 10✗ 2⟲ ships · red · compactions", w)),
-		dimStyle.Render(clip("        · 2nd failure — the same test in two legs · ? — no verdict parsed", w)),
-		dimStyle.Render(clip("        on you 40m today — its waits for your next prompt (3h+ = away)", w)),
-		dimStyle.Render(clip("        ↩ result of X — landed late; it is X's · ↪ sent — a line compass typed", w)),
-		dimStyle.Render(clip("        │ you were here — the read-line · ↳ what came after · ⚠ two sessions, one thing", w)),
-		dimStyle.Render(clip("board:  columns for what owes you, in that order; the rest in the strip", w)),
+		focusMark + " marks the panel your keys are in — tab moves it",
+		"fleet:  ● working  ▲ needs you  ◍ stuck  ↻ circling  ○ idle",
+		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent",
+		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
+		"        ◌ planned — Claude's own next moves · →3 a live session on this lane",
+		"        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them",
+		"        ⟲ context compacted — a summary below · 16⚑ 10✗ 2⟲ ships · red · compactions",
+		"        · 2nd failure — the same test in two legs · ? — no verdict parsed",
+		"        on you 40m today — its waits for your next prompt (3h+ = away)",
+		"        ↩ result of X — landed late; it is X's · ↪ sent — a line compass typed",
+		"        │ you were here — the read-line · ↳ what came after · ⚠ two sessions, one thing",
+		"board:  columns for what owes you, in that order; the rest in the strip",
 		"",
-		dimStyle.Render(clip("every leg is one of seven classes, named on its row:", w)),
+		"every leg is one of seven classes, named on its row:",
 	}
+}
+
+func helpLegendLines(w int, roomy bool) []string {
+	var lines []string
+	for _, l := range helpLegendRaw() {
+		if l == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, dimStyle.Render(clip(l, w)))
+	}
+	return helpLegendClasses(lines, w, roomy)
+}
+
+// helpLegendWrapped is the legend with every line that would clip re-flowed
+// onto continuation rows, hung under its glyph.
+func helpLegendWrapped(w int, roomy bool) []string {
+	var lines []string
+	for _, l := range helpLegendRaw() {
+		if l == "" {
+			lines = append(lines, "")
+			continue
+		}
+		if ansi.StringWidth(l) <= w {
+			lines = append(lines, dimStyle.Render(l))
+			continue
+		}
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		first := l[:indent]
+		text := l[indent:]
+		if i := strings.Index(text, ":  "); i > 0 && indent == 0 {
+			// "fleet:  …" — the continuation hangs under the first glyph.
+			first, text = text[:i+3], text[i+3:]
+			indent = len([]rune(first))
+		}
+		for _, row := range wrapPrefix(text, first, strings.Repeat(" ", indent+2), w) {
+			lines = append(lines, dimStyle.Render(row))
+		}
+	}
+	return helpLegendClasses(lines, w, roomy)
+}
+
+func helpLegendClasses(lines []string, w int, roomy bool) []string {
 	if !roomy {
 		var names []string
 		for _, c := range legClasses {

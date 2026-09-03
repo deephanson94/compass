@@ -177,13 +177,18 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 		t.Fatal("r did not offer the replies")
 	}
 	view := m.View()
-	for _, want := range []string{"┌ reply to 2 · api · ⌁ dev:1.0", "1  please continue", "2  report status", "3  you were stuck", "esc closes", "● working for"} {
+	for _, want := range []string{"┌ reply to 2 · api · ⌁ dev:1.0", "1  please continue", "2  report status", "esc closes", "● working for"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the panel should offer %q:\n%s", want, view)
 		}
 	}
+	// The quota line is for a session that hit the quota; a healthy one is
+	// not offered a lie about its history.
+	if strings.Contains(view, "you were stuck") {
+		t.Errorf("a healthy session should not be offered the quota line:\n%s", view)
+	}
 	// A panel, not a takeover: the deck is still there around it.
-	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–4 sends · t types a line") {
+	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 sends · t types a line") {
 		t.Errorf("the deck should stay under the panel, and the footer name the keys:\n%s", view)
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})

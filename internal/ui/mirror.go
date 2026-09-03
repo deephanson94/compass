@@ -34,7 +34,7 @@ func (m *Model) mirrorColumn(w, h int) []string {
 		// The pane is there and its screen is not here yet: what is
 		// drawn is the transcript, and a panel titled "live" over
 		// compass's own fold marks was taken for the pane itself.
-		header = mirrorMark + " " + pane.Target + " · no capture yet · from transcript"
+		header = mirrorMark + " " + pane.Target + " · the transcript, until the pane is captured"
 	case live:
 		header = mirrorMark + " " + pane.Target + " · live"
 	}

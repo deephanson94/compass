@@ -3,9 +3,9 @@
 
  ▌FLEET · live                    │  TRAIL · infra                      [trail]
                                   │
- ▸1 ▲ infra        needs you   2m │ ◌ nothing yet
+ ▸1 ▲ infra        needs you   2m │ ▲ design AskUserQuestion         waiting 2m
      AskUserQuestion              │
-                                  │ scouting will appear here
+                                  │
   2 ● api                      3m │
      ◆ test   1216✓ 2✗            │
                                   │

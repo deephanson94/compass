@@ -27,4 +27,4 @@
  5 archived · A browses
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- h/l columns · enter attach (prefix d returns) · tab one trail · r reply · / search · x hide · g grab · ? help · q quit
+ h/l columns · enter attach (prefix d returns) · tab session · r reply · / search · x hide · g grab · ? help · q quit

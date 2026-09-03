@@ -53,7 +53,7 @@ func (m *Model) boardFits() bool {
 // boardShown says whether the board is drawn: it fits, and the view has a
 // session to put in a column.
 func (m *Model) boardShown() bool {
-	return m.boardFits() && len(m.viewOrder()) > 0
+	return m.boardFits() && (len(m.viewOrder()) > 0 || m.fleetQuery != "")
 }
 
 // boardColumns says how many trail columns a board of the given inner width
@@ -227,6 +227,11 @@ func (m *Model) boardLines(w, h int) []string {
 	// trails ended every column in eight blank rows while naming four
 	// sessions in the strip.
 	keys, heights := m.boardPack(n, cw, body)
+	if len(keys) == 0 && m.fleetQuery != "" {
+		// A search nothing answers keeps the board and says so, rather
+		// than silently turning into the deck.
+		return fit([]string{"", dimStyle.Render(clip("no session matches /"+m.fleetQuery+" · esc clears it", w))}, h)
+	}
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
@@ -521,7 +526,12 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		return append(rows, dimStyle.Render(clip(glyphGhost+" reading its transcript…", w)))
 	}
 	working := s.Snap.State == state.Working && !m.archiveView
+	headClass := ""
+	if s.HasClass {
+		headClass = s.Class.String()
+	}
 	opts := TrailOpts{
+		HeadClass:  headClass,
 		Todos:      planItems(tr.Tasks),
 		Labels:     m.boardLabels[key],
 		LaneLinks:  m.laneLinks(tr),

@@ -154,7 +154,25 @@ const (
 var DefaultReplies = []string{
 	"please continue",
 	"report status",
-	"you were stuck on the quota limit; it's back now — please resume where you left off",
+	quotaReply,
+}
+
+// quotaReply is the stock line for a session that died on its quota; it is
+// offered only to one that did.
+const quotaReply = "you were stuck on the quota limit; it's back now — please resume where you left off"
+
+// hadAPIError says whether the selected session's conversation ends on a
+// refusal, for a session whose state has since moved on.
+func (m *Model) hadAPIError(s fleet.Session) bool {
+	if s.Info.Key() != m.selectedKey {
+		return false
+	}
+	for i := len(m.events) - 1; i >= 0 && i >= len(m.events)-3; i-- {
+		if m.events[i].APIError {
+			return true
+		}
+	}
+	return false
 }
 
 // Model is the deck. It holds no session state of its own beyond what is on
@@ -606,6 +624,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampSelection()
 		if first && len(m.sessions) > 0 {
 			m.refreshBoard(msg.trails)
+			if m.level == levelBoard && m.boardFits() && len(m.viewOrder()) == 1 {
+				// One session: a board of one column filled a corner of a
+				// wide screen and read as half-drawn. Open the session.
+				m.zoomIn()
+			}
 			return m, tea.Batch(m.titleCmd(), m.relistPanes())
 		}
 		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
@@ -858,6 +881,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// G means the same thing at every depth: back to the present. At
 			// Lv2 the cursor is what the viewport follows, so it is the cursor
 			// that travels — and landing on the newest row re-pins the panel.
+			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 && m.trailPinned {
+				m.note = "at the present"
+				return m, nil
+			}
 			m.cursorToPresent()
 			return m, nil
 		case "[", "]":
@@ -880,6 +907,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "j", "down", "l", "right":
 			// The board runs sideways: h/l and the arrows say so, and j/k
 			// keep working for hands that reach for them.
+			was := m.selectedKey
 			if m.level == levelBoard && m.boardShown() {
 				m.boardMove(1)
 			} else if key == "j" || key == "down" {
@@ -887,14 +915,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				return m, nil
 			}
+			if m.selectedKey == was && m.note == "" {
+				m.note = m.onlyOrLast(1)
+			}
 			return m, m.refresh()
 		case "k", "up", "h", "left":
+			was := m.selectedKey
 			if m.level == levelBoard && m.boardShown() {
 				m.boardMove(-1)
 			} else if key == "k" || key == "up" {
 				m.move(-1)
 			} else {
 				return m, nil
+			}
+			if m.selectedKey == was && m.note == "" {
+				m.note = m.onlyOrLast(-1)
 			}
 			return m, m.refresh()
 		case "ctrl+d", "ctrl+u":
@@ -1304,6 +1339,10 @@ func (m *Model) zoomOut() {
 		// The reader goes back to following the cursor it left behind.
 		m.anchorReader()
 	case m.level > levelTrail:
+		if m.boardFits() && !m.archiveView && len(m.viewOrder()) == 1 {
+			m.note = "the only session · nothing to zoom out to"
+			return
+		}
 		m.level = levelTrail
 		m.cursor, m.anchor = -1, -1
 		if m.boardFits() && !m.archiveView {
@@ -1313,6 +1352,8 @@ func (m *Model) zoomOut() {
 		m.level = levelBoard
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
+	case m.level == levelBoard:
+		m.note = "the board is the top"
 	}
 }
 
@@ -1416,6 +1457,10 @@ func (m *Model) toggleHidden() {
 	}
 	if !s.Live {
 		m.note = "the archive is already off the board"
+		return
+	}
+	if len(m.viewOrder()) <= 1 && !m.archiveView {
+		m.note = "the only session on the board stays"
 		return
 	}
 	m.hidden[key] = true
@@ -1525,6 +1570,18 @@ func (m *Model) fireHooks() {
 // session.
 const hookCoolOff = 10 * time.Minute
 
+// onlyOrLast is what a move that moved nothing says: the fleet has one
+// session, or the selection is at its end.
+func (m *Model) onlyOrLast(delta int) string {
+	if len(m.viewOrder()) <= 1 {
+		return "the only session"
+	}
+	if delta > 0 {
+		return "the last session"
+	}
+	return "the first session"
+}
+
 // offerReplies is `r`: the quick replies go on the footer, numbered, for
 // the selected session's pane. Nothing is sent until a digit is pressed.
 // It is the second of compass's two writes, and like attach it is gated on
@@ -1554,6 +1611,13 @@ func (m *Model) replyChoices() []replyChoice {
 		}
 	}
 	for _, r := range m.replies {
+		if r == quotaReply {
+			// The stock quota line only where a quota was hit: it was
+			// offered to a session fifty seconds old.
+			if s, ok := m.selected(); !ok || !(s.Snap.APIError || m.hadAPIError(s)) {
+				continue
+			}
+		}
 		out = append(out, replyChoice{label: r, text: r, kind: replyLine})
 	}
 	if s, ok := m.selected(); ok && (s.Snap.State == state.Working || s.Snap.State == state.Stuck) {
@@ -2339,9 +2403,9 @@ func (m *Model) footerLine(w int) string {
 	case m.replying:
 		keys = fmt.Sprintf("reply: 1–%d sends · t types a line · esc closes", len(m.replyChoices()))
 	case m.level == levelBoard && m.boardShown():
-		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · / search · x hide · g grab · ? help · q quit"
+		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · / search · x unhide · A live fleet · ? help · q quit"
+			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A live fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · ⇧tab board · g grab · ? help · q quit"

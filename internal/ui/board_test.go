@@ -449,8 +449,8 @@ func TestNoCaptureOnTheBoard(t *testing.T) {
 func TestBoardAndTrailFootersNameEachOther(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
-	if got := m.View(); !strings.Contains(got, "tab one trail") || strings.Contains(got, "tab deeper") {
-		t.Errorf("the board's footer does not offer one trail:\n%s", got)
+	if got := m.View(); !strings.Contains(got, "tab session") || strings.Contains(got, "tab deeper") {
+		t.Errorf("the board's footer does not offer the session view:\n%s", got)
 	}
 	pressTab(m)
 	if got := m.View(); !strings.Contains(got, "esc board") {

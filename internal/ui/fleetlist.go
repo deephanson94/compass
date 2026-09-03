@@ -688,7 +688,14 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 			}
 		}
 		if head < 0 {
-			return ""
+			// No leg yet: the present in the same words the trail's bare
+			// HEAD row uses, not the completed-leg glyph over a placeholder.
+			class := "scout"
+			if s.HasClass {
+				class = s.Class.String()
+			}
+			return bareHeadRow(TrailOpts{Head: m.headFor(s), HeadState: s.Snap.State, HeadClass: class,
+				HeadSince: headSince(s), Now: m.now}, w)
 		}
 		l := tr.Legs[head]
 		// HEAD's own row, in HEAD's own words: the same glyph, label and
