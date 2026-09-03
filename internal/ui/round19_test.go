@@ -95,3 +95,12 @@ func TestTheReaderPageKeepsAResultWithItsOwner(t *testing.T) {
 		t.Errorf("a result at the top of the page has no owner on it")
 	}
 }
+
+// The 100-column help spends its row of air on the tag's line: ⌁ and
+// unread went undefined while a blank row sat under "keys".
+func TestTheHundredColumnHelpDefinesTheTag(t *testing.T) {
+	help := strings.Join(helpLinesFor(98, 25, false), "\n")
+	if !strings.Contains(help, "⌁ dev:1.0") || !strings.Contains(help, "unread —") {
+		t.Errorf("the 100x30 help lacks the tag's line:\n%s", help)
+	}
+}

@@ -96,15 +96,14 @@ func helpLinesFor(w, h int, board bool) []string {
 			// the compaction mark rides with them. A row left over after
 			// that takes the tag's line.
 			legend = helpLegendFold(legend, w)
-			if len(lines)+len(legend) >= h && len(lines) > 1 && lines[1] == "" {
-				// No row to spare and a legend line folded away: the air
-				// under "keys" buys the tag's line back.
-				lines = append(lines[:1], lines[2:]...)
-			}
-			if len(lines)+len(legend) < h {
-				legend = helpLegendFill(legend, full, h-len(lines))
-			}
-		} else {
+		}
+		if len(lines)+len(legend) >= h && len(lines) > 1 && lines[1] == "" && len(legend) < len(full) {
+			// No row to spare and a legend line out: the air under
+			// "keys" buys the tag's line back — the 100-column help kept
+			// its blank row while ⌁ and unread went undefined.
+			lines = append(lines[:1], lines[2:]...)
+		}
+		if len(lines)+len(legend) < h {
 			// Rows to spare: the sentences come back in their own order,
 			// as many as fit — a 120x34 help had three free rows under a
 			// legend missing the marks on its own board.
