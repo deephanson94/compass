@@ -156,3 +156,18 @@ func TestTheReplyPanelShedsAirBeforeItMoves(t *testing.T) {
 }
 
 func lipglossWidth(s string) int { return ansi.StringWidth(s) }
+
+// The way in outlasts the keys that refuse on a fleet of one: at 80 the
+// list shed `tab deeper` first and kept `x hide` and `g grab`, and no
+// narrow Lv1 frame ever named the key that opens a session.
+func TestTheWayInOutlastsTheKeysThatRefuse(t *testing.T) {
+	m := groupedModel(80, 24)
+	foot := ansi.Strip(strings.Split(m.View(), "\n")[23])
+	if !strings.Contains(foot, "tab deeper") || strings.Contains(foot, "g grab") {
+		t.Errorf("the 80-column list footer: %q", foot)
+	}
+	one := sceneModel(sceneFirstSession(), 100, 30)
+	if foot := ansi.Strip(one.footerLine(98)); strings.Contains(foot, "g grab") {
+		t.Errorf("a fleet of one offers g: %q", foot)
+	}
+}
