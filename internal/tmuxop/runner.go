@@ -52,6 +52,14 @@ func SendKeys(r Runner, paneID, text string) error {
 	return err
 }
 
+// SendKey presses one named key in a pane — "Escape", "Enter" — the way
+// SendKeys presses Enter after its text. It is how a quick reply says
+// "stop": the CLI interrupts its turn on Escape.
+func SendKey(r Runner, paneID, key string) error {
+	_, err := r.Output("send-keys", "-t", paneID, key)
+	return err
+}
+
 // Attach hands the terminal to a pane. Outside tmux that means attaching this
 // terminal to the pane's session; inside tmux it means switching this client to
 // it — the same intent, the shape the situation allows.

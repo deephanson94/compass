@@ -171,7 +171,7 @@ run and nothing else.
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
-| `r` | quick reply: a panel beside the selected session names it, says what it is doing right now, and offers stock lines ("please continue", "report status", the quota one); a digit types the line into its tmux pane and presses Enter. `reply = "…"` lines in the config replace them. Off under `-readonly` |
+| `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status", the quota one; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A digit sends; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` until the transcript shows the prompt landed. Off under `-readonly` |
 | `?` | help |
 
 ## Design docs

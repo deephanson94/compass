@@ -643,6 +643,22 @@ func (m *Model) boardSecondLine(s fleet.Session, line string, w int) (string, bo
 	return pad(line, w-lipgloss.Width(group)) + dimStyle.Render(group), true
 }
 
+// tookReply says whether a session's transcript shows a prompt at or after
+// the moment a line was sent to it: the reply landed, and the trail says
+// it better than the trace would.
+func (m *Model) tookReply(key string, sent sentReply) bool {
+	tr, ok := m.trails[key]
+	if !ok {
+		return false
+	}
+	for _, p := range tr.Prompts {
+		if !p.At.Before(sent.at) {
+			return true
+		}
+	}
+	return false
+}
+
 // boardDelta is the header's third row: how much a column has grown since the
 // person last opened it, when both halves of that are known. It is what makes
 // the brightness a quantity — "bright" says there is something unread, this
@@ -652,6 +668,11 @@ func (m *Model) boardSecondLine(s fleet.Session, line string, w int) (string, bo
 func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	if m.archiveView {
 		return ""
+	}
+	if sent, ok := m.sent[key]; ok && !m.tookReply(key, sent) {
+		// A line compass typed and the session has not yet answered: the
+		// row says so until the transcript shows the prompt landed.
+		return dimStyle.Render(clip("↪ sent "+clip(`"`+sent.text+`"`, w-14)+" · "+relAge(m.now, sent.at)+" ago", w))
 	}
 	seen, ok := m.seen[key]
 	if !ok {

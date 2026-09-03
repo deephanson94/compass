@@ -757,6 +757,51 @@ func askedQuestion(input json.RawMessage) string {
 	return text
 }
 
+// askedOptions is an AskUserQuestion call's option labels, in order — what
+// the CLI's menu offers, and what the reply panel offers as digits.
+func askedOptions(input json.RawMessage) []string {
+	var in struct {
+		Questions []struct {
+			Options []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil || len(in.Questions) == 0 {
+		return nil
+	}
+	var labels []string
+	for _, o := range in.Questions[0].Options {
+		if l := strings.TrimSpace(o.Label); l != "" {
+			labels = append(labels, l)
+		}
+	}
+	return labels
+}
+
+// pendingQuestion is the AskUserQuestion call nothing has answered yet, if
+// the conversation ends on one: the menu the session is sitting on.
+func pendingQuestion(events []transcript.Event) (transcript.ToolUse, bool) {
+	answered := map[string]bool{}
+	for _, ev := range events {
+		for _, res := range ev.ToolResults {
+			answered[res.ToolUseID] = true
+		}
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.IsSidechain {
+			continue
+		}
+		for _, use := range ev.ToolUses {
+			if use.Name == "AskUserQuestion" && !answered[use.ID] {
+				return use, true
+			}
+		}
+	}
+	return transcript.ToolUse{}, false
+}
+
 // inputField pulls one string field out of a raw tool input object.
 func inputField(input json.RawMessage, key string) string {
 	if len(input) == 0 {

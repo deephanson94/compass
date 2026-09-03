@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -181,7 +182,7 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 		}
 	}
 	// A panel, not a takeover: the deck is still there around it.
-	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 types and sends") {
+	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–4 sends · t types a line") {
 		t.Errorf("the deck should stay under the panel, and the footer name the keys:\n%s", view)
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
@@ -708,5 +709,110 @@ func TestThePanelsCutIsMarkedAndAChapterNoteKeepsItsKey(t *testing.T) {
 	m.note = "no waypoints · reader at the present"
 	if foot := m.footerLine(98); !strings.Contains(foot, "space unfold") {
 		t.Errorf("another note should keep the reader's own key: %q", foot)
+	}
+}
+
+// ---- round twelve: typed replies, answers, stop
+
+// A session sitting on a question offers its own options first, as the
+// CLI's digits; a typed line goes as typed; stop is escape. Every send
+// leaves a trace on the board until the transcript shows the prompt landed.
+func TestRepliesAnswerTypeAndStop(t *testing.T) {
+	forceASCII(t)
+	build := func() (*Model, *recordingTmux) {
+		m := followModel(152, 40)
+		rec := &recordingTmux{}
+		m.runner = rec
+		return m, rec
+	}
+	asking := func(m *Model) {
+		for i := range m.sessions {
+			if m.sessions[i].Info.Key() == sessionKey("s-api") {
+				m.sessions[i].Snap = state.Snapshot{State: state.NeedsYou, Since: fixtureBase.Add(30 * time.Minute), Activity: "Narrow or wide? [narrow / wide]"}
+			}
+		}
+		m.SetEvents([]transcript.Event{
+			{Type: transcript.EventAssistant, Timestamp: fixtureBase.Add(30 * time.Minute),
+				ToolUses: []transcript.ToolUse{{ID: "q", Name: "AskUserQuestion", Input: json.RawMessage(`{"questions":[{"question":"Narrow or wide?","options":[{"label":"narrow"},{"label":"wide"}]}]}`)}}},
+		})
+	}
+	calls := func(rec *recordingTmux) []string {
+		var out []string
+		for _, c := range rec.calls {
+			out = append(out, strings.Join(c, " "))
+		}
+		return out
+	}
+
+	// Answers first, as digits.
+	m, rec := build()
+	asking(m)
+	press(m, "r")
+	view := m.View()
+	for _, want := range []string{"1  narrow", "2  wide", "3  please continue", "6  stop", "t  type a line"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the panel should offer %q:\n%s", want, view)
+		}
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	m.Update(cmd())
+	if got := calls(rec); len(got) != 2 || got[0] != "send-keys -t %5 -l 2" || got[1] != "send-keys -t %5 Enter" {
+		t.Errorf("an answer should be the menu's own digit, then enter: %v", got)
+	}
+	if sent, ok := m.sent[sessionKey("s-api")]; !ok || sent.text != "wide" {
+		t.Errorf("the send should be remembered by its label: %+v", m.sent)
+	}
+
+	// A typed line.
+	m, rec = build()
+	press(m, "r")
+	press(m, "t")
+	if !m.replyTyping || !strings.Contains(m.View(), "›") {
+		t.Fatalf("t should open a line to type: typing %v", m.replyTyping)
+	}
+	for _, r := range "rebase on main" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter should send the line")
+	}
+	m.Update(cmd())
+	if got := calls(rec); len(got) != 2 || got[0] != "send-keys -t %5 -l rebase on main" {
+		t.Errorf("the typed line should be sent as typed: %v", got)
+	}
+	if m.replying {
+		t.Error("the panel should close after sending")
+	}
+
+	// Stop.
+	m, rec = build()
+	press(m, "r")
+	n := len(m.replyChoices())
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(strconv.Itoa(n))})
+	m.Update(cmd())
+	if got := calls(rec); len(got) != 1 || got[0] != "send-keys -t %5 Escape" {
+		t.Errorf("stop should press escape and nothing else: %v", got)
+	}
+
+	// The trace on the board, until a prompt lands.
+	m, _ = build()
+	m.sent[sessionKey("s-api")] = sentReply{text: "please continue", at: m.now.Add(-2 * time.Minute)}
+	if m.trails == nil {
+		m.trails = map[string]journey.Trail{}
+	}
+	m.trails[sessionKey("s-api")] = m.trail
+	r, ok := m.boardRows()[sessionKey("s-api")]
+	if !ok {
+		t.Fatal("no board row for api")
+	}
+	if got := ansi.Strip(m.boardDelta(sessionKey("s-api"), m.sessions[r.sess], 60)); !strings.Contains(got, `↪ sent "please continue" · 2m ago`) {
+		t.Errorf("the board should carry the sent line: %q", got)
+	}
+	tr := m.trails[sessionKey("s-api")]
+	tr.Prompts = append(tr.Prompts, journey.Prompt{Text: "please continue", At: m.now.Add(-time.Minute)})
+	m.trails[sessionKey("s-api")] = tr
+	if got := ansi.Strip(m.boardDelta(sessionKey("s-api"), m.sessions[r.sess], 60)); strings.Contains(got, "↪ sent") {
+		t.Errorf("a prompt that landed clears the trace: %q", got)
 	}
 }

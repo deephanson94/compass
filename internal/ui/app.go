@@ -110,10 +110,35 @@ type attachDoneMsg struct {
 
 // replyDoneMsg says a quick reply was typed into a pane, or was not.
 type replyDoneMsg struct {
+	key    string // the session it went to
 	target string
 	text   string
 	err    error
 }
+
+// sentReply is the last line compass typed into a session, so the board
+// can say so until the transcript shows the session took it.
+type sentReply struct {
+	text string
+	at   time.Time
+}
+
+// replyChoice is one line the panel offers: an answer to the question the
+// session is sitting on, a stock line, or stop.
+type replyChoice struct {
+	label string // what the panel shows
+	text  string // what is typed, for a line
+	kind  replyKind
+	n     int // an answer's number in the CLI's own menu
+}
+
+type replyKind int
+
+const (
+	replyLine   replyKind = iota // typed and entered
+	replyAnswer                  // the menu's own digit, then enter
+	replyStop                    // escape: the CLI interrupts its turn
+)
 
 // DefaultReplies are the quick replies `r` offers when the config names
 // none: the three lines a person keeps typing into a fleet of sessions.
@@ -190,12 +215,15 @@ type Model struct {
 	restSelKey  string // the other view's selection, also a Key()
 	fleetScroll int
 
-	showHelp  bool
-	searching bool
-	replying  bool     // the quick replies are on the footer; a digit picks one
-	replies   []string // what `r` offers, in order
-	pulse     bool     // HEAD's breath is on its off-beat
-	readonly  bool
+	showHelp    bool
+	searching   bool
+	replying    bool                 // the reply panel is up; a digit picks a line
+	replyTyping bool                 // …and a line is being typed into it
+	replyDraft  string               // the line so far
+	replies     []string             // the stock lines `r` offers, in order
+	sent        map[string]sentReply // the last line sent to each session, by Key()
+	pulse       bool                 // HEAD's breath is on its off-beat
+	readonly    bool
 
 	// The board's data: one trail per column, and each column's narrated
 	// labels. The selected session's trail is here as well as in trail.
@@ -242,6 +270,7 @@ func New(mgr *fleet.Manager) *Model {
 		feeds:        newFeedStore(),
 		runner:       tmuxop.RealRunner{},
 		replies:      DefaultReplies,
+		sent:         map[string]sentReply{},
 		proc:         tmuxop.RealProc{},
 		now:          time.Now(),
 		level:        levelBoard,
@@ -602,6 +631,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.note = "could not send: " + firstLine(msg.err.Error())
 		} else {
 			m.note = fmt.Sprintf("sent to %s %s · %s", mirrorMark, msg.target, clip(`"`+msg.text+`"`, 40))
+			m.sent[msg.key] = sentReply{text: msg.text, at: m.now}
 		}
 		return m, nil
 	case attachDoneMsg:
@@ -655,7 +685,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// never sent by a key that meant something else.
 	if m.replying {
 		m.note = ""
-		return m, m.replyKey(key)
+		return m, m.replyKey(msg)
 	}
 
 	m.note = "" // a keypress answers the last note
@@ -1256,21 +1286,71 @@ func (m *Model) offerReplies() {
 		m.note = "no tmux pane for this session · nothing to reply to"
 		return
 	}
-	if len(m.replies) == 0 {
-		m.note = "no replies configured (reply = \"…\" in config.toml)"
-		return
+	m.replying, m.replyTyping, m.replyDraft = true, false, ""
+}
+
+// replyChoices is what the panel offers for the selected session: the
+// options of the question it is sitting on, as the CLI's own digits; the
+// stock lines; and stop. Nine at most — the digits are the keys.
+func (m *Model) replyChoices() []replyChoice {
+	var out []replyChoice
+	if s, ok := m.selected(); ok && s.Snap.State == state.NeedsYou {
+		if use, ok := pendingQuestion(m.events); ok {
+			for i, label := range askedOptions(use.Input) {
+				out = append(out, replyChoice{label: label, kind: replyAnswer, n: i + 1})
+			}
+		}
 	}
-	m.replying = true
+	for _, r := range m.replies {
+		out = append(out, replyChoice{label: r, text: r, kind: replyLine})
+	}
+	out = append(out, replyChoice{label: "stop — interrupt the turn (escape)", kind: replyStop})
+	if len(out) > 9 {
+		out = out[:9]
+	}
+	return out
 }
 
 // replyKey handles a key while the replies are up: a digit sends its line,
 // anything else closes the menu and sends nothing.
-func (m *Model) replyKey(key string) tea.Cmd {
+func (m *Model) replyKey(msg tea.KeyMsg) tea.Cmd {
+	key := msg.String()
+	if m.replyTyping {
+		// A line being typed: enter sends it, esc goes back to the menu,
+		// everything else is the line.
+		switch key {
+		case "enter":
+			text := strings.TrimSpace(m.replyDraft)
+			m.replying, m.replyTyping, m.replyDraft = false, false, ""
+			if text == "" {
+				return nil
+			}
+			return m.send(replyChoice{label: text, text: text, kind: replyLine})
+		case "esc":
+			m.replyTyping, m.replyDraft = false, ""
+		case "backspace":
+			if r := []rune(m.replyDraft); len(r) > 0 {
+				m.replyDraft = string(r[:len(r)-1])
+			}
+		case "ctrl+c":
+			return tea.Quit
+		default:
+			if msg.Type == tea.KeyRunes || key == " " {
+				m.replyDraft += string(msg.Runes)
+			}
+		}
+		return nil
+	}
+	if key == "t" {
+		m.replyTyping = true
+		return nil
+	}
 	m.replying = false
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
 		i := int(key[0] - '1')
-		if i < len(m.replies) {
-			return m.sendReply(m.replies[i])
+		choices := m.replyChoices()
+		if i < len(choices) {
+			return m.send(choices[i])
 		}
 		m.note = fmt.Sprintf("no reply %d", i+1)
 		return nil
@@ -1281,17 +1361,27 @@ func (m *Model) replyKey(key string) tea.Cmd {
 	return nil // q included: a menu is closed, not quit from
 }
 
-// sendReply types one line into the selected session's pane, off the render
-// loop, and reports what happened in the footer.
-func (m *Model) sendReply(text string) tea.Cmd {
+// send carries one choice to the selected session's pane, off the render
+// loop: a line is typed and entered; an answer is the menu's own digit,
+// then enter; stop is escape.
+func (m *Model) send(c replyChoice) tea.Cmd {
 	pane, ok := m.selectedPane()
 	if !ok {
 		m.note = "no tmux pane for this session · nothing to reply to"
 		return nil
 	}
-	runner, target := m.runner, pane.Target
+	runner, target, key := m.runner, pane.Target, m.selectedKey
 	return func() tea.Msg {
-		return replyDoneMsg{target: target, text: text, err: tmuxop.SendKeys(runner, pane.ID, text)}
+		var err error
+		switch c.kind {
+		case replyAnswer:
+			err = tmuxop.SendKeys(runner, pane.ID, strconv.Itoa(c.n))
+		case replyStop:
+			err = tmuxop.SendKey(runner, pane.ID, "Escape")
+		default:
+			err = tmuxop.SendKeys(runner, pane.ID, c.text)
+		}
+		return replyDoneMsg{key: key, target: target, text: c.label, err: err}
 	}
 }
 
@@ -1694,16 +1784,36 @@ func (m *Model) replyPanel(inner int) []string {
 		}
 		rows = append(rows, readerLine{kind: readerBlank})
 	}
-	for i, r := range m.replies {
-		if i >= 9 {
-			break
+	choices := m.replyChoices()
+	lastKind := replyKind(-1)
+	for i, c := range choices {
+		if i > 0 && c.kind != lastKind {
+			rows = append(rows, readerLine{kind: readerBlank}) // answers, lines, stop: three groups
 		}
-		for _, line := range wrapPrefix(r, fmt.Sprintf("%d  ", i+1), "   ", body) {
-			rows = append(rows, readerLine{text: line, kind: readerText})
+		lastKind = c.kind
+		label := c.label
+		if c.kind == replyAnswer {
+			label += "   ← answers the question"
+			if i > 0 && choices[i-1].kind == replyAnswer {
+				label = c.label
+			}
+		}
+		kind := readerText
+		if c.kind == replyStop {
+			kind = readerFoldErr
+		}
+		for _, line := range wrapPrefix(label, fmt.Sprintf("%d  ", i+1), "   ", body) {
+			rows = append(rows, readerLine{text: line, kind: kind})
 		}
 	}
-	rows = append(rows, readerLine{kind: readerBlank},
-		readerLine{text: "a digit types the line and presses enter · esc closes", kind: readerBody})
+	rows = append(rows, readerLine{kind: readerBlank})
+	if m.replyTyping {
+		rows = append(rows, readerLine{text: "› " + m.replyDraft + "▏", kind: readerSaid},
+			readerLine{text: "enter sends the line · esc back to the menu", kind: readerBody})
+	} else {
+		rows = append(rows, readerLine{text: "t  type a line", kind: readerText},
+			readerLine{text: "a digit sends · esc closes", kind: readerBody})
+	}
 
 	box := func(s string, style lipgloss.Style) string {
 		return " " + ruleStyle.Render("│") + " " + style.Render(pad(clip(s, body), body)) + " " + ruleStyle.Render("│") + " "
@@ -1872,8 +1982,10 @@ func (m *Model) footerLine(w int) string {
 		keys = "? or esc closes help"
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
+	case m.replying && m.replyTyping:
+		keys = "type the line · enter sends · esc back"
 	case m.replying:
-		keys = fmt.Sprintf("reply: 1–%d types and sends · esc closes", min(len(m.replies), 9))
+		keys = fmt.Sprintf("reply: 1–%d sends · t types a line · esc closes", len(m.replyChoices()))
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab one trail · r reply · g grab · ? help · q quit"
 		if m.archiveView {
