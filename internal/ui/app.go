@@ -2233,7 +2233,7 @@ func (m *Model) View() string {
 	var body []string
 	switch {
 	case m.showHelp:
-		body = helpLinesFor(inner, bodyHeight, m.boardFits())
+		body = helpLinesFor(inner, bodyHeight, m.boardFits(), m.refusedKeys()...)
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -2810,7 +2810,7 @@ func (m *Model) footerLine(w int) string {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
 	if m.note == "" {
-		keys = shedKeys(keys, m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
+		keys = shedKeys(keys, m.shedOrder(false, false), func(k string) bool { return lipgloss.Width(k) <= w })
 		return dimStyle.Render(clip(keys, w))
 	}
 	var left string
@@ -2820,7 +2820,7 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := m.shedOrder(m.chapterNote())
+	drops := m.shedOrder(m.chapterNote(), true)
 	note := m.note
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
@@ -2924,6 +2924,17 @@ func (m *Model) footerLine(w int) string {
 // noteForms is a footer note at every length it can be shown, fullest
 // first: whole; a chapter note without its quote (the clock stays); then
 // each trailing clause shed in turn, down to the first.
+// refusedKeys are the keys this deck would refuse right now: the help does
+// not name them, and on a short body their rows go to the keys the footer
+// is offering instead.
+func (m *Model) refusedKeys() []string {
+	var refused []string
+	if m.liveCount() == 1 && !m.archiveView {
+		refused = append(refused, "g", "x") // nothing to grab, and hiding the only session is refused
+	}
+	return refused
+}
+
 // attachHint is the parenthetical the footer carries outside tmux: the
 // lowest-ranked fragment on the row (#31), beneath a key or a note.
 const attachHint = " (prefix d returns)"
@@ -2960,7 +2971,11 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 		}
 		gone[shed[i]] = false
 		if !fits(build()) {
+			// A key comes back only if every key ranked above it came
+			// back too: `a ask` returned to a reader row that could not
+			// fit `[ ] turns`, and the row offered the lesser key.
 			gone[shed[i]] = true
+			break
 		}
 	}
 	return build()
@@ -2982,31 +2997,55 @@ func (m *Model) chapterNote() bool {
 // which refuse on a fleet of one, on the list — deeper in, the person has
 // pressed it, and the chapter keys outlast it. A chapter note keeps the
 // chapter keys over everything; `? help` goes last of all.
-func (m *Model) shedOrder(chapter bool) []string {
-	order := []string{" (prefix d returns)", " · a ask", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · x hide", " · x unhide"}
-	// In the session view `enter` and `esc` are keys everyone knows: under
-	// a note they go before the note's own keys and before the help, which
-	// is the one row an 80-column deck finds the help from.
+func (m *Model) shedOrder(chapter, underNote bool) []string {
+	// First to go first. What every level shares — the attach hint, `a
+	// ask`, the between-sessions keys — goes before anything a level owns,
+	// and every level keeps its own keys longest: the chapter keys are the
+	// trail's and the reader's, not the list's, and `space unfold` is the
+	// reader's alone.
+	order := []string{attachHint, " · m live pane", " · h/l session"}
+	if !m.archiveView {
+		// In the archive `a` is the reason to be there — a claude on a
+		// session you can no longer attach to — so it keeps its place
+		// among the archive's own keys instead.
+		order = append(order, " · a ask")
+	}
 	session := []string{" · enter attach", " · enter · no pane", " · esc back", " · esc board"}
+	if underNote && m.level >= levelWaypoints {
+		// Under a note in the session view `enter` and `esc` follow the
+		// shared keys: everyone knows them, and the note is the news (#36).
+		order = append(order, session...)
+		session = nil
+	}
+	var own []string
 	switch {
-	case chapter:
-		order = append(order, " · tab deeper", " · r reply", " · space unfold")
-		order = append(order, session...)
-		order = append(order, " · [ ] chapters", " · [ ] turns")
+	case m.level >= levelReader:
+		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · space unfold", " · [ ] turns"}
 	case m.level >= levelWaypoints:
-		order = append(order, " · tab deeper", " · [ ] chapters", " · [ ] turns", " · r reply", " · space unfold")
-		order = append(order, session...)
+		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · tab deeper", " · tab reader", " · r reply", " · [ ] chapters"}
 	default:
-		// On the list `x unhide` is the archive's own key on a hidden row:
-		// it outlasts the way in.
-		order = append(order, " · [ ] chapters", " · [ ] turns", " · tab deeper", " · r reply", " · space unfold")
-		for i, frag := range order {
-			if frag == " · x unhide" {
+		// The board and the list: the chapters belong to a trail that is
+		// not open, and the way in outlasts the keys that act on a row.
+		own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · a ask", " · x unhide"}
+		if !m.archiveView {
+			own = own[:len(own)-2]
+			own = append(own, " · x unhide")
+		}
+	}
+	order = append(order, own...)
+	order = append(order, session...) // last of all where the note did not claim them
+	if chapter {
+		// A chapter key's note keeps the chapter keys over everything but
+		// the way out and the help (#24).
+		var keep []string
+		for i := 0; i < len(order); i++ {
+			if order[i] == " · [ ] chapters" || order[i] == " · [ ] turns" {
+				keep = append(keep, order[i])
 				order = append(order[:i], order[i+1:]...)
-				break
+				i--
 			}
 		}
-		order = append(order, " · x unhide")
+		order = append(order, keep...)
 	}
 	return append(order, " · ? help")
 }

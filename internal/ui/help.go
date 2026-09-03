@@ -49,8 +49,8 @@ func helpLines(w, h int) []string {
 	return helpLinesFor(w, h, true)
 }
 
-func helpLinesFor(w, h int, board bool) []string {
-	keys := helpKeyLinesFor(w, board)
+func helpLinesFor(w, h int, board bool, refused ...string) []string {
+	keys := helpKeyLinesFor(w, board, refused...)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
 	// Two columns at a width that holds them whole, or at any width past
@@ -67,11 +67,11 @@ func helpLinesFor(w, h int, board bool) []string {
 		right := w - left - gutterWidth
 		legend := helpLegendWrapped(right, true, h) // definitions wrap into the rows that are free
 		return joinColumns(h, []column{
-			{left, helpKeyLinesFor(left, board)},
+			{left, helpKeyLinesFor(left, board, refused...)},
 			{right, legend},
 		})
 	}
-	lines := helpKeyLinesFor(w, board)
+	lines := helpKeyLinesFor(w, board, refused...)
 	legend := helpLegendLines(w, false)
 	if !board {
 		// No board on this terminal: its legend line would describe a
@@ -126,7 +126,9 @@ func helpLinesFor(w, h int, board bool) []string {
 		for _, l := range lines {
 			plain := ansi.Strip(l)
 			keep := strings.Contains(l, "fleet:") || strings.Contains(l, "trail:  ") || strings.Contains(l, "you were here") || strings.Contains(l, "scout")
-			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "x ", "r ", "space"} {
+			// The keys the deck's own footers offer at this width outrank
+			// the rest: `[ ]` and `a` were cut while `g` and `x` stood.
+			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "[ ]", "a ", "r ", "space"} {
 				keep = keep || strings.HasPrefix(plain, k)
 			}
 			if keep {
@@ -235,13 +237,30 @@ func helpKeyLines(w int) []string {
 	return helpKeyLinesFor(w, true)
 }
 
+// refuses says whether the deck would refuse this key right now — a key it
+// refuses is not a key on this terminal, and on a body too short for every
+// row it is the first to go: a newcomer on a fleet of one read "g grab" and
+// "x hide" in the help and got a refusal from both, while `[ ]` and `a`,
+// which the deck's own footer offered, were cut for the room.
+func refuses(refused []string, key string) bool {
+	for _, r := range refused {
+		if r == key {
+			return true
+		}
+	}
+	return false
+}
+
 // helpKeyLinesFor is the key list for a terminal with or without a board:
 // on one too narrow for it, "zoom in: board → trail" describes a level the
 // person cannot reach.
-func helpKeyLinesFor(w int, board bool) []string {
+func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
 		key, what := k[0], k[1]
+		if refuses(refused, key) {
+			continue // the deck refuses it: naming it here promises nothing
+		}
 		if !board {
 			switch key {
 			case "j / k":

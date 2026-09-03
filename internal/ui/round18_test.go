@@ -30,8 +30,8 @@ func TestTheKeysComeBackWhenTheNoteSheds(t *testing.T) {
 	m := sceneModel(sceneFewOngoing(), 80, 24)
 	m.note = `↪ sent "please continue" · to ⌁ ops:0.0`
 	foot := ansi.Strip(m.footerLine(78))
-	if strings.Contains(foot, "to ⌁") || !strings.Contains(foot, "r reply") || !strings.Contains(foot, `"please continue"`) || !strings.Contains(foot, "? help") {
-		t.Errorf("the reply key should come back once the destination is shed: %q", foot)
+	if !strings.Contains(foot, "to ⌁ ops:0.0") || !strings.Contains(foot, `"please continue"`) || !strings.Contains(foot, "? help") {
+		t.Errorf("the destination outlasts the optional keys: %q", foot)
 	}
 	m.note = "billing stays · dead on the API"
 	if foot := ansi.Strip(m.footerLine(78)); !strings.Contains(foot, "? help") || !strings.Contains(foot, "dead on the API") {

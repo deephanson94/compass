@@ -145,8 +145,8 @@ func TestTheTraceKeepsItsDestinationOverTheOptionalKeys(t *testing.T) {
 	}
 	m.note = `↪ sent "please continue" · to ⌁ ops:0.0`
 	typed := ansi.Strip(m.footerLine(78))
-	if strings.Contains(typed, "to ⌁") || !strings.Contains(typed, "? help") || !strings.Contains(typed, `"please continue"`) {
-		t.Errorf("at 80 a typed line's destination yields to the help: %q", typed)
+	if !strings.Contains(typed, "to ⌁ ops:0.0") || !strings.Contains(typed, "? help") || !strings.Contains(typed, `"please continue"`) {
+		t.Errorf("at 80 the destination should outlast every optional key: %q", typed)
 	}
 	m.note = "2 harness hidden · A, then x · ⌁ harness:1.0"
 	hide := ansi.Strip(m.footerLine(78))

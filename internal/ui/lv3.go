@@ -113,6 +113,9 @@ func (m *Model) readerTop(doc []readerLine) int {
 	for top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
 		top--
 	}
+	for top > 0 && doc[top].kind == readerBlank {
+		top-- // a landing, like a step, opens on a line and not on air
+	}
 	return top
 }
 

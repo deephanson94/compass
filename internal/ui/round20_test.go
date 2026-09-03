@@ -128,3 +128,42 @@ func TestTheAboveRowKeepsItsTurnCount(t *testing.T) {
 		}
 	}
 }
+
+// Every level keeps its own keys longest, and under a note the keys
+// everyone knows go first: the reader offered `a ask` on a row that could
+// not fit `[ ] turns`, and a list named the chapters of a trail it had
+// not opened.
+func TestEachLevelKeepsItsOwnKeysLongest(t *testing.T) {
+	m := sceneModel(sceneVeryLong(), 80, 24)
+	pressKey(m, "tab")
+	pressKey(m, "tab")
+	m.note = "no later turn"
+	if foot := ansi.Strip(m.footerLine(78)); !strings.Contains(foot, "[ ] turns") || strings.Contains(foot, "a ask") {
+		t.Errorf("the reader's row: %q", foot)
+	}
+	list := groupedModel(80, 24)
+	if foot := ansi.Strip(strings.Split(list.View(), "\n")[23]); strings.Contains(foot, "[ ] chapters") {
+		t.Errorf("the list names a trail's keys: %q", foot)
+	}
+	if foot := ansi.Strip(strings.Split(groupedModel(120, 34).View(), "\n")[33]); !strings.Contains(foot, "? help") {
+		t.Errorf("the board's row lost its help: %q", foot)
+	}
+}
+
+// The 80-column help names the keys the deck offers and not the ones it
+// refuses: a newcomer on a fleet of one read `g grab` and `x hide` there
+// and got a refusal from both.
+func TestTheNarrowHelpNamesWhatTheDeckOffers(t *testing.T) {
+	one := sceneModel(sceneFirstSession(), 80, 24)
+	help := strings.Join(helpLinesFor(78, 19, one.boardFits(), one.refusedKeys()...), "\n")
+	for _, want := range []string{"[ ]", "a  ", "previous / next prompt", "ask: a claude"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the 80 help lacks %q:\n%s", want, help)
+		}
+	}
+	for _, gone := range []string{"grab the session waiting longest", "hide a session"} {
+		if strings.Contains(help, gone) {
+			t.Errorf("the 80 help names a key the deck refuses: %q", gone)
+		}
+	}
+}
