@@ -2817,6 +2817,13 @@ func (m *Model) keymap() string {
 	if m.showMirror {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
+	if s, ok := m.selected(); ok && !m.archiveView {
+		if pane, has := m.panes[s.Info.Key()]; !has || pane.Target == "" {
+			// `r` types into a pane, like `enter` attaches to one: a row
+			// that says "no pane" does not offer the other write either.
+			keys = strings.Replace(keys, " · r reply", "", 1)
+		}
+	}
 	return keys
 }
 
@@ -3063,6 +3070,18 @@ func (m *Model) shedOrder(chapter bool) []string {
 		}
 	}
 	order = append(order, own...)
+	// The way out is the last key to go before the help — but a chapter
+	// note's own keys go after it (#24): the row refusing `]` must carry
+	// `[ ] chapters`, and every other row must carry the way out.
+	var out []string
+	for i := 0; i < len(order); i++ {
+		if order[i] == " · esc back" || order[i] == " · esc board" {
+			out = append(out, order[i])
+			order = append(order[:i], order[i+1:]...)
+			i--
+		}
+	}
+	order = append(order, out...)
 	if chapter {
 		// A chapter key's note keeps the chapter keys over everything but
 		// the way out and the help (#24).
@@ -3074,20 +3093,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 				i--
 			}
 		}
+		// Past the level's own last key: under a note a chapter key put
+		// there, the row keeps the key the note is about (#24). Elsewhere
+		// the level's own rank stands.
 		order = append(order, keep...)
 	}
-	// The way out is the last key to go before the help: a reader row that
-	// kept the key it had just refused and shed `esc back` left the one
-	// width where the reader is the whole screen with no exit but `q`.
-	var out []string
-	for i := 0; i < len(order); i++ {
-		if order[i] == " · esc back" || order[i] == " · esc board" {
-			out = append(out, order[i])
-			order = append(order[:i], order[i+1:]...)
-			i--
-		}
-	}
-	order = append(order, out...)
 	return append(order, " · ? help")
 }
 

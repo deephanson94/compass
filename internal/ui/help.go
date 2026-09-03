@@ -158,11 +158,12 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		for _, key := range []string{"A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space"} {
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space")
+		for _, key := range order {
 			if len(lines) <= h {
 				break
 			}
-			if helpOffered(key, o.keymap) {
+			if !refuses(o.refused, key) && helpOffered(key, o.keymap) {
 				continue
 			}
 			for i, l := range lines {
@@ -326,9 +327,10 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
 		key, what := k[0], k[1]
-		if refuses(refused, key) {
-			continue // the deck refuses it: naming it here promises nothing
-		}
+		// A key the deck would refuse still has a row where there is room:
+		// it refuses in words ("nothing archived yet", "the only session
+		// stays"), and those words name a thing the help is the only
+		// place to look up. It is the first row cut when there is not.
 		if !board {
 			switch key {
 			case "tab":
@@ -344,7 +346,7 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 				// Paired rows below the board's width: eighteen keys do
 				// not fit fourteen rows, and a key with no row is a key
 				// the person cannot learn.
-				what = "move down / up (↓ ↑ too) · ctrl+d/u a page · G the newest"
+				what = "move down / up (↓ ↑ too) · ctrl+d/u half a page · G newest"
 			case "ctrl+d/u":
 				what = ""
 			case "G":
@@ -358,7 +360,9 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 			case "q":
 				what = ""
 			case "m":
-				what = "" // the mirror needs the board's width
+				// The deck answers `m` here with a refusal, and the word
+				// "mirror" is nowhere else on a narrow screen.
+				what = "the live pane beside the trail — needs 110 columns"
 			}
 		}
 		if what == "" {

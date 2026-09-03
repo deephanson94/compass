@@ -21,4 +21,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────
- j/k move · enter · no pane · tab deeper · r reply · x hide · ? help · q quit
+ j/k move · enter · no pane · tab deeper · x hide · g grab · ? help · q quit

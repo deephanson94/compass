@@ -27,4 +27,4 @@
                                                        │ moment39 both refresh tests pass now; rerunning the whole auth
                                                        │ suite to be sure nothing else moved
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k legs · [ ] chapters · r reply · a ask · tab reader · enter · no pane · esc board · ? help · q quit   the live pane
+ j/k legs · [ ] chapters · a ask · tab reader · enter · no pane · esc board · ? help · q quit             the live pane

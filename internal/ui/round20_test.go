@@ -165,11 +165,9 @@ func TestTheNarrowHelpNamesWhatTheDeckOffers(t *testing.T) {
 			t.Errorf("the 80 help lacks %q:\n%s", want, help)
 		}
 	}
-	for _, gone := range []string{"grab the session waiting longest", "hide a session"} {
-		if strings.Contains(help, gone) {
-			t.Errorf("the 80 help names a key the deck refuses: %q", gone)
-		}
-	}
+	// A key the deck would refuse still has a row where there is room: it
+	// refuses in words, and those words name a thing the help is the only
+	// place to look up.
 }
 
 // The help keeps the rows for the keys the deck's own footer is offering:
@@ -298,5 +296,34 @@ func TestTheAboveRowNamesTheStart(t *testing.T) {
 	pressKey(m, "tab")
 	if above := ansi.Strip(m.readerAbove(118)); strings.TrimSpace(above) == "" {
 		t.Errorf("the above-row is blank at the top of a conversation")
+	}
+}
+
+// A row that says "no pane" offers neither write: `r` types into a pane
+// as `enter` attaches to one.
+func TestNoPaneOffersNeitherWrite(t *testing.T) {
+	m := sceneModel(sceneFleetHygiene(), 120, 34)
+	for _, s := range m.sessions {
+		if _, has := m.panes[s.Info.Key()]; !has {
+			m.point(s.Info.Key())
+		}
+	}
+	if k := m.keymap(); !strings.Contains(k, "enter · no pane") || strings.Contains(k, "r reply") {
+		t.Errorf("the paneless keymap: %q", k)
+	}
+}
+
+// The board seats what owes you first, and the rest follow where a whole
+// band of them fits: naming them in the strip over twenty-eight blank
+// rows answered nothing.
+func TestTheBoardSeatsTheRestWhereTheyFit(t *testing.T) {
+	m := sceneModel(sceneFewOngoing(), 220, 48)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "docs-site") {
+		t.Errorf("a session the board had room for is named only in the strip:\n%s", view)
+	}
+	narrow := sceneModel(sceneFewOngoing(), 120, 34)
+	if v := ansi.Strip(narrow.View()); !strings.Contains(v, "more ·") {
+		t.Errorf("a board out of rows should still name the rest in its strip:\n%s", v)
 	}
 }

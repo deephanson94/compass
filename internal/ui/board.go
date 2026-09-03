@@ -264,12 +264,37 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	order := m.viewOrder()
 	var bands [][]string
 	rem := body
-	all := m.boardKeys(len(order))
-	for pos := 0; pos < len(all) && rem >= boardBandMin; pos += n {
+	owed := m.boardKeys(len(order))
+	// What owes you gets a column first. The shipped-and-read follow only
+	// where a whole band of them fits in the rows that are left: naming
+	// them in the strip over twenty-eight blank rows answered nothing,
+	// and the wider the terminal the more it hid.
+	all := append([]string(nil), owed...)
+	if !m.archiveView {
+		seen := map[string]bool{}
+		for _, k := range owed {
+			seen[k] = true
+		}
+		for _, i := range order {
+			if k := m.sessions[i].Info.Key(); !seen[k] {
+				all = append(all, k)
+			}
+		}
+	}
+	for pos := 0; pos < len(all); pos += n {
 		band := all[pos:min(pos+n, len(all))]
 		tallest := 0
 		for _, key := range band {
 			tallest = max(tallest, m.boardColumnRows(key, cw))
+		}
+		// A band is measured against its own trails, not against the
+		// tallest band on the board: a band of short trails was named in
+		// the strip over twenty-eight blank rows, and the wider the
+		// terminal the more it hid. What is left has to hold either a
+		// band worth reading, or this band whole.
+		whole := pos < len(owed) // a band of owed columns may be cut short; the rest may not
+		if (rem < boardBandMin && (tallest > rem || rem < boardBandFloor)) || (!whole && tallest > rem) {
+			break
 		}
 		bh := min(tallest, rem) // as tall as its tallest trail, never padded to the minimum
 		bands = append(bands, band)
@@ -280,9 +305,9 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	for _, band := range bands {
 		shown += len(band)
 	}
-	// The selected column is always drawn: boardKeys puts it among the
-	// first shown, so pack once more over that order.
-	keys = m.boardKeys(shown)
+	// The selected column is always drawn: the owed keys put it among the
+	// first shown, and the bands were packed over this very order.
+	keys = all[:min(shown, len(all))]
 	// A band is as tall as its tallest trail, one band or three: the
 	// strip follows it, rather than thirty rows of bare rail.
 	return keys, heights
@@ -366,6 +391,10 @@ func (m *Model) drawnCount(order []int) int {
 // boardBandMin is the least height a band of columns is worth: the header's
 // three rows and enough trail to read.
 const boardBandMin = 10
+
+// boardBandFloor is the least height a band of short trails needs to be
+// worth drawing whole: its two header rows, the tag's row, and a leg.
+const boardBandFloor = 5
 
 // boardColumnRows is how many rows a column would take to show its whole
 // trail: the header and the document.
