@@ -3,8 +3,11 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/deephanson94/compass/internal/state"
 )
 
 // Round twenty of the operator review.
@@ -325,5 +328,37 @@ func TestTheBoardSeatsTheRestWhereTheyFit(t *testing.T) {
 	narrow := sceneModel(sceneFewOngoing(), 120, 34)
 	if v := ansi.Strip(narrow.View()); !strings.Contains(v, "more ·") {
 		t.Errorf("a board out of rows should still name the rest in its strip:\n%s", v)
+	}
+}
+
+// The row's movement key gives way before the way out and before the keys
+// a note is about: a footer kept `j/k rows` and shed `esc back`, leaving
+// `q quit` as the only named exit.
+func TestTheMovementKeyGivesWayBeforeTheExit(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 80, 24)
+	pressKey(m, "tab")
+	m.note = "no later prompt · G is the present"
+	foot := ansi.Strip(m.footerLine(78))
+	if !strings.Contains(foot, "esc back") || !strings.Contains(foot, "[ ] chapters") {
+		t.Errorf("the way out and the note's own key: %q", foot)
+	}
+}
+
+// The open wait counts up to the point you were plainly away: dropping it
+// whole past that made a session waiting four hours report less than one
+// waiting two.
+func TestTheOpenWaitCountsToTheAwayMark(t *testing.T) {
+	sc := sceneManyIdle()
+	for _, s := range sc.sessions {
+		if !s.Live || s.Snap.State != state.Idle {
+			continue
+		}
+		tr := sc.trails[s.Info.Key()]
+		near := youWaited(tr, s.Info.LastEventAt.Add(2*time.Hour), s)
+		far := youWaited(tr, s.Info.LastEventAt.Add(8*time.Hour), s)
+		if far < near {
+			t.Errorf("%s: a longer wait reports less (%s against %s)", sessionName(s.Info), far, near)
+		}
+		return
 	}
 }

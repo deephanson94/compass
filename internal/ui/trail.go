@@ -1890,8 +1890,12 @@ func promptWaits(tr journey.Trail) time.Duration {
 func youWaited(tr journey.Trail, now time.Time, s fleet.Session) time.Duration {
 	total := promptWaits(tr)
 	if s.Live && (s.Snap.State == state.Idle || s.Snap.State == state.NeedsYou) && !s.Info.LastEventAt.IsZero() {
-		if d := now.Sub(s.Info.LastEventAt); d > 0 && d <= waitAway {
-			total += d
+		// The open wait counts up to the point you were plainly away:
+		// dropping it whole past that made a session waiting four hours
+		// report less than one waiting two, on the row whose whole job is
+		// to say which session your own turns are the bottleneck of.
+		if d := now.Sub(s.Info.LastEventAt); d > 0 {
+			total += min(d, waitAway)
 		}
 	}
 	return total

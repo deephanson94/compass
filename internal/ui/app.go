@@ -3070,6 +3070,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 		}
 	}
 	order = append(order, own...)
+	// The row's movement key gives way before the way out and before the
+	// keys a note is about: the arrows move too, and a footer that kept
+	// `j/k rows` and shed `esc back` left `q quit` as the only named exit.
+	order = append(order, "j/k move · ", "j/k rows · ", "j/k legs · ", "j/k scroll · ")
 	// The way out is the last key to go before the help — but a chapter
 	// note's own keys go after it (#24): the row refusing `]` must carry
 	// `[ ] chapters`, and every other row must carry the way out.
