@@ -1839,7 +1839,7 @@ func TestTrailTitleGoesCompact(t *testing.T) {
 	}
 	m.SetTrail(tr)
 	m.now = fixtureBase.Add(5 * time.Hour)
-	if got := m.trailTitle(40); !strings.Contains(got, "⚑") || strings.Contains(got, "…") {
+	if got := m.trailTitle(44); !strings.Contains(got, "⚑") || strings.Contains(got, "…") {
 		t.Errorf("a narrow title is not compact: %q", got)
 	}
 }

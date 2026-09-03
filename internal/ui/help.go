@@ -22,7 +22,7 @@ var helpKeys = [][2]string{
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
-	{"r", "reply: the question's options, stock lines, a typed line, stop; a dead session's remedy"},
+	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
@@ -34,7 +34,10 @@ var helpKeys = [][2]string{
 
 // helpTwoCol is the width at which the overlay splits: below it the keys would
 // be clipped to nonsense, so the legend goes compact instead.
-const helpTwoCol = 104
+const helpTwoCol = 150
+
+// helpSplitMin is the width below which two columns are never worth it.
+const helpSplitMin = 104
 
 // helpLines renders the help overlay in place of the deck body: same margins,
 // same alignment, nothing new to learn.
@@ -50,7 +53,11 @@ func helpLinesFor(w, h int, board bool) []string {
 	keys := helpKeyLinesFor(w, board)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
-	if w >= helpTwoCol && h >= len(keys) {
+	// Two columns at a width that holds them whole, or at any width past
+	// the split where one column would have to cut the keys: a 120x34
+	// split clipped both halves, a 120x22 single column had no legend.
+	oneColumn := len(keys) + 1 + len(helpLegendCore(helpLegendLines(w, false)))
+	if (w >= helpTwoCol || (w >= helpSplitMin && h < oneColumn)) && h >= len(keys) {
 		// The split follows the keys' longest line, not a fraction of the
 		// width: a fixed half pads one column while it clips the other.
 		left := helpKeysWidth(board)
@@ -105,7 +112,7 @@ func helpLinesFor(w, h int, board bool) []string {
 		for _, l := range lines {
 			plain := ansi.Strip(l)
 			keep := strings.Contains(l, "fleet:")
-			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "x ", "r "} {
+			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "x ", "r ", "space"} {
 				keep = keep || strings.HasPrefix(plain, k)
 			}
 			if keep {

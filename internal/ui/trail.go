@@ -193,18 +193,39 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 	// each draws exactly its slice, and the cursor's row is where
 	// TrailCursorRow says.)
 	rows := append([]string(nil), doc[top:end]...)
-	if len(rows) > 0 && top > 0 && isDetailRow(rows[0]) {
+	if len(rows) > 0 && top > 0 && (isDetailRow(rows[0]) || (o.Pinned && isLaneRow(rows[0]))) {
+		// A pinned column that opens on a lane opens on the lane's leg
+		// instead; a scrolled viewport keeps every row where it stands.
 		parent := top - 1
-		for parent > 0 && isDetailRow(doc[parent]) {
+		for parent > 0 && (isDetailRow(doc[parent]) || (o.Pinned && isLaneRow(doc[parent]))) {
 			parent--
 		}
-		rows[0] = dimStyle.Render(ansi.Strip(doc[parent]))
+		if isCursorRow(rows[0]) {
+			// The cursor's own row is never drawn over: the parent takes
+			// the top row and the child keeps the one beneath it, and the
+			// viewport gives up its last row instead.
+			rows = append([]string{dimStyle.Render(ansi.Strip(doc[parent]))}, rows[:len(rows)-1]...)
+		} else {
+			rows[0] = dimStyle.Render(ansi.Strip(doc[parent]))
+		}
 	}
 	return rows
 }
 
 // isDetailRow recognises a Lv2 child row by its hanger: "│  ├", "│  └" or
 // their unrailed forms under HEAD.
+// isLaneRow recognises a subagent lane's row: "├─◈ …", which hangs under a
+// leg the same way a detail row does.
+func isLaneRow(line string) bool {
+	return strings.HasPrefix(ansi.Strip(line), railFork)
+}
+
+// isCursorRow says whether the trail's cursor stands on this row.
+func isCursorRow(line string) bool {
+	r := []rune(ansi.Strip(line))
+	return len(r) > 1 && r[1] == '▸'
+}
+
 func isDetailRow(line string) bool {
 	plain := ansi.Strip(line)
 	if len([]rune(plain)) > 1 && []rune(plain)[1] == '▸' {
@@ -1887,8 +1908,14 @@ func (m *Model) trailTitle(w int) string {
 	switch {
 	case m.level >= levelReader:
 		level = "[reader]"
+		if m.boardFits() {
+			level = "" // the reader's bar carries the word on a deck with a board
+		}
 	case m.level >= levelWaypoints:
 		level = "[legs]"
+		if m.boardFits() {
+			level = "[session]" // the board's words, card or no card
+		}
 	}
 	// Scrolled off the present, the title says so: the trail is no longer
 	// showing the newest work, and `G` is the way back to it.

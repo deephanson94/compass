@@ -890,6 +890,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorMove(-m.trailHalfPage())
 			if m.cursor == was {
 				m.note = "at the start of the trail"
+				if len(TrailRows(m.trail, m.level)) <= 1 {
+					m.note = "the trail is one row"
+				}
 			}
 			return m, nil
 		case "G":
@@ -1354,7 +1357,7 @@ func (m *Model) zoomOut() {
 		// The reader goes back to following the cursor it left behind.
 		m.anchorReader()
 	case m.level > levelTrail:
-		if m.boardFits() && !m.archiveView && len(m.viewOrder()) == 1 {
+		if m.boardFits() && !m.archiveView && m.liveCount() == 1 {
 			m.note = "the only session · nothing to zoom out to"
 			return
 		}
@@ -1363,6 +1366,12 @@ func (m *Model) zoomOut() {
 		if m.boardFits() && !m.archiveView {
 			m.level = levelBoard        // the session view came from the board; back to it
 			m.commitLook(m.selectedKey) // closing the session is the look: the digest stops billing
+			if s, ok := m.selected(); ok && m.fleetQuery != "" && !m.matchesQuery(s) {
+				// A board the query would hide this session from: the
+				// query goes, since a board without the session that was
+				// just open answers "no session matches" beside its keys.
+				m.clearQuery()
+			}
 		}
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
@@ -1384,6 +1393,17 @@ func (m *Model) clearQuery() {
 	}
 	m.clampSelection()
 	m.note = "search cleared"
+}
+
+// liveCount is how many sessions are on the board, query or no query.
+func (m *Model) liveCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if m.onBoard(s) {
+			n++
+		}
+	}
+	return n
 }
 
 // commitLook records a look that is over: the session was read and closed,
@@ -1490,7 +1510,7 @@ func (m *Model) toggleHidden() {
 		m.note = "the archive is already off the board"
 		return
 	}
-	if len(m.viewOrder()) <= 1 && !m.archiveView {
+	if m.liveCount() <= 1 && !m.archiveView {
 		m.note = "the only session stays"
 		return
 	}
@@ -1532,15 +1552,15 @@ func (m *Model) toggleHidden() {
 	if d := m.digits[key]; d > 0 {
 		name = strconv.Itoa(d) + " " + name
 	}
+	m.note = name + " hidden · A, then x brings it back"
 	if m.sharesTmux(s) {
 		if pane, ok := m.panes[key]; ok {
-			name += " · " + mirrorMark + " " + pane.Target
+			m.note += " · " + mirrorMark + " " + pane.Target // the last clause, the first shed
 		}
 	}
-	m.note = name + " hidden · A, then x brings it back"
 	if !m.archiveView {
 		if order := drawn(); len(order) > 0 {
-			m.point(m.sessions[order[min(pos, len(order)-1)]].Info.Key())
+			m.pointQuiet(m.sessions[order[min(pos, len(order)-1)]].Info.Key())
 		}
 		m.clampSelection()
 	}
@@ -1663,7 +1683,7 @@ func (m *Model) offerReplies() {
 		return
 	}
 	if _, ok := m.selectedPane(); !ok {
-		m.note = "no tmux pane for this session · nothing to reply to"
+		m.note = "no pane · nothing to type into"
 		return
 	}
 	m.replying, m.replyTyping, m.replyDraft = true, false, ""
@@ -1912,6 +1932,20 @@ func (m *Model) toggleArchive() {
 	m.archiveView = !m.archiveView
 	m.selectedKey, m.restSelKey = m.restSelKey, m.selectedKey
 	m.fleetScroll = 0
+	if m.archiveView && m.hiddenCount() > 0 {
+		// Something is hidden: the archive opens on it — the note said
+		// "A, then x", and a remembered cursor on an old row beat the row
+		// the person came for.
+		if s, ok := m.selected(); !ok || !s.Live {
+			m.selectedKey = ""
+			for _, s := range m.sessions {
+				if s.Live && !m.onBoard(s) {
+					m.selectedKey = s.Info.Key()
+					break
+				}
+			}
+		}
+	}
 	if m.selectedKey != "" {
 		// A remembered key is a fresh selection for everything downstream.
 		key := m.selectedKey
@@ -1924,14 +1958,32 @@ func (m *Model) toggleArchive() {
 // point moves the selection. Trail and mirror belong to the session that was
 // selected, so they leave with it rather than lingering as somebody else's.
 func (m *Model) point(key string) {
+	m.pointAs(key, false)
+}
+
+// pointQuiet moves the selection without reading the session it lands on:
+// a hide or a search moved it, not the person.
+func (m *Model) pointQuiet(key string) {
+	m.pointAs(key, true)
+}
+
+func (m *Model) pointAs(key string, quiet bool) {
 	if key == m.selectedKey {
 		return
 	}
+	if old := m.selectedKey; old != "" && m.level >= levelTrail && !m.boardShown() {
+		// No board: the trail on screen was the old session's, and
+		// leaving it closes it — the look is over, and its digest was
+		// billing for legs the person had just read.
+		if _, opened := m.seen[old]; opened {
+			m.commitLook(old)
+		}
+	}
 	m.selectedKey = key
-	if m.level >= levelTrail && !m.boardShown() && !(m.searching && m.searchFleet) {
+	if m.level >= levelTrail && !m.boardShown() && !(m.searching && m.searchFleet) && !quiet {
 		// No board: selecting a session puts its trail on screen, which
 		// is opening it. "unread" never cleared at 100 columns. A search
-		// moving the selection is not a look.
+		// or a hide moving the selection is not a look.
 		m.markSeen(key)
 	}
 	// The board already holds this session's trail, plan and labels: use
@@ -2308,11 +2360,15 @@ func (m *Model) replyPanel(inner int) []string {
 		heads[replyLine] = "lines · start a turn — only once the quota is back"
 	}
 	if body < 44 {
-		// The narrow panel: the mechanism, in fewer words.
+		// The narrow panel: the mechanism, in fewer words — and on a
+		// dead session the warning, which is the head's whole point.
 		heads[replyAnswer] = "answers · the menu's digit"
-		heads[replyRemedy] = "remedy · typed and entered"
+		heads[replyRemedy] = "remedy · log in again"
 		heads[replyLine] = "lines · typed and entered"
 		heads[replyStop] = "stop · escape"
+		if ok && s.Snap.APIError {
+			heads[replyLine] = "lines · only once the quota is back"
+		}
 	}
 	if len(choices) > 0 && choices[0].kind == replyAnswer {
 		// Under a menu a typed line lands in the menu: said, so the
@@ -2341,10 +2397,25 @@ func (m *Model) replyPanel(inner int) []string {
 	rows = append(rows, readerLine{kind: readerBlank})
 	if m.replyTyping {
 		rows = append(rows, readerLine{text: "› " + m.replyDraft + "▏", kind: readerSaid},
-			readerLine{text: "enter sends the line · esc back to the menu", kind: readerBody})
+			readerLine{text: "enter sends · esc back to the menu", kind: readerBody})
 	} else {
-		rows = append(rows, readerLine{text: "t  type a line — entered the same way", kind: readerText},
+		typed := "t  type a line — entered the same way"
+		if ok && s.Snap.APIError {
+			typed = "t  type a line — a turn, too"
+		}
+		rows = append(rows, readerLine{text: typed, kind: readerText},
 			readerLine{text: "a digit acts · t types · esc closes", kind: readerBody})
+	}
+	if avail := m.height - 5; len(rows)+2 > avail {
+		// Too tall for the body: the rows of air go before the box loses
+		// its bottom.
+		kept := rows[:0]
+		for _, r := range rows {
+			if r.kind != readerBlank {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
 	}
 
 	box := func(s string, style lipgloss.Style) string {
@@ -2621,14 +2692,16 @@ func (m *Model) footerLine(w int) string {
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back"
 	}
-	if m.archiveView && m.hiddenCount() == 0 {
-		keys = strings.Replace(keys, " · x unhide", "", 1) // nothing to unhide: the key answers no question
+	if m.archiveView {
+		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
+			keys = strings.Replace(keys, " · x unhide", "", 1) // the cursor is not on a hidden row: the key answers no question
+		}
 	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
 	// The view's own keys go last: `x`, `/` and `r` were shed at the
 	// widths the walkthrough pressed them.
-	if len(m.viewOrder()) == 1 && !m.archiveView {
+	if m.liveCount() == 1 && !m.archiveView {
 		// One session: the keys that move between sessions answer no
 		// question, and "esc board" beside "nothing to zoom out to" was
 		// two answers.
@@ -2655,10 +2728,10 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · x hide", " · x unhide", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
+	drops := []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · x hide", " · x unhide", " · r reply", " · [ ] chapters", " · [ ] turns", " · space unfold", " · ? help"}
 	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
 		// A chapter note keeps the chapter keys over everything.
-		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · space unfold", " · [ ] chapters", " · [ ] turns"}
+		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns", " · ? help"}
 	}
 	for _, drop := range drops {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
@@ -2669,9 +2742,9 @@ func (m *Model) footerLine(w int) string {
 	left = dimStyle.Render(clip(keys, w))
 	room := w - lipgloss.Width(left) - 2
 	if room < 12 {
-		return dimStyle.Render(clip(m.note, w)) // no keymap fits beside it
+		return dimStyle.Render(shedClauses(m.note, w)) // no keymap fits beside it
 	}
-	note := dimStyle.Render(clip(m.note, room))
+	note := dimStyle.Render(shedClauses(m.note, room)) // clauses go whole: the way back before the pane
 	gap := w - lipgloss.Width(left) - lipgloss.Width(note)
 	return left + strings.Repeat(" ", gap) + note
 }
@@ -2684,7 +2757,7 @@ func (m *Model) footerLine(w int) string {
 // beside each session, and the parenthetical is what the footer owes an
 // 80-column deck instead.
 func (m *Model) enterKeymap() string {
-	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
+	if s, ok := m.selected(); ok && s.Live {
 		if pane, has := m.panes[s.Info.Key()]; !has || pane.Target == "" {
 			return "enter · no pane" // an attach that cannot work is not promised
 		}

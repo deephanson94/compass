@@ -231,12 +231,12 @@ func TestTheNarrowListTagsNamesakes(t *testing.T) {
 	}
 	m.point(sessionKey("s-webapp"))
 	press(m, "x")
-	if !strings.Contains(m.note, "webapp · ⌁ dev:2.1 hidden") {
-		t.Errorf("the hide note should name the pane: %q", m.note)
+	if !strings.Contains(m.note, "3 webapp hidden") || !strings.HasSuffix(m.note, "⌁ dev:2.1") {
+		t.Errorf("the hide note should name the digit, and the pane last: %q", m.note)
 	}
 	press(m, "A")
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "3 ● webapp") {
-		t.Errorf("the archive keeps the hidden session's digit:\n%s", view)
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "▸1 ● webapp") {
+		t.Errorf("the archive opens on the hidden row and numbers it as drawn:\n%s", view)
 	}
 }
 
@@ -260,10 +260,10 @@ func TestRoundFourteenHelpers(t *testing.T) {
 	if got := shedClauses("↑ 143 legs · 22h · 16⚑ 10✗ 2⟲ · on you 1h", 30); got != "↑ 143 legs · 22h · 16⚑ 10✗ 2⟲" {
 		t.Errorf("shedClauses = %q", got)
 	}
-	if got := compactOverlap("⚠ webapp and api both touched tokens.py in the last 20m"); got != "⚠ webapp, api · tokens.py · 20m" {
+	if got := compactOverlap("⚠ webapp and api both touched tokens.py in the last 20m"); got != "⚠ tokens.py · webapp, api · 20m" {
 		t.Errorf("compactOverlap = %q", got)
 	}
-	if got := compactOverlap("⚠ auth and etl are both failing test_logout"); got != "⚠ auth, etl · test_logout" {
+	if got := compactOverlap("⚠ auth and etl are both failing test_logout"); got != "⚠ test_logout · auth, etl" {
 		t.Errorf("compactOverlap = %q", got)
 	}
 	if !isDetailRow("│▸ └ ✗ test_logout · 10th failure") {

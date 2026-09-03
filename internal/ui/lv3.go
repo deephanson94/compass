@@ -133,8 +133,8 @@ func (m *Model) readerTitle(w int) string {
 	}
 	right := ""
 	switch {
-	case m.searching:
-		right = "/" + m.draft + "▏"
+	case m.searching && !m.searchFleet:
+		right = "/" + m.draft + "▏" // the fleet's query is the header's to echo, not the reader's
 	case m.query != "":
 		right = "/" + m.query
 	case m.anchor >= 0 && !m.anchorAt.IsZero():

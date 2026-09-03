@@ -271,7 +271,7 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 		for _, key := range band {
 			tallest = max(tallest, m.boardColumnRows(key, cw))
 		}
-		bh := min(max(tallest, boardBandMin), rem)
+		bh := min(tallest, rem) // as tall as its tallest trail, never padded to the minimum
 		bands = append(bands, band)
 		heights = append(heights, bh)
 		rem -= bh + 1 // and the row of air under it
@@ -388,11 +388,11 @@ func (m *Model) boardRows() map[string]fleetRow {
 	for pos, i := range m.viewOrder() {
 		num := 0
 		if m.archiveView {
+			// As drawn, hidden rows included: a digit is a key, and a
+			// hidden row wearing its fleet digit over a row numbered by
+			// position gave one digit two sessions.
 			if pos < 9 {
 				num = pos + 1
-			}
-			if m.sessions[i].Live {
-				num = m.digits[m.sessions[i].Info.Key()] // a hidden session keeps its digit here too
 			}
 		} else {
 			num = m.digits[m.sessions[i].Info.Key()]
@@ -584,9 +584,21 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	if len(rest) > 0 {
 		names := fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · "))
 		room := w - lipgloss.Width(tail) - 3
+		if room < 12 {
+			// The overlap sentence goes compact before a session loses
+			// its row on the screen: "+N more" is never shed.
+			for i, f := range fixed {
+				if strings.HasPrefix(f, "⚠") {
+					fixed[i] = compactOverlap(f)
+				}
+			}
+			tail = strings.Join(fixed, "   ")
+			room = w - lipgloss.Width(tail) - 3
+		}
 		if room >= 12 {
 			return dimStyle.Render(shedClauses(names, room)) + "   " + dimStyle.Render(tail)
 		}
+		return dimStyle.Render(clip(fmt.Sprintf("+%d more", len(rest))+"   "+tail, w))
 	}
 	return dimStyle.Render(clip(tail, w))
 }
@@ -1032,15 +1044,16 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 			shipped = ""
 		}
 		parts = append(parts, verdict)
-		if suffix != "" {
-			parts = append(parts, suffix)
-		}
 		if runs := repeatRuns(l); red && runs >= 2 {
 			// The same test red again: the loop is the column's news,
 			// and a board column has no room for the test's name.
 			// "· 3rd failure" — ten runes shorter than "same test 3rd
-			// failure", which is what a 35-column board column shed.
+			// failure", which is what a 35-column board column shed. It
+			// comes before the caveat: the count is what makes it a loop.
 			parts = append(parts, ordinal(runs)+" failure")
+		}
+		if suffix != "" {
+			parts = append(parts, suffix)
 		}
 		if greenSince != "" {
 			parts = append(parts, greenSince) // the subset that ran green, last to stay
@@ -1136,15 +1149,12 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		age := " · " + relAge(m.now, sent.at) + " ago"
 		quote := `"` + sent.text + `"`
 		room := w - len([]rune(verb)) - len([]rune(age))
-		switch {
-		case len([]rune(quote)) <= room:
+		if len([]rune(quote)) <= room {
 			return dimStyle.Render(verb + quote + age)
-		case room >= 8:
-			return dimStyle.Render(verb + clip(quote, room) + age)
-		case sent.answer > 0:
-			return dimStyle.Render(clip(strings.TrimSuffix(verb, " · ")+age, w))
 		}
-		return dimStyle.Render(clip(verb+clip(quote, w-len([]rune(verb))), w))
+		// Never cut inside the quotes: "office C…" is neither the answer
+		// nor absent. The digit, or the mark, and the clock are the trace.
+		return dimStyle.Render(clip(strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")+age, w))
 	}
 	seen, ok := m.seen[key]
 	if at, had := m.lastLook[key]; had && key == m.selectedKey {
@@ -1164,8 +1174,23 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		return ""
 	}
 	// "↳ 38 legs · 1 ship · 6 red, all test_x · looked 4h ago": the
-	// sentence a person back from lunch assembles by hand.
-	parts := []string{"↳ " + plural(legs, "new leg")}
+	// sentence a person back from lunch assembles by hand. The lanes
+	// come first when there are any: a delegator reads the digest for
+	// the agent that came back, and a narrow column shed that clause.
+	var parts []string
+	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
+		switch {
+		case out > 0 && back == 0:
+			parts = append(parts, fmt.Sprintf("↳ %d agents out, none back", out))
+		case out > 0:
+			parts = append(parts, fmt.Sprintf("↳ %d agents out · %d back", out, back))
+		default:
+			parts = append(parts, "↳ "+plural(back, "agent")+" back")
+		}
+		parts = append(parts, plural(legs, "new leg"))
+	} else {
+		parts = append(parts, "↳ "+plural(legs, "new leg"))
+	}
 	if ships > 0 {
 		parts = append(parts, plural(ships, "ship"))
 	}
@@ -1175,18 +1200,6 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 			clause += ", all " + same
 		}
 		parts = append(parts, clause)
-	}
-	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
-		// The lanes dispatched since: a lead that sent three agents and
-		// wrote one leg had a digest that said "1 new leg".
-		switch {
-		case out > 0 && back == 0:
-			parts = append(parts, fmt.Sprintf("%d agents out, none back", out))
-		case out > 0:
-			parts = append(parts, fmt.Sprintf("%d agents out · %d back", out, back))
-		default:
-			parts = append(parts, plural(back, "agent")+" back")
-		}
 	}
 	parts = append(parts, "looked "+state.ShortDuration(m.now.Sub(seen))+" ago")
 	return dimStyle.Render(joinFit(parts, w))

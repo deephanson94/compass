@@ -765,36 +765,38 @@ func sceneModel(sc scene, w, h int) *Model {
 	m.SetPanes(sc.panes)
 	m.SetPaneOrder(sc.order)
 	m.loaded = false // the refresh below is the first, as a launch has it
-	// The second live session was looked at partway through its trail —
-	// halfway, or eight legs from the end of a long one, so the read-line
-	// falls where a pinned column can show it: its column carries the
-	// read-line and the digest.
+	// Every live session with a trail worth it was looked at partway
+	// through — halfway, or eight legs from the end of a long one, so the
+	// read-line falls where a pinned column can show it: the columns carry
+	// the read-line and the digest, including the lead whose look lands
+	// beside a compaction.
 	m.seen = map[string]time.Time{}
-	live := 0
 	for _, s := range sc.sessions {
 		tr := sc.trails[s.Info.Key()]
 		if !s.Live || len(tr.Legs) <= 2 {
 			continue
 		}
-		if live++; live == 2 || live == 3 {
-			at := len(tr.Legs) / 2
-			if len(tr.Legs) > 24 {
-				at = len(tr.Legs) - 8
-			}
-			m.seen[s.Info.Key()] = tr.Legs[at].Start.Add(time.Second)
+		at := len(tr.Legs) / 2
+		if len(tr.Legs) > 24 {
+			at = len(tr.Legs) - 8
 		}
+		m.seen[s.Info.Key()] = tr.Legs[at].Start.Add(time.Second)
 	}
+	// Two polls, as a launch has them: the first is the baseline and the
+	// board — after it the trails are known and the board's first column
+	// is the launch's selection; the second installs that session's trail
+	// and events.
+	poll := func(first string) {
+		m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: first != "", trail: sc.trails[first],
+			events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails})
+	}
+	poll("")
 	first := ""
 	if order := m.viewOrder(); len(order) > 0 {
-		first = sc.sessions[order[0]].Info.Key() // the board's first column, as a launch selects
+		first = sc.sessions[order[0]].Info.Key()
 	}
 	m.point(first)
-	// Two polls, as a launch has them: the first is the baseline and the
-	// board; the second installs the selected session's trail and events.
-	for i := 0; i < 2; i++ {
-		m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: true,
-			trail: sc.trails[first], events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails})
-	}
+	poll(first)
 	return m
 }
 
@@ -819,7 +821,16 @@ func pressKey(m *Model, key string) {
 	case "esc":
 		m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	case "enter":
-		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd != nil {
+			// A typed line's send runs off the loop too: play its report
+			// in, or the one line a person composes leaves no trace.
+			if msg := cmd(); msg != nil {
+				if _, ok := msg.(replyDoneMsg); ok {
+					m.Update(msg)
+				}
+			}
+		}
 	case "ctrl+d":
 		m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	case "ctrl+u":
@@ -843,7 +854,7 @@ func pressKey(m *Model, key string) {
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "t", "go on", "enter", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
+var canonicalKeys = []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "j", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "t", "go on", "enter", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder
