@@ -2802,7 +2802,7 @@ func (m *Model) footerLine(w int) string {
 		// One session: the keys that move between sessions answer no
 		// question, and "esc board" beside "nothing to zoom out to" was
 		// two answers.
-		for _, drop := range []string{"h/l columns · ", " · h/l session", " · esc board", " · g grab"} {
+		for _, drop := range []string{"h/l columns · ", " · h/l session", " · esc board", " · g grab", " · x hide"} {
 			keys = strings.Replace(keys, drop, "", 1)
 		}
 	}

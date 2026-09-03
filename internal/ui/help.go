@@ -151,12 +151,19 @@ func helpLinesFor(w, h int, board bool) []string {
 		// The lanes' row did not survive: the trail's own row carries them
 		// in place of the bare "◈ subagent" — at 80 the board shows all
 		// three and the help defined none.
-		if !strings.Contains(strings.Join(lines, "\n"), "⋯ out") {
-			for i, l := range lines {
-				if strings.Contains(l, "trail:  ") {
-					if lanes := strings.Replace(ansi.Strip(l), "◈ subagent", "◈ ⋯ out · ✓ back · ⌀ back, empty", 1); ansi.StringWidth(lanes) <= w {
-						lines[i] = dimStyle.Render(lanes)
-					}
+		joined := strings.Join(lines, "\n")
+		for i, l := range lines {
+			plain := ansi.Strip(l)
+			switch {
+			case !strings.Contains(joined, "⋯ out") && strings.Contains(l, "trail:  "):
+				if lanes := strings.Replace(plain, "◈ subagent", "◈ ⋯ out · ✓ back · ⌀ back, empty", 1); ansi.StringWidth(lanes) <= w {
+					lines[i] = dimStyle.Render(lanes)
+				}
+			case !strings.Contains(joined, "⌁ ") && strings.Contains(l, "you were here"):
+				// Nor the tag's: the read-line's row carries it — the first
+				// row under FLEET on every 80-column frame.
+				if tag := plain + " · ⌁ its tmux pane"; ansi.StringWidth(tag) <= w {
+					lines[i] = dimStyle.Render(tag)
 				}
 			}
 		}

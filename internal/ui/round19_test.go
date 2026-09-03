@@ -104,3 +104,16 @@ func TestTheHundredColumnHelpDefinesTheTag(t *testing.T) {
 		t.Errorf("the 100x30 help lacks the tag's line:\n%s", help)
 	}
 }
+
+// A fleet of one offers no `x`: it refused when pressed. And the 80 help's
+// read-line row names the tag, the first row under FLEET on every frame.
+func TestAFleetOfOneOffersNoHideAndTheNarrowestHelpNamesTheTag(t *testing.T) {
+	one := sceneModel(sceneFirstSession(), 100, 30)
+	if foot := ansi.Strip(one.footerLine(98)); strings.Contains(foot, "x hide") || !strings.Contains(foot, "/ search") {
+		t.Errorf("a fleet of one: %q", foot)
+	}
+	help := strings.Join(helpLinesFor(78, 19, false), "\n")
+	if !strings.Contains(help, "⌁ its tmux pane") {
+		t.Errorf("the 80x24 help lacks the tag:\n%s", help)
+	}
+}
