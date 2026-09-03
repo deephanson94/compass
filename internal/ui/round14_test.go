@@ -214,9 +214,9 @@ func TestClosingTheSessionCommitsTheLook(t *testing.T) {
 func TestTheFooterShedsTheParentheticalFirst(t *testing.T) {
 	forceASCII(t)
 	m := groupedModel(80, 24)
-	m.note = "webapp hidden · A, then x brings it back"
+	m.note = "webapp hidden · A, then x"
 	foot := ansi.Strip(m.footerLine(76))
-	if strings.Contains(foot, "prefix d") || !strings.Contains(foot, "then x brings it back") {
+	if strings.Contains(foot, "prefix d") || !strings.Contains(foot, "A, then x") {
 		t.Errorf("the parenthetical should go before the note is cut: %q", foot)
 	}
 }

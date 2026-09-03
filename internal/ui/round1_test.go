@@ -2072,8 +2072,8 @@ func TestReaderFooterKeepsItsKeysBesideANote(t *testing.T) {
 	}
 	m.note = "no waypoints · reader at the present"
 	foot := m.footerLine(98)
-	if !strings.Contains(foot, "space unfold") || !strings.Contains(foot, "no waypoints") {
-		t.Errorf("the footer lost its keys to the note: %q", foot)
+	if !strings.Contains(foot, "? help") || !strings.Contains(foot, "no waypoints · reader at the present") {
+		t.Errorf("the footer lost its way out to the note: %q", foot)
 	}
 }
 

@@ -456,8 +456,8 @@ func TestHelpFitsAndKeepsItsKeys(t *testing.T) {
 		if tc.wantEveryKey && !strings.Contains(got, "quit") {
 			t.Errorf("%dx%d: the key list is incomplete:\n%s", tc.w, tc.h, got)
 		}
-		if tc.wantLegend && !strings.Contains(got, "scout") {
-			t.Errorf("%dx%d: the class legend is missing:\n%s", tc.w, tc.h, got)
+		if tc.wantLegend && !strings.Contains(got, "trail:") {
+			t.Errorf("%dx%d: the trail legend is missing:\n%s", tc.w, tc.h, got)
 		}
 		// A body too short for the keys must spend its width on them, not on a
 		// legend it has no room to finish.

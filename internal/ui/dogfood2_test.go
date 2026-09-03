@@ -718,8 +718,8 @@ func TestThePanelsCutIsMarkedAndAChapterNoteKeepsItsKey(t *testing.T) {
 		t.Errorf("a chapter note should keep the chapter key: %q", foot)
 	}
 	m.note = "no waypoints · reader at the present"
-	if foot := m.footerLine(98); !strings.Contains(foot, "space unfold") {
-		t.Errorf("another note should keep the reader's own key: %q", foot)
+	if foot := m.footerLine(98); !strings.Contains(foot, "? help") || !strings.Contains(foot, "reader at the present") {
+		t.Errorf("another note keeps its clauses and the help: %q", foot)
 	}
 }
 

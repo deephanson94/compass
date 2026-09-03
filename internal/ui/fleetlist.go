@@ -209,6 +209,9 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 		if next < 0 {
 			next = 0
 		}
+		if next > 0 && countEntries(lines[:next]) == 0 {
+			next = 0 // a fold over a header and its air alone is a fold of nothing
+		}
 		// Never open the column on a line of air: the air between two
 		// entries reads as a gap under the title. Losing it at the top costs
 		// nothing — the row it would have pushed out is a blank at the
@@ -280,7 +283,9 @@ func foldedHeader(lines []string, off int) string {
 	}
 	for i := off - 1; i >= 0; i-- {
 		if isHeaderLine(lines[i]) {
-			return strings.TrimSpace(ansi.Strip(lines[i]))
+			// The name alone: the header carries the group's echo glyph at
+			// its far edge, padded to the column.
+			return strings.TrimSpace(strings.SplitN(strings.TrimSpace(ansi.Strip(lines[i])), "  ", 2)[0])
 		}
 	}
 	return ""

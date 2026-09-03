@@ -288,8 +288,25 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 		}
 		return -1
 	}
+	// And where the person spoke: a result landing after their next turn
+	// is late too — drawn under "❯" it read as the prompt's reply.
+	var saidAt []int
+	for i, ev := range events {
+		if !ev.IsSidechain && ev.Type == transcript.EventUser && strings.TrimSpace(ev.Text) != "" {
+			saidAt = append(saidAt, i)
+		}
+	}
+	nextSaid := func(after int) int {
+		for _, s := range saidAt {
+			if s > after {
+				return s
+			}
+		}
+		return -1
+	}
 	calls := map[string]transcript.ToolUse{}
 	lastCall := ""
+	spoke := false // the person has taken a turn since the last call
 	for i, ev := range events {
 		if ev.IsSidechain {
 			continue
@@ -298,9 +315,10 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 		case transcript.EventUser:
 			if text := strings.TrimSpace(ev.Text); text != "" {
 				d.said(i, ev.Timestamp, text)
+				spoke = true
 			}
 			for _, res := range ev.ToolResults {
-				if res.ToolUseID != lastCall {
+				if res.ToolUseID != lastCall || spoke {
 					// A result that is not the last call's — a background
 					// agent's, back long after other calls, or the lead's
 					// own edit landing after an agent was dispatched — is
@@ -328,6 +346,7 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 			for _, use := range ev.ToolUses {
 				calls[use.ID] = use
 				lastCall = use.ID
+				spoke = false
 				d.call(i, ev.Timestamp, use, ev.CWD)
 				switch {
 				case !answered[use.ID]:
@@ -335,7 +354,7 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 					// nothing, and an agent still out looked exactly like
 					// one returned and folded.
 					d.pending(i, ev.Timestamp, use)
-				case nextCall(i) >= 0 && resultAt[use.ID] > nextCall(i):
+				case (nextCall(i) >= 0 && resultAt[use.ID] > nextCall(i)) || (nextSaid(i) >= 0 && resultAt[use.ID] >= nextSaid(i)):
 					// Answered, but only after other calls were made: the
 					// result is drawn where it landed, under "↩ result of",
 					// and the call site says so rather than looking hung.

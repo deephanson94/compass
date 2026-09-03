@@ -689,7 +689,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.answer > 0 {
 				verb = fmt.Sprintf("answered %d ·", msg.answer)
 			}
-			m.note = fmt.Sprintf("↪ %s %s · to %s %s", verb, clip(`"`+msg.text+`"`, 40), mirrorMark, msg.target)
+			m.note = fmt.Sprintf("↪ %s %s · to %s %s", verb, `"`+msg.text+`"`, mirrorMark, msg.target) // the footer clips the quote to its room
 			m.sent[msg.key] = sentReply{text: msg.text, at: m.now, answer: msg.answer}
 		}
 		return m, nil
@@ -827,7 +827,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.showMirror = !m.showMirror
 		switch {
+		case !m.showMirror && m.sessionView() && m.level == levelWaypoints:
+			m.note = "the conversation" // short: the panel's own title says the rest, and the keys stay
 		case !m.showMirror:
+		case m.sessionView() && m.level == levelWaypoints:
+			m.note = "the live pane"
 		case m.level == levelBoard:
 			m.note = "the mirror shows beside a session (tab)"
 		case m.sessionView() && m.level >= levelReader:
@@ -1129,6 +1133,9 @@ func (m *Model) chapter(key string) {
 		}
 		if target < 0 {
 			m.note = "no earlier prompt"
+			if len(TrailRows(m.trail, m.level)) <= 1 {
+				m.note = "the trail is one row"
+			}
 			return
 		}
 	}
@@ -1146,7 +1153,7 @@ func (m *Model) chapter(key string) {
 		m.trailScroll = clampScroll(line, len(doc), h)
 		m.trailPinned = m.trailScroll >= lastScreenful(len(doc), h)
 	}
-	m.note = fmt.Sprintf("◉ %d/%d · %s · %s", nth, len(prompts), clip(`"`+rows[target].Text+`"`, 40), rows[target].Time.Local().Format("15:04"))
+	m.note = fmt.Sprintf("◉ %d/%d · %s · %s", nth, len(prompts), `"`+rows[target].Text+`"`, rows[target].Time.Local().Format("15:04")) // the footer clips the quote to its room
 }
 
 // firstRowInView is the first selectable row at or below the trail
@@ -1539,7 +1546,7 @@ func (m *Model) toggleHidden() {
 	name := sessionName(s.Info)
 	switch {
 	case s.Snap.APIError:
-		m.note = name + " stays · it is dead on the API"
+		m.note = name + " stays · dead on the API" // short enough to stand whole beside the help at 80
 		return
 	case s.Snap.State == state.NeedsYou:
 		m.note = name + " stays · it is asking"
@@ -2248,14 +2255,14 @@ func (m *Model) View() string {
 		// of footer was too easy to miss, and the person pressing `r`
 		// expected something to pop up.
 		panel := m.replyPanel(inner)
-		left, top, cap := m.panelPlace(inner, panelWidth(panel), len(panel))
+		left, top, cap := m.panelPlace(inner, panelWidth(panel), len(panel), false)
 		if len(panel) > cap {
 			// The box would run into the head rows of the band below:
 			// its rows of air go first, and the tighter box is placed
 			// again — on its own band's trail rows when it now fits
 			// there, else wherever the rows are free.
 			panel = m.replyPanelN(inner, cap)
-			left, top, _ = m.panelPlace(inner, panelWidth(panel), len(panel))
+			left, top, _ = m.panelPlace(inner, panelWidth(panel), len(panel), true)
 		}
 		overlay(out[3:3+bodyHeight], panel, left, top)
 	}
@@ -2345,6 +2352,12 @@ const replyPanelMax = 64
 // the deck's text from running into the border.
 func (m *Model) replyPanel(inner int) []string {
 	return m.replyPanelN(inner, m.height-5)
+}
+
+// replyPanelAir says whether a panel ph rows tall still carries its rows of
+// air — that is, whether shedding them would make it shorter.
+func (m *Model) replyPanelAir(ph int) bool {
+	return len(m.replyPanelN(m.width-2*edgePad, 0)) < ph
 }
 
 // replyPanelN is the panel within avail rows: past that, its rows of air go
@@ -2537,7 +2550,7 @@ func (m *Model) replyState(s fleet.Session) string {
 // trail rows end, and a box over its name rows left a band with a verdict
 // and a trail and no session named. A panel taller than that is rebuilt
 // without its air and placed again.
-func (m *Model) panelPlace(inner, pw, ph int) (left, top, cap int) {
+func (m *Model) panelPlace(inner, pw, ph int, tight bool) (left, top, cap int) {
 	body := m.height - 5
 	if m.level == levelBoard && m.boardShown() {
 		if x, y, bh, last, ok := m.boardBandAt(inner); ok {
@@ -2560,13 +2573,18 @@ func (m *Model) panelPlace(inner, pw, ph int) (left, top, cap int) {
 			case top+ph <= next:
 				// On its own band's trail rows, the band below untouched.
 				return left, top, next - top
+			case m.replyPanelAir(ph) && !tight:
+				// Its rows of air would run into the band below: the
+				// caller sheds them and asks again, so the box stays by
+				// the row it is about.
+				return left, top, next - top
 			case next+3+ph <= body:
-				// Too tall for those: under the head rows of the band
-				// below, over that band's trail — every session on the
-				// board keeps its name.
+				// Too tall for those even tight: under the head rows of
+				// the band below, over that band's trail — every session
+				// on the board keeps its name.
 				return left, next + 3, body - (next + 3)
 			}
-			return left, top, next - top // the caller sheds the air and asks again
+			return left, top, next - top
 		}
 		return 0, 3, max(body-3, 0)
 	}
@@ -2734,7 +2752,7 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · x hide · g grab · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · / search · x hide · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
@@ -2765,11 +2783,11 @@ func (m *Model) footerLine(w int) string {
 	case m.level >= levelReader && m.sessionView():
 		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · enter attach · esc back · ? help · q quit"
 	case m.level >= levelReader:
-		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · enter attach · esc back"
+		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · enter attach · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
 		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back"
+		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back · ? help · q quit"
 	}
 	if m.archiveView {
 		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
@@ -2791,39 +2809,69 @@ func (m *Model) footerLine(w int) string {
 	if m.showMirror {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
-	for _, drop := range []string{" (prefix d returns)", " · a ask", " · tab deeper", " · m live pane", " · h/l session", " · g grab", " · [ ] chapters", " · [ ] turns", " · / search", " · r reply", " · x hide", " · x unhide"} {
-		if lipgloss.Width(keys) <= w {
-			break
-		}
-		keys = strings.Replace(keys, drop, "", 1)
-	}
-	left := dimStyle.Render(clip(keys, w))
 	if m.note == "" {
-		return left
+		// `n/N` goes before `/ search`: the walk keys without the search
+		// they walk were a wrong clause boundary.
+		for _, drop := range []string{" (prefix d returns)", " · a ask", " · tab deeper", " · m live pane", " · h/l session", " · g grab", " · [ ] chapters", " · [ ] turns", " · n/N", " · / search", " · r reply", " · x hide", " · x unhide"} {
+			if lipgloss.Width(keys) <= w {
+				break
+			}
+			keys = strings.Replace(keys, drop, "", 1)
+		}
+		return dimStyle.Render(clip(keys, w))
 	}
+	var left string
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
 	// clip the note before the keymap goes.
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · x hide", " · x unhide", " · r reply", " · [ ] chapters", " · [ ] turns", " · space unfold", " · ? help"}
+	drops := []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · [ ] chapters", " · [ ] turns", " · r reply", " · space unfold", " · ? help"}
 	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
 		// A chapter note keeps the chapter keys over everything.
-		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns", " · ? help"}
+		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns", " · ? help"}
 	}
 	note := m.note
-	fits := func(n string) bool { return lipgloss.Width(keys)+2+max(12, lipgloss.Width(n)) <= w }
-	dest := "" // the trace's "to ⌁ ops:0.0": where the bytes went
+	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
+	fits := func(n string) bool { return fitsWith(keys, n) }
+	// shed is the keys with their optional fragments gone, in order, until
+	// the note fits — stopping short of `upto` when one is named. It
+	// always starts from the whole keymap: a key shed for a clause the
+	// note then gave up stayed shed, and 13 blank columns stood where
+	// `r reply` had been.
+	whole := keys
+	shed := func(n, upto string) string {
+		k := whole
+		for _, drop := range drops {
+			if fitsWith(k, n) || drop == upto {
+				break
+			}
+			k = strings.Replace(k, drop, "", 1)
+		}
+		return k
+	}
 	if i := strings.LastIndex(note, " · "); i > 0 && !fits(note) {
 		// The note's pane clause — a fact the card's third row carries
-		// too — goes before any key does. A trace's destination is the
-		// one clause that proves where a line landed (§5): it outranks
-		// the optional keys and yields only to the way out and the help.
-		switch tail := note[i+len(" · "):]; {
-		case strings.HasPrefix(tail, "to "+mirrorMark):
-			dest = note[i:]
-		case strings.HasPrefix(tail, mirrorMark):
+		// too — goes before any key does.
+		if tail := note[i+len(" · "):]; strings.HasPrefix(tail, mirrorMark) {
+			note = note[:i]
+		}
+	}
+	if strings.HasPrefix(note, "↪ answered") && !fits(note) {
+		// An answer's digit says which line went: its quote is the
+		// label, and goes before the destination does.
+		if i, j := strings.Index(note, " · "), strings.LastIndex(note, " · "); i > 0 && i != j && strings.Contains(note[i:j], `"`) {
+			note = note[:i] + note[j:]
+		}
+	}
+	if i := strings.LastIndex(note, " · "); i > 0 && !fits(note) && strings.HasPrefix(note[i+len(" · "):], "to "+mirrorMark) {
+		// A trace's destination is the one clause that proves where a
+		// line landed (§5): it outranks the optional keys and yields only
+		// to the way out and the help.
+		if k := shed(note, " · ? help"); fitsWith(k, note) {
+			keys = k
+		} else {
 			note = note[:i]
 		}
 	}
@@ -2834,27 +2882,18 @@ func (m *Model) footerLine(w int) string {
 	// and three shed keys said less than either half could.
 	forms := noteForms(note)
 	// A chapter note's keys are shed against its first clause; any other
-	// note keeps its clauses (the way back, "A, then x") over the keys.
+	// note keeps its clauses (the way back, "A, then x") over the optional
+	// keys. `? help` goes last of all (#32): only when the note's first
+	// clause alone cannot stand beside it.
 	minimal := note
 	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) {
 		minimal = forms[len(forms)-1]
 	}
-	for _, drop := range drops {
-		if fits(minimal) {
-			break
+	if !fits(minimal) {
+		keys = shed(minimal, " · ? help")
+		if !fitsWith(keys, minimal) && !fitsWith(keys, forms[len(forms)-1]) {
+			keys = shed(minimal, "")
 		}
-		if drop == " · ? help" && dest != "" {
-			// Every optional key is gone: the destination goes before
-			// the help does.
-			note = strings.TrimSuffix(note, dest)
-			forms = noteForms(note)
-			minimal = strings.TrimSuffix(minimal, dest)
-			dest = ""
-			if fits(minimal) {
-				break
-			}
-		}
-		keys = strings.Replace(keys, drop, "", 1)
 	}
 	left = dimStyle.Render(clip(keys, w))
 	room := w - lipgloss.Width(left) - 2
@@ -2865,6 +2904,12 @@ func (m *Model) footerLine(w int) string {
 	for _, f := range forms {
 		if lipgloss.Width(f) <= room {
 			shown = dimStyle.Render(f)
+			break
+		}
+		if q := fitQuote(f, room); q != "" {
+			// The quote clipped to the room rather than dropped whole:
+			// a 220-column footer cut a prompt at 38 with 23 to spare.
+			shown = dimStyle.Render(q)
 			break
 		}
 	}
@@ -2878,6 +2923,22 @@ func (m *Model) footerLine(w int) string {
 // noteForms is a footer note at every length it can be shown, fullest
 // first: whole; a chapter note without its quote (the clock stays); then
 // each trailing clause shed in turn, down to the first.
+// fitQuote is form with its quoted clause clipped so the whole fits room,
+// or "" when that would leave too little of the quote to read.
+func fitQuote(form string, room int) string {
+	i, j := strings.Index(form, `"`), strings.LastIndex(form, `"`)
+	if i < 0 || j <= i {
+		return ""
+	}
+	over := lipgloss.Width(form) - room
+	q := form[i+1 : j]
+	keep := lipgloss.Width(q) - over
+	if keep < 9 {
+		return ""
+	}
+	return form[:i+1] + clip(q, keep) + form[j:]
+}
+
 func noteForms(note string) []string {
 	forms := []string{note}
 	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) {

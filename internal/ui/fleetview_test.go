@@ -941,8 +941,8 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 		m := groupedModel(80, 24)
 		for _, want := range []string{
 			"j/k move · enter attach · r reply · / search · x hide · ? help · q quit",
-			"j/k rows · [ ] chapters · r reply · enter attach · tab deeper · esc back",
-			"j/k scroll · space unfold · / search · n/N · r reply · enter attach · esc back",
+			"j/k rows · [ ] chapters · r reply · enter attach · esc back · ? help · q quit",
+			"j/k scroll · space unfold · enter attach · esc back · ? help · q quit",
 		} {
 			if got := m.View(); !strings.Contains(got, want) {
 				t.Errorf("the Lv%d footer does not fit an 80-column deck: %q", m.level, want)

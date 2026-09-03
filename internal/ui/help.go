@@ -93,8 +93,12 @@ func helpLinesFor(w, h int, board bool) []string {
 		legend = helpLegendCore(legend)
 		if len(lines)+len(legend) > h {
 			// Still too tall: the lane and plan glyphs share one row, and
-			// the compaction mark rides with them.
+			// the compaction mark rides with them. A row left over after
+			// that takes the tag's line.
 			legend = helpLegendFold(legend, w)
+			if len(lines)+len(legend) < h {
+				legend = helpLegendFill(legend, full, h-len(lines))
+			}
 		} else {
 			// Rows to spare: the sentences come back in their own order,
 			// as many as fit — a 120x34 help had three free rows under a
@@ -160,7 +164,9 @@ func contains(list []string, s string) bool {
 func helpLegendCore(legend []string) []string {
 	var core []string
 	for _, l := range legend {
-		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "you were here", "scout"} {
+		// The class names are not here: they are plain words on every leg
+		// row, and their row cost the narrow help the lanes.
+		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "you were here"} {
 			if strings.Contains(l, keep) {
 				core = append(core, l)
 				break
@@ -190,7 +196,9 @@ func helpLegendFold(legend []string, w int) []string {
 		switch {
 		case strings.Contains(l, "⌀ back") || strings.Contains(l, "◌ planned"):
 			if !folded {
-				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · →3 · ↳ since you looked · ↪ sent · │ you were here · ⌁ its pane · unread", w)))
+				// The tag and unread first — the words every namesake and
+				// every finished row wears — and the clauses go whole.
+				out = append(out, dimStyle.Render(shedClauses("        ◈ ⋯ out · ✓ back · ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · →3 · ↪ sent · │ you were here", w)))
 				folded = true
 			}
 		default:
@@ -252,7 +260,7 @@ func helpLegendRaw() []string {
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
 		"        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them",
-		"        ⟲ context compacted — a summary below · 16⚑ 10✗ 2⟲ ships · red · compactions",
+		"        ⟲ context compacted — a summary below · 16⚑\u00a010✗\u00a02⟲\u00a0ships\u00a0·\u00a0red\u00a0·\u00a0compactions",
 		"        · 2nd\u00a0failure — the same test in two legs · ?\u00a0—\u00a0no\u00a0verdict\u00a0parsed · edited\u00a0since — touched after that run",
 		"        on\u00a0you\u00a040m\u00a0today — its waits for your next prompt (3h+\u00a0=\u00a0away)",
 		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit · ↩ result of X — landed late; it is X's",
@@ -287,7 +295,7 @@ func helpLegendWrapped(w int, roomy bool, h int) []string {
 			continue
 		}
 		if ansi.StringWidth(l) <= w {
-			lines = append(lines, dimStyle.Render(l))
+			lines = append(lines, dimStyle.Render(strings.ReplaceAll(l, "\u00a0", " ")))
 			continue
 		}
 		indent := len(l) - len(strings.TrimLeft(l, " "))
@@ -306,7 +314,7 @@ func helpLegendWrapped(w int, roomy bool, h int) []string {
 			budget -= extra
 		}
 		for _, row := range rows {
-			lines = append(lines, dimStyle.Render(row))
+			lines = append(lines, dimStyle.Render(strings.ReplaceAll(row, "\u00a0", " "))) // the binding is the wrap's, not the reader's
 		}
 	}
 	return helpLegendClasses(lines, w, roomy)
