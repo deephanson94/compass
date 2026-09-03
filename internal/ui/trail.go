@@ -529,6 +529,38 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		// ticks they still show that tests ran between the legs that did
 		// something, at a third of the height (SPEC §4: every line answers a
 		// question; anything that doesn't is dimmed or dropped).
+		//
+		// The rules that mean "something changed here" — the memory, the
+		// look — are drawn before the row, whatever the row is: a tick or
+		// a fork took the gap and the read-line never drew on a long
+		// trail, while the board billed for it.
+		ruled := false
+		if i > 0 {
+			compactAt, compacted := time.Time{}, compactedBetween(tr.Compactions, nodes[i-1].at, n.at)
+			if compacted {
+				compactAt = compactionIn(tr.Compactions, nodes[i-1].at, n.at)
+			}
+			looked := lookedBetween(o.Looked, nodes[i-1].at, n.at)
+			switch {
+			case compacted && looked && o.Looked.Before(compactAt):
+				b.node(lookRule(o.Looked, o.Now, o.Width))
+				b.node(compactRule(compactAt, o.Width))
+			case compacted && looked:
+				b.node(compactRule(compactAt, o.Width))
+				b.node(lookRule(o.Looked, o.Now, o.Width))
+			case compacted:
+				// The conversation ran out of context here and was folded
+				// into a summary: everything below works from what the
+				// summary kept. A session compacted twice is the one to
+				// read closely.
+				b.node(compactRule(compactAt, o.Width))
+			case looked:
+				// The read-line: everything above it was seen, everything
+				// below is new since.
+				b.node(lookRule(o.Looked, o.Now, o.Width))
+			}
+			ruled = compacted || looked
+		}
 		if n.leg >= 0 && tickLeg(tr.Legs[n.leg], o) {
 			stroke := railStroke
 			if i == 1 {
@@ -547,17 +579,8 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		switch {
 		case i == 0:
 			// The journey's first node. Nothing came before it.
-		case compactedBetween(tr.Compactions, nodes[i-1].at, n.at):
-			// The conversation ran out of context here and was folded into
-			// a summary: everything below works from what the summary kept.
-			// A session compacted twice is the one to read closely. Drawn
-			// even under a fork or a tick — the one rule that means "the
-			// memory changed here" is not the one to skip.
-			b.node(compactRule(compactionIn(tr.Compactions, nodes[i-1].at, n.at), o.Width))
-		case lookedBetween(o.Looked, nodes[i-1].at, n.at):
-			// The read-line: everything above it was seen, everything
-			// below is new since.
-			b.node(lookRule(o.Looked, o.Now, o.Width))
+		case ruled:
+			// A rule above already took the gap.
 		case forked:
 			// The fork row above is a rail segment of its own: `├` reaches down
 			// to this node as well as right to the lane it opened.
@@ -589,7 +612,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			var extra []detailRow
 			if leg.Current && o.HeadState == state.NeedsYou && o.Head != "" && label != o.Head {
 				rest := strings.TrimSpace(strings.TrimPrefix(o.Head, label))
-				for _, line := range wrapN(rest, o.Width-trailWayWidth, 4) {
+				for _, line := range wrapQuestion(rest, o.Width-trailWayWidth, 4) {
 					extra = append(extra, detailRow{text: dimStyle.Render(line), sel: -1})
 				}
 			}
@@ -1347,6 +1370,45 @@ func sameFile(file, label string) bool {
 // wrapN breaks a sentence over at most n rows of width, each at the last
 // word that fits, the last clipped. A finding cut at "two are the sa…" was
 // the half a reader came for.
+// wrapQuestion wraps a spelled-out question at its own seams: the options
+// begin a row of their own when the question does not fit with them, and a
+// row never ends inside the brackets on an option — "[office CIDR" over "/
+// keep bastion]" read as a choice called "[office CIDR".
+func wrapQuestion(text string, width, n int) []string {
+	i := strings.Index(text, " [")
+	if i < 0 || len([]rune(text)) <= width {
+		return wrapN(text, width, n)
+	}
+	rows := wrapN(strings.TrimSpace(text[:i]), width, n)
+	options := strings.TrimSpace(text[i:])
+	if len(rows) >= n {
+		return rows
+	}
+	if len([]rune(options)) <= width {
+		return append(rows, options)
+	}
+	// Too long for one row: break before " / ", so a row begins on the
+	// separator and reads as the next option.
+	for len(options) > 0 && len(rows) < n {
+		cut := -1
+		for j := strings.Index(options, " / "); j >= 0 && j < width; {
+			cut = j
+			k := strings.Index(options[j+3:], " / ")
+			if k < 0 {
+				break
+			}
+			j += 3 + k
+		}
+		if cut <= 0 || len([]rune(options)) <= width {
+			rows = append(rows, clip(options, width))
+			break
+		}
+		rows = append(rows, options[:cut])
+		options = strings.TrimSpace(options[cut:])
+	}
+	return rows
+}
+
 func wrapN(text string, width, n int) []string {
 	var rows []string
 	rest := []rune(strings.TrimSpace(text))

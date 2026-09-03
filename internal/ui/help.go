@@ -27,7 +27,7 @@ var helpKeys = [][2]string{
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
-	{"esc", "one level out (a standing search clears first)"},
+	{"esc", "one level out · on the board or a list, a standing search clears first"},
 	{"?", "this help"},
 	{"q", "quit"},
 }
@@ -201,6 +201,8 @@ func helpKeyLinesFor(w int, board bool) []string {
 				what = "zoom in: trail → legs → reader"
 			case "⇧ tab":
 				what = "zoom out (esc too)"
+			case "esc":
+				what = "one level out · from a list, a standing search clears first"
 			}
 		}
 		if what == "" {
@@ -221,7 +223,8 @@ func helpLegendRaw() []string {
 		"compass observes; enter hands you the session.",
 		"",
 		focusMark + " marks the panel your keys are in — tab moves it",
-		"fleet:  ● working  ▲ needs you  ◍ stuck  ↻ circling  ○ idle",
+		"fleet:  ● working  ▲ needs you  ◍ stuck  ↻ circling  ⊘ dead on the API  ○ idle",
+		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3 a live session on this lane",
@@ -229,7 +232,7 @@ func helpLegendRaw() []string {
 		"        ⟲ context compacted — a summary below · 16⚑ 10✗ 2⟲ ships · red · compactions",
 		"        · 2nd failure — the same test in two legs · ? — no verdict parsed",
 		"        on you 40m today — its waits for your next prompt (3h+ = away)",
-		"        ↩ result of X — landed late; it is X's · ↪ sent — a line compass typed",
+		"        ↩ result of X — landed late; it is X's · ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
 		"        │ you were here — the read-line · ↳ what came after · ⚠ two sessions, one thing",
 		"board:  columns for what owes you, in that order; the rest in the strip",
 		"",

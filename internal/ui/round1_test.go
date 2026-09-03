@@ -143,8 +143,8 @@ func TestNeverOpenedColumnKeepsTheRowAsAir(t *testing.T) {
 	m := boardModel(152, 30)
 	api := sessionKey("s-api")
 	col := m.boardColumn(api, rowFor(t, m, api), 70, 20)
-	if strings.TrimSpace(col[2]) != "" {
-		t.Errorf("a never-opened column spends its third row: %q", col[2])
+	if strings.TrimSpace(ansi.Strip(col[2])) != "⌁ dev:1.0" {
+		t.Errorf("a never-opened column's third row is the tag alone: %q", col[2])
 	}
 }
 
@@ -918,12 +918,13 @@ func TestWorkingColumnHeaderSaysWhatHeadCannot(t *testing.T) {
 		t.Errorf("a working column's second row is not its verdict:\n%s", strings.Join(col, "\n"))
 	}
 	if !strings.Contains(col[2], "⌁ dev") {
-		t.Errorf("the tmux session did not fall to the third row:\n%s", strings.Join(col, "\n"))
+		t.Errorf("the tmux session is not on the third row:\n%s", strings.Join(col, "\n"))
 	}
-	// With room on the second row, it stays there and the third is air.
+	// The third row is the tag's row at every width: where a column lives
+	// never moves, and the digest never evicts it.
 	wide := m.boardColumn(api, rowFor(t, m, api), 70, 20)
-	if !strings.Contains(wide[1], "⌁ dev") || strings.TrimSpace(wide[2]) != "" {
-		t.Errorf("a wide column moved the tmux session off its second row:\n%s", strings.Join(wide, "\n"))
+	if strings.Contains(wide[1], "⌁ dev") || !strings.Contains(wide[2], "⌁ dev") {
+		t.Errorf("a wide column moved the tmux session off its third row:\n%s", strings.Join(wide, "\n"))
 	}
 	// No verdict: the present, as the fleet says it.
 	tr := m.trails[api]

@@ -79,6 +79,12 @@ func (m *Model) fleetLines(w, h int) []string {
 		if n := m.archivedCount(); n > 0 {
 			tail = []string{"", dimStyle.Render(clip(fmt.Sprintf("%d archived · A browses", n), w))}
 		}
+		if over := m.overlaps(); len(over) > 0 && !m.boardShown() {
+			// The one sentence only compass can say, above the archive
+			// row: it was board-only furniture, and two of five widths
+			// have no board.
+			tail = append([]string{"", dimStyle.Render(clip(over[0], w))}, tail...)
+		}
 	}
 
 	rows := m.fleetRows()
@@ -118,11 +124,12 @@ func (m *Model) fleetBlock(rows []fleetRow, w int) (lines []string, selStart, se
 			continue
 		}
 		prevHeader = false
+		entry := m.entryLines(r, w)
 		if m.sessions[r.sess].Info.Key() == m.selectedKey && selStart < 0 {
 			selStart = len(lines)
-			selEnd = selStart + entryLines - 1
+			selEnd = selStart + len(entry) - 1
 		}
-		lines = append(lines, m.entryLines(r, w)...)
+		lines = append(lines, entry...)
 	}
 	return lines, selStart, selEnd
 }
@@ -605,7 +612,16 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	first := marker + indexStyled + " " + accent.Render(glyph) + " " +
 		body + " " + dimStyle.Render(age)
 
-	return []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
+	lines := []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
+	if !m.boardShown() && !m.archiveView && s.Live {
+		// Below the board's width the row is the column: the digest and
+		// the sent-trace ride under it, or a reply at eighty columns left
+		// no trace at all.
+		if third := m.boardDelta(s.Info.Key(), s, w-4); third != "" {
+			lines = append(lines, strings.Repeat(" ", 4)+third)
+		}
+	}
+	return lines
 }
 
 // secondLine is what the session is actually doing, in the trail's own words:

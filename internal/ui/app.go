@@ -1904,7 +1904,13 @@ func (m *Model) point(key string) {
 	m.scroll = 0
 	m.cursor, m.anchor = -1, -1
 	m.trailScroll, m.trailPinned = 0, true
-	m.query, m.draft, m.searching = "", "", false
+	if !m.searchFleet {
+		// The reader's search belongs to the session that left. The
+		// fleet's does not: narrowing it moved the selection, and the
+		// move ended the typing — the next key went to the deck, and
+		// enter attached instead of keeping the query.
+		m.query, m.draft, m.searching = "", "", false
+	}
 }
 
 // selectIndex is the `1`–`9` keys: an index into the rendered order, groups
@@ -2177,7 +2183,13 @@ func overlay(rows, panel []string, left, top int) {
 		if w := lipgloss.Width(before); w < left {
 			before += strings.Repeat(" ", left-w)
 		}
-		rows[top+i] = before + pad(p, pw)
+		// And what is right of it stays too: a seventy-column box was
+		// blanking five columns of board to draw itself.
+		after := ""
+		if lipgloss.Width(line) > left+pw {
+			after = "…" + ansi.TruncateLeft(line, left+pw+1, "")
+		}
+		rows[top+i] = before + pad(p, pw) + after
 	}
 }
 
@@ -2213,6 +2225,13 @@ func (m *Model) replyPanel(inner int) []string {
 	body := replyPanelMax
 	if max := inner - 8; body > max {
 		body = max
+	}
+	if fw, _, _ := m.layout(inner); fw > 0 && !m.boardShown() && m.level < levelReader {
+		// Beside a fleet list the panel stands over the trail and leaves
+		// the list legible; at eighty columns it was standing on both.
+		if max := inner - fw - gutterWidth - 6; body > max {
+			body = max
+		}
 	}
 	if body < 20 {
 		body = 20

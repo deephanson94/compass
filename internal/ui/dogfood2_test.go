@@ -15,7 +15,6 @@ import (
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
-	"github.com/deephanson94/compass/internal/tmuxop"
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
@@ -499,49 +498,55 @@ func TestTheVerdictNamesARepeatedFailure(t *testing.T) {
 
 // ---- round ten
 
-// The reply panel blanks the rest of every row it covers: a column's tail
-// sliced at the border read as a leg with no label.
-func TestTheReplyPanelBlanksToTheEdge(t *testing.T) {
+// The reply panel blanks its own box and nothing else: what is right of it
+// stays, marked as cut, so replying to one column does not blind the four
+// beside it.
+func TestTheReplyPanelBlanksOnlyItsBox(t *testing.T) {
 	forceASCII(t)
-	// The board: the panel stands under the selected column, and the
-	// columns to its right are what it must not slice.
-	m := boardModel(152, 40)
-	m.SetPanes(map[string]tmuxop.Pane{
-		sessionKey("s-api"): {Target: "dev:1.0", ID: "%5", PID: 4242, Command: "claude", Window: "auth-fix"},
-	})
-	m.point(sessionKey("s-api"))
+	m := boardModel(220, 48)
+	m.replies = []string{"please continue", "report status"}
+	m.point(sessionKey("s-infra"))
 	before := strings.Split(m.View(), "\n")
 	press(m, "r")
 	if !m.replying {
 		t.Fatalf("r did not offer the replies: %q", m.note)
 	}
-	got := m.View()
-	covered := 0
-	for i, line := range strings.Split(got, "\n") {
-		trimmed := strings.TrimRight(line, " ")
-		if !strings.HasPrefix(strings.TrimSpace(trimmed), "│") || !strings.Contains(trimmed, "│ ") || strings.Contains(trimmed, "READER") {
-			continue // not a row of the panel's body
-		}
-		// A row that had a neighbour to the right before the panel came
-		// now ends at the panel's own border.
-		if lipgloss.Width(strings.TrimRight(before[i], " ")) > lipgloss.Width(trimmed) {
-			covered++
-		}
-		if !strings.HasSuffix(trimmed, "│") && !strings.HasSuffix(trimmed, "┐") && !strings.HasSuffix(trimmed, "┘") {
-			t.Errorf("text survives right of the panel: %q", line)
+	got := strings.Split(m.View(), "\n")
+	top, left, pw := -1, 0, 0
+	for i, line := range got {
+		if j := strings.Index(line, "┌ reply to"); j >= 0 {
+			top, left = i, len([]rune(line[:j]))
+			pw = strings.Index(line[j:], "┐")
+			pw = len([]rune(line[j:j+pw])) + 2 // the border, and its column of air
 		}
 	}
-	if covered == 0 {
-		t.Fatalf("the fixture drew nothing right of the panel:\n%s", got)
+	if top < 0 {
+		t.Fatalf("no panel drawn:\n%s", strings.Join(got, "\n"))
 	}
-	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "a digit types the line") {
-			after := line[strings.LastIndex(line, "│")+len("│"):]
-			if strings.TrimSpace(after) != "" {
-				t.Errorf("the row is not blank right of the panel: %q", line)
+	kept := 0
+	for i := top; i < len(got); i++ {
+		runes := []rune(got[i])
+		if len(runes) > left+pw {
+			if after := strings.TrimSpace(string(runes[left+pw:])); after != "" {
+				if !strings.HasPrefix(after, "…") {
+					t.Errorf("a row cut by the panel's right edge does not say so: %q", got[i])
+				}
+				kept++
 			}
 		}
+		if strings.Contains(got[i], "└") {
+			break
+		}
 	}
+	if kept == 0 {
+		t.Fatalf("nothing survived right of the panel:\n%s", strings.Join(got, "\n"))
+	}
+	for i, line := range got {
+		if lipgloss.Width(line) > 220 {
+			t.Errorf("row %d is wider than the terminal: %q", i, line)
+		}
+	}
+	_ = before
 }
 
 // The panel's working line carries the turn's clock, not the last write's:

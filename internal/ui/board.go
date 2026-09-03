@@ -70,7 +70,10 @@ func boardColumns(inner, count int) (n, w int) {
 		n = count
 	}
 	w = (inner - (n-1)*gutterWidth) / n
-	if w > boardColMax {
+	if w > boardColMax && n >= 2 {
+		// The cap is for a row of columns; a lone column takes the
+		// width, since a filtered column at 65 of 220 was cutting its
+		// prompt beside a field of nothing.
 		w = boardColMax
 	}
 	return n, w
@@ -279,10 +282,8 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	// The selected column is always drawn: boardKeys puts it among the
 	// first shown, so pack once more over that order.
 	keys = m.boardKeys(shown)
-	if len(bands) == 1 {
-		// One band takes the whole height, whatever its tallest trail.
-		heights[0] = body
-	}
+	// A band is as tall as its tallest trail, one band or three: the
+	// strip follows it, rather than thirty rows of bare rail.
 	return keys, heights
 }
 
@@ -481,6 +482,9 @@ func (m *Model) overlaps() []string {
 
 // failingNow is the test the trail's newest red run failed, or "".
 func failingNow(tr journey.Trail) string {
+	if test, _, ok := circling(tr); ok {
+		return test // a loop is failing its test whatever the last run said
+	}
 	for i := len(tr.Legs) - 1; i >= 0; i-- {
 		badge := legBadge(tr.Legs[i])
 		if badge == "" || badge == "?" {
@@ -643,12 +647,20 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 			second = "    " + dimStyle.Render(joinFit(parts, w-4))
 		}
 	}
-	second, marked := m.boardSecondLine(s, second, w)
-	third := m.boardDelta(key, s, w)
-	if third == "" && !marked {
-		// The tmux session is what `enter` spends; a column that never
-		// says where it lives is the one you attach to blind.
-		third, _ = m.boardSecondLine(s, "", w)
+	// The third row is the tag's row, always: the digest or the trace
+	// takes the left of it and the tmux session the right, so where a
+	// column lives never moves and is never evicted by what is new.
+	tag := m.boardTag(s)
+	room := w
+	if tag != "" {
+		room = w - lipgloss.Width(tag) - 2
+	}
+	third := ""
+	if room >= 12 {
+		third = m.boardDelta(key, s, room)
+	}
+	if tag != "" {
+		third = pad(third, w-lipgloss.Width(tag)) + dimStyle.Render(tag)
 	}
 	return []string{entry[0], second, third}
 }
@@ -990,31 +1002,25 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 // boardSecondLine is the fleet's second row for the session with, where the
 // fleet's grouping would have said it, the tmux session it lives in on the
 // right: the one fact the list carried that the column otherwise loses.
-func (m *Model) boardSecondLine(s fleet.Session, line string, w int) (string, bool) {
-	group := ""
+func (m *Model) boardTag(s fleet.Session) string {
 	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
-		group = tmuxSessionName(pane.Target)
+		group := tmuxSessionName(pane.Target)
 		if m.sharesTmux(s) {
 			// Two live sessions in one tmux session: the name alone is
 			// the same string on both, and the pane is what tells them
 			// apart — "⌁ harness:1.0", the address enter spends.
 			group = pane.Target
 		}
-	} else if s.Live && !m.archiveView {
-		// No pane at all: said, not left as a blank where the tag goes.
-		if lipgloss.Width(line)+2+7 > w {
-			return line, false
+		if group == "" {
+			return ""
 		}
-		return pad(line, w-7) + dimStyle.Render("no pane"), true
+		return mirrorMark + " " + group // the pane mark, so "work" does not read as a state word
 	}
-	if group == "" {
-		return line, true // nothing to say: nothing owed
+	if s.Live && !m.archiveView {
+		// No pane at all: said, not left as a blank where the tag goes.
+		return "no pane"
 	}
-	group = "⌁ " + group // the pane mark, so "work" does not read as a state word
-	if lipgloss.Width(line)+2+lipgloss.Width(group) > w {
-		return line, false
-	}
-	return pad(line, w-lipgloss.Width(group)) + dimStyle.Render(group), true
+	return ""
 }
 
 // tookReply says whether a session's transcript shows a prompt at or after
@@ -1045,8 +1051,19 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 	}
 	if sent, ok := m.sent[key]; ok && !m.tookReply(key, sent) {
 		// A line compass typed and the session has not yet answered: the
-		// row says so until the transcript shows the prompt landed.
-		return dimStyle.Render(clip("↪ sent "+clip(`"`+sent.text+`"`, w-14)+" · "+relAge(m.now, sent.at)+" ago", w))
+		// row says so until the transcript shows the prompt landed — and
+		// says which key it pressed: a menu's digit is not a typed line.
+		verb := "↪ sent "
+		if sent.answer > 0 {
+			verb = fmt.Sprintf("↪ answered %d · ", sent.answer)
+		}
+		// The quote is the proof of what went; the age goes first when
+		// the row is narrow.
+		line := verb + clip(`"`+sent.text+`"`, w-len([]rune(verb)))
+		if age := " · " + relAge(m.now, sent.at) + " ago"; len([]rune(line))+len(age) <= w {
+			line += age
+		}
+		return dimStyle.Render(clip(line, w))
 	}
 	seen, ok := m.seen[key]
 	if at, had := m.lastLook[key]; had && key == m.selectedKey {

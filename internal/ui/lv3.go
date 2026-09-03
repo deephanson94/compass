@@ -143,7 +143,7 @@ func (m *Model) readerTitle(w int) string {
 		// gets whatever the name leaves, not half the panel.
 		right = m.anchorAt.Local().Format("15:04")
 		if m.anchorText != "" {
-			room := w - 1 - len([]rune("READER · "+name)) - 1 - len([]rune(right)) - 3
+			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
 			if room >= 8 {
 				right = clip(m.anchorText, room) + " · " + right // clip marks the cut with …
 			}
@@ -160,7 +160,7 @@ func (m *Model) readerTitle(w int) string {
 	// and the tag leave; the tag goes before the row does.
 	body := w - 1
 	title := "READER · " + name
-	room := body - lipgloss.Width(title) - 1
+	room := body - lipgloss.Width(title) - 3 // three of air: "porter Another Claude…" read as one name
 	if tag != "" {
 		room -= lipgloss.Width(tag) + 2
 	}

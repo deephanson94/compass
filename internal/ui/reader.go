@@ -353,6 +353,11 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 func (d *docBuilder) said(event int, at time.Time, text string) {
 	d.gap()
 	rows := wrapPrefix(text, glyphSaid+" ", "  ", d.measure())
+	if len(rows) > 1 && !at.IsZero() && d.width-len([]rune(rows[0]))-2 < 5 {
+		// A turn that wraps keeps its clock: the first row gives the
+		// clock its room rather than losing it to the wrap.
+		rows = wrapPrefix(text, glyphSaid+" ", "  ", d.measure()-7)
+	}
 	for i, row := range rows {
 		if i == 0 && !at.IsZero() {
 			clock := at.Local().Format("15:04")

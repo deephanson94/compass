@@ -635,7 +635,7 @@ func sceneVeryLong() scene {
 		journey.Task{ID: "1", Subject: "Router", Status: "completed"}, journey.Task{ID: "2", Subject: "Store", Status: "completed"},
 		journey.Task{ID: "3", Subject: "Tokens", Status: "completed"}, journey.Task{ID: "4", Subject: "Audit log", Active: "Wiring the audit log", Status: "in_progress"},
 		journey.Task{ID: "5", Subject: "Migrate existing sessions", Status: "pending"}, journey.Task{ID: "6", Subject: "Docs and changelog", Status: "pending"},
-		journey.Task{ID: "7", Subject: "Open the PR", Status: "pending"}), n.Add(-14*time.Hour), n.Add(-5*time.Hour))
+		journey.Task{ID: "7", Subject: "Open the PR", Status: "pending"}), n.Add(-14*time.Hour), n.Add(-2*time.Hour))
 	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/dedupe", "dedupe the nightly load", state.Idle, n.Add(-3*time.Hour), journey.Ship, "", "turn complete", "idle"))
 	tr[sessionKey("etl")] = long("etl", 120, n.Add(-20*time.Hour), false)
 	ss = append(ss, sess("cli", "cli", "/home/user/cli", "main", "add --json to every command", state.Idle, n.Add(-40*time.Minute), journey.Test, "40✓", "turn complete", "idle"))
@@ -763,18 +763,23 @@ func sceneModel(sc scene, w, h int) *Model {
 	m.SetSessions(sc.sessions, sceneNow)
 	m.SetPanes(sc.panes)
 	m.SetPaneOrder(sc.order)
-	// The second live session was looked at halfway through its trail: its
-	// column carries the read-line and the digest.
+	// The second live session was looked at partway through its trail —
+	// halfway, or eight legs from the end of a long one, so the read-line
+	// falls where a pinned column can show it: its column carries the
+	// read-line and the digest.
 	m.seen = map[string]time.Time{}
 	live := 0
 	for _, s := range sc.sessions {
-		if s.Live {
-			live++
-			if live == 2 {
-				if tr := sc.trails[s.Info.Key()]; len(tr.Legs) > 2 {
-					m.seen[s.Info.Key()] = tr.Legs[len(tr.Legs)/2].Start.Add(time.Second)
-				}
+		tr := sc.trails[s.Info.Key()]
+		if !s.Live || len(tr.Legs) <= 2 {
+			continue
+		}
+		if live++; live == 2 {
+			at := len(tr.Legs) / 2
+			if len(tr.Legs) > 24 {
+				at = len(tr.Legs) - 8
 			}
+			m.seen[s.Info.Key()] = tr.Legs[at].Start.Add(time.Second)
 		}
 	}
 	first := ""
