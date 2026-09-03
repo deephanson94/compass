@@ -144,8 +144,12 @@ reply = "please continue"   # the stock lines `r` offers, one per line, up to ni
 reply = "report status"
 hook = "tmux display-message \"compass: $COMPASS_SESSION $COMPASS_EVENT\""
                         # run when a session crosses a line while nobody is looking:
-                        # COMPASS_EVENT is needs_you, api_error, stuck, circling or
-                        # agents_back; COMPASS_SESSION, COMPASS_TMUX, COMPASS_DETAIL say which
+                        # COMPASS_EVENT is needs_you, api_error, stuck, circling,
+                        # agents_back or shipped_on_red; COMPASS_SESSION, COMPASS_TMUX,
+                        # COMPASS_DETAIL say which. Once per crossing, at most once
+                        # every ten minutes per session and event; agents_back fires
+                        # once per set of lanes and names the empties. The first
+                        # refresh is a baseline and fires nothing.
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:
@@ -176,10 +180,10 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
-| `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it; `x` there brings it back; a hidden session that needs you or hangs comes back on its own |
+| `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `/` | on the board, the list or the archive: search the fleet — name, opening prompt, branch, any prompt, a leg, a file a leg touched. The header says `/query · 3 of 40`; `esc` clears it |
-| `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status", the quota one; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A digit sends; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` until the transcript shows the prompt landed. Off under `-readonly` |
+| `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status"; the quota one only where a quota was hit; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A session dead on the API is offered the remedy its refusal names (`/login`) and nothing that would start a turn. A digit acts; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` (or `↪ answered 1 · "…"`) until the transcript shows the prompt landed. Off under `-readonly` |
 | `?` | help |
 
 ## Design docs
