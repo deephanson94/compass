@@ -157,8 +157,8 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 	// below the board's.
 	if joined := strings.Join(legend, "\n"); strings.Contains(joined, "— its tmux pane") {
 		for i, l := range legend {
-			if plain := ansi.Strip(l); strings.Contains(plain, "⌁ dev:1.0 pane · unread — not opened · ") {
-				legend[i] = dimStyle.Render(shedClauses(strings.Replace(plain, "⌁ dev:1.0 pane · unread — not opened · ", "", 1), w))
+			if plain := ansi.Strip(l); strings.Contains(plain, "⌁ dev:1.0 pane · unread · ") {
+				legend[i] = dimStyle.Render(shedClauses(strings.Replace(plain, "⌁ dev:1.0 pane · unread · ", "", 1), w))
 			}
 		}
 	}
@@ -299,7 +299,9 @@ func helpLegendFold(legend []string, w int) []string {
 				// every finished row wears — and the clauses go whole.
 				// The tag and unread lead: every row wears one or says "no
 				// pane", where the lanes belong to a lead that delegates.
-				fold := "        ⌁ dev:1.0 pane · unread — not opened · ↪ sent · ⟲ compacted · ◈ ⋯ out · ✓ back · ⌀ empty · ◌ planned · │ you were here"
+				// #17 pins ⌀ and ◌ to the narrow help; the compaction mark
+				// rides from a hundred columns up, where the row has room.
+				fold := "        ⌁ dev:1.0 pane · unread · ↪ sent · ◈ ⋯ out · ⌀ empty · ◌ planned · ⟲ compacted · ✓ back · │ you were here"
 				if strings.Contains(strings.Join(legend, "\n"), "dev:1.0") {
 					// The tag's own row survived: this one need not say it
 					// twice, and the room goes to the marks below it.
