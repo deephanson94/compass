@@ -2827,7 +2827,7 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := m.shedOrder(strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt))
+	drops := m.shedOrder(m.chapterNote())
 	note := m.note
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
@@ -2882,7 +2882,7 @@ func (m *Model) footerLine(w int) string {
 	// keys. `? help` goes last of all (#32): only when the note's first
 	// clause alone cannot stand beside it.
 	minimal := note
-	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) {
+	if m.chapterNote() && (strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt)) {
 		minimal = forms[len(forms)-1]
 	}
 	if !fits(minimal) {
@@ -2919,6 +2919,12 @@ func (m *Model) footerLine(w int) string {
 // noteForms is a footer note at every length it can be shown, fullest
 // first: whole; a chapter note without its quote (the clock stays); then
 // each trailing clause shed in turn, down to the first.
+// chapterNote says whether the note is a chapter key's: a chapter counted,
+// or a chapter key's refusal — either keeps the chapter keys (#24).
+func (m *Model) chapterNote() bool {
+	return strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) || strings.HasPrefix(m.note, "no later prompt") || strings.HasPrefix(m.note, "no earlier prompt")
+}
+
 // shedOrder is the order the footer gives up its optional keys in, first
 // to go first. The way in (`tab deeper`) outlasts `x hide` and `g grab`,
 // which refuse on a fleet of one, on the list — deeper in, the person has
@@ -2926,11 +2932,18 @@ func (m *Model) footerLine(w int) string {
 // chapter keys over everything; `? help` goes last of all.
 func (m *Model) shedOrder(chapter bool) []string {
 	order := []string{" (prefix d returns)", " · a ask", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · x hide", " · x unhide"}
+	// In the session view `enter` and `esc` are keys everyone knows: under
+	// a note they go before the note's own keys and before the help, which
+	// is the one row an 80-column deck finds the help from.
+	session := []string{" · enter attach", " · enter · no pane", " · esc back", " · esc board"}
 	switch {
 	case chapter:
-		order = append(order, " · tab deeper", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns")
+		order = append(order, " · tab deeper", " · r reply", " · space unfold")
+		order = append(order, session...)
+		order = append(order, " · [ ] chapters", " · [ ] turns")
 	case m.level >= levelWaypoints:
 		order = append(order, " · tab deeper", " · [ ] chapters", " · [ ] turns", " · r reply", " · space unfold")
+		order = append(order, session...)
 	default:
 		order = append(order, " · [ ] chapters", " · [ ] turns", " · tab deeper", " · r reply", " · space unfold")
 	}
@@ -2946,11 +2959,15 @@ func fitQuote(form string, room int) string {
 	}
 	over := lipgloss.Width(form) - room
 	q := form[i+1 : j]
-	keep := lipgloss.Width(q) - over
-	if keep < 9 {
-		return ""
+	keep := lipgloss.Width(q) - over - 1 // the cells the quote may keep before its mark
+	if keep < 12 {
+		return "" // under a dozen characters the quote says nothing: it goes whole
 	}
-	return form[:i+1] + clip(q, keep) + form[j:]
+	cut := string([]rune(q)[:keep])
+	if sp := strings.LastIndex(cut, " "); sp >= 8 {
+		cut = cut[:sp] // at a word boundary: "please c…" answered nothing
+	}
+	return form[:i+1] + strings.TrimRight(cut, " ") + "…" + form[j:]
 }
 
 func noteForms(note string) []string {

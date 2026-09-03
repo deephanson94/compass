@@ -149,6 +149,18 @@ func helpLinesFor(w, h int, board bool) []string {
 		if len(lines) > h {
 			lines = lines[:h]
 		}
+		// The lanes' row did not survive: the trail's own row carries them
+		// in place of the bare "◈ subagent" — at 80 the board shows all
+		// three and the help defined none.
+		if !strings.Contains(strings.Join(lines, "\n"), "⋯ out") {
+			for i, l := range lines {
+				if strings.Contains(l, "trail:  ") {
+					if lanes := strings.Replace(ansi.Strip(l), "◈ subagent", "◈ ⋯ out · ✓ back · ⌀ back, empty", 1); ansi.StringWidth(lanes) <= w {
+						lines[i] = dimStyle.Render(lanes)
+					}
+				}
+			}
+		}
 	}
 	return lines
 }

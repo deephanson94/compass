@@ -87,7 +87,7 @@ func (m *Model) readerColumn(w, h int) []string {
 		frame := RenderReader(m.events, ReaderOpts{
 			Width:    w,
 			Height:   h - 2,
-			Scroll:   m.scroll,
+			Scroll:   m.readerTop(m.doc(m.readerWidth())), // never a result row without its owner
 			Unfolded: m.unfolded,
 			Query:    m.query,
 			Anchor:   m.anchor,
@@ -99,6 +99,23 @@ func (m *Model) readerColumn(w, h int) []string {
 	return rows
 }
 
+// readerTop is the first row of the page: the scroll, clamped — and never a
+// result row whose owner is the row above. A tail page that opened on a
+// bare "⎿ 20 passed" had its "↩ result of Bash(…)" as the last line above,
+// and the first thing on the page was a test result with no owner.
+func (m *Model) readerTop(doc []readerLine) int {
+	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	for top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
+		top--
+	}
+	return top
+}
+
+// isResultRow says whether a row is a call's "⎿" result.
+func isResultRow(l readerLine) bool {
+	return strings.HasPrefix(strings.TrimLeft(l.text, " "), glyphResult)
+}
+
 // readerAbove is the row under the reader's title: what the page is not
 // showing above its first line, so a conversation opened on its tail says
 // it is a tail — "↑ 212 lines above · 3 turns" — and air when nothing is.
@@ -107,7 +124,7 @@ func (m *Model) readerAbove(w int) string {
 		return ""
 	}
 	doc := m.doc(m.readerWidth())
-	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	top := m.readerTop(doc)
 	if top == 0 {
 		return ""
 	}
@@ -259,7 +276,7 @@ func (m *Model) scrollBy(delta int) bool {
 		m.note = "all of it is on screen"
 		return true // said; nothing more to say
 	}
-	was := clampScroll(m.scroll, len(doc), m.readerHeight())
+	was := m.readerTop(doc)
 	m.scroll = clampScroll(was+delta, len(doc), m.readerHeight())
 	// A single step never lands the top of the page on a line of air: the
 	// press that only pushed a blank in and a line out revealed nothing.
@@ -296,7 +313,7 @@ func (m *Model) readerChapter(key string) {
 			cur = i
 		}
 	}
-	at := clampScroll(m.scroll, len(doc), m.readerHeight())
+	at := m.readerTop(doc)
 	if m.anchor > at {
 		at = m.anchor
 	}
@@ -332,7 +349,7 @@ func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
 		text = string([]rune(text)[:doc[t].dim]) // without the clock
 	}
 	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid))
-	m.note = fmt.Sprintf("%s %d/%d · %s · %s", glyphSaid, i+1, len(turns), clip(`"`+m.anchorText+`"`, 40), doc[t].at.Local().Format("15:04"))
+	m.note = fmt.Sprintf("%s %d/%d · %s · %s", glyphSaid, i+1, len(turns), `"`+m.anchorText+`"`, doc[t].at.Local().Format("15:04")) // the footer clips the quote to its room
 }
 
 // readerHeight is the rows the document gets: the deck body minus the
@@ -354,7 +371,7 @@ func (m *Model) readerHeight() int {
 func (m *Model) toggleFold() {
 	width := m.readerWidth()
 	doc := m.doc(width)
-	top := clampScroll(m.scroll, len(doc), m.readerHeight())
+	top := m.readerTop(doc)
 	for i := top; i < len(doc) && i < top+m.readerHeight(); i++ {
 		if !doc[i].foldable() {
 			continue
