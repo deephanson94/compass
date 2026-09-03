@@ -2306,7 +2306,17 @@ func overlay(rows, panel []string, left, top int) {
 		// blanking five columns of board to draw itself.
 		after := ""
 		if lipgloss.Width(line) > left+pw {
-			after = "…" + ansi.TruncateLeft(line, left+pw+1, "")
+			rest := ansi.TruncateLeft(line, left+pw+1, "")
+			// A cut inside a token read as a wrong number ("…4m ago" for
+			// 14m): the peek begins at the next space.
+			if plain := ansi.Strip(rest); len(plain) > 0 && plain[0] != ' ' {
+				if i := strings.Index(plain, " "); i >= 0 {
+					rest = strings.Repeat(" ", i) + ansi.TruncateLeft(rest, i, "")
+				} else {
+					rest = strings.Repeat(" ", lipgloss.Width(rest))
+				}
+			}
+			after = "…" + rest
 		}
 		rows[top+i] = before + pad(p, pw) + after
 	}
@@ -2756,8 +2766,17 @@ func (m *Model) footerLine(w int) string {
 		// A chapter note keeps the chapter keys over everything.
 		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns", " · ? help"}
 	}
+	note := m.note
+	if i := strings.LastIndex(note, " · "); i > 0 && lipgloss.Width(keys)+2+lipgloss.Width(note) > w {
+		// The note's pane clause goes before any key does: the card's
+		// third row carries the pane, and the keys are the only place
+		// the keys are named.
+		if tail := note[i+3:]; strings.HasPrefix(tail, "to "+mirrorMark) || strings.HasPrefix(tail, mirrorMark) {
+			note = note[:i]
+		}
+	}
 	for _, drop := range drops {
-		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
+		if lipgloss.Width(keys)+2+lipgloss.Width(note) <= w {
 			break
 		}
 		keys = strings.Replace(keys, drop, "", 1)
@@ -2765,11 +2784,11 @@ func (m *Model) footerLine(w int) string {
 	left = dimStyle.Render(clip(keys, w))
 	room := w - lipgloss.Width(left) - 2
 	if room < 12 {
-		return dimStyle.Render(shedClauses(m.note, w)) // no keymap fits beside it
+		return dimStyle.Render(shedClauses(note, w)) // no keymap fits beside it
 	}
-	note := dimStyle.Render(shedClauses(m.note, room)) // clauses go whole: the way back before the pane
-	gap := w - lipgloss.Width(left) - lipgloss.Width(note)
-	return left + strings.Repeat(" ", gap) + note
+	shown := dimStyle.Render(shedClauses(note, room)) // clauses go whole: the way back before the pane
+	gap := w - lipgloss.Width(left) - lipgloss.Width(shown)
+	return left + strings.Repeat(" ", gap) + shown
 }
 
 // enterKeymap is what Enter promises, and — outside tmux, where compass hands

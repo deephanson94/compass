@@ -89,11 +89,17 @@ func helpLinesFor(w, h int, board bool) []string {
 		// the glyphs and the class names — and drop the sentences around
 		// them and the line of air, before any key is cut. A reader who
 		// cannot reach the keys cannot leave the overlay.
+		full := legend
 		legend = helpLegendCore(legend)
 		if len(lines)+len(legend) > h {
 			// Still too tall: the lane and plan glyphs share one row, and
 			// the compaction mark rides with them.
 			legend = helpLegendFold(legend, w)
+		} else {
+			// Rows to spare: the sentences come back in their own order,
+			// as many as fit — a 120x34 help had three free rows under a
+			// legend missing the marks on its own board.
+			legend = helpLegendFill(legend, full, h-len(lines))
 		}
 		if len(lines)+len(legend) > h && len(lines) > 1 && lines[1] == "" {
 			// And the line of air under "keys" goes before any glyph does.
@@ -338,4 +344,52 @@ var legClasses = []struct {
 	{journey.Test, "checking: test runs, with their results parsed"},
 	{journey.Ship, "landing it: commits, pushes, PRs"},
 	{journey.Docs, "writing it down: markdown, comments, READMEs"},
+}
+
+// helpLegendFill puts back the legend's lines the core dropped, in the
+// legend's own order, while the rows allow.
+func helpLegendFill(core, full []string, rows int) []string {
+	kept := map[string]bool{}
+	for _, l := range core {
+		kept[l] = true
+	}
+	out := append([]string(nil), core...)
+	// The marks a person opens the help for come back first — the rail's
+	// rules and counts, the loop, the trace and the read-line — and the
+	// sentences about the panel last.
+	var order []string
+	for _, want := range []string{"⟲ context compacted", "2nd failure", "↪ sent", "you were here", "⌁ dev", "on you", "board:", "▌", "compass observes"} {
+		for _, l := range full {
+			if strings.Contains(l, want) && !kept[l] {
+				order = append(order, l)
+			}
+		}
+	}
+	order = append(order, full...)
+	for _, l := range order {
+		if kept[l] || l == "" || len(out) >= rows {
+			continue
+		}
+		// Insert before the first core line that follows it in the full order.
+		pos := len(out)
+		after := false
+		for _, f := range full {
+			if f == l {
+				after = true
+				continue
+			}
+			if after && kept[f] {
+				for i, o := range out {
+					if o == f {
+						pos = i
+						break
+					}
+				}
+				break
+			}
+		}
+		out = append(out[:pos], append([]string{l}, out[pos:]...)...)
+		kept[l] = true
+	}
+	return out
 }

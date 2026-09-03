@@ -1340,7 +1340,7 @@ func restates(l journey.Leg, w journey.Waypoint) bool {
 func waypointBody(w journey.Waypoint, bug, width int) string {
 	switch w.Kind {
 	case journey.WaypointTestFail:
-		return stuckStyle.Render(wayFail) + " " + dimStyle.Render(clip(failText(w), width-2))
+		return stuckStyle.Render(wayFail) + " " + dimStyle.Render(shedClauses(failText(w), width-2)) // "· 10th failure" goes whole
 	case journey.WaypointBug:
 		prefix := fmt.Sprintf("bug%d ", bug)
 		return dimStyle.Render(prefix + clip(w.Text, width-len(prefix)))

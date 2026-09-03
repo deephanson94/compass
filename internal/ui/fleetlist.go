@@ -666,6 +666,12 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		if m.sharesTmux(s) {
 			if pane, ok := m.panes[s.Info.Key()]; ok {
 				tag = mirrorMark + " " + pane.Target
+				if w-4-lipgloss.Width(tag)-2 < 16 {
+					// The group header names the tmux session: a narrow
+					// row keeps the pane alone, so the digest is not cut
+					// mid-word beside a name said two rows up.
+					tag = mirrorMark + " " + paneSuffix(pane.Target)
+				}
 			}
 		}
 		room := w - 4
