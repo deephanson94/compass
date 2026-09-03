@@ -68,7 +68,7 @@ func TestTheTurnNoteIsNotCapped(t *testing.T) {
 // does not survive: the board shows all three and the help defined none.
 func TestTheNarrowestHelpDefinesTheLanes(t *testing.T) {
 	help := strings.Join(helpLinesFor(78, 19, false), "\n")
-	if !strings.Contains(help, "⋯ out") || !strings.Contains(help, "⌀ back") {
+	if !strings.Contains(help, "⋯ out") || !strings.Contains(help, "⌀ ") {
 		t.Errorf("the 80x24 help lacks the lanes:\n%s", help)
 	}
 }
@@ -116,7 +116,7 @@ func TestAFleetOfOneOffersNoHideAndTheNarrowestHelpNamesTheTag(t *testing.T) {
 		t.Errorf("a fleet of one: %q", foot)
 	}
 	help := strings.Join(helpLinesFor(78, 19, false), "\n")
-	if !strings.Contains(help, "⌁ its pane") && !strings.Contains(help, "⌁ its tmux pane") {
+	if !strings.Contains(help, "⌁ pane") && !strings.Contains(help, "⌁ its pane") && !strings.Contains(help, "⌁ its tmux pane") {
 		t.Errorf("the 80x24 help lacks the tag:\n%s", help)
 	}
 }

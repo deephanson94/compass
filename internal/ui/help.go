@@ -151,6 +151,17 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 	} else {
 		lines = append(lines, "")
 	}
+	// One gloss per mark: the folded row leads with the tag only where the
+	// tag's own row did not survive, and gives that lead to the trace when
+	// it did — `↪` stood on thirty-two rows and was defined at no width
+	// below the board's.
+	if joined := strings.Join(legend, "\n"); strings.Contains(joined, "dev:1.0") {
+		for i, l := range legend {
+			if plain := ansi.Strip(l); strings.Contains(plain, "⌁ pane · unread · ") {
+				legend[i] = dimStyle.Render(shedClauses(strings.Replace(plain, "⌁ pane · unread · ", "", 1), w))
+			}
+		}
+	}
 	lines = append(lines, legend...)
 	if h > 0 && len(lines) > h && o.keymap != "" {
 		// A key row the deck's own footer is not offering goes before any
@@ -286,7 +297,7 @@ func helpLegendFold(legend []string, w int) []string {
 				// every finished row wears — and the clauses go whole.
 				// The tag and unread lead: every row wears one or says "no
 				// pane", where the lanes belong to a lead that delegates.
-				fold := "        ⌁ its pane · unread · ◈ ⋯ out · ✓ back · ⌀ back, empty · ◌ planned · ⟲ compacted · ↪ sent · │ you were here"
+				fold := "        ⌁ pane · unread · ↪ sent · ⟲ compacted · ◈ ⋯ out · ✓ back · ⌀ empty · ◌ planned · │ you were here"
 				if strings.Contains(strings.Join(legend, "\n"), "dev:1.0") {
 					// The tag's own row survived: this one need not say it
 					// twice, and the room goes to the marks below it.
