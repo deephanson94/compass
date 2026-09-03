@@ -33,7 +33,8 @@ import (
 
 type scene struct {
 	name     string
-	story    string // what the person at the keyboard is in the middle of
+	story    string   // what the person at the keyboard is in the middle of
+	extra    []string // keys pressed after the canonical walkthrough, for this scene's own case
 	sessions []fleet.Session
 	trails   map[string]journey.Trail
 	panes    map[string]tmuxop.Pane
@@ -504,7 +505,7 @@ func sceneFewOngoing() scene {
 		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap([]string{"infra", "api", "webapp", "etl", "billing", "docs-site", "cli"}, []string{"ops:0.0", "work:0.0", "work:1.0", "work:2.0", "side:0.0", "", "side:1.0"})
-	return scene{name: "few-ongoing", story: "Four sessions alive at once: one asking a question, two working (one with a red suite), one gone quiet mid-turn; three finished earlier.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "few-ongoing", extra: []string{"5", "x", "A", "A"}, story: "Four sessions alive at once: one asking a question, two working (one with a red suite), one gone quiet mid-turn; three finished earlier.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Three sessions that delegate: one with three background agents still out,
@@ -713,7 +714,7 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Scout, "the command table", 5 * time.Minute, []string{"main.go"}, "", nil},
 		legSpec{journey.Build, "the flag", 15 * time.Minute, []string{"main.go"}, "", nil})
 	panes, order := paneMap([]string{"billing", "mobile", "docs-site", "infra", "etl", "api", "cli"}, []string{"work:0.0", "work:1.0", "work:2.0", "ops:0.0", "work:3.0", "work:4.0", "tools:0.0"})
-	return scene{name: "alarm-storm", story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "alarm-storm", extra: []string{"4", "r", "1"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Fleet hygiene: two live sessions with one name in one tmux session, a
@@ -749,7 +750,7 @@ func sceneFleetHygiene() scene {
 		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap([]string{"harness-a", "harness-b", "relay", "nopane"}, []string{"harness:1.0", "harness:0.0", "tinker:0.0", ""})
-	return scene{name: "fleet-hygiene", story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "fleet-hygiene", extra: []string{"4", "r", "esc"}, story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // ---------------------------------------------------------------- driver
@@ -763,6 +764,7 @@ func sceneModel(sc scene, w, h int) *Model {
 	m.SetSessions(sc.sessions, sceneNow)
 	m.SetPanes(sc.panes)
 	m.SetPaneOrder(sc.order)
+	m.loaded = false // the refresh below is the first, as a launch has it
 	// The second live session was looked at partway through its trail —
 	// halfway, or eight legs from the end of a long one, so the read-line
 	// falls where a pinned column can show it: its column carries the
@@ -774,7 +776,7 @@ func sceneModel(sc scene, w, h int) *Model {
 		if !s.Live || len(tr.Legs) <= 2 {
 			continue
 		}
-		if live++; live == 2 {
+		if live++; live == 2 || live == 3 {
 			at := len(tr.Legs) / 2
 			if len(tr.Legs) > 24 {
 				at = len(tr.Legs) - 8
@@ -783,15 +785,16 @@ func sceneModel(sc scene, w, h int) *Model {
 		}
 	}
 	first := ""
-	for _, s := range sc.sessions {
-		if s.Live {
-			first = s.Info.Key()
-			break
-		}
+	if order := m.viewOrder(); len(order) > 0 {
+		first = sc.sessions[order[0]].Info.Key() // the board's first column, as a launch selects
 	}
 	m.point(first)
-	m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: true,
-		trail: sc.trails[first], events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails})
+	// Two polls, as a launch has them: the first is the baseline and the
+	// board; the second installs the selected session's trail and events.
+	for i := 0; i < 2; i++ {
+		m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: true,
+			trail: sc.trails[first], events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails})
+	}
 	return m
 }
 
@@ -840,10 +843,14 @@ func pressKey(m *Model, key string) {
 // canonicalKeys is the walkthrough every scenario gets: the board, a move,
 // down into one trail and its legs and the reader, back out, a jump by
 // number, the archive and back, the mirror toggle and the help.
-var canonicalKeys = []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "esc", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
+var canonicalKeys = []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "tab", "j", "j", "shift+tab", "shift+tab", "shift+tab", "j", "r", "t", "go on", "enter", "tab", "m", "m", "tab", "[", "]", "shift+tab", "shift+tab", "x", "A", "A", "m", "?"}
 
 func walkthrough(sc scene, w, h int, keys []string) string {
 	var b strings.Builder
+	if len(sc.extra) > 0 {
+		// The canonical walkthrough ends on the help: close it first.
+		keys = append(append(append([]string(nil), keys...), "esc"), sc.extra...)
+	}
 	m := sceneModel(sc, w, h)
 	fmt.Fprintf(&b, "SCENARIO %s · %dx%d\n%s\n\n", sc.name, w, h, sc.story)
 	fmt.Fprintf(&b, "=== opening frame (Lv%d) ===\n%s\n\n", m.level, m.View())

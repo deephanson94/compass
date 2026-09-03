@@ -63,7 +63,7 @@ func TestAPIErrorIsItsOwnState(t *testing.T) {
 	m.point(dead)
 	press(m, "r")
 	panel := ansi.Strip(m.View())
-	for _, want := range []string{"⊘ stopped on an API error", "1  /login — log in again, in that pane"} {
+	for _, want := range []string{"⊘ stopped on an API error", "1  /login"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("the panel should say %q:\n%s", want, panel)
 		}
@@ -212,7 +212,7 @@ func TestHidingIsHonest(t *testing.T) {
 	infra := sessionKey("s-infra")
 	m.point(infra)
 	press(m, "x")
-	if m.hidden[infra] || !strings.Contains(m.note, "is asking · it stays") || m.selectedKey != infra {
+	if m.hidden[infra] || !strings.Contains(m.note, "stays · it is asking") || m.selectedKey != infra {
 		t.Errorf("x on a question: hidden %v, note %q, selected %q", m.hidden[infra], m.note, m.selectedKey)
 	}
 	if strings.Contains(ansi.Strip(m.View()), "x unhide") {
@@ -229,7 +229,7 @@ func TestHidingIsHonest(t *testing.T) {
 	}
 	m.point(webapp)
 	press(m, "x")
-	if !m.hidden[webapp] || !strings.Contains(m.note, "webapp hidden · A, then x") {
+	if !m.hidden[webapp] || !strings.Contains(m.note, "webapp") || !strings.Contains(m.note, "hidden · A, then x") {
 		t.Errorf("hide: hidden %v, note %q", m.hidden[webapp], m.note)
 	}
 	if after := m.viewOrder(); m.selectedKey != m.sessions[after[min(pos, len(after)-1)]].Info.Key() {
@@ -295,8 +295,8 @@ func TestSharedTmuxNamesThePane(t *testing.T) {
 	}
 	m.point(sessionKey("s-webapp"))
 	press(m, "x")
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "⌁ dev ") && !strings.Contains(view, "⌁ dev\n") {
-		t.Errorf("alone in dev, the tag is the name again:\n%s", view)
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "⌁ dev:1.0") {
+		t.Errorf("a hidden namesake still shares dev: the pane stays on the tag:\n%s", view)
 	}
 }
 

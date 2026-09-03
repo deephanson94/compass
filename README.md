@@ -72,8 +72,9 @@ hands the keys to the conversation.
 
 1. **The CLI is sacred, and so is your tmux.** Sessions are the real `claude` binary
    in panes you own. compass never wraps, proxies, or re-renders the CLI, and never
-   creates or manages tmux sessions — it only observes, plus one keypress-gated
-   action: `Enter`, which hands you the session's own terminal.
+   creates or manages tmux sessions — it only observes, plus the keypress-gated
+   writes: `Enter`, which hands you the session's own terminal, and `r`, which
+   types a line, a menu's digit, or the escape that stop is, into its pane.
 2. **Three keypresses, max.** Any session, any zoom level, any answer — reachable in
    ≤3 keypresses from anywhere. This is a hard constraint, tested in CI.
 3. **Zero config, read-only.** compass watches the JSONL transcripts Claude Code
@@ -183,7 +184,7 @@ run and nothing else.
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `/` | on the board, the list or the archive: search the fleet — name, opening prompt, branch, any prompt, a leg, a file a leg touched. The header says `/query · 3 of 40`; `esc` clears it |
-| `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status"; the quota one only where a quota was hit; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A session dead on the API is offered the remedy its refusal names (`/login`) and nothing that would start a turn. A digit acts; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` (or `↪ answered 1 · "…"`) until the transcript shows the prompt landed. Off under `-readonly` |
+| `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status"; the quota one only where a quota was hit; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A session dead on the API is offered the remedy its refusal names (`/login`, typed as those bytes) under its own head, and the quota line named as what it is — a turn, for once the quota is back. A digit acts; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` (or `↪ answered 1 · "…"`) until the transcript shows the prompt landed. Off under `-readonly` |
 | `?` | help |
 
 ## Design docs

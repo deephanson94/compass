@@ -21,4 +21,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · x hide · ? help · q quit
+ j/k move · enter · no pane · r reply · / search · x hide · ? help · q quit

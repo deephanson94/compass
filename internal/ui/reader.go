@@ -344,6 +344,11 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 			}
 		}
 	}
+	if n := len(events); n > 0 && events[n-1].Type == transcript.EventUser && strings.TrimSpace(events[n-1].Text) != "" {
+		// The conversation ends on your turn: the reader says the reply
+		// has not come rather than leaving the rows under it blank.
+		d.push(resultIndent+glyphResult+" ⋯ no reply yet", readerBody, n-1, events[n-1].Timestamp)
+	}
 	return d.lines
 }
 
@@ -353,10 +358,10 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 func (d *docBuilder) said(event int, at time.Time, text string) {
 	d.gap()
 	rows := wrapPrefix(text, glyphSaid+" ", "  ", d.measure())
-	if len(rows) > 1 && !at.IsZero() && d.width-len([]rune(rows[0]))-2 < 5 {
-		// A turn that wraps keeps its clock: the first row gives the
-		// clock its room rather than losing it to the wrap.
-		rows = wrapPrefix(text, glyphSaid+" ", "  ", d.measure()-7)
+	if !at.IsZero() && d.width-len([]rune(rows[0]))-2 < 5 {
+		// A turn keeps its clock: the first row gives the clock its room
+		// rather than losing it to the wrap, or to a line that just fits.
+		rows = wrapPrefix(text, glyphSaid+" ", "  ", min(d.measure(), d.width)-7)
 	}
 	for i, row := range rows {
 		if i == 0 && !at.IsZero() {

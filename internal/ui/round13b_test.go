@@ -88,9 +88,9 @@ func TestAnAnswerIsTracedAsTheDigit(t *testing.T) {
 	if row := ansi.Strip(m.boardDelta(api, m.sessions[rowFor(t, m, api).sess], 60)); !strings.Contains(row, `↪ answered 1 · "narrow"`) {
 		t.Errorf("the trace should say the digit: %q", row)
 	}
-	// Narrow: the quote outlives the age.
-	if row := ansi.Strip(m.boardDelta(api, m.sessions[rowFor(t, m, api).sess], 26)); !strings.Contains(row, `"narrow"`) || strings.Contains(row, "ago") {
-		t.Errorf("a narrow trace keeps the quote and sheds the age: %q", row)
+	// Narrow: the digit and the clock are the trace; the quote goes first.
+	if row := ansi.Strip(m.boardDelta(api, m.sessions[rowFor(t, m, api).sess], 24)); !strings.Contains(row, "answered 1") || !strings.Contains(row, "ago") {
+		t.Errorf("a narrow trace keeps the digit and the clock: %q", row)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestOverlapsAreNamedInTheNarrowFleet(t *testing.T) {
 	}
 	m.trails[sessionKey("s-api")] = shared("api")
 	m.trails[sessionKey("s-webapp")] = shared("webapp")
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "⚠") || !strings.Contains(view, "both touched") {
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "⚠") || !strings.Contains(view, "tokens.py") {
 		t.Errorf("the narrow fleet should name the overlap:\n%s", view)
 	}
 }

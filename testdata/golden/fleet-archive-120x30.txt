@@ -27,4 +27,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · tab deeper · / search · ⇧tab board · A live fleet · ? help · q quit
+ j/k move · enter attach · tab deeper · a ask · / search · ⇧tab board · A live fleet · ? help · q quit

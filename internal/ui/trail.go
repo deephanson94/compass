@@ -77,6 +77,9 @@ type TrailOpts struct {
 	// HeadDead says the session is dead on the API: HEAD wears ⊘ and the
 	// refusal, not the needs-you glyph and a wait.
 	HeadDead bool
+	// HeadActivity is the call in flight, for a bare HEAD row when Head
+	// is empty: a working session with no leg yet is still doing something.
+	HeadActivity string
 
 	// HeadWaits is how many agents HEAD has out with nothing of its own
 	// written since it sent them: a parent parked on its children, which
@@ -204,6 +207,10 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 // their unrailed forms under HEAD.
 func isDetailRow(line string) bool {
 	plain := ansi.Strip(line)
+	if len([]rune(plain)) > 1 && []rune(plain)[1] == '▸' {
+		r := []rune(plain)
+		plain = string(r[0]) + " " + string(r[2:]) // the cursor's mark is not the row's shape
+	}
 	return strings.HasPrefix(plain, "│  ├") || strings.HasPrefix(plain, "│  └") ||
 		strings.HasPrefix(plain, "   ├") || strings.HasPrefix(plain, "   └")
 }
@@ -253,6 +260,13 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	o.HeadTail = headTail(tr, o.Now, o.HeadState != state.Idle)
 	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
+	if o.HeadDead && len(tr.Legs) > 0 && !tr.Legs[len(tr.Legs)-1].Current {
+		// The API refused after the last leg closed: the trail ends on
+		// the refusal, not on a leg that finished twenty minutes ago.
+		if row := bareHeadRow(o, width); row != "" {
+			b.node(row)
+		}
+	}
 	if len(tr.Legs) == 0 {
 		// A journey that has only been asked for: the present, when the
 		// fleet knows one ("● scout  thinking…  for 40s"), else say what
@@ -279,6 +293,9 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 // fleet's glyph and class, what the session is doing, and for how long.
 // "" when the session is not doing anything.
 func bareHeadRow(o TrailOpts, width int) string {
+	if o.Head == "" && o.HeadState == state.Working && strings.TrimSpace(o.HeadActivity) != "" {
+		o.Head = o.HeadActivity // "● scout  thinking…  for 40s": the present, before a leg exists
+	}
 	if o.Head == "" || o.HeadState == state.Idle {
 		return ""
 	}
@@ -351,6 +368,8 @@ type detailRow struct {
 type trailBuilder struct {
 	lines  []trailLine
 	groups int
+
+	lookDrawn bool // the read-line was drawn among a leg's lanes
 
 	cursor int  // the selectable row to invert; -1 for none
 	picked int  // how many selectable rows have been handed out so far
@@ -540,7 +559,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			if compacted {
 				compactAt = compactionIn(tr.Compactions, nodes[i-1].at, n.at)
 			}
-			looked := lookedBetween(o.Looked, nodes[i-1].at, n.at)
+			looked := !b.lookDrawn && lookedBetween(o.Looked, nodes[i-1].at, n.at)
 			switch {
 			case compacted && looked && o.Looked.Before(compactAt):
 				b.node(lookRule(o.Looked, o.Now, o.Width))
@@ -863,8 +882,9 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 		if o.Head != "" {
 			if o.HeadState == state.NeedsYou && len([]rune(o.Head)) > headLabelMax(o.Width) {
 				// Too long for the row: the row carries what fits at a word,
-				// and the rows beneath carry the rest.
-				return wrapN(o.Head, headLabelMax(o.Width), 100)[0], false
+				// never inside the options' brackets, and the rows beneath
+				// carry the rest.
+				return wrapQuestion(o.Head, headLabelMax(o.Width), 100)[0], false
 			}
 			return o.Head, false
 		}
@@ -1441,6 +1461,13 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		if br.AfterLeg != after {
 			continue
 		}
+		if after >= 0 && !b.lookDrawn && !o.Looked.IsZero() && o.Looked.After(tr.Legs[after].Start) && o.Looked.Before(br.Start) {
+			// The look fell before this lane left: the read-line goes
+			// here, so a lane that came back after the look stands below
+			// it, where the digest counts it.
+			b.node(lookRule(o.Looked, o.Now, width))
+			b.lookDrawn = true
+		}
 		sel := b.pick()
 		mark := branchOpen
 		if br.Done {
@@ -1608,10 +1635,7 @@ func (m *Model) cardSecond(w int) string {
 			}
 		}
 	}
-	tmux := ""
-	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
-		tmux = "⌁ " + tmuxSessionName(pane.Target)
-	}
+	tmux := m.boardTag(s) // the column's tag verbatim: the pane when a namesake shares the session
 	// The tmux session is always kept — `enter` attaches from here — and
 	// the day is added after the verdict, so joinFit sheds the day's
 	// clauses before the verdict's; the long form when it all fits, the
@@ -1673,29 +1697,30 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 	if s, ok := m.selected(); ok && s.HasClass {
 		headClass = s.Class.String()
 	}
-	dead := false
+	dead, activity := false, ""
 	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
-		dead = s.Snap.APIError
+		dead, activity = s.Snap.APIError, s.Snap.Activity
 	}
 	return TrailOpts{
-		HeadClass:  headClass,
-		HeadDead:   dead,
-		Looked:     m.looked(m.selectedKey),
-		Todos:      m.todos,
-		Labels:     m.labels,
-		LaneLinks:  m.laneLinks(m.trail),
-		Head:       head,
-		HeadState:  headState,
-		HeadSince:  since,
-		SessionKey: m.selectedKey,
-		Now:        m.now,
-		Width:      w,
-		Height:     h,
-		Level:      m.level,
-		Cursor:     m.cursor,
-		Pulse:      m.pulse,
-		Scroll:     m.trailScroll,
-		Pinned:     m.trailPinned,
+		HeadClass:    headClass,
+		HeadDead:     dead,
+		HeadActivity: activity,
+		Looked:       m.looked(m.selectedKey),
+		Todos:        m.todos,
+		Labels:       m.labels,
+		LaneLinks:    m.laneLinks(m.trail),
+		Head:         head,
+		HeadState:    headState,
+		HeadSince:    since,
+		SessionKey:   m.selectedKey,
+		Now:          m.now,
+		Width:        w,
+		Height:       h,
+		Level:        m.level,
+		Cursor:       m.cursor,
+		Pulse:        m.pulse,
+		Scroll:       m.trailScroll,
+		Pinned:       m.trailPinned,
 	}
 }
 
@@ -1886,6 +1911,12 @@ func (m *Model) trailTitle(w int) string {
 	title := "TRAIL · " + name + trailDay(m.trail, m.now, false)
 	if len([]rune(title)) > room {
 		title = "TRAIL · " + name + trailDay(m.trail, m.now, true) // "· 22h · 16⚑ 10✗"
+	}
+	if len([]rune(title)) > room {
+		title = "TRAIL · " + name + trailDay(m.trail, m.now, true)
+		for len([]rune(title)) > room && strings.Contains(title, " · ") {
+			title = title[:strings.LastIndex(title, " · ")] // clauses go whole, the day's tail first
+		}
 	}
 	if len([]rune(title)) > room {
 		title = "TRAIL · " + name // the day goes whole, never "· 22h ·…"

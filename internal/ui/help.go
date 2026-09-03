@@ -22,7 +22,7 @@ var helpKeys = [][2]string{
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
-	{"r", "reply: the question's options, stock lines, a typed line, stop"},
+	{"r", "reply: the question's options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
@@ -54,14 +54,11 @@ func helpLinesFor(w, h int, board bool) []string {
 		// The split follows the keys' longest line, not a fraction of the
 		// width: a fixed half pads one column while it clips the other.
 		left := helpKeysWidth(board)
-		if left > w/2 {
-			left = w/2 - gutterWidth
+		if left > w*3/5 {
+			left = w*3/5 - gutterWidth
 		}
 		right := w - left - gutterWidth
-		legend := helpLegendLines(right, true)
-		if wrapped := helpLegendWrapped(right, true); len(wrapped) <= h {
-			legend = wrapped // a definition cut at "…" taught nothing; the rows were free
-		}
+		legend := helpLegendWrapped(right, true, h) // definitions wrap into the rows that are free
 		return joinColumns(h, []column{
 			{left, helpKeyLinesFor(left, board)},
 			{right, legend},
@@ -106,11 +103,19 @@ func helpLinesFor(w, h int, board bool) []string {
 		keep := len(lines) - h
 		var tail []string
 		for _, l := range lines {
-			if strings.Contains(l, "fleet:") || strings.HasPrefix(ansi.Strip(l), "esc ") || strings.HasPrefix(ansi.Strip(l), "q ") || strings.HasPrefix(ansi.Strip(l), "? ") {
-				tail = append(tail, l)
+			plain := ansi.Strip(l)
+			keep := strings.Contains(l, "fleet:")
+			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "x ", "r "} {
+				keep = keep || strings.HasPrefix(plain, k)
+			}
+			if keep {
+				tail = append(tail, l) // the way out, the fleet's glyphs, and the keys pressed at this width
 			}
 		}
-		cut := lines[:h-len(tail)]
+		for len(tail) > 0 && h-len(tail) < 3 {
+			tail = tail[1:] // the first key rows outrank the kept tail on a tiny body
+		}
+		cut := lines[:max(h-len(tail), 0)]
 		var out []string
 		for _, l := range cut {
 			if !contains(tail, l) {
@@ -172,7 +177,7 @@ func helpLegendFold(legend []string, w int) []string {
 		switch {
 		case strings.Contains(l, "⌀ back") || strings.Contains(l, "◌ planned"):
 			if !folded {
-				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · on you: waits · →3 · ? no verdict", w)))
+				out = append(out, dimStyle.Render(clip("        ⌀ back, empty · ◌ planned · ⟲ compacted · 2nd failure · →3 · ↳ since you looked · ↪ sent · │ you were here", w)))
 				folded = true
 			}
 		default:
@@ -203,6 +208,8 @@ func helpKeyLinesFor(w int, board bool) []string {
 				what = "zoom out (esc too)"
 			case "esc":
 				what = "one level out · from a list, a standing search clears first"
+			case "m":
+				what = "" // the mirror needs the board's width
 			}
 		}
 		if what == "" {
@@ -230,9 +237,9 @@ func helpLegendRaw() []string {
 		"        ◌ planned — Claude's own next moves · →3 a live session on this lane",
 		"        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them",
 		"        ⟲ context compacted — a summary below · 16⚑ 10✗ 2⟲ ships · red · compactions",
-		"        · 2nd failure — the same test in two legs · ? — no verdict parsed",
+		"        · 2nd failure — the same test in two legs · ? — no verdict parsed · edited since — files touched after that run",
 		"        on you 40m today — its waits for your next prompt (3h+ = away)",
-		"        ↩ result of X — landed late; it is X's · ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
+		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit · ↩ result of X — landed late; it is X's",
 		"        │ you were here — the read-line · ↳ what came after · ⚠ two sessions, one thing",
 		"board:  columns for what owes you, in that order; the rest in the strip",
 		"",
@@ -254,9 +261,11 @@ func helpLegendLines(w int, roomy bool) []string {
 
 // helpLegendWrapped is the legend with every line that would clip re-flowed
 // onto continuation rows, hung under its glyph.
-func helpLegendWrapped(w int, roomy bool) []string {
+func helpLegendWrapped(w int, roomy bool, h int) []string {
+	raw := helpLegendRaw()
+	budget := h - len(raw) - len(legClasses) // the rows free for continuations
 	var lines []string
-	for _, l := range helpLegendRaw() {
+	for _, l := range raw {
 		if l == "" {
 			lines = append(lines, "")
 			continue
@@ -273,7 +282,14 @@ func helpLegendWrapped(w int, roomy bool) []string {
 			first, text = text[:i+3], text[i+3:]
 			indent = len([]rune(first))
 		}
-		for _, row := range wrapPrefix(text, first, strings.Repeat(" ", indent+2), w) {
+		rows := wrapPrefix(text, first, strings.Repeat(" ", indent+2), w)
+		if extra := len(rows) - 1; extra > budget {
+			lines = append(lines, dimStyle.Render(clip(l, w))) // no rows left: this one clips
+			continue
+		} else {
+			budget -= extra
+		}
+		for _, row := range rows {
 			lines = append(lines, dimStyle.Render(row))
 		}
 	}

@@ -238,9 +238,10 @@ func (m *Model) boardLines(w, h int) []string {
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
+		bw := bandWidth(w, min(len(keys)-b*n, n), cw)
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
-				cols = append(cols, column{cw, m.boardColumn(keys[i], r, cw, bh)})
+				cols = append(cols, column{bw, m.boardColumn(keys[i], r, bw, bh)})
 			}
 		}
 		if len(cols) == 0 {
@@ -291,9 +292,15 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 // column's left edge and its band's top row, so a panel about that
 // session can sit beside it rather than over someone else's.
 func (m *Model) boardPlace(w int) (x, y int, ok bool) {
+	x, y, _, ok = m.boardBand(w)
+	return x, y, ok
+}
+
+// boardBand is boardPlace with the height of the selected column's band.
+func (m *Model) boardBand(w int) (x, y, bh int, ok bool) {
 	n, cw := boardColumns(w, m.drawnCount(m.viewOrder()))
 	if n == 0 {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	h := m.height - 5
 	if h < 1 {
@@ -306,10 +313,29 @@ func (m *Model) boardPlace(w int) (x, y int, ok bool) {
 			y += heights[i/n-1] + 1
 		}
 		if key == m.selectedKey {
-			return (i % n) * (cw + gutterWidth), y, true
+			band := keys[(i/n)*n : min((i/n+1)*n, len(keys))]
+			bw := bandWidth(w, len(band), cw)
+			return (i % n) * (bw + gutterWidth), y, heights[i/n], true
 		}
 	}
-	return 0, 0, false
+	return 0, 0, 0, false
+}
+
+// bandWidth is a column's width in a band of k columns: the board's
+// column width, or wider when the band is short of columns — a lone
+// column under a full band was 38 wide beside 80 columns of nothing.
+func bandWidth(w, k, cw int) int {
+	if k <= 0 {
+		return cw
+	}
+	_, bw := boardColumns(w, k)
+	if k == 1 && bw > boardColMax && cw <= boardColMax {
+		bw = boardColMax // a lone column under a full band: wider, capped like any other
+	}
+	if bw < cw {
+		return cw
+	}
+	return bw
 }
 
 // drawnCount is how many of the view's sessions earn a column: the ones
@@ -364,6 +390,9 @@ func (m *Model) boardRows() map[string]fleetRow {
 		if m.archiveView {
 			if pos < 9 {
 				num = pos + 1
+			}
+			if m.sessions[i].Live {
+				num = m.digits[m.sessions[i].Info.Key()] // a hidden session keeps its digit here too
 			}
 		} else {
 			num = m.digits[m.sessions[i].Info.Key()]
@@ -556,7 +585,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		names := fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · "))
 		room := w - lipgloss.Width(tail) - 3
 		if room >= 12 {
-			return dimStyle.Render(clip(names, room)) + "   " + dimStyle.Render(tail)
+			return dimStyle.Render(shedClauses(names, room)) + "   " + dimStyle.Render(tail)
 		}
 	}
 	return dimStyle.Render(clip(tail, w))
@@ -586,24 +615,25 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		headClass = s.Class.String()
 	}
 	opts := TrailOpts{
-		HeadClass:  headClass,
-		HeadDead:   s.Snap.APIError,
-		Todos:      planItems(tr.Tasks),
-		Labels:     m.boardLabels[key],
-		LaneLinks:  m.laneLinks(tr),
-		Head:       m.headFor(s),
-		HeadState:  s.Snap.State,
-		HeadSince:  headSince(s),
-		SessionKey: key,
-		Now:        m.now,
-		Width:      w,
-		Height:     h - 3,
-		Level:      levelTrail,
-		Cursor:     -1,
-		Pulse:      m.pulse && working,
-		Pinned:     true,
-		Dense:      true, // the board always packs: a rail row between every leg halved what fit
-		Looked:     m.looked(key),
+		HeadClass:    headClass,
+		HeadDead:     s.Snap.APIError,
+		HeadActivity: s.Snap.Activity,
+		Todos:        planItems(tr.Tasks),
+		Labels:       m.boardLabels[key],
+		LaneLinks:    m.laneLinks(tr),
+		Head:         m.headFor(s),
+		HeadState:    s.Snap.State,
+		HeadSince:    headSince(s),
+		SessionKey:   key,
+		Now:          m.now,
+		Width:        w,
+		Height:       h - 3,
+		Level:        levelTrail,
+		Cursor:       -1,
+		Pulse:        m.pulse && working,
+		Pinned:       true,
+		Dense:        true, // the board always packs: a rail row between every leg halved what fit
+		Looked:       m.looked(key),
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
@@ -616,12 +646,18 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		if len(tr.Prompts) > 0 {
 			began = " · began " + relAge(m.now, tr.Prompts[0].At) + " ago"
 		}
-		full := fmt.Sprintf("↑ %d legs above%s%s", hidden, began, foldTotals(tr, hidden, false))
+		full := fmt.Sprintf("↑ %s above%s%s", plural(hidden, "leg"), began, foldTotals(tr, hidden, false))
 		if len([]rune(full)) > w {
-			full = fmt.Sprintf("↑ %d legs · %s%s", hidden, strings.TrimPrefix(began, " · began "), foldTotals(tr, hidden, true))
+			full = fmt.Sprintf("↑ %s · %s%s", plural(hidden, "leg"), strings.TrimPrefix(began, " · began "), foldTotals(tr, hidden, true))
 			full = strings.Replace(full, " ago", "", 1)
 		}
-		lines[0] = dimStyle.Render(clip(full, w))
+		if len(lines) > 1 && isDetailRow(lines[1]) {
+			// The fold took the row the parent stood on: the parent
+			// takes the child's, so the column does not open on a child
+			// with no name.
+			lines[1] = lines[0]
+		}
+		lines[0] = dimStyle.Render(shedClauses(full, w))
 	}
 	if m.boardMuted(s) {
 		for i, line := range lines {
@@ -922,7 +958,30 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 	// has not been rerun over, a rerun in progress, or — the one to catch —
 	// a commit made on top of a red run.
 	verdict := ""
-	for i := len(tr.Legs) - 1; i >= 0; i-- {
+	// A loop leads with its red: the newest run may be a narrower green
+	// that did not end it, and a circling row over "✓ green" gave
+	// opposite advice about interrupting.
+	start, greenSince := len(tr.Legs)-1, ""
+	if _, _, ok := circling(tr); ok {
+		newest := -1
+		for i := len(tr.Legs) - 1; i >= 0; i-- {
+			badge := legBadge(tr.Legs[i])
+			if badge == "" || badge == "?" {
+				continue
+			}
+			if strings.Contains(badge, "✗") {
+				if newest >= 0 {
+					greenSince = strings.TrimSpace(tr.Legs[newest].Label) + " " + legBadge(tr.Legs[newest]) + " since"
+				}
+				start = i
+				break
+			}
+			if newest < 0 {
+				newest = i
+			}
+		}
+	}
+	for i := start; i >= 0; i-- {
 		l := tr.Legs[i]
 		badge := legBadge(l)
 		if badge == "" || badge == "?" {
@@ -935,7 +994,18 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 		}
 		verdict = word + " " + badge
 		edited, shippedSince, rerunning := false, false, time.Time{}
-		for j := i + 1; j < len(tr.Legs); j++ {
+		end := len(tr.Legs)
+		if greenSince != "" {
+			// The loop's red leads; what happened after the narrower
+			// green run is that run's story, not the red's.
+			for j := i + 1; j < len(tr.Legs); j++ {
+				if b := legBadge(tr.Legs[j]); b != "" && b != "?" && !strings.Contains(b, "✗") {
+					end = j
+					break
+				}
+			}
+		}
+		for j := i + 1; j < end; j++ {
 			switch c := tr.Legs[j]; {
 			case c.Class == journey.Fix || c.Class == journey.Build:
 				edited = true
@@ -971,6 +1041,9 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 			// "· 3rd failure" — ten runes shorter than "same test 3rd
 			// failure", which is what a 35-column board column shed.
 			parts = append(parts, ordinal(runs)+" failure")
+		}
+		if greenSince != "" {
+			parts = append(parts, greenSince) // the subset that ran green, last to stay
 		}
 		break
 	}
@@ -1057,13 +1130,21 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		if sent.answer > 0 {
 			verb = fmt.Sprintf("↪ answered %d · ", sent.answer)
 		}
-		// The quote is the proof of what went; the age goes first when
-		// the row is narrow.
-		line := verb + clip(`"`+sent.text+`"`, w-len([]rune(verb)))
-		if age := " · " + relAge(m.now, sent.at) + " ago"; len([]rune(line))+len(age) <= w {
-			line += age
+		// The clock is what says whether the key landed; the quote is the
+		// proof of what went. Both when they fit; a narrow row keeps the
+		// clock and shortens the quote, and the digit alone is a trace.
+		age := " · " + relAge(m.now, sent.at) + " ago"
+		quote := `"` + sent.text + `"`
+		room := w - len([]rune(verb)) - len([]rune(age))
+		switch {
+		case len([]rune(quote)) <= room:
+			return dimStyle.Render(verb + quote + age)
+		case room >= 8:
+			return dimStyle.Render(verb + clip(quote, room) + age)
+		case sent.answer > 0:
+			return dimStyle.Render(clip(strings.TrimSuffix(verb, " · ")+age, w))
 		}
-		return dimStyle.Render(clip(line, w))
+		return dimStyle.Render(clip(verb+clip(quote, w-len([]rune(verb))), w))
 	}
 	seen, ok := m.seen[key]
 	if at, had := m.lastLook[key]; had && key == m.selectedKey {
@@ -1332,12 +1413,25 @@ func (m *Model) sharesTmux(s fleet.Session) bool {
 	}
 	name := tmuxSessionName(pane.Target)
 	for _, o := range m.sessions {
-		if o.Info.Key() == s.Info.Key() || !m.onBoard(o) {
-			continue
+		if o.Info.Key() == s.Info.Key() || !o.Live {
+			continue // hidden or not: the namesake is still in that tmux session
 		}
 		if p, ok := m.panes[o.Info.Key()]; ok && tmuxSessionName(p.Target) == name {
 			return true
 		}
 	}
 	return false
+}
+
+// shedClauses fits a " · "-joined line to w by dropping its trailing
+// clauses whole, and clips only a lone clause that is still too long.
+func shedClauses(s string, w int) string {
+	for lipgloss.Width(s) > w {
+		i := strings.LastIndex(s, " · ")
+		if i < 0 {
+			return clip(s, w)
+		}
+		s = s[:i]
+	}
+	return s
 }

@@ -240,8 +240,8 @@ func TestYourTurnsCarryTheirClock(t *testing.T) {
 	}
 	got = RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 40, Height: 20})
 	first = strings.Split(got, "\n")[0]
-	if strings.Contains(first, clock) {
-		t.Errorf("a turn that fills its row should drop the clock: %q", first)
+	if !strings.HasSuffix(strings.TrimRight(first, " "), clock) {
+		t.Errorf("a turn that fills its row wraps and keeps the clock: %q", first)
 	}
 }
 

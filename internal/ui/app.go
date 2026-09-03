@@ -147,6 +147,7 @@ type replyKind int
 
 const (
 	replyLine   replyKind = iota // typed and entered
+	replyRemedy                  // the remedy a refusal names, typed and entered
 	replyAnswer                  // the menu's own digit, then enter
 	replyStop                    // escape: the CLI interrupts its turn
 )
@@ -858,6 +859,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// newest row, so the first `j` of every visit was that.
 			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 {
 				m.note = "at the present · k goes back"
+				if n <= 1 {
+					m.note = "the trail is one row" // no key goes anywhere
+				}
 				return m, nil
 			}
 			m.cursorMove(1)
@@ -865,6 +869,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			if m.cursor == 0 {
 				m.note = "at the start of the trail"
+				if len(TrailRows(m.trail, m.level)) <= 1 {
+					m.note = "the trail is one row"
+				}
 				return m, nil
 			}
 			m.cursorMove(-1)
@@ -1354,10 +1361,12 @@ func (m *Model) zoomOut() {
 		m.level = levelTrail
 		m.cursor, m.anchor = -1, -1
 		if m.boardFits() && !m.archiveView {
-			m.level = levelBoard // the session view came from the board; back to it
+			m.level = levelBoard        // the session view came from the board; back to it
+			m.commitLook(m.selectedKey) // closing the session is the look: the digest stops billing
 		}
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
+		m.commitLook(m.selectedKey)
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	case m.level == levelBoard:
@@ -1375,6 +1384,20 @@ func (m *Model) clearQuery() {
 	}
 	m.clampSelection()
 	m.note = "search cleared"
+}
+
+// commitLook records a look that is over: the session was read and closed,
+// so the read-line goes to the present and the digest has nothing to add.
+func (m *Model) commitLook(key string) {
+	if key == "" {
+		return
+	}
+	if m.seen == nil {
+		m.seen = make(map[string]time.Time)
+	}
+	m.seen[key] = m.now
+	delete(m.lastLook, key)
+	m.saveSeen()
 }
 
 // looked is the moment the trail's read-line stands for: the look before
@@ -1468,7 +1491,7 @@ func (m *Model) toggleHidden() {
 		return
 	}
 	if len(m.viewOrder()) <= 1 && !m.archiveView {
-		m.note = "the only session on the board stays"
+		m.note = "the only session stays"
 		return
 	}
 	// What owes you an alarm stays, and says so: a note that reported a
@@ -1476,31 +1499,47 @@ func (m *Model) toggleHidden() {
 	name := sessionName(s.Info)
 	switch {
 	case s.Snap.APIError:
-		m.note = name + " is dead on the API · it stays on the board"
+		m.note = name + " stays · it is dead on the API"
 		return
 	case s.Snap.State == state.NeedsYou:
-		m.note = name + " is asking · it stays on the board"
+		m.note = name + " stays · it is asking"
 		return
 	case s.Snap.State == state.Stuck:
-		m.note = name + " hangs · it stays on the board"
+		m.note = name + " stays · it hangs"
 		return
 	case m.isCircling(s):
-		m.note = name + " is circling · it stays on the board"
+		m.note = name + " stays · it is circling"
 		return
 	}
-	// Where the selection goes: the neighbour, not the first column.
+	// Where the selection goes: the neighbour as drawn — the next column,
+	// or the next row of the list — not the first column.
+	drawn := func() []int {
+		if m.boardShown() {
+			return m.viewOrder()
+		}
+		return m.fleetOrder()
+	}
 	pos := 0
-	order := m.viewOrder()
-	for i, idx := range order {
+	for i, idx := range drawn() {
 		if m.sessions[idx].Info.Key() == key {
 			pos = i
 		}
 	}
 	m.hidden[key] = true
 	m.saveHidden()
+	// The note names the session the way its row does — digit, and the
+	// pane when a namesake shares its tmux session.
+	if d := m.digits[key]; d > 0 {
+		name = strconv.Itoa(d) + " " + name
+	}
+	if m.sharesTmux(s) {
+		if pane, ok := m.panes[key]; ok {
+			name += " · " + mirrorMark + " " + pane.Target
+		}
+	}
 	m.note = name + " hidden · A, then x brings it back"
 	if !m.archiveView {
-		if order := m.viewOrder(); len(order) > 0 {
+		if order := drawn(); len(order) > 0 {
 			m.point(m.sessions[order[min(pos, len(order)-1)]].Info.Key())
 		}
 		m.clampSelection()
@@ -1646,7 +1685,7 @@ func (m *Model) replyChoices() []replyChoice {
 		// Dead on the API: the remedy the refusal names, then the quota
 		// line. "please continue" into a 403 is a turn that 403s again.
 		if strings.Contains(s.Snap.Activity, "/login") {
-			out = append(out, replyChoice{label: "/login — log in again, in that pane", text: "/login", kind: replyLine})
+			out = append(out, replyChoice{label: "/login", text: "/login", kind: replyRemedy})
 		}
 		for _, r := range m.replies {
 			if r == quotaReply {
@@ -1746,7 +1785,11 @@ func (m *Model) send(c replyChoice) tea.Cmd {
 		default:
 			err = tmuxop.SendKeys(runner, pane.ID, c.text)
 		}
-		return replyDoneMsg{key: key, target: target, text: c.label, answer: c.n, err: err}
+		text := c.text
+		if text == "" {
+			text = c.label // an answer or stop: the label is the act
+		}
+		return replyDoneMsg{key: key, target: target, text: text, answer: c.n, err: err}
 	}
 }
 
@@ -1851,6 +1894,11 @@ func (m *Model) clampSelection() {
 			return
 		}
 	}
+	if !m.archiveView {
+		// Nothing selected yet: the board's first column — what owes
+		// you most — not the first row of a list that opened on a corpse.
+		order = m.viewOrder()
+	}
 	m.point(m.sessions[order[0]].Info.Key())
 }
 
@@ -1880,9 +1928,10 @@ func (m *Model) point(key string) {
 		return
 	}
 	m.selectedKey = key
-	if m.level >= levelTrail && !m.boardShown() {
+	if m.level >= levelTrail && !m.boardShown() && !(m.searching && m.searchFleet) {
 		// No board: selecting a session puts its trail on screen, which
-		// is opening it. "unread" never cleared at 100 columns.
+		// is opening it. "unread" never cleared at 100 columns. A search
+		// moving the selection is not a look.
 		m.markSeen(key)
 	}
 	// The board already holds this session's trail, plan and labels: use
@@ -2126,7 +2175,7 @@ func (m *Model) View() string {
 		// of footer was too easy to miss, and the person pressing `r`
 		// expected something to pop up.
 		panel := m.replyPanel(inner)
-		left, top := m.panelPlace(inner, panelWidth(panel))
+		left, top := m.panelPlace(inner, panelWidth(panel), len(panel))
 		overlay(out[3:3+bodyHeight], panel, left, top)
 	}
 
@@ -2207,10 +2256,10 @@ func (m *Model) replyPanel(inner int) []string {
 	s, ok := m.selected()
 	if ok {
 		name = sessionName(s.Info)
-		for i, key := range m.viewOrder() {
-			if m.sessions[key].Info.Key() == m.selectedKey {
-				who = strconv.Itoa(i+1) + " · "
-			}
+		if d := m.digits[s.Info.Key()]; d > 0 && !m.archiveView {
+			// The row's own digit, which is the session's for life — a
+			// position named another session on the same screen.
+			who = strconv.Itoa(d) + " · "
 		}
 	}
 	if pane, ok := m.selectedPane(); ok {
@@ -2249,8 +2298,21 @@ func (m *Model) replyPanel(inner int) []string {
 	choices := m.replyChoices()
 	heads := map[replyKind]string{
 		replyAnswer: "answers · sent as the menu's own digit",
+		replyRemedy: "remedy · typed into the pane and entered · log in again",
 		replyLine:   "lines · typed into the prompt and entered",
 		replyStop:   "stop · escape, which interrupts the turn",
+	}
+	if ok && s.Snap.APIError {
+		// A dead session: a stock line starts a turn into the refusal,
+		// and the panel says so rather than offering it as a reply.
+		heads[replyLine] = "lines · start a turn — only once the quota is back"
+	}
+	if body < 44 {
+		// The narrow panel: the mechanism, in fewer words.
+		heads[replyAnswer] = "answers · the menu's digit"
+		heads[replyRemedy] = "remedy · typed and entered"
+		heads[replyLine] = "lines · typed and entered"
+		heads[replyStop] = "stop · escape"
 	}
 	if len(choices) > 0 && choices[0].kind == replyAnswer {
 		// Under a menu a typed line lands in the menu: said, so the
@@ -2263,7 +2325,9 @@ func (m *Model) replyPanel(inner int) []string {
 			if i > 0 {
 				rows = append(rows, readerLine{kind: readerBlank})
 			}
-			rows = append(rows, readerLine{text: heads[c.kind], kind: readerBody})
+			for _, line := range wrapPrefix(heads[c.kind], "", "", body) {
+				rows = append(rows, readerLine{text: line, kind: readerBody})
+			}
 		}
 		lastKind = c.kind
 		kind := readerText
@@ -2343,10 +2407,16 @@ func (m *Model) replyState(s fleet.Session) string {
 // board, under the selected column's header; in a session, over the
 // companion; on a narrow deck, over the trail — never over the row or the
 // card that names the session it is about.
-func (m *Model) panelPlace(inner, pw int) (left, top int) {
+func (m *Model) panelPlace(inner, pw, ph int) (left, top int) {
 	if m.level == levelBoard && m.boardShown() {
-		if x, y, ok := m.boardPlace(inner); ok {
-			return min(x, max(inner-pw, 0)), y + 3
+		if x, y, bh, ok := m.boardBand(inner); ok {
+			top := y + 3
+			if body := m.height - 5; bh < ph && y+bh+1+ph <= body {
+				// A band shorter than the panel, with free rows under it:
+				// the panel stands under the band rather than on the strip.
+				top = y + bh + 1
+			}
+			return min(x, max(inner-pw, 0)), top
 		}
 		return 0, 3
 	}
@@ -2519,7 +2589,7 @@ func (m *Model) footerLine(w int) string {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
 		// on the fleet's own last row: "N archived · A browses".
-		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · A live fleet · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · A live fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -2558,7 +2628,18 @@ func (m *Model) footerLine(w int) string {
 	// that ends in "· ? he" says less than one without the chapters.
 	// The view's own keys go last: `x`, `/` and `r` were shed at the
 	// widths the walkthrough pressed them.
-	for _, drop := range []string{" · a ask", " · tab deeper", " · m live pane", " · h/l session", " · g grab", " · [ ] chapters", " · [ ] turns", " · / search", " · r reply", " · x hide", " · x unhide"} {
+	if len(m.viewOrder()) == 1 && !m.archiveView {
+		// One session: the keys that move between sessions answer no
+		// question, and "esc board" beside "nothing to zoom out to" was
+		// two answers.
+		for _, drop := range []string{"h/l columns · ", " · h/l session", " · esc board"} {
+			keys = strings.Replace(keys, drop, "", 1)
+		}
+	}
+	if m.showMirror {
+		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
+	}
+	for _, drop := range []string{" (prefix d returns)", " · a ask", " · tab deeper", " · m live pane", " · h/l session", " · g grab", " · [ ] chapters", " · [ ] turns", " · / search", " · r reply", " · x hide", " · x unhide"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -2574,10 +2655,10 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · x hide", " · x unhide", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
+	drops := []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · x hide", " · x unhide", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
 	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
 		// A chapter note keeps the chapter keys over everything.
-		drops = []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · space unfold", " · [ ] chapters", " · [ ] turns"}
+		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · space unfold", " · [ ] chapters", " · [ ] turns"}
 	}
 	for _, drop := range drops {
 		if lipgloss.Width(keys)+2+lipgloss.Width(m.note) <= w {
@@ -2603,6 +2684,11 @@ func (m *Model) footerLine(w int) string {
 // beside each session, and the parenthetical is what the footer owes an
 // 80-column deck instead.
 func (m *Model) enterKeymap() string {
+	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
+		if pane, has := m.panes[s.Info.Key()]; !has || pane.Target == "" {
+			return "enter · no pane" // an attach that cannot work is not promised
+		}
+	}
 	if m.inTmux {
 		return "enter attach"
 	}

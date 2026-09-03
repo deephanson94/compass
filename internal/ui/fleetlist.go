@@ -76,14 +76,26 @@ func (m *Model) fleetLines(w, h int) []string {
 	// discovered, so it stands even when nothing at all is live.
 	var tail []string
 	if !m.archiveView {
-		if n := m.archivedCount(); n > 0 {
-			tail = []string{"", dimStyle.Render(clip(fmt.Sprintf("%d archived · A browses", n), w))}
+		archived, hidden := m.archivedCount(), m.hiddenCount()
+		switch {
+		case archived > 0 && hidden > 0:
+			tail = []string{"", dimStyle.Render(clip(fmt.Sprintf("%d archived · %d hidden · A browses", archived, hidden), w))}
+		case archived > 0:
+			tail = []string{"", dimStyle.Render(clip(fmt.Sprintf("%d archived · A browses", archived), w))}
+		case hidden > 0:
+			// Below the board's width there is no strip: the list's last
+			// line is where a hide stays said.
+			tail = []string{"", dimStyle.Render(clip(fmt.Sprintf("%d hidden · A, then x", hidden), w))}
 		}
 		if over := m.overlaps(); len(over) > 0 && !m.boardShown() {
 			// The one sentence only compass can say, above the archive
 			// row: it was board-only furniture, and two of five widths
-			// have no board.
-			tail = append([]string{"", dimStyle.Render(clip(over[0], w))}, tail...)
+			// have no board. Narrow, it keeps the fact and drops the prose.
+			line := over[0]
+			if lipgloss.Width(line) > w {
+				line = compactOverlap(line)
+			}
+			tail = append([]string{"", dimStyle.Render(clip(line, w))}, tail...)
 		}
 	}
 
@@ -92,6 +104,9 @@ func (m *Model) fleetLines(w, h int) []string {
 		note := "nothing live"
 		if m.archiveView {
 			note = "no archived sessions"
+		}
+		if m.fleetQuery != "" {
+			note = "no session matches /" + m.fleetQuery + " · esc clears it"
 		}
 		return append([]string{dimStyle.Render(clip(note, w))}, tail...)
 	}
@@ -345,16 +360,7 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 		return min(m.obligation(m.sessions[i]), rankOwed)
 	}
 	sort.SliceStable(out, func(a, b int) bool {
-		ra, rb := tier(out[a]), tier(out[b])
-		if ra != rb {
-			return ra < rb
-		}
-		wa, pa := m.paneCoords(out[a])
-		wb, pb := m.paneCoords(out[b])
-		if wa != wb {
-			return wa < wb
-		}
-		return pa < pb
+		return tier(out[a]) < tier(out[b]) // then the fleet's own order, as the board has it
 	})
 	return out
 }
@@ -420,16 +426,19 @@ func (m *Model) archivedCount() int {
 // groupEcho is the header's right-aligned reminder that something inside the
 // group wants you — the one warm mark the fleet is allowed to repeat.
 func (m *Model) groupEcho(g fleetGroup) string {
-	echo := ""
+	// The group's worst row, as the board ranks it — a ▲ over a group of
+	// ◍ ↻ ⊘ pointed at the wrong group — and nothing when that row is the
+	// one right beneath the header.
+	worst, rank := -1, rankAPIError+1
 	for _, i := range g.entries {
-		switch m.sessions[i].Snap.State {
-		case state.NeedsYou:
-			return fleet.Glyph(state.NeedsYou)
-		case state.Stuck:
-			echo = fleet.Glyph(state.Stuck)
+		if r := m.obligation(m.sessions[i]); r < rank {
+			worst, rank = i, r
 		}
 	}
-	return echo
+	if worst < 0 {
+		return ""
+	}
+	return m.rowGlyph(m.sessions[worst])
 }
 
 // isHeaderLine recognises a group header among rendered fleet lines: it
@@ -443,8 +452,12 @@ func isHeaderLine(l string) bool {
 // isEntryFirstLine recognises the first of an entry's two lines: a window
 // that ends on it shows a name with its second line cut off.
 func isEntryFirstLine(l string) bool {
-	plain := []rune(strings.TrimLeft(ansi.Strip(l), " ▸0123456789"))
-	return len(plain) > 0 && strings.ContainsRune("●▲◍○", plain[0])
+	// A mark or a space, a digit or a space, a space, the glyph: a second
+	// line's "◍ build …" after four spaces is not an entry, and a loop's ↻
+	// or a dead session's ⊘ is.
+	r := []rune(ansi.Strip(l))
+	return len(r) > 3 && (r[0] == ' ' || r[0] == '▸') && (r[1] == ' ' || (r[1] >= '0' && r[1] <= '9')) &&
+		r[2] == ' ' && strings.ContainsRune("●▲◍○↻⊘", r[3])
 }
 
 // countEntries counts the session rows among rendered fleet lines: the
@@ -454,8 +467,7 @@ func isEntryFirstLine(l string) bool {
 func countEntries(lines []string) int {
 	n := 0
 	for _, l := range lines {
-		plain := []rune(strings.TrimLeft(ansi.Strip(l), " ▸0123456789"))
-		if len(plain) > 0 && strings.ContainsRune("●▲◍○", plain[0]) {
+		if isEntryFirstLine(l) {
 			n++
 		}
 	}
@@ -546,8 +558,11 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 
 	age := padLeft(m.age(headSince(s)), ageWidth)
-	if at := circlingSince(m.trails[s.Info.Key()]); m.isCircling(s) && !at.IsZero() {
-		age = padLeft(m.age(at), ageWidth) // the loop's age, not its last write's
+	if at := circlingSince(m.trails[s.Info.Key()]); m.isCircling(s) && !at.IsZero() && st != state.Idle {
+		// A loop in flight wears the loop's age, not its last write's; an
+		// idle loop keeps its wait for a prompt, which is what decides
+		// whether to type.
+		age = padLeft(m.age(at), ageWidth)
 	}
 	head := headline(s)
 	if head == "" && m.unread(s) {
@@ -570,8 +585,8 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 	if m.isCircling(s) && !m.archiveView {
 		head = "circling"
-		if st == state.Idle {
-			head = "circling · idle" // the loop, and whether a turn is in flight
+		if st == state.Idle && lipgloss.Width("circling · idle")+1 <= w-5-1-ageWidth-6 {
+			head = "circling · idle" // the loop, and whether a turn is in flight — whole, or not at all
 		}
 	}
 
@@ -616,8 +631,26 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	if !m.boardShown() && !m.archiveView && s.Live {
 		// Below the board's width the row is the column: the digest and
 		// the sent-trace ride under it, or a reply at eighty columns left
-		// no trace at all.
-		if third := m.boardDelta(s.Info.Key(), s, w-4); third != "" {
+		// no trace at all — and the pane, when a namesake shares the tmux
+		// session the header names.
+		tag := ""
+		if m.sharesTmux(s) {
+			if pane, ok := m.panes[s.Info.Key()]; ok {
+				tag = mirrorMark + " " + pane.Target
+			}
+		}
+		room := w - 4
+		if tag != "" {
+			room -= lipgloss.Width(tag) + 2
+		}
+		third := ""
+		if room >= 12 {
+			third = m.boardDelta(s.Info.Key(), s, room)
+		}
+		if tag != "" {
+			third = pad(third, w-4-lipgloss.Width(tag)) + dimStyle.Render(tag)
+		}
+		if strings.TrimSpace(ansi.Strip(third)) != "" {
 			lines = append(lines, strings.Repeat(" ", 4)+third)
 		}
 	}
@@ -639,6 +672,9 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 			// A hidden live session: where it lives, since that is how
 			// its namesake on the board is told from it.
 			return dimStyle.Render(clip(mirrorMark+" "+pane.Target+" · "+branchOf(s.Info), w))
+		}
+		if s.Live {
+			return dimStyle.Render(clip("no pane · "+branchOf(s.Info), w))
 		}
 		return dimStyle.Render(clip(branchOf(s.Info), w))
 	}
@@ -737,7 +773,7 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 				class = s.Class.String()
 			}
 			return bareHeadRow(TrailOpts{Head: m.headFor(s), HeadState: s.Snap.State, HeadClass: class,
-				HeadSince: headSince(s), Now: m.now}, w)
+				HeadActivity: s.Snap.Activity, HeadSince: headSince(s), Now: m.now}, w)
 		}
 		l := tr.Legs[head]
 		// HEAD's own row, in HEAD's own words: the same glyph, label and
@@ -1025,4 +1061,23 @@ func sessionName(info fleet.SessionInfo) string {
 		return info.ID[:8]
 	}
 	return info.ID
+}
+
+// compactOverlap is an overlap line with its prose dropped: "⚠ webapp and
+// api both touched tokens.py in the last 20m" → "⚠ webapp, api · tokens.py
+// · 20m" — the fact survives a narrow column, the sentence does not.
+func compactOverlap(line string) string {
+	body := strings.TrimSpace(strings.TrimPrefix(line, "⚠"))
+	if i := strings.Index(body, " both touched "); i >= 0 {
+		names := strings.Replace(body[:i], " and ", ", ", 1)
+		rest := body[i+len(" both touched "):]
+		if j := strings.Index(rest, " in the last "); j >= 0 {
+			return "⚠ " + names + " · " + rest[:j] + " · " + rest[j+len(" in the last "):]
+		}
+		return "⚠ " + names + " · " + rest
+	}
+	if i := strings.Index(body, " are both failing "); i >= 0 {
+		return "⚠ " + strings.Replace(body[:i], " and ", ", ", 1) + " · " + body[i+len(" are both failing "):]
+	}
+	return line
 }

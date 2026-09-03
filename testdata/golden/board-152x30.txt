@@ -13,10 +13,10 @@
                                      │ │  └ came back with no report       │                                     │
                                      │ ● fix    tokens.py           for 3m │                                     │
 
-  5 ○ scratch            unread  22m
+  5 ○ scratch                                         unread  22m
      ◆ scout  try the streaming api
-                             no pane
- ◉ "try the streaming api"   23m ago
+                                                          no pane
+ ◉ "try the streaming api"                                23m ago
 
  scouting will appear here
 

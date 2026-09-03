@@ -562,7 +562,7 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 		}
 		got = append(got, m.sessions[r.sess].Info.ID)
 	}
-	want := []string{"[⌁ ops]", "s-ops", "[⌁ dev]", "s-w9", "s-w10"}
+	want := []string{"[⌁ ops]", "s-ops", "[⌁ dev]", "s-w10", "s-w9"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("rendered order = %v, want %v", got, want)
 	}
@@ -937,7 +937,7 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 	t.Run("the footers promise it", func(t *testing.T) {
 		m := groupedModel(80, 24)
 		for _, want := range []string{
-			"j/k move · enter attach (prefix d returns) · x hide · ? help · q quit",
+			"j/k move · enter attach · r reply · / search · x hide · ? help · q quit",
 			"j/k rows · [ ] chapters · r reply · enter attach · tab deeper · esc back",
 			"j/k scroll · space unfold · / search · n/N · r reply · enter attach · esc back",
 		} {

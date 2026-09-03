@@ -6,25 +6,25 @@
   ⌁ ops                                ▲ │ ◉ "fix the 401 bug"                              38m ago
   1 ▲ infra               needs you   2m │ ╷
      AskUserQuestion                     │ ◆ scout  middleware.py                                5m
-                                         │ │
-  4 ○ tfstate                unread  15m │ ◆ build  tokens.py                                   12m
-     ◆ build  1190✓                      │ │
-                                         │ ◆ test   pytest                                18✓ 2✗ 8m
-  ⌁ dev                              40s │ ├─◈ scout the payments module                   ⌀ 7m ago
- ▸2 ● api                             3m │ │  └ came back with no report
-     ◆ test   1216✓ 2✗                   │ ● fix    tokens.py                                for 3m
+                               ⌁ ops:1.0 │ │
+                                         │ ◆ build  tokens.py                                   12m
+  4 ○ tfstate                unread  15m │ │
+     ◆ build  1190✓                      │ ◆ test   pytest                                18✓ 2✗ 8m
+                               ⌁ ops:0.0 │ ├─◈ scout the payments module                   ⌀ 7m ago
+                                         │ │  └ came back with no report
+  ⌁ dev                              40s │ ● fix    tokens.py                                for 3m
+ ▸2 ● api                             3m │
+     ◆ test   1216✓ 2✗                   │
+                               ⌁ dev:1.0 │
                                          │
   3 ● webapp                         40s │
      ◆ test   18✓ 2✗                     │
+                               ⌁ dev:2.1 │
                                          │
   elsewhere                              │
   5 ○ scratch                unread  22m │
      ◆ scout  try the streaming api      │
                                          │
  5 archived · A browses                  │
-
-
-
-
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · r reply · / search · x hide · ? help · q quit
+ j/k move · enter attach · [ ] chapters · r reply · / search · x hide · g grab · ? help · q quit
