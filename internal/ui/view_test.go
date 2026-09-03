@@ -203,8 +203,8 @@ func TestT16DeckViewGolden(t *testing.T) {
 	// is the floor, and the attach hint is the longest thing it carries: both
 	// keymaps have to survive the clip whole.
 	for _, want := range []string{
-		"j/k move · enter · no pane · r reply · / search · x hide · ? help · q quit",
-		"j/k move · enter · no pane · / search · A live fleet · ? help · q quit",
+		"j/k move · enter · no pane · tab deeper · r reply · ? help · q quit",
+		"j/k move · enter · no pane · tab deeper · A live fleet · ? help · q quit",
 	} {
 		m.archiveView = strings.Contains(want, "A live fleet")
 		if frame := m.View(); !strings.Contains(frame, want) {

@@ -96,6 +96,11 @@ func helpLinesFor(w, h int, board bool) []string {
 			// the compaction mark rides with them. A row left over after
 			// that takes the tag's line.
 			legend = helpLegendFold(legend, w)
+			if len(lines)+len(legend) >= h && len(lines) > 1 && lines[1] == "" {
+				// No row to spare and a legend line folded away: the air
+				// under "keys" buys the tag's line back.
+				lines = append(lines[:1], lines[2:]...)
+			}
 			if len(lines)+len(legend) < h {
 				legend = helpLegendFill(legend, full, h-len(lines))
 			}

@@ -940,7 +940,7 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 	t.Run("the footers promise it", func(t *testing.T) {
 		m := groupedModel(80, 24)
 		for _, want := range []string{
-			"j/k move · enter attach · r reply · / search · x hide · ? help · q quit",
+			"j/k move · enter attach · tab deeper · r reply · ? help · q quit",
 			"j/k rows · [ ] chapters · r reply · enter attach · esc back · ? help · q quit",
 			"j/k scroll · space unfold · enter attach · esc back · ? help · q quit",
 		} {

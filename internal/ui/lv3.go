@@ -256,7 +256,7 @@ func (m *Model) anchorReader() {
 func (m *Model) scrollBy(delta int) bool {
 	doc := m.doc(m.readerWidth())
 	if len(doc) <= m.readerHeight() {
-		m.note = "the whole conversation is on screen"
+		m.note = "all of it is on screen"
 		return true // said; nothing more to say
 	}
 	was := clampScroll(m.scroll, len(doc), m.readerHeight())

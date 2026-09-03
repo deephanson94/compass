@@ -1783,7 +1783,7 @@ func TestFittingConversationSaysSo(t *testing.T) {
 	pressTab(m)
 	pressTab(m)
 	press(m, "j")
-	if !strings.Contains(m.note, "whole conversation is on screen") {
+	if !strings.Contains(m.note, "all of it is on screen") {
 		t.Errorf("j on a fitting conversation said %q", m.note)
 	}
 }

@@ -47,7 +47,7 @@ func TestTheMirrorNeverFlipsOutOfSight(t *testing.T) {
 	m := groupedModel(100, 30)
 	press(m, "m")
 	press(m, "m")
-	if m.showMirror || !strings.Contains(m.note, "needs 110") {
+	if m.showMirror || !strings.Contains(m.note, "110 columns") {
 		t.Errorf("m below 110: showMirror %v, note %q", m.showMirror, m.note)
 	}
 	m2 := boardModel(152, 40)

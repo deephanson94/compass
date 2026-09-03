@@ -818,7 +818,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Not flipped: a mirror switched on out of sight appeared
 			// unbidden when the terminal widened, and the second press
 			// was a silent key.
-			m.note = fmt.Sprintf("the mirror needs %d columns", deckWideCols)
+			m.note = fmt.Sprintf("mirror: %d columns", deckWideCols) // short enough to stand beside the help at 80
 			return m, nil
 		}
 		if m.archiveView {
@@ -1366,7 +1366,7 @@ func (m *Model) zoomIn() {
 	case m.level < levelReader:
 		m.enterReader()
 	default:
-		m.note = "this is the deepest level"
+		m.note = "the deepest level"
 	}
 }
 
@@ -2802,7 +2802,7 @@ func (m *Model) footerLine(w int) string {
 		// One session: the keys that move between sessions answer no
 		// question, and "esc board" beside "nothing to zoom out to" was
 		// two answers.
-		for _, drop := range []string{"h/l columns · ", " · h/l session", " · esc board"} {
+		for _, drop := range []string{"h/l columns · ", " · h/l session", " · esc board", " · g grab"} {
 			keys = strings.Replace(keys, drop, "", 1)
 		}
 	}
@@ -2812,7 +2812,7 @@ func (m *Model) footerLine(w int) string {
 	if m.note == "" {
 		// `n/N` goes before `/ search`: the walk keys without the search
 		// they walk were a wrong clause boundary.
-		for _, drop := range []string{" (prefix d returns)", " · a ask", " · tab deeper", " · m live pane", " · h/l session", " · g grab", " · [ ] chapters", " · [ ] turns", " · n/N", " · / search", " · r reply", " · x hide", " · x unhide"} {
+		for _, drop := range m.shedOrder(false) {
 			if lipgloss.Width(keys) <= w {
 				break
 			}
@@ -2827,11 +2827,7 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · [ ] chapters", " · [ ] turns", " · r reply", " · space unfold", " · ? help"}
-	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
-		// A chapter note keeps the chapter keys over everything.
-		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns", " · ? help"}
-	}
+	drops := m.shedOrder(strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt))
 	note := m.note
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
@@ -2923,6 +2919,24 @@ func (m *Model) footerLine(w int) string {
 // noteForms is a footer note at every length it can be shown, fullest
 // first: whole; a chapter note without its quote (the clock stays); then
 // each trailing clause shed in turn, down to the first.
+// shedOrder is the order the footer gives up its optional keys in, first
+// to go first. The way in (`tab deeper`) outlasts `x hide` and `g grab`,
+// which refuse on a fleet of one, on the list — deeper in, the person has
+// pressed it, and the chapter keys outlast it. A chapter note keeps the
+// chapter keys over everything; `? help` goes last of all.
+func (m *Model) shedOrder(chapter bool) []string {
+	order := []string{" (prefix d returns)", " · a ask", " · h/l session", " · m live pane", " · g grab", " · n/N", " · / search", " · x hide", " · x unhide"}
+	switch {
+	case chapter:
+		order = append(order, " · tab deeper", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns")
+	case m.level >= levelWaypoints:
+		order = append(order, " · tab deeper", " · [ ] chapters", " · [ ] turns", " · r reply", " · space unfold")
+	default:
+		order = append(order, " · [ ] chapters", " · [ ] turns", " · tab deeper", " · r reply", " · space unfold")
+	}
+	return append(order, " · ? help")
+}
+
 // fitQuote is form with its quoted clause clipped so the whole fits room,
 // or "" when that would leave too little of the quote to read.
 func fitQuote(form string, room int) string {
