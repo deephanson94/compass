@@ -2824,7 +2824,17 @@ func (m *Model) keymap() string {
 // optional keys shed: what the person can actually see being offered,
 // which is what the help asks before it cuts a key row.
 func (m *Model) keymapAt(w int) string {
-	return shedKeys(m.keymap(), m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
+	keys := shedKeys(m.keymap(), m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
+	// The deck names keys outside its footer too: the fleet's last row
+	// offers the archive, and a hide note names the way back. A key the
+	// person can see being offered anywhere is one the help owes a row.
+	if m.archivedCount() > 0 {
+		keys += " · A browses"
+	}
+	if m.hiddenCount() > 0 {
+		keys += " · A, then x"
+	}
+	return keys
 }
 
 // footerWith renders the keymap and the note into one row w wide.

@@ -69,10 +69,12 @@ func helpOffered(key, keymap string) bool {
 		return false
 	}
 	for _, f := range map[string][]string{
-		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"}, "A": {"A live fleet", "A fleet"},
+		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"},
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
+		"G": {"G is the present"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
 		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
+		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
 	}[key] {
 		if strings.Contains(keymap, f) {
 			return true
@@ -156,7 +158,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		for _, key := range []string{"A", "g", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "x", "r", "a", "[ ]", "space", "/ n N"} {
+		for _, key := range []string{"A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "x", "r", "a", "[ ]", "space"} {
 			if len(lines) <= h {
 				break
 			}

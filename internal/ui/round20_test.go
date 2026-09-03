@@ -276,3 +276,28 @@ func TestTheMirrorKeyRanksTheSameBothWays(t *testing.T) {
 		t.Errorf("m ranks %d with the mirror off and %d with it on", a, b)
 	}
 }
+
+// A key the deck offers anywhere it speaks — the fleet's last row, a hide
+// note — is a key the help owes a row: an 80-column help dropped `A`
+// while the strip under the list said "300 archived · A browses".
+func TestTheHelpCountsWhatTheDeckOffersAnywhere(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 80, 24)
+	if !strings.Contains(m.keymapAt(78), "A browses") {
+		t.Fatalf("the fixture has no archive to offer: %q", m.keymapAt(78))
+	}
+	help := strings.Join(helpLinesWith(78, 19, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymapAt(78)}), "\n")
+	if !strings.Contains(help, "browse the archive") {
+		t.Errorf("the help drops the archive key the strip offers:\n%s", help)
+	}
+}
+
+// The reader's above-row says where the page is even when the whole
+// conversation fits: a blank row answered nothing.
+func TestTheAboveRowNamesTheStart(t *testing.T) {
+	m := sceneModel(sceneManyIdle(), 220, 48)
+	pressKey(m, "tab")
+	pressKey(m, "tab")
+	if above := ansi.Strip(m.readerAbove(118)); strings.TrimSpace(above) == "" {
+		t.Errorf("the above-row is blank at the top of a conversation")
+	}
+}

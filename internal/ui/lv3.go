@@ -144,12 +144,10 @@ func (m *Model) readerAbove(w int) string {
 	doc := m.doc(w)
 	top := readerTopIn(doc, m.scroll, m.readerHeight())
 	if top == 0 {
-		if len(doc) > m.readerHeight() {
-			// The row that says where you are says it here too: the
-			// answer is "the beginning", and a blank said nothing.
-			return dimStyle.Render(clip(" the start of the conversation", w))
-		}
-		return ""
+		// The row that says where you are says it here too: the answer is
+		// "the beginning", and a blank said nothing — at the widths where
+		// a conversation fits whole, least of all.
+		return dimStyle.Render(clip(" the start of the conversation", w))
 	}
 	turns := 0
 	for i := 0; i < top; i++ {
