@@ -360,23 +360,74 @@ func (m *Model) boardRows() map[string]fleetRow {
 	rows := map[string]fleetRow{}
 	for pos, i := range m.viewOrder() {
 		num := 0
-		if pos < 9 {
-			num = pos + 1
+		if m.archiveView {
+			if pos < 9 {
+				num = pos + 1
+			}
+		} else {
+			num = m.digits[m.sessions[i].Info.Key()]
 		}
 		rows[m.sessions[i].Info.Key()] = fleetRow{sess: i, num: num}
 	}
 	return rows
 }
 
+// assignDigits gives every live session its number on first sight and
+// keeps it for the session's life: the rows re-sort as what they owe
+// changes, the digits do not. A `3` from muscle memory then lands on the
+// session it landed on this morning, however the board has moved since.
+func (m *Model) assignDigits() {
+	if m.digits == nil {
+		m.digits = map[string]int{}
+	}
+	live := map[string]bool{}
+	for _, s := range m.sessions {
+		if s.Live {
+			live[s.Info.Key()] = true
+		}
+	}
+	for key := range m.digits {
+		if !live[key] {
+			delete(m.digits, key) // archived: its digit is free again
+		}
+	}
+	taken := map[int]bool{}
+	for _, d := range m.digits {
+		taken[d] = true
+	}
+	// New sessions take the lowest free digit, in the board's own order.
+	for _, i := range m.viewOrder() {
+		key := m.sessions[i].Info.Key()
+		if _, ok := m.digits[key]; ok {
+			continue
+		}
+		for d := 1; d <= 9; d++ {
+			if !taken[d] {
+				m.digits[key], taken[d] = d, true
+				break
+			}
+		}
+	}
+}
+
 // boardSelect is `1`–`9` on the board: the column (or strip entry) wearing
 // that number.
 func (m *Model) boardSelect(i int) bool {
 	order := m.viewOrder()
-	if i < 0 || i >= len(order) {
-		return false
+	if m.archiveView {
+		if i < 0 || i >= len(order) {
+			return false
+		}
+		m.point(m.sessions[order[i]].Info.Key())
+		return true
 	}
-	m.point(m.sessions[order[i]].Info.Key())
-	return true
+	for _, idx := range order {
+		if m.digits[m.sessions[idx].Info.Key()] == i+1 {
+			m.point(m.sessions[idx].Info.Key())
+			return true
+		}
+	}
+	return false
 }
 
 // overlaps is what two live sessions are doing to the same thing: a file
@@ -488,7 +539,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	if !m.archiveView {
 		fixed = append(fixed, m.overlaps()...)
 		if n := m.hiddenCount(); n > 0 {
-			fixed = append(fixed, fmt.Sprintf("%d hidden · A lists them", n))
+			fixed = append(fixed, fmt.Sprintf("%d hidden · A, then x", n))
 		}
 		if n := m.archivedCount(); n > 0 {
 			fixed = append(fixed, fmt.Sprintf("%d archived · A browses", n))
@@ -532,6 +583,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	}
 	opts := TrailOpts{
 		HeadClass:  headClass,
+		HeadDead:   s.Snap.APIError,
 		Todos:      planItems(tr.Tasks),
 		Labels:     m.boardLabels[key],
 		LaneLinks:  m.laneLinks(tr),
@@ -642,7 +694,7 @@ func circling(tr journey.Trail) (test string, runs int, ok bool) {
 	// has failed in three legs is a loop, whatever a narrower green run
 	// beside it says — "pytest tests/auth 312✓" between two red full
 	// suites was reading as the loop ending.
-	seen, greenest := 0, 0
+	seen, greenest, greenArgs := 0, 0, 0
 	for i := len(tr.Legs) - 1; i >= 0 && seen < 3; i-- {
 		l := tr.Legs[i]
 		badge := legBadge(l)
@@ -654,11 +706,14 @@ func circling(tr journey.Trail) (test string, runs int, ok bool) {
 			// A green run as big as the red one ends the loop; a smaller
 			// one is a subset and says nothing about the failing test.
 			if n := badgeCount(badge); n > greenest {
-				greenest = n
+				greenest, greenArgs = n, len(strings.Fields(l.Label))
 			}
 			continue
 		}
-		if badgeCount(badge) <= greenest {
+		if badgeCount(badge) <= greenest && greenArgs <= len(strings.Fields(l.Label)) {
+			// The green run was as big and no narrower: "pytest
+			// tests/auth 312✓" over a red "pytest" is a subset whatever
+			// its count says, and the loop is still on.
 			return "", 0, false
 		}
 		for _, w := range l.Waypoints {
@@ -671,6 +726,23 @@ func circling(tr journey.Trail) (test string, runs int, ok bool) {
 		}
 	}
 	return "", 0, false
+}
+
+// circlingSince is when a loop began: the first leg the failing test
+// failed in. A loop's clock is its age, not its last write's.
+func circlingSince(tr journey.Trail) time.Time {
+	test, _, ok := circling(tr)
+	if !ok {
+		return time.Time{}
+	}
+	for _, l := range tr.Legs {
+		for _, w := range l.Waypoints {
+			if w.Kind == journey.WaypointTestFail && w.Text == test {
+				return l.Start
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // badgeCount is how many tests a badge counts: "310✓ 2✗" is 312.
@@ -717,31 +789,68 @@ func (m *Model) obligation(s fleet.Session) int {
 	tr := m.trails[s.Info.Key()]
 	switch s.Snap.State {
 	case state.NeedsYou:
-		return 0
+		if s.Snap.APIError {
+			// Dead on the API: nothing you type clears it, so it sorts
+			// under the question and the loop, which a keypress ends.
+			return rankAPIError
+		}
+		return rankNeedsYou
 	case state.Stuck:
-		return 1
+		return rankStuck
 	}
 	if _, _, ok := circling(tr); ok {
-		return 2
+		return rankCircling
 	}
 	if s.Snap.State == state.Working {
-		return 3
+		if headWaits(tr) > 0 && parkedFor(tr, m.now) >= parkedNotable {
+			return rankParked // a lead sitting on its agents past the quiet mark
+		}
+		return rankWorking
 	}
 	if !s.Info.LastEventAt.IsZero() && m.now.Sub(s.Info.LastEventAt) > boardFresh {
-		return 6 // a day old owes nothing today, red or not
+		return rankRest // a day old owes nothing today, red or not
 	}
 	if redNow(tr) || unfinished(tr) {
-		return 4
+		return rankOwed
 	}
 	if m.unread(s) {
-		return 5
+		return rankUnread
 	}
-	return 6
+	return rankRest
 }
+
+// The obligation ranks, in board order: what a keypress ends first, then
+// what only time or a person elsewhere can clear, then work in flight, then
+// what stopped short of done.
+const (
+	rankNeedsYou = iota
+	rankStuck
+	rankCircling
+	rankAPIError
+	rankParked
+	rankWorking
+	rankOwed
+	rankUnread
+	rankRest
+)
 
 // owedRank is the last obligation rank that earns a column of its own;
 // past it a session is named in the strip.
-const owedRank = 5
+const owedRank = rankUnread
+
+// parkedNotable is how long a lead may sit on its agents before that is
+// what it owes you: "◈3 out 20m · quiet 15m" above a session that is fine.
+const parkedNotable = 10 * time.Minute
+
+// parkedFor is how long HEAD has been quiet on its open lanes.
+func parkedFor(tr journey.Trail, now time.Time) time.Duration {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		if tr.Legs[i].Current {
+			return now.Sub(tr.Legs[i].End)
+		}
+	}
+	return 0
+}
 
 // repeatRuns is how many legs the leg's most-repeated failing test has now
 // failed in — 0 when nothing in it has failed before.
@@ -885,6 +994,18 @@ func (m *Model) boardSecondLine(s fleet.Session, line string, w int) (string, bo
 	group := ""
 	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
 		group = tmuxSessionName(pane.Target)
+		if m.sharesTmux(s) {
+			// Two live sessions in one tmux session: the name alone is
+			// the same string on both, and the pane is what tells them
+			// apart — "⌁ harness:1.0", the address enter spends.
+			group = pane.Target
+		}
+	} else if s.Live && !m.archiveView {
+		// No pane at all: said, not left as a blank where the tag goes.
+		if lipgloss.Width(line)+2+7 > w {
+			return line, false
+		}
+		return pad(line, w-7) + dimStyle.Render("no pane"), true
 	}
 	if group == "" {
 		return line, true // nothing to say: nothing owed
@@ -1183,4 +1304,23 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 			m.narrator.Request(key, tr, "")
 		}
 	}
+}
+
+// sharesTmux says whether another session on the board lives in the same
+// tmux session as this one: when it does, the tag names the pane.
+func (m *Model) sharesTmux(s fleet.Session) bool {
+	pane, ok := m.panes[s.Info.Key()]
+	if !ok || pane.Target == "" {
+		return false
+	}
+	name := tmuxSessionName(pane.Target)
+	for _, o := range m.sessions {
+		if o.Info.Key() == s.Info.Key() || !m.onBoard(o) {
+			continue
+		}
+		if p, ok := m.panes[o.Info.Key()]; ok && tmuxSessionName(p.Target) == name {
+			return true
+		}
+	}
+	return false
 }

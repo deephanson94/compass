@@ -2,8 +2,8 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   1 ▲ infra           needs you   2m │ ▸2 ● api                         3m │  3 ● webapp                     40s │  4 ○ tfstate            unread  15m
-     AskUserQuestion           ⌁ ops │     ✗ red 18✓ 2✗ · edited since     │     ✗ red 18✓ 2✗ · edited since     │     build state.tf            ⌁ ops
-                                     │                               ⌁ dev │                               ⌁ dev │
+     AskUserQuestion       ⌁ ops:1.0 │     ✗ red 18✓ 2✗ · edited since     │     ✗ red 18✓ 2✗ · edited since     │     build state.tf        ⌁ ops:0.0
+                                     │                           ⌁ dev:1.0 │                           ⌁ dev:2.1 │
  ◉ "tighten the vpc securit… 39m ago │ ◉ "fix the 401 bug"         38m ago │ ◉ "flake in the checkout s… 35m ago │ ◉ "reconcile the state fil… 37m ago
  ╷                                   │ ╷                                   │ ╷                                   │ ╷
  ◆ scout  main.tf                18m │ ◆ scout  middleware.py           5m │ ◆ test   pytest           18✓ 2✗ 3m │ ◆ build  state.tf               21m
@@ -15,7 +15,7 @@
 
   5 ○ scratch            unread  22m
      ◆ scout  try the streaming api
-
+                             no pane
  ◉ "try the streaming api"   23m ago
 
  scouting will appear here

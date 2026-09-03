@@ -113,6 +113,7 @@ type replyDoneMsg struct {
 	key    string // the session it went to
 	target string
 	text   string
+	answer int // the menu digit pressed, when the reply was an answer
 	err    error
 }
 
@@ -128,8 +129,9 @@ type hookState struct {
 // sentReply is the last line compass typed into a session, so the board
 // can say so until the transcript shows the session took it.
 type sentReply struct {
-	text string
-	at   time.Time
+	text   string
+	at     time.Time
+	answer int // the menu digit pressed, 0 for a typed line
 }
 
 // replyChoice is one line the panel offers: an answer to the question the
@@ -270,6 +272,7 @@ type Model struct {
 	lastLook    map[string]time.Time // the look before the current one, per session: the read-line while it is open
 	hookFired   map[string]time.Time // when each session+event last ran the hook, for the cool-off
 	hidden      map[string]bool      // sessions taken off the board with `x`, by Key()
+	digits      map[string]int       // each live session's number, kept from first sight
 	hiddenFile  string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
 	seenFile    string               // where the seen-times persist; "" = memory only (harness)
@@ -404,6 +407,7 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 	m.sessions = sessions
 	m.now = now
 	m.loaded = true
+	m.assignDigits()
 	m.clampSelection()
 }
 
@@ -440,7 +444,7 @@ func (m *Model) SetMirror(frame string) {
 // Init kicks off the first refresh and the three cadences.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.refresh(), tick(), paneTick(), captureTick(), breathTick(),
-		m.relistPanes(), tea.SetWindowTitle(tabTitle(0, 0, 0)))
+		m.relistPanes(), tea.SetWindowTitle(tabTitle(0, 0, 0, 0)))
 }
 
 func tick() tea.Cmd {
@@ -679,8 +683,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.note = "could not send: " + firstLine(msg.err.Error())
 		} else {
-			m.note = fmt.Sprintf("sent to %s %s · %s", mirrorMark, msg.target, clip(`"`+msg.text+`"`, 40))
-			m.sent[msg.key] = sentReply{text: msg.text, at: m.now}
+			verb := "sent"
+			if msg.answer > 0 {
+				verb = fmt.Sprintf("answered %d ·", msg.answer)
+			}
+			m.note = fmt.Sprintf("↪ %s %s · to %s %s", verb, clip(`"`+msg.text+`"`, 40), mirrorMark, msg.target)
+			m.sent[msg.key] = sentReply{text: msg.text, at: m.now, answer: msg.answer}
 		}
 		return m, nil
 	case attachDoneMsg:
@@ -1463,13 +1471,37 @@ func (m *Model) toggleHidden() {
 		m.note = "the only session on the board stays"
 		return
 	}
+	// What owes you an alarm stays, and says so: a note that reported a
+	// hide while the column stood was the screen lying.
+	name := sessionName(s.Info)
+	switch {
+	case s.Snap.APIError:
+		m.note = name + " is dead on the API · it stays on the board"
+		return
+	case s.Snap.State == state.NeedsYou:
+		m.note = name + " is asking · it stays on the board"
+		return
+	case s.Snap.State == state.Stuck:
+		m.note = name + " hangs · it stays on the board"
+		return
+	case m.isCircling(s):
+		m.note = name + " is circling · it stays on the board"
+		return
+	}
+	// Where the selection goes: the neighbour, not the first column.
+	pos := 0
+	order := m.viewOrder()
+	for i, idx := range order {
+		if m.sessions[idx].Info.Key() == key {
+			pos = i
+		}
+	}
 	m.hidden[key] = true
 	m.saveHidden()
-	m.note = sessionName(s.Info) + " hidden · A brings it back"
+	m.note = name + " hidden · A, then x brings it back"
 	if !m.archiveView {
-		// The selection moves on: the board no longer has this column.
 		if order := m.viewOrder(); len(order) > 0 {
-			m.point(m.sessions[order[0]].Info.Key())
+			m.point(m.sessions[order[min(pos, len(order)-1)]].Info.Key())
 		}
 		m.clampSelection()
 	}
@@ -1610,11 +1642,24 @@ func (m *Model) replyChoices() []replyChoice {
 			}
 		}
 	}
+	if s, ok := m.selected(); ok && s.Snap.APIError {
+		// Dead on the API: the remedy the refusal names, then the quota
+		// line. "please continue" into a 403 is a turn that 403s again.
+		if strings.Contains(s.Snap.Activity, "/login") {
+			out = append(out, replyChoice{label: "/login — log in again, in that pane", text: "/login", kind: replyLine})
+		}
+		for _, r := range m.replies {
+			if r == quotaReply {
+				out = append(out, replyChoice{label: r, text: r, kind: replyLine})
+			}
+		}
+		return out
+	}
 	for _, r := range m.replies {
 		if r == quotaReply {
 			// The stock quota line only where a quota was hit: it was
 			// offered to a session fifty seconds old.
-			if s, ok := m.selected(); !ok || !(s.Snap.APIError || m.hadAPIError(s)) {
+			if s, ok := m.selected(); !ok || !m.hadAPIError(s) {
 				continue
 			}
 		}
@@ -1687,7 +1732,7 @@ func (m *Model) replyKey(msg tea.KeyMsg) tea.Cmd {
 func (m *Model) send(c replyChoice) tea.Cmd {
 	pane, ok := m.selectedPane()
 	if !ok {
-		m.note = "no tmux pane for this session · nothing to reply to"
+		m.note = "no pane · nothing to type into"
 		return nil
 	}
 	runner, target, key := m.runner, pane.Target, m.selectedKey
@@ -1701,7 +1746,7 @@ func (m *Model) send(c replyChoice) tea.Cmd {
 		default:
 			err = tmuxop.SendKeys(runner, pane.ID, c.text)
 		}
-		return replyDoneMsg{key: key, target: target, text: c.label, err: err}
+		return replyDoneMsg{key: key, target: target, text: c.label, answer: c.n, err: err}
 	}
 }
 
@@ -1719,7 +1764,7 @@ func (m *Model) attach() tea.Cmd {
 	}
 	pane, ok := m.selectedPane()
 	if !ok {
-		m.note = "no tmux pane for this session"
+		m.note = "no pane · nothing to attach to"
 		return nil
 	}
 	m.markSeen(m.selectedKey)
@@ -1917,7 +1962,8 @@ func (m *Model) move(delta int) {
 // pressing `g` while browsing it comes back to the live fleet first.
 func (m *Model) selectOldestNeedsYou() bool {
 	for _, s := range m.sessions {
-		if s.Live && s.Snap.State == state.NeedsYou {
+		if s.Live && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+			// A session dead on the API is not one a keypress helps.
 			if m.archiveView {
 				m.toggleArchive()
 			}
@@ -1931,7 +1977,18 @@ func (m *Model) selectOldestNeedsYou() bool {
 func (m *Model) needsYouCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if m.onBoard(s) && s.Snap.State == state.NeedsYou {
+		if m.onBoard(s) && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+			n++
+		}
+	}
+	return n
+}
+
+// apiErrorCount is how many sessions on the board are dead on the API.
+func (m *Model) apiErrorCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if m.onBoard(s) && s.Snap.APIError {
 			n++
 		}
 	}
@@ -1941,7 +1998,7 @@ func (m *Model) needsYouCount() int {
 // titleCmd emits an OSC 2 tab title only when the attention count changes, so
 // an unfocused terminal tab carries the fleet's health (SPEC §2.4).
 func (m *Model) titleCmd() tea.Cmd {
-	title := tabTitle(m.needsYouCount(), m.stuckCount(), m.circlingCount())
+	title := tabTitle(m.needsYouCount(), m.stuckCount(), m.circlingCount(), m.apiErrorCount())
 	if title == m.lastTitle {
 		return nil
 	}
@@ -1951,7 +2008,7 @@ func (m *Model) titleCmd() tea.Cmd {
 
 // tabTitle is the terminal's title: the alarms, so a tab bar says what
 // the deck says without the deck being looked at.
-func tabTitle(needsYou, stuck, loops int) string {
+func tabTitle(needsYou, stuck, loops, dead int) string {
 	title := "⌂ compass"
 	if needsYou > 0 {
 		title += fmt.Sprintf(" ▲%d", needsYou)
@@ -1961,6 +2018,9 @@ func tabTitle(needsYou, stuck, loops int) string {
 	}
 	if loops > 0 {
 		title += fmt.Sprintf(" ↻%d", loops)
+	}
+	if dead > 0 {
+		title += fmt.Sprintf(" %s%d", glyphAPIError, dead)
 	}
 	return title
 }
@@ -2003,11 +2063,18 @@ func (m *Model) rowGlyph(s fleet.Session) string {
 	if m.isCircling(s) {
 		return glyphCircling
 	}
+	if s.Snap.APIError {
+		return glyphAPIError
+	}
 	return fleet.Glyph(s.Snap.State)
 }
 
 // glyphCircling marks a session failing the same test leg after leg.
 const glyphCircling = "↻"
+
+// glyphAPIError marks a session dead on the API — a refusal nothing you
+// type clears, which the needs-you glyph read as a question.
+const glyphAPIError = "⊘"
 
 // View renders the whole deck.
 func (m *Model) View() string {
@@ -2166,6 +2233,11 @@ func (m *Model) replyPanel(inner int) []string {
 		replyLine:   "lines · typed into the prompt and entered",
 		replyStop:   "stop · escape, which interrupts the turn",
 	}
+	if len(choices) > 0 && choices[0].kind == replyAnswer {
+		// Under a menu a typed line lands in the menu: said, so the
+		// answers above read as the safer keys they are.
+		heads[replyLine] = "lines · typed into the menu — the answers above are safer"
+	}
 	lastKind := replyKind(-1)
 	for i, c := range choices {
 		if c.kind != lastKind {
@@ -2188,8 +2260,8 @@ func (m *Model) replyPanel(inner int) []string {
 		rows = append(rows, readerLine{text: "› " + m.replyDraft + "▏", kind: readerSaid},
 			readerLine{text: "enter sends the line · esc back to the menu", kind: readerBody})
 	} else {
-		rows = append(rows, readerLine{text: "t  type a line", kind: readerText},
-			readerLine{text: "a digit sends · t types · esc closes", kind: readerBody})
+		rows = append(rows, readerLine{text: "t  type a line — entered the same way", kind: readerText},
+			readerLine{text: "a digit acts · t types · esc closes", kind: readerBody})
 	}
 
 	box := func(s string, style lipgloss.Style) string {
@@ -2213,6 +2285,13 @@ func (m *Model) replyPanel(inner int) []string {
 // question, since the digits of that menu are on the same keys.
 func (m *Model) replyState(s fleet.Session) string {
 	since := relAge(m.now, headSince(s))
+	if s.Snap.APIError {
+		text := strings.TrimSpace(s.Snap.Activity)
+		if text == "" {
+			text = s.Snap.Reason
+		}
+		return glyphAPIError + " stopped on an API error " + since + " ago · " + text + " — no turn will consume a line; the remedy is typed into the pane"
+	}
 	switch s.Snap.State {
 	case state.NeedsYou:
 		q := strings.TrimSpace(m.headFor(s))
@@ -2294,10 +2373,33 @@ func (m *Model) statusChips() string {
 	if !m.loaded {
 		return dimStyle.Render("scanning…")
 	}
+	// One chip per session: a circling session is counted under ↻ and a
+	// dead one under ⊘, and nowhere else — the tally summed to one more
+	// than the board drew, and the count is the first thing read.
 	counts := map[state.State]int{}
 	oldest := map[state.State]time.Time{}
+	loops, dead, loopSince, deadSince, deadWord := 0, 0, time.Time{}, time.Time{}, ""
 	for _, s := range m.sessions {
 		if !m.onBoard(s) {
+			continue
+		}
+		switch {
+		case s.Snap.APIError:
+			dead++
+			if deadSince.IsZero() || headSince(s).Before(deadSince) {
+				deadSince = headSince(s)
+			}
+			if w := apiWord(s); deadWord == "" || w == deadWord {
+				deadWord = w
+			} else {
+				deadWord = "api error" // more than one kind: the general word
+			}
+			continue
+		case m.isCircling(s):
+			loops++
+			if at := circlingSince(m.trails[s.Info.Key()]); !at.IsZero() && (loopSince.IsZero() || at.Before(loopSince)) {
+				loopSince = at
+			}
 			continue
 		}
 		counts[s.Snap.State]++
@@ -2308,24 +2410,28 @@ func (m *Model) statusChips() string {
 		}
 	}
 	var parts []string
-	for _, st := range []state.State{state.NeedsYou, state.Stuck, state.Working, state.Idle} {
-		n := counts[st]
-		if n == 0 {
-			continue
+	for _, st := range []state.State{state.NeedsYou, state.Stuck} {
+		if n := counts[st]; n > 0 {
+			// The states you must not miss carry their wait: "▲1 4m" is
+			// a change you can read from across the room, where a census
+			// is not.
+			parts = append(parts, stateStyle(st).Render(fmt.Sprintf("%s%d %s", fleet.Glyph(st), n, m.age(oldest[st]))))
 		}
-		chip := fmt.Sprintf("%s%d", fleet.Glyph(st), n)
-		// The two states you must not miss carry their wait: "▲1 4m" is a
-		// change you can read from across the room, where a census is not.
-		if at, ok := oldest[st]; ok {
-			chip += " " + m.age(at)
-		}
-		parts = append(parts, stateStyle(st).Render(chip))
 	}
-	// A session going round the same failure: the loop the state machine
-	// calls healthy and busy, counted where "all calm" can see it.
-	loops := m.circlingCount()
 	if loops > 0 {
-		parts = append(parts, stuckStyle.Render(fmt.Sprintf("↻%d circling", loops)))
+		chip := fmt.Sprintf("↻%d", loops)
+		if !loopSince.IsZero() {
+			chip += " " + m.age(loopSince) // the loop's age, as its row counts it
+		}
+		parts = append(parts, stuckStyle.Render(chip))
+	}
+	if dead > 0 {
+		parts = append(parts, needsYouStyle.Render(fmt.Sprintf("%s%d %s %s", glyphAPIError, dead, deadWord, m.age(deadSince))))
+	}
+	for _, st := range []state.State{state.Working, state.Idle} {
+		if n := counts[st]; n > 0 {
+			parts = append(parts, stateStyle(st).Render(fmt.Sprintf("%s%d", fleet.Glyph(st), n)))
+		}
 	}
 	// Agents out are work in flight nobody's glyph shows: "●2 ○2 all calm"
 	// over four lanes still out twenty minutes in was a claim, and wrong.
@@ -2347,24 +2453,29 @@ func (m *Model) statusChips() string {
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("◈%d out · oldest %s", out, m.age(oldestOut))))
 	}
 	if m.archiveView {
-		parts = append(parts, dimStyle.Render(fmt.Sprintf("archive %d", m.archivedCount())))
+		chip := fmt.Sprintf("archive %d", m.archivedCount())
+		if n := m.hiddenCount(); n > 0 {
+			chip += fmt.Sprintf(" · %d hidden", n) // the list holds both; the chip says so
+		}
+		parts = append(parts, dimStyle.Render(chip))
 	}
 	if len(parts) == 0 {
 		return dimStyle.Render("○ all quiet")
 	}
-	// What owes you short of an alarm: sessions that stopped red or with
-	// steps left, and ones not read yet. "all calm" over four columns
-	// that owed something was the header contradicting the board.
+	// What owes you: every session with a column — the alarms, the work
+	// in flight, what stopped red or with steps left, what is not read
+	// yet — counted as one number, with the unread named beside it.
+	// "all calm" beside "2 unread" was the header contradicting itself.
 	owed, unread := 0, 0
 	for _, s := range m.sessions {
 		if !m.onBoard(s) {
 			continue
 		}
 		switch m.obligation(s) {
-		case 4:
-			owed++
-		case 5:
+		case rankUnread:
 			unread++
+		case rankOwed:
+			owed++
 		}
 	}
 	if owed > 0 {
@@ -2373,7 +2484,7 @@ func (m *Model) statusChips() string {
 	if unread > 0 {
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("%d unread", unread)))
 	}
-	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && out == 0 && owed == 0 && !m.archiveView {
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && dead == 0 && out == 0 && owed == 0 && unread == 0 && !m.archiveView {
 		// Calm, said aloud: the absence of a warm glyph is the design, and
 		// in monochrome an absence is also what a clipped header looks like.
 		parts = append(parts, dimStyle.Render("all calm"))
@@ -2384,7 +2495,7 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
-	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · g grab · ? help · q quit"
+	keys := "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · x hide · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
@@ -2401,7 +2512,7 @@ func (m *Model) footerLine(w int) string {
 	case m.replying && m.replyTyping:
 		keys = "type the line · enter sends · esc back"
 	case m.replying:
-		keys = fmt.Sprintf("reply: 1–%d sends · t types a line · esc closes", len(m.replyChoices()))
+		keys = fmt.Sprintf("reply: 1–%d · t types a line · esc closes", len(m.replyChoices()))
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
@@ -2421,9 +2532,14 @@ func (m *Model) footerLine(w int) string {
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back"
 	}
+	if m.archiveView && m.hiddenCount() == 0 {
+		keys = strings.Replace(keys, " · x unhide", "", 1) // nothing to unhide: the key answers no question
+	}
 	// The keymap sheds its optional fragments before it clips: a footer
 	// that ends in "· ? he" says less than one without the chapters.
-	for _, drop := range []string{" · x hide", " · x unhide", " · r reply", " · [ ] chapters", " · [ ] turns", " · / search", " · m live pane", " · h/l session", " · tab deeper", " · a ask", " · g grab"} {
+	// The view's own keys go last: `x`, `/` and `r` were shed at the
+	// widths the walkthrough pressed them.
+	for _, drop := range []string{" · a ask", " · tab deeper", " · m live pane", " · h/l session", " · g grab", " · [ ] chapters", " · [ ] turns", " · / search", " · r reply", " · x hide", " · x unhide"} {
 		if lipgloss.Width(keys) <= w {
 			break
 		}
@@ -2439,7 +2555,7 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := []string{" · x hide", " · x unhide", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
+	drops := []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · x hide", " · x unhide", " · r reply", " · ? help", " · [ ] chapters", " · [ ] turns", " · space unfold"}
 	if strings.HasPrefix(m.note, glyphSaid) || strings.HasPrefix(m.note, glyphPrompt) {
 		// A chapter note keeps the chapter keys over everything.
 		drops = []string{" · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · ? help", " · space unfold", " · [ ] chapters", " · [ ] turns"}

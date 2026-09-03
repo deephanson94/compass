@@ -74,6 +74,9 @@ type TrailOpts struct {
 	// contradicting the fleet beside it.
 	HeadState state.State
 	HeadSince time.Time
+	// HeadDead says the session is dead on the API: HEAD wears ⊘ and the
+	// refusal, not the needs-you glyph and a wait.
+	HeadDead bool
 
 	// HeadWaits is how many agents HEAD has out with nothing of its own
 	// written since it sent them: a parent parked on its children, which
@@ -291,6 +294,14 @@ func bareHeadRow(o TrailOpts, width int) string {
 			tail = "silent " + relAge(o.Now, o.HeadSince)
 		} else if o.HeadState == state.NeedsYou {
 			tail = "waiting " + relAge(o.Now, o.HeadSince)
+		}
+	}
+	if o.HeadDead {
+		// The trail ends where the API refused: a node, since the
+		// session that died mid-turn looked like one that finished a leg.
+		glyph, class = glyphAPIError, "api"
+		if !o.HeadSince.IsZero() && !o.Now.IsZero() {
+			tail = "dead " + relAge(o.Now, o.HeadSince)
 		}
 	}
 	lead := stateStyle(o.HeadState).Render(glyph + " " + pad(class, trailVerbWidth))
@@ -1024,6 +1035,10 @@ func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
 	if since.IsZero() {
 		since = l.Start
 	}
+	if o.HeadDead {
+		// The API refused mid-leg: the row is the refusal, not a wait.
+		return glyphAPIError, "dead " + relAge(o.Now, since)
+	}
 	switch o.HeadState {
 	case state.NeedsYou:
 		return fleet.Glyph(state.NeedsYou), "waiting " + relAge(o.Now, since)
@@ -1596,8 +1611,13 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 	if s, ok := m.selected(); ok && s.HasClass {
 		headClass = s.Class.String()
 	}
+	dead := false
+	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
+		dead = s.Snap.APIError
+	}
 	return TrailOpts{
 		HeadClass:  headClass,
+		HeadDead:   dead,
 		Looked:     m.looked(m.selectedKey),
 		Todos:      m.todos,
 		Labels:     m.labels,

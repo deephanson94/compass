@@ -188,7 +188,7 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 		t.Errorf("a healthy session should not be offered the quota line:\n%s", view)
 	}
 	// A panel, not a takeover: the deck is still there around it.
-	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 sends · t types a line") {
+	if !strings.Contains(view, "READER") || !strings.Contains(view, "reply: 1–3 · t types a line") {
 		t.Errorf("the deck should stay under the panel, and the footer name the keys:\n%s", view)
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
@@ -211,7 +211,7 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 			t.Errorf("call %d: %v, want %v", i, rec.calls[i], want[i])
 		}
 	}
-	if !strings.Contains(m.note, "sent to") || !strings.Contains(m.note, "dev:1.0") || !strings.Contains(m.note, "please continue") {
+	if !strings.Contains(m.note, "↪ sent") || !strings.Contains(m.note, "dev:1.0") || !strings.Contains(m.note, "please continue") {
 		t.Errorf("the footer should say what went where: %q", m.note)
 	}
 
@@ -755,7 +755,7 @@ func TestRepliesAnswerTypeAndStop(t *testing.T) {
 	asking(m)
 	press(m, "r")
 	view := m.View()
-	for _, want := range []string{"answers · sent as the menu's own digit", "1  narrow", "2  wide", "lines · typed into the prompt and entered", "3  please continue", "t  type a line"} {
+	for _, want := range []string{"answers · sent as the menu's own digit", "1  narrow", "2  wide", "lines · typed into the menu — the answers above are safer", "3  please continue", "t  type a line"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the panel should offer %q:\n%s", want, view)
 		}
@@ -907,10 +907,10 @@ func TestCirclingIsAnAlarm(t *testing.T) {
 			m.sessions[i].Snap = state.Snapshot{State: state.Working, Since: base}
 		}
 	}
-	if chips := ansi.Strip(m.statusChips()); !strings.Contains(chips, "↻1 circling") || strings.Contains(chips, "all calm") {
+	if chips := ansi.Strip(m.statusChips()); !strings.Contains(chips, "↻1 ") || strings.Contains(chips, "all calm") {
 		t.Errorf("the header should count the loop and not be calm: %q", chips)
 	}
-	if got := tabTitle(0, 1, 2); got != "⌂ compass ◍1 ↻2" {
+	if got := tabTitle(0, 1, 2, 0); got != "⌂ compass ◍1 ↻2" {
 		t.Errorf("tabTitle = %q", got)
 	}
 	if got := m.obligation(m.sessions[m.boardRows()[key].sess]); got != 2 {
@@ -950,7 +950,7 @@ func TestTheBoardIsRankedByObligation(t *testing.T) {
 		m.seen = map[string]time.Time{}
 	}
 	m.seen[key] = base
-	if got := m.obligation(m.sessions[m.boardRows()[key].sess]); got != 6 {
+	if got := m.obligation(m.sessions[m.boardRows()[key].sess]); got != rankRest {
 		t.Fatalf("a shipped, read, day-old session owes nothing: rank %d", got)
 	}
 	m.boardSelect(0) // the selection always has a column; look from somewhere else
@@ -1009,7 +1009,7 @@ func TestHidingASession(t *testing.T) {
 	if !m.hidden[key] || len(m.viewOrder()) != before-1 || m.selectedKey == key {
 		t.Fatalf("x should hide the session and move on: hidden %v, %d of %d shown, selected %q", m.hidden[key], len(m.viewOrder()), before, m.selectedKey)
 	}
-	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A lists them") {
+	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A, then x") {
 		t.Errorf("the strip should count the hidden: %s", strip)
 	}
 	press(m, "A")

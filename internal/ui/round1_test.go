@@ -452,6 +452,9 @@ func TestHeaderChipsCarryTheWait(t *testing.T) {
 			m.sessions[i].Snap.State = state.Idle
 		}
 	}
+	for _, s := range m.sessions {
+		m.markSeen(s.Info.Key()) // unread is owed: calm needs every column read
+	}
 	if got := m.statusChips(); !strings.Contains(got, "all calm") || strings.Contains(got, "▲") {
 		t.Errorf("chips = %q, want 'all calm' with nothing waiting", got)
 	}
@@ -630,6 +633,9 @@ func TestHeaderCountsAgentsOut(t *testing.T) {
 		if m.sessions[i].Snap.State == state.NeedsYou {
 			m.sessions[i].Snap.State = state.Idle
 		}
+	}
+	for _, s := range m.sessions {
+		m.markSeen(s.Info.Key())
 	}
 	if got := m.statusChips(); !strings.Contains(got, "all calm") {
 		t.Fatalf("chips = %q, want calm before any agent is out", got)

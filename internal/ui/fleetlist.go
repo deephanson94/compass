@@ -89,6 +89,11 @@ func (m *Model) fleetLines(w, h int) []string {
 		}
 		return append([]string{dimStyle.Render(clip(note, w))}, tail...)
 	}
+	if m.archiveView && m.archivedCount() == 0 {
+		// Only the hidden on this list: the empty archive says so under
+		// them rather than leaving the floor to say it.
+		tail = []string{"", dimStyle.Render(clip("no finished sessions yet — they land here", w))}
+	}
 
 	body := h - len(tail)
 	if body < 1 {
@@ -302,7 +307,7 @@ func (m *Model) liveGroups() []fleetGroup {
 	// the circling session sat under a healthy one because of its tmux
 	// session's place in the pane list.
 	best := func(g fleetGroup) int {
-		b := 7
+		b := rankRest + 1
 		for _, i := range g.entries {
 			if r := m.obligation(m.sessions[i]); r < b {
 				b = r
@@ -322,24 +327,29 @@ func (m *Model) liveGroups() []fleetGroup {
 // Sessions already arrive in fleet order, so the floaters keep the Manager's
 // longest-waiting-first ranking among themselves.
 func (m *Model) orderLiveGroup(idx []int) []int {
-	att := make([]int, 0, len(idx))
-	rest := make([]int, 0, len(idx))
-	for _, i := range idx {
-		if wantsAttention(m.sessions[i].Snap.State) || m.isCircling(m.sessions[i]) {
-			att = append(att, i)
-			continue
-		}
-		rest = append(rest, i)
+	out := append([]int(nil), idx...)
+	// The board's own order inside the group, then window.pane: the
+	// digits ran 4, 2, 1, 3 down a panel when the tmux index decided.
+	// The calm tiers — stopped short, unread, read — are one tier here:
+	// below the board's width, selecting a row is reading it, and a row
+	// that re-sorted to the bottom on every `j` was a list nobody could
+	// walk.
+	tier := func(i int) int {
+		return min(m.obligation(m.sessions[i]), rankOwed)
 	}
-	sort.SliceStable(rest, func(a, b int) bool {
-		wa, pa := m.paneCoords(rest[a])
-		wb, pb := m.paneCoords(rest[b])
+	sort.SliceStable(out, func(a, b int) bool {
+		ra, rb := tier(out[a]), tier(out[b])
+		if ra != rb {
+			return ra < rb
+		}
+		wa, pa := m.paneCoords(out[a])
+		wb, pb := m.paneCoords(out[b])
 		if wa != wb {
 			return wa < wb
 		}
 		return pa < pb
 	})
-	return append(att, rest...)
+	return out
 }
 
 // hiddenGroup is the archive's first group: live sessions `x` took off the
@@ -529,6 +539,9 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 
 	age := padLeft(m.age(headSince(s)), ageWidth)
+	if at := circlingSince(m.trails[s.Info.Key()]); m.isCircling(s) && !at.IsZero() {
+		age = padLeft(m.age(at), ageWidth) // the loop's age, not its last write's
+	}
 	head := headline(s)
 	if head == "" && m.unread(s) {
 		// Unread is a word, not only a brightness: monochrome has to read
@@ -542,12 +555,17 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		age, head = padLeft(m.age(s.Info.LastEventAt), ageWidth), archiveHeadline(s)
 		if s.Live {
 			// A live session `x` took off the board: it keeps its glyph
-			// and says why it is here.
-			head = "hidden · " + head
+			// and its name — the header over it says it is hidden, and
+			// "hidden · add watch driver tests" lost the one word the
+			// person went looking for.
+			head = sessionName(s.Info) + ` · "` + head + `"`
 		}
 	}
 	if m.isCircling(s) && !m.archiveView {
 		head = "circling"
+		if st == state.Idle {
+			head = "circling · idle" // the loop, and whether a turn is in flight
+		}
 	}
 
 	// Everything between the state glyph and the age. The name takes it, less
@@ -581,6 +599,9 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	if m.isCircling(s) {
 		glyph, accent = glyphCircling, stuckStyle
 	}
+	if s.Snap.APIError && !(m.archiveView && !s.Live) {
+		glyph = glyphAPIError
+	}
 	first := marker + indexStyled + " " + accent.Render(glyph) + " " +
 		body + " " + dimStyle.Render(age)
 
@@ -598,6 +619,11 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 // times in a fleet says less than nothing.
 func (m *Model) secondLine(s fleet.Session, w int) string {
 	if m.archiveView {
+		if pane, ok := m.panes[s.Info.Key()]; ok && s.Live && pane.Target != "" {
+			// A hidden live session: where it lives, since that is how
+			// its namesake on the board is told from it.
+			return dimStyle.Render(clip(mirrorMark+" "+pane.Target+" · "+branchOf(s.Info), w))
+		}
 		return dimStyle.Render(clip(branchOf(s.Info), w))
 	}
 	// Result before process. "1216✓ 2✗" answers whether the session is going
@@ -851,11 +877,25 @@ func wantsAttention(s state.State) bool {
 // `stuck` earn their words: they are the two a reader must not miss, and the
 // space is better spent on them than on the two that are simply fine.
 func headline(s fleet.Session) string {
+	if s.Snap.APIError {
+		return apiWord(s)
+	}
 	switch s.Snap.State {
 	case state.NeedsYou, state.Stuck:
 		return stateLabel(s.Snap.State)
 	}
 	return ""
+}
+
+// apiWord is the state word of a session dead on the API: "quota" when
+// that is what the refusal says, "api error" otherwise. It is the word that
+// survives every truncation, so the row never reads as a question.
+func apiWord(s fleet.Session) string {
+	text := strings.ToLower(s.Snap.Activity + " " + s.Snap.Reason)
+	if strings.Contains(text, "quota") || strings.Contains(text, "rate limit") {
+		return "quota"
+	}
+	return "api error"
 }
 
 // archiveHeadline is what an archived session is remembered for: what you asked

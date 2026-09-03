@@ -728,7 +728,7 @@ func TestT67EnterAttaches(t *testing.T) {
 		if *got != nil {
 			t.Fatalf("a session with no pane must build no command: %v", (*got).cmd.Args)
 		}
-		if m.note != "no tmux pane for this session" {
+		if m.note != "no pane · nothing to attach to" {
 			t.Errorf("note = %q, want the no-pane note", m.note)
 		}
 	})
@@ -937,9 +937,9 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 	t.Run("the footers promise it", func(t *testing.T) {
 		m := groupedModel(80, 24)
 		for _, want := range []string{
-			"j/k move · enter attach (prefix d returns) · g grab · ? help · q quit",
-			"j/k rows · [ ] chapters · enter attach · tab deeper · a ask · esc back",
-			"j/k scroll · space unfold · / search · n/N · a ask · enter attach · esc back",
+			"j/k move · enter attach (prefix d returns) · x hide · ? help · q quit",
+			"j/k rows · [ ] chapters · r reply · enter attach · tab deeper · esc back",
+			"j/k scroll · space unfold · / search · n/N · r reply · enter attach · esc back",
 		} {
 			if got := m.View(); !strings.Contains(got, want) {
 				t.Errorf("the Lv%d footer does not fit an 80-column deck: %q", m.level, want)
