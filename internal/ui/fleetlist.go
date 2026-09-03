@@ -129,7 +129,15 @@ func (m *Model) fleetLines(w, h int) []string {
 		body = 1
 	}
 	lines, selStart, selEnd := m.fleetBlock(rows, w)
-	return append(m.scrollFleet(lines, selStart, selEnd, body), tail...)
+	win := m.scrollFleet(lines, selStart, selEnd, body)
+	if len(lines) > body && len(win) < body {
+		// A folded list short of its body — the rows an entry-whole
+		// window could not use: the air goes between the fold and the
+		// strip, where it reads as slack, not under the archive's line,
+		// where it read as room the fold could have shown.
+		win = append(win, make([]string, body-len(win))...)
+	}
+	return append(win, tail...)
 }
 
 // fleetBlock renders every row, and reports which lines the selected session
@@ -240,13 +248,42 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 	}
 	var out []string
 	if top > 0 {
-		out = append(out, dimStyle.Render(fmt.Sprintf("▴ %d more above · k", countEntries(lines[:off]))))
+		// The fold names the group it cut into: under "▴ 1 more above"
+		// a row's pane tag read ":0.0" of no tmux session, its "⌁ harness"
+		// header being the first thing the fold hid.
+		count := fmt.Sprintf("%d more above · k", countEntries(lines[:off]))
+		fold := "▴ " + count
+		if group := foldedHeader(lines, off); group != "" {
+			fold = "▴ " + group + " · " + count
+		}
+		fw := 0 // the column's width, as the rows were drawn to it
+		for _, l := range lines {
+			fw = max(fw, lipgloss.Width(l))
+		}
+		if lipgloss.Width(fold) > fw {
+			fold = "▴ " + count // the group's name goes before the count does
+		}
+		out = append(out, dimStyle.Render(fold))
 	}
 	out = append(out, lines[off:end]...)
 	if bottom > 0 {
 		out = append(out, dimStyle.Render(fmt.Sprintf("▾ %d more below · j", countEntries(lines[end:]))))
 	}
 	return out
+}
+
+// foldedHeader is the group header the fold at off hid, when the window's
+// first row is one of that group's entries rather than a header of its own.
+func foldedHeader(lines []string, off int) string {
+	if off >= len(lines) || isHeaderLine(lines[off]) || (lines[off] == "" && off+1 < len(lines) && isHeaderLine(lines[off+1])) {
+		return ""
+	}
+	for i := off - 1; i >= 0; i-- {
+		if isHeaderLine(lines[i]) {
+			return strings.TrimSpace(ansi.Strip(lines[i]))
+		}
+	}
+	return ""
 }
 
 // fleetRows groups the sessions of the current view and flattens them into the

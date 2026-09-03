@@ -145,7 +145,7 @@ func (m *Model) readerTitle(w int) string {
 		if m.anchorText != "" {
 			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
 			if room >= 8 {
-				right = clip(m.anchorText, room) + " · " + right // clip marks the cut with …
+				right = clipQuestion(m.anchorText, room) + " · " + right // the bracket clause whole or gone; clip marks the cut with …
 			}
 		}
 	}
@@ -169,7 +169,10 @@ func (m *Model) readerTitle(w int) string {
 			// The row's text, clipped to fit; the clock stays.
 			clock := m.anchorAt.Local().Format("15:04")
 			if room >= len(clock)+3+8 {
-				right = clip(m.anchorText, room-len(clock)-3) + " · " + clock
+				// The card's rule: a question's bracket clause goes whole
+				// or not at all, then the question is truncated — "[office
+				// CIDR / keep bas…" read as options the menu does not have.
+				right = clipQuestion(m.anchorText, room-len(clock)-3) + " · " + clock
 			} else if room >= len(clock) {
 				right = clock
 			} else {
@@ -192,6 +195,16 @@ func (m *Model) readerTitle(w int) string {
 		gap = 1
 	}
 	return mark + left + strings.Repeat(" ", gap) + dimStyle.Render(right)
+}
+
+// clipQuestion truncates a question to w cells, its bracket clause of
+// options whole or gone: cut inside, the brackets named options that were
+// not there.
+func clipQuestion(text string, w int) string {
+	if i := strings.Index(text, " ["); i > 0 && lipgloss.Width(text) > w {
+		text = strings.TrimSpace(text[:i])
+	}
+	return clip(text, w)
 }
 
 // enterReader is Tab on a Lv2 row: the reader is already open on that moment —

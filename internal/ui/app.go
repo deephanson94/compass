@@ -1115,6 +1115,9 @@ func (m *Model) chapter(key string) {
 		}
 		if target < 0 {
 			m.note = "no later prompt · G is the present"
+			if len(TrailRows(m.trail, m.level)) <= 1 {
+				m.note = "the trail is one row"
+			}
 			return
 		}
 	} else {
@@ -2245,7 +2248,15 @@ func (m *Model) View() string {
 		// of footer was too easy to miss, and the person pressing `r`
 		// expected something to pop up.
 		panel := m.replyPanel(inner)
-		left, top := m.panelPlace(inner, panelWidth(panel), len(panel))
+		left, top, cap := m.panelPlace(inner, panelWidth(panel), len(panel))
+		if len(panel) > cap {
+			// The box would run into the head rows of the band below:
+			// its rows of air go first, and the tighter box is placed
+			// again — on its own band's trail rows when it now fits
+			// there, else wherever the rows are free.
+			panel = m.replyPanelN(inner, cap)
+			left, top, _ = m.panelPlace(inner, panelWidth(panel), len(panel))
+		}
 		overlay(out[3:3+bodyHeight], panel, left, top)
 	}
 
@@ -2333,6 +2344,12 @@ const replyPanelMax = 64
 // lines, and the two keys that matter. A column of air on each side keeps
 // the deck's text from running into the border.
 func (m *Model) replyPanel(inner int) []string {
+	return m.replyPanelN(inner, m.height-5)
+}
+
+// replyPanelN is the panel within avail rows: past that, its rows of air go
+// before the box loses its bottom or covers a head row.
+func (m *Model) replyPanelN(inner, avail int) []string {
 	name, target, who := "—", "", ""
 	s, ok := m.selected()
 	if ok {
@@ -2368,8 +2385,16 @@ func (m *Model) replyPanel(inner int) []string {
 	}
 	var rows []readerLine
 	if ok {
-		for _, line := range wrapPrefix(m.replyState(s), "", "", body) {
-			rows = append(rows, readerLine{text: line, kind: readerBody})
+		if s.Snap.APIError {
+			// A dead session's state is one row, clipped: the row
+			// beneath carries the refusal already and the reader has
+			// the rest, and a four-row state stood the box on two other
+			// alarms' verdict rows.
+			rows = append(rows, readerLine{text: clip(m.replyState(s), body), kind: readerBody})
+		} else {
+			for _, line := range wrapPrefix(m.replyState(s), "", "", body) {
+				rows = append(rows, readerLine{text: line, kind: readerBody})
+			}
 		}
 		rows = append(rows, readerLine{kind: readerBlank})
 	}
@@ -2435,7 +2460,7 @@ func (m *Model) replyPanel(inner int) []string {
 		rows = append(rows, readerLine{text: typed, kind: readerText},
 			readerLine{text: "a digit acts · t types · esc closes", kind: readerBody})
 	}
-	if avail := m.height - 5; len(rows)+2 > avail {
+	if len(rows)+2 > avail {
 		// Too tall for the body: the rows of air go before the box loses
 		// its bottom.
 		kept := rows[:0]
@@ -2473,7 +2498,7 @@ func (m *Model) replyState(s fleet.Session) string {
 		if text == "" {
 			text = s.Snap.Reason
 		}
-		return glyphAPIError + " stopped on an API error " + since + " ago · " + text + " — no turn will consume a line; the remedy is typed into the pane"
+		return glyphAPIError + " stopped on an API error " + since + " ago · " + text + " · no turn takes a line; the remedy is typed into the pane"
 	}
 	switch s.Snap.State {
 	case state.NeedsYou:
@@ -2507,33 +2532,53 @@ func (m *Model) replyState(s fleet.Session) string {
 // board, under the selected column's header; in a session, over the
 // companion; on a narrow deck, over the trail — never over the row or the
 // card that names the session it is about.
-func (m *Model) panelPlace(inner, pw, ph int) (left, top int) {
+// The third value is the rows the panel may take from top without covering
+// a head row: on the board, the band below begins where the selected band's
+// trail rows end, and a box over its name rows left a band with a verdict
+// and a trail and no session named. A panel taller than that is rebuilt
+// without its air and placed again.
+func (m *Model) panelPlace(inner, pw, ph int) (left, top, cap int) {
+	body := m.height - 5
 	if m.level == levelBoard && m.boardShown() {
-		if x, y, bh, ok := m.boardBand(inner); ok {
+		if x, y, bh, last, ok := m.boardBandAt(inner); ok {
 			top := y + 3
-			body := m.height - 5
-			if bh < ph && y+bh+1+ph <= body {
-				// A band shorter than the panel, with free rows under it:
-				// the panel stands under the band rather than on the strip.
-				top = y + bh + 1
-			} else if top+ph > body && y >= ph {
-				// Lifting the box to fit would cover the row it is about:
-				// it stands above the row instead, where the rows are free.
-				top = y - ph
+			left := min(x, max(inner-pw, 0))
+			if last {
+				if bh < ph && y+bh+1+ph <= body {
+					// A band shorter than the panel, with free rows under it:
+					// the panel stands under the band rather than on the strip.
+					top = y + bh + 1
+				} else if top+ph > body && y >= ph {
+					// Lifting the box to fit would cover the row it is about:
+					// it stands above the row instead, where the rows are free.
+					top = y - ph
+				}
+				return left, top, max(body-top, 0)
 			}
-			return min(x, max(inner-pw, 0)), top
+			next := y + bh + 1 // the head row of the band below
+			switch {
+			case top+ph <= next:
+				// On its own band's trail rows, the band below untouched.
+				return left, top, next - top
+			case next+3+ph <= body:
+				// Too tall for those: under the head rows of the band
+				// below, over that band's trail — every session on the
+				// board keeps its name.
+				return left, next + 3, body - (next + 3)
+			}
+			return left, top, next - top // the caller sheds the air and asks again
 		}
-		return 0, 3
+		return 0, 3, max(body-3, 0)
 	}
 	fw, mw, _ := m.layout(inner)
 	switch {
 	case fw == 0 && mw > 0:
 		_, tw := sessionSplit(inner)
-		return min(tw+gutterWidth, max(inner-pw, 0)), 2
+		return min(tw+gutterWidth, max(inner-pw, 0)), 2, max(body-2, 0)
 	case fw > 0:
-		return min(fw+gutterWidth, max(inner-pw, 0)), 2
+		return min(fw+gutterWidth, max(inner-pw, 0)), 2, max(body-2, 0)
 	}
-	return 0, 2
+	return 0, 2, max(body-2, 0)
 }
 
 // headerLine: the product mark on the left, the fleet's pulse on the right.
@@ -2718,11 +2763,11 @@ func (m *Model) footerLine(w int) string {
 			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A live fleet · ? help · q quit"
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · enter attach · esc back"
+		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · enter attach · esc back · ? help · q quit"
 	case m.level >= levelReader:
 		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · enter attach · esc back"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board"
+		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back"
 	}
@@ -2768,17 +2813,46 @@ func (m *Model) footerLine(w int) string {
 		drops = []string{" (prefix d returns)", " · a ask", " · tab deeper", " · h/l session", " · m live pane", " · g grab", " · / search", " · n/N", " · r reply", " · space unfold", " · [ ] chapters", " · [ ] turns", " · ? help"}
 	}
 	note := m.note
-	if i := strings.LastIndex(note, " · "); i > 0 && lipgloss.Width(keys)+2+lipgloss.Width(note) > w {
-		// The note's pane clause goes before any key does: the card's
-		// third row carries the pane, and the keys are the only place
-		// the keys are named.
-		if tail := note[i+3:]; strings.HasPrefix(tail, "to "+mirrorMark) || strings.HasPrefix(tail, mirrorMark) {
+	fits := func(n string) bool { return lipgloss.Width(keys)+2+max(12, lipgloss.Width(n)) <= w }
+	dest := "" // the trace's "to ⌁ ops:0.0": where the bytes went
+	if i := strings.LastIndex(note, " · "); i > 0 && !fits(note) {
+		// The note's pane clause — a fact the card's third row carries
+		// too — goes before any key does. A trace's destination is the
+		// one clause that proves where a line landed (§5): it outranks
+		// the optional keys and yields only to the way out and the help.
+		switch tail := note[i+len(" · "):]; {
+		case strings.HasPrefix(tail, "to "+mirrorMark):
+			dest = note[i:]
+		case strings.HasPrefix(tail, mirrorMark):
 			note = note[:i]
 		}
 	}
+	// The note's forms, fullest first: a chapter note gives up its quote
+	// before its clock, any other its trailing clauses. The keys are shed
+	// only as far as the note's shortest form needs, and the note then
+	// takes the room the keys leave — "◉ 11/12" beside 37 blank columns
+	// and three shed keys said less than either half could.
+	forms := noteForms(note)
+	// A chapter note's keys are shed against its first clause; any other
+	// note keeps its clauses (the way back, "A, then x") over the keys.
+	minimal := note
+	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) {
+		minimal = forms[len(forms)-1]
+	}
 	for _, drop := range drops {
-		if lipgloss.Width(keys)+2+lipgloss.Width(note) <= w {
+		if fits(minimal) {
 			break
+		}
+		if drop == " · ? help" && dest != "" {
+			// Every optional key is gone: the destination goes before
+			// the help does.
+			note = strings.TrimSuffix(note, dest)
+			forms = noteForms(note)
+			minimal = strings.TrimSuffix(minimal, dest)
+			dest = ""
+			if fits(minimal) {
+				break
+			}
 		}
 		keys = strings.Replace(keys, drop, "", 1)
 	}
@@ -2787,9 +2861,36 @@ func (m *Model) footerLine(w int) string {
 	if room < 12 {
 		return dimStyle.Render(shedClauses(note, w)) // no keymap fits beside it
 	}
-	shown := dimStyle.Render(shedClauses(note, room)) // clauses go whole: the way back before the pane
+	shown := ""
+	for _, f := range forms {
+		if lipgloss.Width(f) <= room {
+			shown = dimStyle.Render(f)
+			break
+		}
+	}
+	if shown == "" {
+		shown = dimStyle.Render(shedClauses(forms[len(forms)-1], room))
+	}
 	gap := w - lipgloss.Width(left) - lipgloss.Width(shown)
 	return left + strings.Repeat(" ", gap) + shown
+}
+
+// noteForms is a footer note at every length it can be shown, fullest
+// first: whole; a chapter note without its quote (the clock stays); then
+// each trailing clause shed in turn, down to the first.
+func noteForms(note string) []string {
+	forms := []string{note}
+	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) {
+		if i, j := strings.Index(note, " · "), strings.LastIndex(note, " · "); i > 0 && i != j && strings.Contains(note[i:j], `"`) {
+			forms = append(forms, note[:i]+note[j:])
+		}
+	}
+	rest := forms[len(forms)-1]
+	for strings.Contains(rest, " · ") {
+		rest = rest[:strings.LastIndex(rest, " · ")]
+		forms = append(forms, rest)
+	}
+	return forms
 }
 
 // enterKeymap is what Enter promises, and — outside tmux, where compass hands
@@ -2824,7 +2925,11 @@ func (m *Model) mirrorShown() bool {
 	// In the session view the live pane stands in for the conversation
 	// while the keys are on the trail; at Lv3 the keys are the reader's,
 	// so the reader is what is drawn.
-	return m.showMirror && m.width >= deckWideCols && (m.level == levelTrail || (m.sessionView() && m.level == levelWaypoints))
+	// The archive is a list at every width (decision #18): the flag
+	// stays with the session view, so a board press that said "the
+	// mirror shows beside a session" cannot surface two screens later
+	// squeezing the archive's list.
+	return m.showMirror && !m.archiveView && m.width >= deckWideCols && (m.level == levelTrail || (m.sessionView() && m.level == levelWaypoints))
 }
 
 // middleShown says whether the deck draws a middle panel at all: the mirror

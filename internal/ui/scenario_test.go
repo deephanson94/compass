@@ -714,7 +714,7 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Scout, "the command table", 5 * time.Minute, []string{"main.go"}, "", nil},
 		legSpec{journey.Build, "the flag", 15 * time.Minute, []string{"main.go"}, "", nil})
 	panes, order := paneMap([]string{"billing", "mobile", "docs-site", "infra", "etl", "api", "cli"}, []string{"work:0.0", "work:1.0", "work:2.0", "ops:0.0", "work:3.0", "work:4.0", "tools:0.0"})
-	return scene{name: "alarm-storm", extra: []string{"4", "r", "1"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "alarm-storm", extra: []string{"4", "r", "1", "3", "x", "3", "tab", "esc", "g"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Fleet hygiene: two live sessions with one name in one tmux session, a

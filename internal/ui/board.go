@@ -298,9 +298,17 @@ func (m *Model) boardPlace(w int) (x, y int, ok bool) {
 
 // boardBand is boardPlace with the height of the selected column's band.
 func (m *Model) boardBand(w int) (x, y, bh int, ok bool) {
+	x, y, bh, _, ok = m.boardBandAt(w)
+	return x, y, bh, ok
+}
+
+// boardBandAt is boardBand with one more fact: whether the selected band is
+// the board's last, so a panel knows if the rows under it are free or the
+// next band's head.
+func (m *Model) boardBandAt(w int) (x, y, bh int, last, ok bool) {
 	n, cw := boardColumns(w, m.drawnCount(m.viewOrder()))
 	if n == 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, false, false
 	}
 	h := m.height - 5
 	if h < 1 {
@@ -315,10 +323,10 @@ func (m *Model) boardBand(w int) (x, y, bh int, ok bool) {
 		if key == m.selectedKey {
 			band := keys[(i/n)*n : min((i/n+1)*n, len(keys))]
 			bw := bandWidth(w, len(band), cw)
-			return (i % n) * (bw + gutterWidth), y, heights[i/n], true
+			return (i % n) * (bw + gutterWidth), y, heights[i/n], i/n == (len(keys)-1)/n, true
 		}
 	}
-	return 0, 0, 0, false
+	return 0, 0, 0, false, false
 }
 
 // bandWidth is a column's width in a band of k columns: the board's

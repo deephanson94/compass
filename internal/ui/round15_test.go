@@ -190,12 +190,24 @@ func TestAQueryHidingTheOpenSessionClears(t *testing.T) {
 // The help splits into two columns only where they hold whole, or where
 // one column would have to cut the keys.
 func TestTheHelpSplitsOnlyWhereItHolds(t *testing.T) {
-	one := strings.Join(helpLinesFor(120, 29, true), "\n")
-	if strings.Contains(one, " │ ") {
+	// A column join carries text before its bar; the legend's read-line row
+	// (│ you were here) has only air before its own.
+	split := func(lines []string) bool {
+		for _, l := range lines {
+			if i := strings.Index(l, "│"); i > 0 && strings.TrimSpace(l[:i]) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	oneLines := helpLinesFor(120, 29, true)
+	one := strings.Join(oneLines, "\n")
+	if split(oneLines) {
 		t.Errorf("at 120x34 the help should be one column:\n%s", one)
 	}
-	two := strings.Join(helpLinesFor(120, 22, true), "\n")
-	if !strings.Contains(two, " │ ") || !strings.Contains(two, "scout") {
+	twoLines := helpLinesFor(120, 22, true)
+	two := strings.Join(twoLines, "\n")
+	if !split(twoLines) || !strings.Contains(two, "scout") {
 		t.Errorf("at 120x22 the help should split to keep a legend:\n%s", two)
 	}
 }

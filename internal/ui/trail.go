@@ -1959,6 +1959,13 @@ func (m *Model) trailTitle(w int) string {
 	if len([]rune(title)) > room {
 		title = "TRAIL · " + name // the day goes whole, never "· 22h ·…"
 	}
+	if s, ok := m.selected(); ok && m.archiveView && title == "TRAIL" {
+		// An archived row's prompt that does not fit: the project it
+		// ran in, rather than "TRAIL" over nothing.
+		if t := "TRAIL · " + sessionName(s.Info); len([]rune(t)) <= room {
+			title = t
+		}
+	}
 	left := m.titleStyleFor(panelTrail).Render(clip(title, room))
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {

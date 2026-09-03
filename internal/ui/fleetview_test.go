@@ -326,6 +326,9 @@ func TestT60FleetScrolling(t *testing.T) {
 					}
 				}
 				visible := len(lines) - tail
+				for visible > 1 && lines[visible-1] == "" {
+					visible-- // the slack a folded list leaves under its window is not the list
+				}
 				if visible > h-tail || visible < 1 {
 					t.Fatalf("step %d: column rendered %d list lines in a height of %d", step, visible, h)
 				}

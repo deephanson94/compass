@@ -886,7 +886,10 @@ func wrapLine(text string, width, firstWidth int, isFirst bool) []string {
 		line = ""
 		room = width
 	}
-	for _, word := range strings.Fields(text) {
+	for _, word := range strings.FieldsFunc(text, func(r rune) bool { return r == ' ' || r == '\t' }) {
+		// A no-break space binds a term ("dead on the API") so a wrap
+		// never splits it; it is a plain space on screen.
+		word = strings.ReplaceAll(word, "\u00a0", " ")
 		for len([]rune(word)) > room && len([]rune(word)) > width {
 			// A word nothing can hold: cut it at the column and carry on.
 			if line != "" {

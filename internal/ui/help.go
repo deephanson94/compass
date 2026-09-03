@@ -56,7 +56,7 @@ func helpLinesFor(w, h int, board bool) []string {
 	// Two columns at a width that holds them whole, or at any width past
 	// the split where one column would have to cut the keys: a 120x34
 	// split clipped both halves, a 120x22 single column had no legend.
-	oneColumn := len(keys) + 1 + len(helpLegendCore(helpLegendLines(w, false)))
+	oneColumn := len(keys) + 1 + 5 // the keys, a line of air, the glyph lines a column cannot do without
 	if (w >= helpTwoCol || (w >= helpSplitMin && h < oneColumn)) && h >= len(keys) {
 		// The split follows the keys' longest line, not a fraction of the
 		// width: a fixed half pads one column while it clips the other.
@@ -117,7 +117,7 @@ func helpLinesFor(w, h int, board bool) []string {
 		var tail []string
 		for _, l := range lines {
 			plain := ansi.Strip(l)
-			keep := strings.Contains(l, "fleet:")
+			keep := strings.Contains(l, "fleet:") || strings.Contains(l, "trail:  ") || strings.Contains(l, "you were here") || strings.Contains(l, "scout")
 			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "x ", "r ", "space"} {
 				keep = keep || strings.HasPrefix(plain, k)
 			}
@@ -160,7 +160,7 @@ func contains(list []string, s string) bool {
 func helpLegendCore(legend []string) []string {
 	var core []string
 	for _, l := range legend {
-		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "scout"} {
+		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "you were here", "scout"} {
 			if strings.Contains(l, keep) {
 				core = append(core, l)
 				break
@@ -246,17 +246,17 @@ func helpLegendRaw() []string {
 		"compass observes; enter hands you the session.",
 		"",
 		focusMark + " marks the panel your keys are in — tab moves it",
-		"fleet:  ● working  ▲ needs\u00a0you  ◍ stuck  ↻ circling  ⊘ dead\u00a0on\u00a0the\u00a0API  ○ idle",
+		"fleet:  ● working  ▲\u00a0needs\u00a0you  ◍ stuck  ↻ circling  ⊘\u00a0dead\u00a0on\u00a0the\u00a0API  ○ idle",
 		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
-		"        ◌ planned — Claude's own next moves · →3 a live session on this lane",
+		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
 		"        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them",
 		"        ⟲ context compacted — a summary below · 16⚑ 10✗ 2⟲ ships · red · compactions",
-		"        · 2nd failure — the same test in two legs · ? — no verdict parsed · edited since — files touched after that run",
-		"        on you 40m today — its waits for your next prompt (3h+ = away)",
+		"        · 2nd\u00a0failure — the same test in two legs · ?\u00a0—\u00a0no\u00a0verdict\u00a0parsed · edited\u00a0since — touched after that run",
+		"        on\u00a0you\u00a040m\u00a0today — its waits for your next prompt (3h+\u00a0=\u00a0away)",
 		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit · ↩ result of X — landed late; it is X's",
-		"        │ you were here — the read-line · ↳ what came after · ⚠ two sessions, one thing",
+		"        │\u00a0you\u00a0were\u00a0here — the read-line · ↳\u00a0what\u00a0came\u00a0after · ⚠\u00a0two\u00a0sessions, one thing",
 		"board:  columns for what owes you, in that order; the rest in the strip",
 		"",
 		"every leg is one of seven classes, named on its row:",
@@ -270,7 +270,7 @@ func helpLegendLines(w int, roomy bool) []string {
 			lines = append(lines, "")
 			continue
 		}
-		lines = append(lines, dimStyle.Render(clip(l, w)))
+		lines = append(lines, dimStyle.Render(shedClauses(strings.ReplaceAll(l, "\u00a0", " "), w)))
 	}
 	return helpLegendClasses(lines, w, roomy)
 }
@@ -300,7 +300,7 @@ func helpLegendWrapped(w int, roomy bool, h int) []string {
 		}
 		rows := wrapPrefix(text, first, strings.Repeat(" ", indent+2), w)
 		if extra := len(rows) - 1; extra > budget {
-			lines = append(lines, dimStyle.Render(clip(l, w))) // no rows left: this one clips
+			lines = append(lines, dimStyle.Render(shedClauses(strings.ReplaceAll(l, "\u00a0", " "), w))) // no rows left: clauses go whole
 			continue
 		} else {
 			budget -= extra
@@ -358,7 +358,7 @@ func helpLegendFill(core, full []string, rows int) []string {
 	// rules and counts, the loop, the trace and the read-line — and the
 	// sentences about the panel last.
 	var order []string
-	for _, want := range []string{"⟲ context compacted", "2nd failure", "↪ sent", "you were here", "⌁ dev", "on you", "board:", "▌", "compass observes"} {
+	for _, want := range []string{"you\u00a0were\u00a0here", "⌁ dev", "⟲ context compacted", "↪ sent", "2nd\u00a0failure", "on\u00a0you", "board:", "▌", "compass observes"} {
 		for _, l := range full {
 			if strings.Contains(l, want) && !kept[l] {
 				order = append(order, l)
