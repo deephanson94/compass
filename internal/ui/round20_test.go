@@ -167,3 +167,38 @@ func TestTheNarrowHelpNamesWhatTheDeckOffers(t *testing.T) {
 		}
 	}
 }
+
+// The help keeps the rows for the keys the deck's own footer is offering:
+// an 80-column help named `g`, which no footer there offers, while `x` —
+// on nine of them — was cut for the room.
+func TestTheHelpKeepsWhatTheFooterOffers(t *testing.T) {
+	m := groupedModel(80, 24)
+	help := strings.Join(helpLinesWith(78, 19, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymap()}), "\n")
+	if !strings.Contains(m.keymap(), "x hide") {
+		t.Fatalf("the fixture's footer does not offer x: %q", m.keymap())
+	}
+	if !strings.Contains(help, "hide a session") {
+		t.Errorf("the help drops a key the footer offers:\n%s", help)
+	}
+}
+
+// Every level asks what `enter` does rather than promising an attach: a
+// paneless session said `enter · no pane` on its list and `enter attach`
+// one keypress deeper.
+func TestEveryLevelAsksWhatEnterDoes(t *testing.T) {
+	m := sceneModel(sceneFleetHygiene(), 120, 34)
+	for _, s := range m.sessions {
+		if _, has := m.panes[s.Info.Key()]; !has {
+			m.point(s.Info.Key())
+		}
+	}
+	if strings.Contains(m.keymap(), "enter attach") {
+		t.Fatalf("the fixture's row has a pane: %q", m.keymap())
+	}
+	for _, level := range []string{"legs", "reader"} {
+		pressKey(m, "tab")
+		if k := m.keymap(); !strings.Contains(k, "enter · no pane") {
+			t.Errorf("the %s keymap promises an attach: %q", level, k)
+		}
+	}
+}

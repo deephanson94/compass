@@ -87,7 +87,7 @@ func (m *Model) readerColumn(w, h int) []string {
 		frame := RenderReader(m.events, ReaderOpts{
 			Width:    w,
 			Height:   h - 2,
-			Scroll:   m.readerTop(m.doc(m.readerWidth())), // never a result row without its owner
+			Scroll:   readerTopIn(m.doc(w), m.scroll, h-2), // never a result row without its owner
 			Unfolded: m.unfolded,
 			Query:    m.query,
 			Anchor:   m.anchor,
@@ -104,10 +104,20 @@ func (m *Model) readerColumn(w, h int) []string {
 // bare "⎿ 20 passed" had its "↩ result of Bash(…)" as the last line above,
 // and the first thing on the page was a test result with no owner.
 func (m *Model) readerTop(doc []readerLine) int {
-	top := clampScroll(m.scroll, len(doc), m.readerHeight())
-	if top >= len(doc)-m.readerHeight() {
-		// The tail page: its last row is the present and outranks its
-		// first — the row above names the owner instead (readerAbove).
+	return readerTopIn(doc, m.scroll, m.readerHeight())
+}
+
+// readerTopIn is the first row of a page h rows tall at this scroll: never
+// a transcript blank, and never a result whose owner is the row above —
+// except on the tail page, whose last row is the present and outranks its
+// first. There the blank is stepped over forwards and the owner is named
+// in the row above the page (readerAbove).
+func readerTopIn(doc []readerLine, scroll, h int) int {
+	top := clampScroll(scroll, len(doc), h)
+	if top >= len(doc)-h {
+		for top < len(doc)-1 && doc[top].kind == readerBlank {
+			top++
+		}
 		return top
 	}
 	for top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
@@ -131,8 +141,8 @@ func (m *Model) readerAbove(w int) string {
 	if len(m.events) == 0 {
 		return ""
 	}
-	doc := m.doc(m.readerWidth())
-	top := m.readerTop(doc)
+	doc := m.doc(w)
+	top := readerTopIn(doc, m.scroll, m.readerHeight())
 	if top == 0 {
 		return ""
 	}

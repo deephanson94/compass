@@ -226,7 +226,7 @@ func TestTheArchiveBoardShowsArchivedSessions(t *testing.T) {
 			t.Errorf("a live trail is on the archive board: %q", live)
 		}
 	}
-	if !strings.Contains(got, "A live fleet") {
+	if !strings.Contains(got, "A fleet") {
 		t.Errorf("the archive board does not say how to get back:\n%s", got)
 	}
 }

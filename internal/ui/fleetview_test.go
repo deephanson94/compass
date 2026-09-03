@@ -225,7 +225,7 @@ func TestT59ArchiveViewGolden(t *testing.T) {
 	if !*update {
 		for _, want := range []string{
 			"FLEET · archive", // the header names the view
-			"A live fleet",    // and the footer names the way back
+			"A fleet",         // and the footer names the way back
 			" docs",           // project groups, newest member first
 			" api",
 			" scratch",
@@ -948,7 +948,12 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 			for _, k := range own {
 				kept = kept || strings.Contains(foot, k)
 			}
-			if lipgloss.Width(foot) > 78 || !strings.Contains(foot, "enter attach") || !strings.HasSuffix(foot, "? help · q quit") || !kept {
+			// `enter` attaches at every level and the help says so; the
+			// row promises it wherever the width leaves room, and at the
+			// deepest level of an 80-column deck the level's own keys and
+			// the way out come first (#39).
+			way := strings.Contains(foot, "enter attach") || strings.Contains(foot, "esc back")
+			if lipgloss.Width(foot) > 78 || !way || !strings.HasSuffix(foot, "? help · q quit") || !kept {
 				t.Errorf("the Lv%d footer does not fit an 80-column deck whole: %q", m.level, foot)
 			}
 			pressTab(m)

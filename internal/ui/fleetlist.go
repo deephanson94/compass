@@ -654,15 +654,14 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 	if m.isCircling(s) && !m.archiveView {
 		head = "circling"
-		if st == state.Idle {
-			if lipgloss.Width("circling · idle")+1 <= w-5-1-ageWidth-6 {
-				head = "circling · idle" // the loop, and whether a turn is in flight — whole, or not at all
-			} else if at := circlingSince(m.trails[s.Info.Key()]); !at.IsZero() {
-				// "· idle" had to go: the figure follows the word, so
-				// "circling 3h" beside "circling 20h" is the loop's age too.
-				age = padLeft(m.age(at), ageWidth)
-			}
+		if st == state.Idle && lipgloss.Width("circling · idle")+1 <= w-5-1-ageWidth-6 {
+			head = "circling · idle" // the loop, and whether a turn is in flight — whole, or not at all
 		}
+		// The age beside the word is the state's own, here as everywhere:
+		// hoisting the loop's age where "· idle" would not fit put
+		// "circling  18h" on a card whose every other view said
+		// "circling · idle  3h", and the loop's age is the chip's and
+		// the verdict's to give ("↻1 18h", "4th failure").
 	}
 
 	// Everything between the state glyph and the age. The name takes it, less

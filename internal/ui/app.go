@@ -2233,7 +2233,7 @@ func (m *Model) View() string {
 	var body []string
 	switch {
 	case m.showHelp:
-		body = helpLinesFor(inner, bodyHeight, m.boardFits(), m.refusedKeys()...)
+		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymap()})
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -2752,12 +2752,20 @@ func (m *Model) statusChips() string {
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 func (m *Model) footerLine(w int) string {
+	keys := m.keymap()
+	return m.footerWith(keys, w)
+}
+
+// keymap is the whole keymap for where the keys are now, before any of it
+// is shed for width: the row's promise, and what the help asks when it has
+// to choose which key rows a short body keeps.
+func (m *Model) keymap() string {
 	keys := "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · / search · x hide · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
 		// on the fleet's own last row: "N archived · A browses".
-		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · A live fleet · ? help · q quit"
+		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · A fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -2773,21 +2781,21 @@ func (m *Model) footerLine(w int) string {
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A live fleet · ? help · q quit"
+			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A live fleet · ? help · q quit"
+			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · enter attach · esc back · ? help · q quit"
+		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
-		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · enter attach · esc back · ? help · q quit"
+		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · enter attach · esc board · ? help · q quit"
+		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · [ ] chapters · r reply · enter attach · tab deeper · a ask · esc back · ? help · q quit"
+		keys = "j/k rows · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
 	}
 	if m.archiveView {
 		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
@@ -2809,8 +2817,13 @@ func (m *Model) footerLine(w int) string {
 	if m.showMirror {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
+	return keys
+}
+
+// footerWith renders the keymap and the note into one row w wide.
+func (m *Model) footerWith(keys string, w int) string {
 	if m.note == "" {
-		keys = shedKeys(keys, m.shedOrder(false, false), func(k string) bool { return lipgloss.Width(k) <= w })
+		keys = shedKeys(keys, m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
 		return dimStyle.Render(clip(keys, w))
 	}
 	var left string
@@ -2820,7 +2833,7 @@ func (m *Model) footerLine(w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := m.shedOrder(m.chapterNote(), true)
+	drops := m.shedOrder(m.chapterNote())
 	note := m.note
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
@@ -2997,43 +3010,35 @@ func (m *Model) chapterNote() bool {
 // which refuse on a fleet of one, on the list — deeper in, the person has
 // pressed it, and the chapter keys outlast it. A chapter note keeps the
 // chapter keys over everything; `? help` goes last of all.
-func (m *Model) shedOrder(chapter, underNote bool) []string {
+func (m *Model) shedOrder(chapter bool) []string {
 	// First to go first. What every level shares — the attach hint, `a
 	// ask`, the between-sessions keys — goes before anything a level owns,
 	// and every level keeps its own keys longest: the chapter keys are the
 	// trail's and the reader's, not the list's, and `space unfold` is the
 	// reader's alone.
 	order := []string{attachHint, " · m live pane", " · h/l session"}
-	if !m.archiveView {
-		// In the archive `a` is the reason to be there — a claude on a
-		// session you can no longer attach to — so it keeps its place
-		// among the archive's own keys instead.
-		order = append(order, " · a ask")
-	}
-	session := []string{" · enter attach", " · enter · no pane", " · esc back", " · esc board"}
-	if underNote && m.level >= levelWaypoints {
-		// Under a note in the session view `enter` and `esc` follow the
-		// shared keys: everyone knows them, and the note is the news (#36).
-		order = append(order, session...)
-		session = nil
-	}
+	// The way in and the way out are not shared in the same sense as
+	// `h/l session` or the attach hint — they are how you enter and leave
+	// this level — so they stand with the level's own keys below, ranked
+	// under the keys the level is for.
 	var own []string
 	switch {
 	case m.level >= levelReader:
-		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · space unfold", " · [ ] turns"}
+		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · space unfold", " · [ ] turns"}
 	case m.level >= levelWaypoints:
-		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · tab deeper", " · tab reader", " · r reply", " · [ ] chapters"}
+		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · tab deeper", " · tab reader", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · [ ] chapters"}
 	default:
 		// The board and the list: the chapters belong to a trail that is
 		// not open, and the way in outlasts the keys that act on a row.
-		own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · a ask", " · x unhide"}
-		if !m.archiveView {
-			own = own[:len(own)-2]
-			own = append(own, " · x unhide")
+		// In the archive `a` is the reason to be there — a claude on a
+		// session you can no longer attach to — so it stands with the
+		// archive's own keys; on the live list it is the trail's.
+		own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · x unhide"}
+		if m.archiveView {
+			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · a ask", " · x unhide"}
 		}
 	}
 	order = append(order, own...)
-	order = append(order, session...) // last of all where the note did not claim them
 	if chapter {
 		// A chapter key's note keeps the chapter keys over everything but
 		// the way out and the help (#24).
@@ -3053,6 +3058,13 @@ func (m *Model) shedOrder(chapter, underNote bool) []string {
 // fitQuote is form with its quoted clause clipped so the whole fits room,
 // or "" when that would leave too little of the quote to read.
 func fitQuote(form string, room int) string {
+	return fitQuoteMin(form, room, 12)
+}
+
+// fitQuoteMin is fitQuote with the floor named: a footer wants a dozen
+// characters before it bothers, a board column three — there the choice is
+// a stub of the bytes or no bytes at all.
+func fitQuoteMin(form string, room, min int) string {
 	i, j := strings.Index(form, `"`), strings.LastIndex(form, `"`)
 	if i < 0 || j <= i {
 		return ""
@@ -3060,8 +3072,8 @@ func fitQuote(form string, room int) string {
 	over := lipgloss.Width(form) - room
 	q := form[i+1 : j]
 	keep := lipgloss.Width(q) - over - 1 // the cells the quote may keep before its mark
-	if keep < 12 {
-		return "" // under a dozen characters the quote says nothing: it goes whole
+	if keep < min {
+		return "" // too little of the quote to read: it goes whole
 	}
 	cut := string([]rune(q)[:keep])
 	if sp := strings.LastIndex(cut, " "); sp >= 8 {

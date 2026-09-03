@@ -206,7 +206,7 @@ func TestT16DeckViewGolden(t *testing.T) {
 		m.archiveView = archive
 		lines := strings.Split(m.View(), "\n")
 		foot := strings.TrimSpace(lines[len(lines)-1])
-		if lipgloss.Width(foot) > 78 || !strings.HasSuffix(foot, "? help · q quit") || !strings.Contains(foot, "enter · no pane") || (archive && !strings.Contains(foot, "A live fleet")) {
+		if lipgloss.Width(foot) > 78 || !strings.HasSuffix(foot, "? help · q quit") || !strings.Contains(foot, "enter · no pane") || (archive && !strings.Contains(foot, "A fleet")) {
 			t.Errorf("the footer does not fit an 80-column deck whole (archive %v): %q", archive, foot)
 		}
 	}

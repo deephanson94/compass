@@ -14,7 +14,7 @@ var helpKeys = [][2]string{
 	{"1 – 9", "select a session"},
 	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
-	{"g", "grab the session waiting longest, and attach"},
+	{"g", "grab the oldest ▲ needs-you and attach — a ⊘ is skipped"},
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: board → session → reader"},
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
@@ -49,7 +49,40 @@ func helpLines(w, h int) []string {
 	return helpLinesFor(w, h, true)
 }
 
+// helpOpts is what the deck tells the help about itself: whether a board
+// fits, which keys it would refuse, and the keymap its own footer is
+// carrying — the last so a body too short for every row keeps the rows for
+// the keys the person can see being offered.
+type helpOpts struct {
+	board   bool
+	refused []string
+	keymap  string
+}
+
 func helpLinesFor(w, h int, board bool, refused ...string) []string {
+	return helpLinesWith(w, h, helpOpts{board: board, refused: refused})
+}
+
+// helpOffered says whether the deck's own footer is naming this key now.
+func helpOffered(key, keymap string) bool {
+	if keymap == "" {
+		return false
+	}
+	for _, f := range map[string][]string{
+		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"}, "A": {"A live fleet", "A fleet"},
+		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
+		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
+		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
+	}[key] {
+		if strings.Contains(keymap, f) {
+			return true
+		}
+	}
+	return false
+}
+
+func helpLinesWith(w, h int, o helpOpts) []string {
+	board, refused := o.board, o.refused
 	keys := helpKeyLinesFor(w, board, refused...)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
@@ -126,10 +159,14 @@ func helpLinesFor(w, h int, board bool, refused ...string) []string {
 		for _, l := range lines {
 			plain := ansi.Strip(l)
 			keep := strings.Contains(l, "fleet:") || strings.Contains(l, "trail:  ") || strings.Contains(l, "you were here") || strings.Contains(l, "scout")
-			// The keys the deck's own footers offer at this width outrank
-			// the rest: `[ ]` and `a` were cut while `g` and `x` stood.
-			for _, k := range []string{"esc ", "q ", "? ", "/ n N", "[ ]", "a ", "r ", "space"} {
+			// The keys the deck's own footer is offering outrank the rest:
+			// an 80-column help named `g`, which no footer there offers,
+			// while `x` — on nine of them — was cut for the room.
+			for _, k := range []string{"esc ", "q ", "? "} {
 				keep = keep || strings.HasPrefix(plain, k)
+			}
+			if !keep && len(plain) > 10 {
+				keep = helpOffered(strings.TrimSpace(plain[:10]), o.keymap)
 			}
 			if keep {
 				tail = append(tail, l) // the way out, the fleet's glyphs, and the keys pressed at this width

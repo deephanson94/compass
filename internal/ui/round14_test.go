@@ -272,7 +272,9 @@ func TestRoundFourteenHelpers(t *testing.T) {
 	if w := bandWidth(148, 1, 35); w != boardColMax {
 		t.Errorf("a lone column under a full band is %d wide, want the cap", w)
 	}
-	help := strings.Join(helpLinesFor(76, 19, false), "\n")
+	// The narrow help drops `m` (the mirror needs the board's width) and
+	// keeps the search when the deck's own footer is offering it.
+	help := strings.Join(helpLinesWith(76, 19, helpOpts{keymap: "j/k move · / search · ? help · q quit"}), "\n")
 	if !strings.Contains(help, "/ n N") || strings.Contains(help, "live tmux pane") {
 		t.Errorf("the narrow help keeps / and drops m:\n%s", help)
 	}

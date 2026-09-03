@@ -1164,8 +1164,8 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 			trace = verb + quote + age
 		case sent.answer == 0 && len([]rune(verb+quote)) <= w:
 			trace = verb + quote
-		case sent.answer == 0 && fitQuote(verb+quote, w) != "":
-			trace = fitQuote(verb+quote, w) // the bytes clipped, never dropped for a cell
+		case sent.answer == 0 && fitQuoteMin(verb+quote, w, 3) != "":
+			trace = fitQuoteMin(verb+quote, w, 3) // a stub of the bytes beats no bytes
 		default:
 			trace = clip(strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")+age, w)
 		}
