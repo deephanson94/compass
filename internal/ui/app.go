@@ -2311,7 +2311,8 @@ func overlay(rows, panel []string, left, top int) {
 			// 14m): the peek begins at the next space.
 			if plain := ansi.Strip(rest); len(plain) > 0 && plain[0] != ' ' {
 				if i := strings.Index(plain, " "); i >= 0 {
-					rest = strings.Repeat(" ", i) + ansi.TruncateLeft(rest, i, "")
+					cut := ansi.StringWidth(plain[:i]) // cells, not bytes
+					rest = strings.Repeat(" ", cut) + ansi.TruncateLeft(rest, cut, "")
 				} else {
 					rest = strings.Repeat(" ", lipgloss.Width(rest))
 				}
