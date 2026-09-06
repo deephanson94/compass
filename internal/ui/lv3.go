@@ -214,7 +214,18 @@ func (m *Model) readerColumn(w, h int) []string {
 				empty = "⋯ the agent has written nothing yet"
 			}
 		}
-		rows = append(rows, dimStyle.Render(clip(empty, w)), "")
+		rows = append(rows, dimStyle.Render(clip(empty, w)))
+		// The page owns the screen: no trail panel is on the frame to say
+		// the call the lane is inside, and the row the person pressed Tab
+		// on said it. The clock stays above, said once (#60, #66).
+		if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 {
+			if a, has := m.agentsFor(m.selectedKey)[br.ToolUseID]; has {
+				if g, text, _ := laneHead(a, br, true, m.now); text != "" && !a.Wrote.IsZero() {
+					rows = append(rows, dimStyle.Render(clip(g+" "+text, w)))
+				}
+			}
+		}
+		rows = append(rows, "")
 		rows = append(rows, textStyle.Render(clip(glyphBranch+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
 		for len(rows) < h {
 			rows = append(rows, "") // the gutter runs the panel's height, as every other page
