@@ -230,6 +230,16 @@ func (m *Model) boardLines(w, h int) []string {
 	// trails ended every column in eight blank rows while naming four
 	// sessions in the strip.
 	keys, heights := m.boardPack(n, cw, body)
+	// The lane heads are what the board spends its spare rows on, never
+	// what costs a session its column: pack with them, pack without, and
+	// keep them only where the same columns are drawn either way.
+	m.noLaneHeads = true
+	if bare, bareH := m.boardPack(n, cw, body); len(bare) > len(keys) {
+		keys, heights = bare, bareH
+	} else {
+		m.noLaneHeads = false
+	}
+	defer func() { m.noLaneHeads = false }()
 	if len(keys) == 0 && m.fleetQuery != "" {
 		// A search nothing answers keeps the board and says so, rather
 		// than silently turning into the deck.
@@ -441,7 +451,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	doc := TrailLines(tr, TrailOpts{
 		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, Agents: m.agentsFor(key),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
-		Dense: true, Looked: m.looked(key),
+		Dense: true, Looked: m.looked(key), NoLaneHeads: m.noLaneHeads,
 	})
 	return 3 + len(doc)
 }
@@ -715,6 +725,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Pulse:        m.pulse && working,
 		Pinned:       true,
 		Dense:        true, // the board always packs: a rail row between every leg halved what fit
+		NoLaneHeads:  m.noLaneHeads,
 		Looked:       m.looked(key),
 	}
 	frame := RenderTrail(tr, opts)

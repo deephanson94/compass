@@ -116,6 +116,16 @@ type TrailOpts struct {
 	// something — forks, ticks, hour rules — keep theirs.
 	Dense bool
 
+	// NoLaneHeads is the board's answer when the heads would cost it a
+	// column: pack first, spend the rows that are left.
+	NoLaneHeads bool
+
+	// laneHeads draws an open lane's head under it below Lv2 — set by
+	// trailDoc's own retry, never by a caller: the board and the deck's
+	// panel take the heads when the column still fits without them.
+	laneHeads      bool
+	laneHeadsFixed bool
+
 	// HeadClass is the class the fleet's state machine gives the session
 	// when the trail has no leg yet — "scout", from the first call — so a
 	// session fifty seconds old has a present on its trail, not a
@@ -287,6 +297,18 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	width := o.Width
 	if width < trailPrefixWidth {
 		return nil, nil
+	}
+	if o.Level < levelWaypoints && !o.laneHeadsFixed && o.Height > 0 && !o.NoLaneHeads {
+		// Below Lv2 the lane's head is the first thing the column gives
+		// up, not the last: try the column with the heads, and fall back
+		// to the glyph alone only where they cost the trail a row (#49).
+		o.laneHeadsFixed = true
+		o.laneHeads = true
+		if doc, sel := trailDoc(tr, o); len(doc) <= o.Height {
+			return doc, sel
+		}
+		o.laneHeads = false
+		return trailDoc(tr, o)
 	}
 	nodes := trailNodes(tr)
 	if len(nodes) == 0 {
@@ -1604,7 +1626,7 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		// An open lane's own head, from its file — the call in flight and
 		// when it last wrote — beneath it where the finding of a returned
 		// lane goes (#49). Only from Lv2 down: at Lv1 the glyph says it.
-		if !br.Done && known && o.Level >= levelWaypoints && o.HeadState != state.Idle {
+		if !br.Done && known && (o.Level >= levelWaypoints || o.laneHeads) && o.HeadState != state.Idle {
 			g, text, clock := laneHead(live, br, known, o.Now)
 			if body := width - trailWayWidth; body >= trailMinLabel && text != "" {
 				row := g + " " + text

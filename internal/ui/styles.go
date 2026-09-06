@@ -194,7 +194,13 @@ func clip(s string, w int) string {
 	// promised a phrase), where a hyphen inside a token is the token's
 	// (`--all`, `-run`): the spaced dashes go, the hyphen stays (#63).
 	// A comma or a semicolon promises the clause after it the same way (#64).
-	return strings.TrimRight(string(runes[:kept]), " ·(./—–,;") + "…"
+	// And a flag's leading dash with nothing after it: "--model x -…"
+	// promised a flag; the hyphen inside a token stays (#72).
+	head := strings.TrimRight(string(runes[:kept]), " ·(./—–,;")
+	for strings.HasSuffix(head, " -") || strings.HasSuffix(head, " --") {
+		head = strings.TrimRight(strings.TrimRight(head, "-"), " ·(./—–,;")
+	}
+	return head + "…"
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }
