@@ -720,6 +720,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	// The page keys are the half-page keys: a person reaching for PgDn on
+	// a long trail should get the move the deck offers, not a dead key.
+	switch key {
+	case "pgdown":
+		key = "ctrl+d"
+	case "pgup":
+		key = "ctrl+u"
+	}
 
 	if m.showHelp {
 		switch key {
@@ -2784,18 +2792,18 @@ func (m *Model) keymap() string {
 			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
-		keys = "j/k move · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
+		keys = "j/k move · ctrl+d/u ½ page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
+			keys = "j/k move · ctrl+d/u ½ page · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k scroll · ctrl+d/u ½ page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
-		keys = "j/k scroll · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k scroll · ctrl+d/u ½ page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · h/l session · [ ] chapters · m live pane · r reply · a ask · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		keys = "j/k legs · ctrl+d/u ½ page · h/l session · [ ] chapters · m live pane · r reply · a ask · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u ½ page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
 	}
 	if m.archiveView {
 		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
@@ -3047,7 +3055,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 	if m.showMirror {
 		mirror = " · m conversation" // the toggle's other label, the same rank
 	}
-	order := []string{attachHint, mirror, " · h/l session"}
+	// The page key goes first: it is a shortcut for a distance `j` covers,
+	// and the help teaches it (#42).
+	order := []string{" · ctrl+d/u ½ page", attachHint, mirror, " · h/l session"}
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
 	// this level — so they stand with the level's own keys below, ranked

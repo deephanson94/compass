@@ -51,6 +51,12 @@ type Snapshot struct {
 	Reason   string    // short human phrase, e.g. "turn ended with a question"
 	Activity string    // hint, e.g. `Bash: pytest tests/auth -x`, `reading middleware.py`
 
+	// Allowed is the budget the call in flight was given — a Bash timeout —
+	// when its silence is inside that budget, so a row can say "2m of 7m"
+	// where it would otherwise have said "silent 2m". Zero when the call
+	// has no budget or the budget has run out.
+	Allowed time.Duration
+
 	// APIError says the session is waiting on a call the API refused, not on
 	// anything it did. A reader needs the error's own words here more than the
 	// session's last good result, so the fleet lets this override its usual
@@ -181,6 +187,17 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 		}
 		if quiet < StuckAfter {
 			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "tool call in flight", Activity: act}
+		}
+		// A shell command is allowed its own budget before its silence means
+		// anything: the harness gives Bash a timeout (two minutes unless the
+		// call names one, up to ten) and kills the command when it runs out,
+		// so a `sleep 420` under a ten-minute budget is a session doing what
+		// it said, not one that has hung. The person reading "stuck" over a
+		// deliberate wait stopped trusting the word.
+		if allow := allowance(oldest.use); allow > 0 {
+			if at := m.since(oldest.at); now.Before(at.Add(allow)) {
+				return Snapshot{State: Working, Since: at, Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
+			}
 		}
 		return Snapshot{State: Stuck, Since: m.since(oldest.at), Reason: stuckReason(quiet), Activity: act}
 	}
@@ -313,6 +330,39 @@ func apiErrorText(s string) string {
 
 // apiErrorMarker is the phrase Claude Code writes before the status it got.
 const apiErrorMarker = "API Error:"
+
+// bashTimeout is the budget the harness gives a Bash call that names none.
+const bashTimeout = 2 * time.Minute
+
+// allowance is how long a pending call may run before its silence counts —
+// the Bash timeout, in milliseconds on the call's input, or the harness's
+// default. Every other tool answers at once or not at all, so 0.
+func allowance(use transcript.ToolUse) time.Duration {
+	if use.Name != "Bash" {
+		return 0
+	}
+	if ms := rawNumber(use.Input, "timeout"); ms > 0 {
+		return time.Duration(ms) * time.Millisecond
+	}
+	return bashTimeout
+}
+
+// rawNumber reads a numeric field off a tool call's input; 0 when absent or
+// not a number.
+func rawNumber(input json.RawMessage, key string) float64 {
+	if len(input) == 0 {
+		return 0
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return 0
+	}
+	var n float64
+	if err := json.Unmarshal(obj[key], &n); err != nil {
+		return 0
+	}
+	return n
+}
 
 func stuckReason(quiet time.Duration) string {
 	return fmt.Sprintf("no output for %s mid-turn", ShortDuration(quiet))

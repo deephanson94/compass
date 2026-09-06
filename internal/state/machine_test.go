@@ -314,9 +314,11 @@ func TestStuckAfterBoundary(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run("pending tool "+tc.name, func(t *testing.T) {
+			// A Read has no budget of its own; a Bash does (see
+			// TestABashInsideItsTimeoutIsWorking).
 			m := machineWith(
 				userPrompt(0, "build it"),
-				assistantTool(0, "toolu_x", "Bash", `{"command":"go build ./..."}`),
+				assistantTool(0, "toolu_x", "Read", `{"file_path":"main.go"}`),
 			)
 			assertState(t, m.Evaluate(at(tc.quiet)), tc.want)
 		})
@@ -649,4 +651,37 @@ func TestAskedQuestionIsTheActivity(t *testing.T) {
 		assistantTool(time.Second, "toolu_q", "AskUserQuestion", `{"questions":[]}`),
 	)
 	assertActivity(t, m.Evaluate(at(5*time.Second)), "AskUserQuestion")
+}
+
+// A shell command is allowed the budget the harness gave it before its
+// silence means anything: "stuck" over a deliberate `sleep 420` was the word
+// losing its meaning (#45).
+func TestABashInsideItsTimeoutIsWorking(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "wait for the run"),
+		assistantTool(0, "toolu_x", "Bash", `{"command":"sleep 420","timeout":600000}`),
+	)
+	snap := m.Evaluate(at(2 * time.Minute))
+	assertState(t, snap, state.Working)
+	assertReason(t, snap, "Bash allowed 10m")
+	if snap.Allowed != 10*time.Minute {
+		t.Fatalf("Allowed = %v, want 10m", snap.Allowed)
+	}
+	// Past the budget the harness has killed it and the silence is real.
+	snap = m.Evaluate(at(11 * time.Minute))
+	assertState(t, snap, state.Stuck)
+	if snap.Allowed != 0 {
+		t.Fatalf("Allowed = %v past the budget, want 0", snap.Allowed)
+	}
+}
+
+// A Bash that names no timeout has the harness's two minutes; ninety
+// seconds of silence inside them is still working, and past them stuck.
+func TestABashWithNoTimeoutHasTwoMinutes(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_x", "Bash", `{"command":"go build ./..."}`),
+	)
+	assertState(t, m.Evaluate(at(100*time.Second)), state.Working)
+	assertState(t, m.Evaluate(at(3*time.Minute)), state.Stuck)
 }

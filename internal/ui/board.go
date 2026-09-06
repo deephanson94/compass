@@ -420,7 +420,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	}
 	s := m.sessions[r.sess]
 	doc := TrailLines(tr, TrailOpts{
-		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s),
+		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed,
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 		Dense: true, Looked: m.looked(key),
 	})
@@ -684,6 +684,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Head:         m.headFor(s),
 		HeadState:    s.Snap.State,
 		HeadSince:    headSince(s),
+		HeadAllowed:  s.Snap.Allowed,
 		SessionKey:   key,
 		Now:          m.now,
 		Width:        w,

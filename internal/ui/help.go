@@ -18,7 +18,7 @@ var helpKeys = [][2]string{
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: board → session → reader"},
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
-	{"ctrl+d/u", "half a page: the trail, or the reader once the keys are in it"},
+	{"ctrl+d/u", "half a page (PgDn / PgUp too): the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},

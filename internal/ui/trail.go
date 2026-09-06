@@ -74,6 +74,10 @@ type TrailOpts struct {
 	// contradicting the fleet beside it.
 	HeadState state.State
 	HeadSince time.Time
+	// HeadAllowed is the budget the call in flight was given when HEAD is
+	// still inside it — a Bash timeout — so the figure says "for 2m of
+	// 7m": the silence is the session doing what it said.
+	HeadAllowed time.Duration
 	// HeadDead says the session is dead on the API: HEAD wears ⊘ and the
 	// refusal, not the needs-you glyph and a wait.
 	HeadDead bool
@@ -328,6 +332,9 @@ func bareHeadRow(o TrailOpts, width int) string {
 	tail := ""
 	if !o.HeadSince.IsZero() && !o.Now.IsZero() {
 		tail = "for " + relAge(o.Now, o.HeadSince)
+		if o.HeadAllowed > 0 {
+			tail += " of " + state.ShortDuration(o.HeadAllowed)
+		}
 		if o.HeadState == state.Stuck {
 			tail = "silent " + relAge(o.Now, o.HeadSince)
 		} else if o.HeadState == state.NeedsYou {
@@ -1120,6 +1127,12 @@ func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
 	if o.HeadTail != "" {
 		figure = o.HeadTail
 	}
+	if o.HeadAllowed > 0 && !since.IsZero() && !strings.HasPrefix(figure, "◈") {
+		// The call has a budget and is inside it: "for 2m of 7m" answers
+		// the question "stuck" was answering wrongly (#45). A lead parked
+		// on its agents keeps the parked sentence — that is the wait.
+		figure = "for " + relAge(o.Now, since) + " of " + state.ShortDuration(o.HeadAllowed)
+	}
 	return glyph, figure
 }
 
@@ -1722,8 +1735,10 @@ func withoutPrefix(parts []string, prefix string) []string {
 // trailOpts is the model's state as the renderer wants it.
 func (m *Model) trailOpts(w, h int) TrailOpts {
 	head, headState, since := "", state.Working, time.Time{}
+	var allowed time.Duration
 	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
 		head, headState, since = m.headFor(s), s.Snap.State, headSince(s)
+		allowed = s.Snap.Allowed
 	}
 	headClass := ""
 	if s, ok := m.selected(); ok && s.HasClass {
@@ -1744,6 +1759,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Head:         head,
 		HeadState:    headState,
 		HeadSince:    since,
+		HeadAllowed:  allowed,
 		SessionKey:   m.selectedKey,
 		Now:          m.now,
 		Width:        w,
