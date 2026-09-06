@@ -123,3 +123,13 @@ func TestATickRowsLabelTakesItsWholeField(t *testing.T) {
 		t.Errorf("the tick row at 37 = %q (%d wide)", row, lipgloss.Width(row))
 	}
 }
+
+// `↪` is a fleet row's mark, and the 120x34 help glosses it on the fleet's
+// own row rather than on a trail row the height cuts (#62).
+func TestTheWideHelpGlossesTheSentMark(t *testing.T) {
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	press(m, "?")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "↪ sent — a line compass typed") {
+		t.Errorf("the 120x34 help never says what ↪ means:\n%s", view)
+	}
+}

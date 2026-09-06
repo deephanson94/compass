@@ -421,7 +421,10 @@ func helpLegendRaw() []string {
 		"",
 		focusMark + " marks the panel your keys are in — tab moves it",
 		"fleet:  ● working  ▲\u00a0needs\u00a0you  ◍ stuck  ↻ looping  ⊘\u00a0dead\u00a0on\u00a0the\u00a0API  ○ idle",
-		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
+		// `↪` is a fleet row's mark, and its gloss rides the fleet's row:
+		// the 120x34 help drew the mark on its board and cut the trail row
+		// that defined it (#62).
+		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened · ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent  ◍ silent agent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
@@ -429,7 +432,7 @@ func helpLegendRaw() []string {
 		"        ⟲ context compacted — a summary below · 16⚑\u00a010✗\u00a02⟲\u00a0ships\u00a0·\u00a0red\u00a0·\u00a0compactions",
 		"        · 2nd\u00a0failure — the same test in two legs · ?\u00a0—\u00a0no\u00a0verdict\u00a0parsed · edited\u00a0since — touched after that run",
 		"        on\u00a0you\u00a040m\u00a0today — its waits for your next prompt (3h+\u00a0=\u00a0away) · for\u00a04m\u00a0of\u00a010m — inside its shell command's budget",
-		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit · ↩ result of X — landed late; it is X's",
+		"        ↩ result of X — landed late; it is X's",
 		"        │\u00a0you\u00a0were\u00a0here — the read-line · ↳\u00a0what\u00a0came\u00a0after · ⚠\u00a0two\u00a0sessions, one thing",
 		"board:  columns for what owes you; the rest below",
 		"",
