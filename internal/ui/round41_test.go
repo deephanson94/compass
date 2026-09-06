@@ -107,3 +107,19 @@ func TestTheLaneReaderSaysTheSilenceOnItsHungCall(t *testing.T) {
 		t.Fatal("the walkthrough never opens the silent lane's reader on its hung call")
 	}
 }
+
+// At eighty columns the recent band keeps the verdict's mark where "✗ red"
+// is a cell short of the prompt's floor (#67).
+func TestTheNarrowBandKeepsTheVerdictsMark(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"✗ 2h", "✓ 6h", "✓ 9h"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the 80 band should keep the verdict's mark %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "✗ red 2h") {
+		t.Errorf("at 80 the whole verdict does not fit beside the prompt's floor:\n%s", view)
+	}
+}

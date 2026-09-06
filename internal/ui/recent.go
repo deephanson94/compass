@@ -147,7 +147,16 @@ func (m *Model) recentLineWith(r recentRow, w int, short bool) string {
 	// prompt does not. It goes only when the prompt's own floor would —
 	// and its counts go first, so a red row keeps "✗ red" where a green
 	// one keeps its tick.
-	for _, v := range []string{verdict, firstWords(verdict, 2)} {
+	// Last rung: the verdict's own mark. A row that cannot buy "✗ red"
+	// can buy "✗", and the mark is what the band's colour is for — at
+	// eighty columns "✗ red" was a cell short and every row answered
+	// "when" and none "how it went" (#67). Glyph-guarded: a verdict
+	// that opens with a word (`build 10h`) has no mark to keep.
+	mark := ""
+	if rs := []rune(verdict); len(rs) > 0 && strings.ContainsRune("✓✗⚑", rs[0]) {
+		mark = string(rs[0])
+	}
+	for _, v := range []string{verdict, firstWords(verdict, 2), mark} {
 		if keep := room - lipgloss.Width(v) - 2; v != "" && keep >= recentNameFloor {
 			body = pad(clip(name, keep), keep) + "  " + v
 			break
