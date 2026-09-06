@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/state"
 )
 
@@ -55,5 +58,63 @@ func TestThePageKeysMoveHalfAPage(t *testing.T) {
 	press(m, "pgdown")
 	if m.cursor != was {
 		t.Errorf("PgDn did not come back: cursor %d, want %d", m.cursor, was)
+	}
+}
+
+// headerOf is the deck's first row, plain.
+func headerOf(m *Model) string {
+	return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+}
+
+// The selected session's digit and name ride the header at every level and
+// every width — the one row that never moves under a zoom — and a namesake
+// carries its ⌁ tag there, so two sessions called harness are never the
+// same title (#46).
+func TestTheHeaderNamesTheSelectedSessionAtEveryLevel(t *testing.T) {
+	for _, w := range []int{80, 120, 220} {
+		m := sceneModel(sceneFleetHygiene(), w, 34)
+		for i := 0; i < 3; i++ {
+			if got := headerOf(m); !strings.Contains(got, " · 1 porter") || strings.Contains(got, "⌁") {
+				t.Errorf("at %d after %d tabs the header does not name the selection, or tags a session with no namesake: %q", w, i, got)
+			}
+			pressTab(m)
+		}
+		press(m, "2")
+		if got := headerOf(m); !strings.Contains(got, "2 harness · ⌁ harness:1.0") {
+			t.Errorf("at %d a digit press does not show its landing on the header: %q", w, got)
+		}
+		other := strconv.Itoa(m.digits[sessionKey("harness-b")])
+		press(m, other)
+		if got := headerOf(m); !strings.Contains(got, other+" harness · ⌁ harness:0.0") {
+			t.Errorf("at %d the namesake is not told apart on the header: %q", w, got)
+		}
+	}
+}
+
+// The chips are the product: the header's identity sheds — the board word,
+// the tag, the search, then the name clips around its digit — and the
+// chips never do.
+func TestTheHeaderShedsTheNameBeforeTheChips(t *testing.T) {
+	m := sceneModel(sceneFleetHygiene(), 120, 34)
+	press(m, "2") // the namesake, tagged
+	full := ansi.Strip(m.headerLine(118))
+	if !strings.Contains(full, "· board · 2 harness · ⌁ harness:1.0") {
+		t.Fatalf("the board header does not carry the whole identity: %q", full)
+	}
+	chips := ansi.Strip(m.statusChips())
+	for _, w := range []int{60, 40, 30} {
+		got := ansi.Strip(m.headerLine(w))
+		if !strings.HasSuffix(got, chips) {
+			t.Errorf("at %d the chips gave way: %q", w, got)
+		}
+		if lipgloss.Width(got) > w {
+			t.Errorf("at %d the header overflows: %q", w, got)
+		}
+	}
+	if got := ansi.Strip(m.headerLine(60)); strings.Contains(got, "board") || !strings.Contains(got, "2 harness") {
+		t.Errorf("the board word should go before the name: %q", got)
+	}
+	if got := ansi.Strip(m.headerLine(40)); strings.Contains(got, "⌁") || !strings.Contains(got, " 2 ") {
+		t.Errorf("the tag should go before the digit: %q", got)
 	}
 }

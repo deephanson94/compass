@@ -2609,10 +2609,18 @@ func (m *Model) panelPlace(inner, pw, ph int, tight bool) (left, top, cap int) {
 
 // headerLine: the product mark on the left, the fleet's pulse on the right.
 func (m *Model) headerLine(w int) string {
-	left := titleStyle.Render("⌂ compass")
+	right := m.statusChips()
+	// The selected session's identity rides the header — the one row at
+	// the same cells at every level and width — so a zoom never moves the
+	// name and a digit press always shows its landing (#46). It sheds
+	// before the chips, which never do: the board word first, then the
+	// tag, then the search, and last the name clips around its digit.
+	board := ""
 	if m.level == levelBoard && m.boardShown() {
-		left += dimStyle.Render(" · board")
+		board = " · board"
 	}
+	digit, name, tag := m.headerName()
+	query := ""
 	if m.fleetQuery != "" {
 		// The search in force, and how much of the fleet answers it.
 		total := 0
@@ -2621,14 +2629,72 @@ func (m *Model) headerLine(w int) string {
 				total++
 			}
 		}
-		left += dimStyle.Render(fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total))
+		query = fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total)
 	}
-	right := m.statusChips()
+	room := w - lipgloss.Width(right) - 1 // a cell of air before the chips
+	compose := func(board, tag, query string, name string) string {
+		left := titleStyle.Render("⌂ compass") + dimStyle.Render(board)
+		if name != "" {
+			who := name
+			if digit != "" {
+				who = digit + " " + name
+			}
+			left += dimStyle.Render(" · ") + who
+			if tag != "" {
+				left += dimStyle.Render(" · " + tag)
+			}
+		}
+		return left + dimStyle.Render(query)
+	}
+	left := compose(board, tag, query, name)
+	for _, try := range []func() string{
+		func() string { board = ""; return compose(board, tag, query, name) },
+		func() string { tag = ""; return compose(board, tag, query, name) },
+		func() string { query = ""; return compose(board, tag, query, name) },
+	} {
+		if lipgloss.Width(left) <= room {
+			break
+		}
+		left = try()
+	}
+	if over := lipgloss.Width(left) - room; over > 0 && name != "" {
+		// The name clips around its digit, and goes whole before it
+		// would be a bare mark.
+		keep := lipgloss.Width(name) - over
+		if keep >= 3 {
+			left = compose(board, tag, query, clip(name, keep))
+		} else {
+			left = compose(board, tag, query, "")
+		}
+	}
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// headerName is the selected session as the header names it: the digit its
+// row wears for life (the archive's drawn number in the archive, #32), its
+// name, and its ⌁ tag only when another session shares the name — the reply
+// panel's own form (#31), so the two read as one fact. Nothing when nothing
+// is selected.
+func (m *Model) headerName() (digit, name, tag string) {
+	s, ok := m.selected()
+	if !ok || (s.Live == m.archiveView) {
+		return "", "", ""
+	}
+	name = sessionName(s.Info)
+	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
+		digit = strconv.Itoa(r.num)
+	}
+	for _, o := range m.sessions {
+		if o.Info.Key() != s.Info.Key() && o.Live == s.Live && sessionName(o.Info) == name {
+			tag = m.boardTag(s)
+			break
+		}
+	}
+	return digit, name, tag
 }
 
 // statusChips renders the same counts `compass status` prints — the live ones
