@@ -201,21 +201,15 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 	// each draws exactly its slice, and the cursor's row is where
 	// TrailCursorRow says.)
 	rows := append([]string(nil), doc[top:end]...)
-	if len(rows) > 0 && top > 0 && (isDetailRow(rows[0]) || (o.Pinned && isLaneRow(rows[0]))) {
-		// A pinned column that opens on a lane opens on the lane's leg
-		// instead; a scrolled viewport keeps every row where it stands.
+	if len(rows) > 0 && top > 0 && isDetailRow(rows[0]) {
+		// A finding's parent is the lane that brought it, a detail's the
+		// leg: the first row above that is not a detail. Walking past
+		// the lane put "3 defects found" under "◆ scout" — and drawing
+		// the leg over a lane row at the top did the same (#57): a lane
+		// row names itself and stays.
 		parent := top - 1
-		if isDetailRow(rows[0]) {
-			// A finding's parent is the lane that brought it, a detail's
-			// the leg: the first row above that is not a detail. Walking
-			// past the lane put "3 defects found" under "◆ scout" (#57).
-			for parent > 0 && isDetailRow(doc[parent]) {
-				parent--
-			}
-		} else {
-			for parent > 0 && (isDetailRow(doc[parent]) || isLaneRow(doc[parent])) {
-				parent--
-			}
+		for parent > 0 && isDetailRow(doc[parent]) {
+			parent--
 		}
 		if isCursorRow(rows[0]) {
 			// The cursor's own row is never drawn over: the parent takes

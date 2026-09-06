@@ -176,6 +176,18 @@ func clip(s string, w int) string {
 		kept++
 	}
 	out := b.String()
+	if kept < len(runes) && kept > 0 && runes[kept-1] == '.' {
+		// "go test ./...…": a mark after a dot reads as more of the
+		// token it cut. The token goes whole instead (#58).
+		i := kept
+		for i > 0 && runes[i-1] != ' ' {
+			i--
+		}
+		if i > 0 {
+			kept = i
+			out = string(runes[:i])
+		}
+	}
 	if kept < len(runes) && isDigit(runes[kept]) && kept > 0 && isDigit(runes[kept-1]) {
 		// Never cut a number in half: "API Error: 4…" read as a one-digit
 		// status, and 403 against 429 is the difference the row is for.
