@@ -135,7 +135,7 @@ func TestRoundFifteenOrders(t *testing.T) {
 	tr.Branches = append(tr.Branches, journey.Branch{ToolUseID: "b", Label: "scout", Start: m.now.Add(-5 * time.Minute), End: m.now.Add(-time.Minute), Done: true, Report: "found it", AfterLeg: len(tr.Legs) - 1})
 	m.trails[api] = tr
 	m.seen = map[string]time.Time{api: m.now.Add(-10 * time.Minute)}
-	if row := ansi.Strip(m.boardDelta(api, m.sessions[rowFor(t, m, api).sess], 60)); !strings.HasPrefix(row, "↳ 1 agent back") {
+	if row := ansi.Strip(m.boardDelta(api, m.sessions[rowFor(t, m, api).sess], 60)); !strings.HasPrefix(row, "↳ ") || !strings.Contains(strings.SplitN(row, " · ", 2)[0], "back") {
 		t.Errorf("the digest should lead with the lanes: %q", row)
 	}
 	base := fixtureBase

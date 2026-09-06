@@ -215,8 +215,11 @@ func TestAnOpenLaneIsJudgedByItsOwnFile(t *testing.T) {
 			t.Errorf("the session view's lanes lack %q:\n%s", want, trail)
 		}
 	}
-	if strings.Contains(trail, "→1") {
-		t.Errorf("a lane whose own file was read still wears the →N hedge:\n%s", trail)
+	// The lane's own file is in hand, and the session it matches wrote
+	// thirty seconds ago where the file went quiet twelve minutes ago:
+	// the link joins the staler reading to the fresher one (#67).
+	if !strings.Contains(trail, "→1") {
+		t.Errorf("the lane should link to the fresher session:\n%s", trail)
 	}
 }
 

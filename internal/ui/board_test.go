@@ -756,7 +756,7 @@ func TestABrightColumnSaysWhatIsNewSinceTheLastLook(t *testing.T) {
 
 	// One new leg speaks singular.
 	m.seen[key] = fixtureBase.Add(30 * time.Minute)
-	if got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n"); !strings.Contains(got, "1 new leg ·") {
+	if got := strings.Join(m.boardColumn(key, rowFor(t, m, key), 40, 20), "\n"); !strings.Contains(got, "1 new leg") || strings.Contains(got, "1 new legs") {
 		t.Errorf("one new leg is not singular:\n%s", got)
 	}
 

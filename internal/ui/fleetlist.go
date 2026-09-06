@@ -1054,7 +1054,7 @@ func (m *Model) unread(s fleet.Session) bool {
 // a session whose first prompt begins with the lane's label. The transcript
 // carries no real link between a lead and a teammate, so the mark is a
 // hedge — "→3" — and `3` is the key that goes and looks.
-func (m *Model) laneLinks(tr journey.Trail) map[string]int {
+func (m *Model) laneLinks(tr journey.Trail, agents map[string]agentLive) map[string]int {
 	if len(tr.Branches) == 0 {
 		return nil
 	}
@@ -1074,6 +1074,14 @@ func (m *Model) laneLinks(tr journey.Trail) map[string]int {
 				continue
 			}
 			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(other.Prompts[0].Text)), label) {
+				// A hedge where nothing better was read (#49) — and where
+				// the lane's own file is in hand but the session it
+				// matches wrote more recently: the file is then the
+				// staler of two readings of one agent, and the board
+				// called it silent while it worked two columns right (#67).
+				if a, known := agents[b.ToolUseID]; known && !s.Info.LastEventAt.After(a.Wrote) {
+					break
+				}
 				if r, ok := rows[s.Info.Key()]; ok && r.num > 0 {
 					links[b.Label] = r.num
 				}

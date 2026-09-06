@@ -1578,9 +1578,9 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		name := clip(branchName(br.Label), labelWidth)
 		live, known := o.Agents[br.ToolUseID]
 		_, hung := laneSilence(live, br, o.Now)
-		if n, ok := o.LaneLinks[br.Label]; ok && n > 0 && !known {
-			// A hedge, and only where nothing better was read: a lane
-			// whose own file is in hand is not a guess (#49).
+		if n, ok := o.LaneLinks[br.Label]; ok && n > 0 {
+			// A hedge where nothing better was read (#49), or where the
+			// file in hand is the staler reading (#67): laneLinks decides.
 			// A session that looks like this agent's: the link survives
 			// the clip, because it is the three characters that go somewhere.
 			link := fmt.Sprintf(" →%d", n)
@@ -1856,7 +1856,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Looked:       m.looked(m.selectedKey),
 		Todos:        m.todos,
 		Labels:       m.labels,
-		LaneLinks:    m.laneLinks(m.trail),
+		LaneLinks:    m.laneLinks(m.trail, m.agentsFor(m.selectedKey)),
 		Head:         head,
 		HeadState:    headState,
 		HeadSince:    since,

@@ -699,7 +699,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		HeadActivity: s.Snap.Activity,
 		Todos:        planItems(tr.Tasks),
 		Labels:       m.boardLabels[key],
-		LaneLinks:    m.laneLinks(tr),
+		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
 		Head:         m.headFor(s),
 		HeadState:    s.Snap.State,
 		HeadSince:    headSince(s),
@@ -1306,6 +1306,7 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 	// come first when there are any: a delegator reads the digest for
 	// the agent that came back, and a narrow column shed that clause.
 	var parts []string
+	laneAt, laneLong := -1, "" // the lane clause's longer form, tried first (#60, #67)
 	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
 		switch {
 		case out > 0 && back == 0:
@@ -1328,13 +1329,21 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 			// "back" alone means a finding beneath (the help's own
 			// glossary): a lane that came back with nothing is "back,
 			// empty", the trail's word for it (#66).
+			// And "back since" where it costs the digest no clause: the
+			// card's "◈3 back" a row above counts every lane, the digest
+			// the ones since the look, and one word for two scopes read
+			// as a contradiction (#66, #67).
+			laneAt = len(parts)
 			switch empty := emptyLanesSince(m.trails[key], seen); {
 			case empty == back:
 				parts = append(parts, fmt.Sprintf("↳ %d back, empty", back))
+				laneLong = fmt.Sprintf("↳ %d back since, empty", back)
 			case empty > 0:
 				parts = append(parts, fmt.Sprintf("↳ %d back · %d empty", back, empty))
+				laneLong = fmt.Sprintf("↳ %d back since · %d empty", back, empty)
 			default:
 				parts = append(parts, "↳ "+plural(back, "agent")+" back")
+				laneLong = fmt.Sprintf("↳ %d back since", back)
 			}
 		}
 		parts = append(parts, plural(legs, "new leg"))
@@ -1352,7 +1361,15 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 		parts = append(parts, clause)
 	}
 	parts = append(parts, "looked "+state.ShortDuration(m.now.Sub(seen))+" ago")
-	return dimStyle.Render(joinFit(parts, w))
+	fit := joinFit(parts, w)
+	if laneAt >= 0 && laneLong != "" {
+		long := append([]string(nil), parts...)
+		long[laneAt] = laneLong
+		if try := joinFit(long, w); strings.Count(try, " · ") >= strings.Count(fit, " · ") && !strings.HasSuffix(try, "…") {
+			fit = try
+		}
+	}
+	return dimStyle.Render(fit)
 }
 
 // fitWithBack joins the card's clauses to w — and where that sheds the
@@ -1389,7 +1406,7 @@ func fitWithBack(parts []string, w int) string {
 func emptyLanesSince(tr journey.Trail, looked time.Time) int {
 	n := 0
 	for _, b := range tr.Branches {
-		if b.Start.After(looked) && b.Done && strings.TrimSpace(b.Report) == "" {
+		if b.Done && b.End.After(looked) && strings.TrimSpace(b.Report) == "" {
 			n++
 		}
 	}
@@ -1400,12 +1417,15 @@ func emptyLanesSince(tr journey.Trail, looked time.Time) int {
 // back.
 func lanesSince(tr journey.Trail, looked time.Time) (out, back int) {
 	for _, b := range tr.Branches {
-		if !b.Start.After(looked) {
+		if b.Done {
+			// By its return, not its dispatch: a lane sent before lunch
+			// that came back while you were out is the digest's news (#67).
+			if b.End.After(looked) {
+				back++
+			}
 			continue
 		}
-		if b.Done {
-			back++
-		} else {
+		if b.Start.After(looked) {
 			out++
 		}
 	}
