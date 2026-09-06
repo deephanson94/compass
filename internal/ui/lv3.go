@@ -198,7 +198,19 @@ func (m *Model) readerColumn(w, h int) []string {
 		// glyph, not ❯ — the person did not type it.
 		empty := "◍ the agent has written nothing since it was sent"
 		if a, has := m.agentsFor(m.selectedKey)[br.ToolUseID]; has {
-			if _, hung := laneSilence(a, br, m.now); !hung {
+			_, hung := laneSilence(a, br, m.now)
+			switch {
+			case !a.Wrote.IsZero():
+				// The file has been written and holds no turn to draw:
+				// the page says that, with the clock the lane's own head
+				// carries — "written nothing" contradicted the head two
+				// panels left, which said it wrote forty seconds ago.
+				if hung {
+					empty = "◍ nothing to read yet · silent " + relAge(m.now, a.Wrote)
+				} else {
+					empty = "⋯ nothing to read yet · wrote " + relAge(m.now, a.Wrote) + " ago"
+				}
+			case !hung:
 				empty = "⋯ the agent has written nothing yet"
 			}
 		}

@@ -43,9 +43,11 @@ func TestTheOverlaysPeekKeepsOnlyARemainderThatReads(t *testing.T) {
 	if !strings.Contains(ansi.Strip(keep[0]), "…") || !strings.Contains(ansi.Strip(keep[0]), "33m") {
 		t.Errorf("a number remainder should peek: %q", keep[0])
 	}
-	drop := []string{strings.Repeat("x", 20) + strings.Repeat(" ", 20) + "2h ago"}
-	overlay(drop, []string{strings.Repeat("─", 34)}, 10, 0) // the panel ends inside "2h", leaving "ago"
-	if plain := ansi.Strip(drop[0]); strings.Contains(plain, "ago") {
+	// The cut lands in whitespace, so the lone word reaches the rule under
+	// test rather than the mid-token blanking above it (#74).
+	drop := []string{strings.Repeat("x", 20) + strings.Repeat(" ", 25) + "still"}
+	overlay(drop, []string{strings.Repeat("─", 30)}, 10, 0)
+	if plain := ansi.Strip(drop[0]); strings.Contains(plain, "still") || strings.Count(plain, "…") != 1 {
 		t.Errorf("a lone word with no digit should not peek: %q", plain)
 	}
 }
