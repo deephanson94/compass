@@ -589,7 +589,7 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"porter", "harness", "redteam", "cli"}, []string{"tinker:0.0", "harness:0.0", "harness:1.0", "tools:0.0"})
-	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "tab"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "j", "tab"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
 }
 
 // Two very long sessions — a day of work each, every class, dozens of prompts
