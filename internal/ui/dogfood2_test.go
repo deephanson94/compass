@@ -1025,8 +1025,14 @@ func TestHidingASession(t *testing.T) {
 	if !m.hidden[key] || len(m.viewOrder()) != before-1 || m.selectedKey == key {
 		t.Fatalf("x should hide the session and move on: hidden %v, %d of %d shown, selected %q", m.hidden[key], len(m.viewOrder()), before, m.selectedKey)
 	}
-	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A, then x") {
+	// The note teaches the key on this frame; the strip counts, and says
+	// the key once the note is gone (#64).
+	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden") || strings.Count(strip, "A, then x") != 1 {
 		t.Errorf("the strip should count the hidden: %s", strip)
+	}
+	m.note = ""
+	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A, then x") {
+		t.Errorf("with the note gone the strip says the way back: %s", strip)
 	}
 	press(m, "A")
 	if !m.archiveView {

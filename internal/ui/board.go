@@ -639,7 +639,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	if !m.archiveView {
 		fixed = append(fixed, m.overlaps()...)
 		if n := m.hiddenCount(); n > 0 {
-			fixed = append(fixed, fmt.Sprintf("%d hidden · A, then x", n))
+			fixed = append(fixed, m.hiddenClause(n))
 		}
 		if n := m.archivedCount(); n > 0 {
 			fixed = append(fixed, fmt.Sprintf("%d archived · A browses", n))

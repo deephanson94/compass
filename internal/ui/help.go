@@ -246,7 +246,9 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			case !strings.Contains(joined, "⋯ out") && strings.Contains(l, "trail:  "):
 				// One space before the lanes, not the legend's two: the
 				// row is seventy-eight cells wide with the silent glyph in it.
-				if lanes := strings.Replace(plain, "  ◈ subagent  ◍ silent agent", " ◈ ⋯ out · ◍ silent · ✓ back · ⌀ empty", 1); ansi.StringWidth(lanes) <= w {
+				// The `✓ back` the fold row gave this row (#64) is in the
+				// lanes' own clause: it goes before the lanes come.
+				if lanes := strings.Replace(strings.TrimSuffix(plain, "  ✓ back"), "  ◈ subagent  ◍ silent agent", " ◈ ⋯ out · ◍ silent · ✓ back · ⌀ empty", 1); ansi.StringWidth(lanes) <= w {
 					lines[i] = dimStyle.Render(lanes)
 				}
 			case !strings.Contains(joined, "⌁ ") && strings.Contains(l, "you were here"):
@@ -328,6 +330,17 @@ func helpLegendFold(legend []string, w int) []string {
 			}
 		default:
 			out = append(out, l)
+		}
+	}
+	if joined := strings.Join(out, "\n"); folded && !strings.Contains(joined, "✓ back") {
+		// The fold shed `✓ back` for the marks #17 pins, and `✓` is on the
+		// screen the person came from: the trail's own row takes it when
+		// it has the cells (#64).
+		for i, l := range out {
+			if plain := ansi.Strip(l); strings.HasPrefix(plain, "trail:") && ansi.StringWidth(plain)+len("  ✓ back") <= w {
+				out[i] = l + "  ✓ back"
+				break
+			}
 		}
 	}
 	return out

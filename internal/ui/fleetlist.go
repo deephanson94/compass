@@ -75,6 +75,16 @@ func (m *Model) fleetColumn(w, h int) []string {
 	return rows
 }
 
+// hiddenClause is the strip's word for its hidden sessions, with the way
+// to them — except on the frame whose note just said the same words: two
+// rows two apart taught one key pair (#64).
+func (m *Model) hiddenClause(n int) string {
+	if strings.Contains(m.note, "hidden · A, then x") {
+		return fmt.Sprintf("%d hidden", n)
+	}
+	return fmt.Sprintf("%d hidden · A, then x", n)
+}
+
 // fleetLines renders the fleet: grouped the way the user thinks of it, scrolled
 // so the selection is always whole on screen, and — in the live view — closed
 // by the dim line that says how much history is one keypress away.
@@ -94,7 +104,7 @@ func (m *Model) fleetLines(w, h int) []string {
 		case hidden > 0:
 			// Below the board's width there is no strip: the list's last
 			// line is where a hide stays said.
-			last = fmt.Sprintf("%d hidden · A, then x", hidden)
+			last = m.hiddenClause(hidden)
 		}
 		if lipgloss.Width(last) > w {
 			last = strings.Replace(last, " · A browses", " · A", 1) // the key survives whole

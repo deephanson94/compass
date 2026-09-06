@@ -193,7 +193,8 @@ func clip(s string, w int) string {
 	// A dash that stands alone is a separator too ("porter_tui —…"
 	// promised a phrase), where a hyphen inside a token is the token's
 	// (`--all`, `-run`): the spaced dashes go, the hyphen stays (#63).
-	return strings.TrimRight(string(runes[:kept]), " ·(./—–") + "…"
+	// A comma or a semicolon promises the clause after it the same way (#64).
+	return strings.TrimRight(string(runes[:kept]), " ·(./—–,;") + "…"
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }

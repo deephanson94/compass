@@ -218,6 +218,18 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 			rows = append([]string{dimStyle.Render(ansi.Strip(doc[parent]))}, rows[:len(rows)-1]...)
 		} else {
 			rows[0] = dimStyle.Render(ansi.Strip(doc[parent]))
+			if len(rows) > 1 && isDetailRow(rows[1]) {
+				// The block's first surviving line wears the mark at its
+				// head: "two are the same root cause" under the lane read
+				// as the whole finding, and the count was the finding (#64).
+				plain := ansi.Strip(rows[1])
+				for _, hanger := range []string{"├ ", "└ "} {
+					if i := strings.Index(plain, hanger); i >= 0 {
+						rows[1] = dimStyle.Render(clip(plain[:i+len(hanger)]+"…"+plain[i+len(hanger):], o.Width))
+						break
+					}
+				}
+			}
 		}
 	}
 	return rows

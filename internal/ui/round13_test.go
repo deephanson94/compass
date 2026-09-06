@@ -235,8 +235,8 @@ func TestHidingIsHonest(t *testing.T) {
 	if after := m.viewOrder(); m.selectedKey != m.sessions[after[min(pos, len(after)-1)]].Info.Key() {
 		t.Errorf("the selection should land on the neighbour, not %q", m.selectedKey)
 	}
-	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A, then x") {
-		t.Errorf("the strip should say the way back:\n%s", strip)
+	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden") || strings.Count(strip, "A, then x") != 1 {
+		t.Errorf("the strip counts, and the way back is said once while the note says it (#64):\n%s", strip)
 	}
 	press(m, "A")
 	view := ansi.Strip(m.View())

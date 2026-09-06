@@ -195,3 +195,50 @@ func TestTheOverlayDrawsNoMarkForAnEmptyPeek(t *testing.T) {
 		t.Errorf("an empty peek should draw no mark: %q", rows[0])
 	}
 }
+
+// The fold marks the line it painted the lane over: the block's first
+// surviving row wears the mark at its head (#64).
+func TestTheFoldMarksTheLineItPaintedOver(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSubagents(), 80, 24)
+	press(m, "2")
+	pressTab(m)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "└ …two are the same root cause") {
+		t.Errorf("the finding's surviving line wears no mark:\n%s", view)
+	}
+}
+
+// The narrow help glosses ✓ on the trail's row when the fold row shed it (#64).
+func TestTheNarrowHelpGlossesTheBackMark(t *testing.T) {
+	m := sceneModel(sceneSubagents(), 80, 24)
+	press(m, "?")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "✓ back") {
+		t.Errorf("the 80 help never says what ✓ means:\n%s", view)
+	}
+}
+
+// A clip never ends on a comma or a semicolon (#64).
+func TestAClipNeverEndsOnAComma(t *testing.T) {
+	if got := clip("the encoder is in; now the tests, then measure", 34); got != "the encoder is in; now the tests…" {
+		t.Errorf("clip at 34 = %q", got)
+	}
+	if got := clip("the encoder is in; now the tests", 19); got != "the encoder is in…" {
+		t.Errorf("clip at 19 = %q", got)
+	}
+}
+
+// The strip's `A, then x` stands down on the frame whose note says it (#64).
+func TestTheStripStandsDownWhileTheNoteTeachesTheKey(t *testing.T) {
+	m := sceneModel(sceneSubagents(), 120, 34)
+	press(m, "3")
+	press(m, "x")
+	view := ansi.Strip(m.View())
+	if strings.Count(view, "A, then x") != 1 || !strings.Contains(view, "1 hidden") {
+		t.Errorf("one frame, one lesson:\n%s", view)
+	}
+	m.note = ""
+	if view := ansi.Strip(m.View()); strings.Count(view, "A, then x") != 1 {
+		t.Errorf("with the note gone the strip carries the key:\n%s", view)
+	}
+}
