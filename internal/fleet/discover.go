@@ -36,6 +36,22 @@ type SessionInfo struct {
 	Title       string    // first user prompt: first line, max 80 runes, "…" if cut
 	StartedAt   time.Time // first event timestamp
 	LastEventAt time.Time // last event timestamp (file mtime as fallback)
+
+	// Tool is what runs the session — "" or "claude" for Claude Code,
+	// "opencode" for an OpenCode session read out of its store — and
+	// Model the model it last answered with, as the tool names it
+	// ("claude-opus-4-1-20250805", "mock/mock-1"). The deck says both, so
+	// two sessions in one directory are told apart by more than a name.
+	Tool  string
+	Model string
+}
+
+// ToolName is the tool a session runs under, "claude" when unsaid.
+func (i SessionInfo) ToolName() string {
+	if i.Tool == "" {
+		return "claude"
+	}
+	return i.Tool
 }
 
 // Key identifies a session uniquely. The session id does not: one id can own

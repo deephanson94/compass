@@ -263,7 +263,16 @@ func (m *Model) readerTitle(w int) string {
 	if tag != "" {
 		room -= lipgloss.Width(tag) + 2
 	}
-	if lipgloss.Width(right) > room {
+	if br, ok := m.laneOpen(); ok && lipgloss.Width(right) > room && !m.searching && m.query == "" {
+		// The lane's own title, clipped at the label: the glyph and the
+		// clock are what tell it from the lead's.
+		glyph, clock := right[:strings.Index(right, " ")], " · "+relAge(m.now, br.Start)+" out"
+		if keep := room - lipgloss.Width(glyph) - 1 - lipgloss.Width(clock); keep >= 8 {
+			right = glyph + " " + clip(branchName(br.Label), keep) + clock
+		} else {
+			right = clip(right, max(room, 0))
+		}
+	} else if lipgloss.Width(right) > room {
 		if m.anchor >= 0 && !m.searching && m.query == "" {
 			// The row's text, clipped to fit; the clock stays.
 			clock := m.anchorAt.Local().Format("15:04")

@@ -741,6 +741,11 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 					tag = mirrorMark + " " + paneSuffix(pane.Target)
 				}
 			}
+		} else if s.Info.Tool != "" && s.Info.Tool != "claude" {
+			// Another tool's session says so where the pane tag would
+			// go: a fleet of claudes needs no word, a fleet of two tools
+			// needs the one that is not the default (#50).
+			tag = m.toolTag(s)
 		}
 		room := w - 4
 		if tag != "" {

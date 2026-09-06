@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/transcript"
 )
@@ -154,11 +155,14 @@ func (m *Model) laneWanted() string {
 // call in flight and when the agent last wrote, in the words a HEAD uses
 // — "● Bash python dla.py …  wrote 40s ago", "◍ Bash pytest -x  silent
 // 12m" — or that nothing is written yet. "" when no file was read.
-func laneHead(a agentLive, ok bool, now time.Time) (glyph, text, clock string) {
+func laneHead(a agentLive, b journey.Branch, ok bool, now time.Time) (glyph, text, clock string) {
 	if !ok {
 		return "", "", ""
 	}
 	if a.Wrote.IsZero() {
+		if quiet, hung := laneSilence(a, b, now); hung {
+			return "◍", "nothing written", "silent " + state.ShortDuration(quiet)
+		}
 		return "⋯", "nothing written yet", ""
 	}
 	act := strings.TrimSpace(a.Snap.Activity)
@@ -174,17 +178,17 @@ func laneHead(a agentLive, ok bool, now time.Time) (glyph, text, clock string) {
 // lanesLive adds up the open lanes' own clocks for a parked HEAD: how many
 // are silent and the longest silence, else how recently the newest wrote.
 // ok is false when no lane has a file, and the old clause stands.
-func lanesLive(agents map[string]agentLive, lanes []string, now time.Time) (silent int, longest time.Duration, newest time.Duration, ok bool) {
-	for _, id := range lanes {
-		a, found := agents[id]
+func lanesLive(agents map[string]agentLive, lanes []journey.Branch, now time.Time) (silent int, longest time.Duration, newest time.Duration, ok bool) {
+	for _, b := range lanes {
+		a, found := agents[b.ToolUseID]
 		if !found {
 			continue
 		}
 		ok = true
-		if a.silent() {
+		if quiet, hung := laneSilence(a, b, now); hung {
 			silent++
-			if d := now.Sub(a.Wrote); d > longest {
-				longest = d
+			if quiet > longest {
+				longest = quiet
 			}
 		}
 		if !a.Wrote.IsZero() {
@@ -196,11 +200,34 @@ func lanesLive(agents map[string]agentLive, lanes []string, now time.Time) (sile
 	return silent, longest, newest, ok
 }
 
+// laneSilence is how long a lane's file has been quiet and whether that is
+// past the threshold: an agent that has written nothing since it was sent
+// is judged from the dispatch — an empty file eighteen minutes on is as
+// silent as one that stopped mid-call.
+func laneSilence(a agentLive, b journey.Branch, now time.Time) (time.Duration, bool) {
+	if a.Wrote.IsZero() {
+		d := now.Sub(b.Start)
+		return d, !b.Start.IsZero() && d >= state.StuckAfter
+	}
+	return now.Sub(a.Wrote), a.silent()
+}
+
+// openLanes is the lanes still out.
+func openLanes(tr journey.Trail) []journey.Branch {
+	var out []journey.Branch
+	for _, b := range tr.Branches {
+		if !b.Done {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // lanesClause is the parked HEAD's second half from its agents' own files:
 // "1 silent 12m" — the hung one is the only actionable fact, so it
 // displaces the rest whole — else "newest 40s ago". "" when no file
 // was read.
-func lanesClause(agents map[string]agentLive, lanes []string, now time.Time) string {
+func lanesClause(agents map[string]agentLive, lanes []journey.Branch, now time.Time) string {
 	silent, longest, newest, ok := lanesLive(agents, lanes, now)
 	switch {
 	case !ok:

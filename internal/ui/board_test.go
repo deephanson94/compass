@@ -249,7 +249,7 @@ func TestT80BoardGolden(t *testing.T) {
 		"● fix    checkout.py",
 		"5 ○ scratch", // packed trails leave thirty rows a second band for it
 		"5 archived · A browses",
-		"⌂ compass · board",
+		"· board",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the board is missing %q:\n%s", want, got)

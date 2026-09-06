@@ -40,9 +40,16 @@ func askPreamble(info fleet.SessionInfo) string {
 	fmt.Fprintf(&b, "branch: %s\n", orDash(info.GitBranch))
 	fmt.Fprintf(&b, "working directory: %s\n", orDash(info.CWD))
 	fmt.Fprintf(&b, "state: last active %s (started %s)\n", stamp(info.LastEventAt), stamp(info.StartedAt))
-	fmt.Fprintf(&b, "transcript: %s\n\n", orDash(info.TranscriptPath))
-	b.WriteString("Read the transcript first, before answering anything. It is JSONL — one " +
-		"event per line, oldest first — and it is the only record of what this session did.\n\n")
+	if info.ToolName() == "opencode" {
+		fmt.Fprintf(&b, "tool: opencode (model %s)\n", orDash(info.Model))
+		fmt.Fprintf(&b, "transcript: run `opencode export %s` — it prints the session as JSON\n\n", info.ID)
+		b.WriteString("Read the transcript first, before answering anything: run the export and read " +
+			"its messages oldest first — it is the only record of what this session did.\n\n")
+	} else {
+		fmt.Fprintf(&b, "transcript: %s\n\n", orDash(info.TranscriptPath))
+		b.WriteString("Read the transcript first, before answering anything. It is JSONL — one " +
+			"event per line, oldest first — and it is the only record of what this session did.\n\n")
+	}
 	b.WriteString("Then answer questions about that journey: what it tried, what it abandoned " +
 		"and why, what a reviewer should look at. Cite timestamps from the transcript for " +
 		"anything you claim. If the transcript does not say, say so rather than guessing. " +

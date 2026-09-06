@@ -11,7 +11,7 @@ import (
 // helpKeys is the M2 keymap. Keys that arrive in later milestones are named
 // here only when they already do something.
 var helpKeys = [][2]string{
-	{"1 – 9", "select a session"},
+	{"1 – 9", "select a session · a digit under recent opens that finished one"},
 	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
 	{"g", "grab the oldest ▲ needs-you and attach — a ⊘ is skipped"},
@@ -230,7 +230,9 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			plain := ansi.Strip(l)
 			switch {
 			case !strings.Contains(joined, "⋯ out") && strings.Contains(l, "trail:  "):
-				if lanes := strings.Replace(plain, "◈ subagent", "◈ ⋯ out · ✓ back · ⌀ back, empty", 1); ansi.StringWidth(lanes) <= w {
+				// One space before the lanes, not the legend's two: the
+				// row is seventy-eight cells wide with the silent glyph in it.
+				if lanes := strings.Replace(plain, "  ◈ subagent  ◍ silent agent", " ◈ ⋯ out · ◍ silent · ✓ back · ⌀ empty", 1); ansi.StringWidth(lanes) <= w {
 					lines[i] = dimStyle.Render(lanes)
 				}
 			case !strings.Contains(joined, "⌁ ") && strings.Contains(l, "you were here"):
@@ -403,7 +405,7 @@ func helpLegendRaw() []string {
 		focusMark + " marks the panel your keys are in — tab moves it",
 		"fleet:  ● working  ▲\u00a0needs\u00a0you  ◍ stuck  ↻ looping  ⊘\u00a0dead\u00a0on\u00a0the\u00a0API  ○ idle",
 		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
-		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent",
+		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent  ◍ silent agent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
 		"        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them",

@@ -1158,11 +1158,11 @@ func headTail(tr journey.Trail, now time.Time, live bool, agents map[string]agen
 		return ""
 	}
 	out, oldest, newest := 0, time.Time{}, time.Time{}
-	var lanes []string
+	var lanes []journey.Branch
 	for _, b := range tr.Branches {
 		if !b.Done {
 			out++
-			lanes = append(lanes, b.ToolUseID)
+			lanes = append(lanes, b)
 			if oldest.IsZero() || b.Start.Before(oldest) {
 				oldest = b.Start
 			}
@@ -1548,16 +1548,19 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 			continue
 		}
 		name := clip(branchName(br.Label), labelWidth)
-		if n, ok := o.LaneLinks[br.Label]; ok && n > 0 {
+		live, known := o.Agents[br.ToolUseID]
+		_, hung := laneSilence(live, br, o.Now)
+		if n, ok := o.LaneLinks[br.Label]; ok && n > 0 && !known {
+			// A hedge, and only where nothing better was read: a lane
+			// whose own file is in hand is not a guess (#49).
 			// A session that looks like this agent's: the link survives
 			// the clip, because it is the three characters that go somewhere.
 			link := fmt.Sprintf(" →%d", n)
 			name = clip(branchName(br.Label), labelWidth-len([]rune(link))) + link
 		}
 		label := dimStyle.Render(pad(name, labelWidth))
-		live, known := o.Agents[br.ToolUseID]
 		glyph := textStyle.Render(glyphBranch)
-		if !br.Done && known && live.silent() {
+		if !br.Done && known && hung {
 			// The agent's own file has gone quiet past the threshold:
 			// the lane wears the hung glyph, the whole answer at 80
 			// columns (#49).
@@ -1571,7 +1574,7 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 		// when it last wrote — beneath it where the finding of a returned
 		// lane goes (#49). Only from Lv2 down: at Lv1 the glyph says it.
 		if !br.Done && known && o.Level >= levelWaypoints && o.HeadState != state.Idle {
-			g, text, clock := laneHead(live, known, o.Now)
+			g, text, clock := laneHead(live, br, known, o.Now)
 			if body := width - trailWayWidth; body >= trailMinLabel && text != "" {
 				row := g + " " + text
 				if clock != "" {
@@ -1580,7 +1583,7 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 					}
 				}
 				style := dimStyle
-				if live.silent() {
+				if hung {
 					style = stuckStyle
 				}
 				b.details([]detailRow{{text: style.Render(clip(row, body)), sel: -1}})
@@ -1729,7 +1732,7 @@ func (m *Model) cardSecond(w int) string {
 			}
 		}
 	}
-	tmux := m.boardTag(s) // the column's tag verbatim: the pane when a namesake shares the session
+	tmux := joinTag(m.toolTag(s), m.boardTag(s)) // the column's tag verbatim, with the tool and model (#50)
 	// The tmux session is always kept — `enter` attaches from here — and
 	// the day is added after the verdict, so joinFit sheds the day's
 	// clauses before the verdict's; the long form when it all fits, the
@@ -1737,6 +1740,14 @@ func (m *Model) cardSecond(w int) string {
 	fit := room
 	if tmux != "" {
 		fit -= lipgloss.Width(tmux) + 2
+	}
+	if fit < 24 && m.toolTag(s) != "" {
+		// The verdict is the row's reason: the tool and model go first.
+		tmux = m.boardTag(s)
+		fit = room
+		if tmux != "" {
+			fit -= lipgloss.Width(tmux) + 2
+		}
 	}
 	best := ""
 	for _, compact := range []bool{false, true} {

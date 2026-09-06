@@ -114,12 +114,26 @@ func (m *Model) recentLine(r recentRow, w int) string {
 	body := clip(name, room)
 	// The verdict outranks the prompt's tail: "webapp · "the checkout
 	// suite …  ✗ red 18✓ 2✗" answers whether to reopen, and the whole
-	// prompt does not. It goes only when the name's own floor would.
-	if keep := room - lipgloss.Width(verdict) - 2; verdict != "" && keep >= recentNameFloor {
-		body = pad(clip(name, keep), keep) + "  " + verdict
+	// prompt does not. It goes only when the name's own floor would —
+	// and its counts go first, so a red row keeps "✗ red" where a green
+	// one keeps its tick.
+	for _, v := range []string{verdict, firstWords(verdict, 2)} {
+		if keep := room - lipgloss.Width(v) - 2; v != "" && keep >= recentNameFloor {
+			body = pad(clip(name, keep), keep) + "  " + v
+			break
+		}
 	}
 	body = pad(body, room)
 	return dimStyle.Render(lead) + body + " " + dimStyle.Render(age)
+}
+
+// firstWords is the first n words of s.
+func firstWords(s string, n int) string {
+	f := strings.Fields(s)
+	if len(f) <= n {
+		return s
+	}
+	return strings.Join(f[:n], " ")
 }
 
 // recentNameFloor is the least of a band row's name and prompt kept

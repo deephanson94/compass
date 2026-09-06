@@ -71,6 +71,21 @@ type Manager struct {
 	// cache is the last discovery scan, keyed by transcript path: 280 archived
 	// transcripts are stat'ed every second, not re-read.
 	cache map[string]cachedInfo
+
+	// sources are the other places sessions come from — an opencode store
+	// — each listing its sessions as SessionInfos keyed by a scheme path
+	// the transcript package knows how to tail. Consulted on every
+	// refresh beside the projects scan.
+	sources []func() ([]SessionInfo, error)
+}
+
+// AddSource adds a place sessions come from besides the Claude home: each
+// refresh lists it and treats what it returns exactly as a discovered
+// transcript — tailed through its scheme, judged by the same machine.
+func (m *Manager) AddSource(list func() ([]SessionInfo, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sources = append(m.sources, list)
 }
 
 // NewManager returns a Manager watching the given Claude home directory.
@@ -203,6 +218,14 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	}
 	m.cache = cache
 	m.resume.keepScan(cache)
+	for _, list := range m.sources {
+		// A source that fails to answer keeps its sessions off this
+		// refresh and says nothing: the Claude fleet is not held hostage
+		// to a store that is locked or gone.
+		if extra, err := list(); err == nil {
+			infos = append(infos, extra...)
+		}
+	}
 
 	kept := make(map[string]bool, len(infos))
 	out := make([]Session, 0, len(infos))
@@ -333,6 +356,10 @@ func (e *entry) merge(info SessionInfo) {
 	e.info.ID = info.ID
 	e.info.TranscriptPath = info.TranscriptPath
 	e.info.ProjectSlug = info.ProjectSlug
+	e.info.Tool = info.Tool
+	if e.info.Model == "" {
+		e.info.Model = info.Model // the store's own, until an answer names one
+	}
 	if e.info.CWD == "" {
 		e.info.CWD = info.CWD
 	}
@@ -342,8 +369,8 @@ func (e *entry) merge(info SessionInfo) {
 	if e.info.GitBranch == "" {
 		e.info.GitBranch = info.GitBranch
 	}
-	if e.info.Title == "" {
-		e.info.Title = info.Title
+	if e.info.Title == "" || (info.Tool != "" && info.Title != "") {
+		e.info.Title = info.Title // a store names its sessions after the fact; the file's first prompt stands
 	}
 	if e.info.StartedAt.IsZero() {
 		e.info.StartedAt = info.StartedAt
@@ -381,6 +408,9 @@ func (e *entry) absorb(ev transcript.Event) {
 		if e.info.OriginCWD == "" {
 			e.info.OriginCWD = ev.CWD
 		}
+	}
+	if !ev.IsSidechain && ev.Model != "" {
+		e.info.Model = ev.Model // the model that last answered
 	}
 	if !ev.Timestamp.IsZero() {
 		if e.info.StartedAt.IsZero() || ev.Timestamp.Before(e.info.StartedAt) {

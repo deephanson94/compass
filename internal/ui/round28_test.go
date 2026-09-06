@@ -100,7 +100,7 @@ func TestTheHeaderShedsTheNameBeforeTheChips(t *testing.T) {
 	m := sceneModel(sceneFleetHygiene(), 120, 34)
 	press(m, "2") // the namesake, tagged
 	full := ansi.Strip(m.headerLine(118))
-	if !strings.Contains(full, "· board · 2 harness · ⌁ harness:1.0") {
+	if !strings.Contains(full, "· 2 harness · ⌁ harness:1.0 · board") {
 		t.Fatalf("the board header does not carry the whole identity: %q", full)
 	}
 	chips := ansi.Strip(m.statusChips())
@@ -144,7 +144,7 @@ func TestAFleetOfOneKeepsItsRecentPast(t *testing.T) {
 	// the verdict there is no room for.
 	n := sceneModel(sceneSecondDay(), 80, 24)
 	list := strings.Join(n.fleetLines(33, 18), "\n")
-	if !strings.Contains(list, "recent · 12 archived · A browses") || !strings.Contains(list, ` 2 ○ api · "fix the 401 on to… 2h`) {
+	if !strings.Contains(list, "recent · 12 archived · A browses") || !strings.Contains(list, ` 2 ○ api · "fix the 40…  ✗ red 2h`) {
 		t.Errorf("the narrow list's band is missing or misdrawn:\n%s", list)
 	}
 	if strings.Count(list, "archived") != 1 {
@@ -195,7 +195,7 @@ func TestAnOpenLaneIsJudgedByItsOwnFile(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneSubagents(), 120, 34)
 	col := strings.Join(m.boardColumn(sessionKey("porter"), rowFor(t, m, sessionKey("porter")), 37, 30), "\n")
-	for _, want := range []string{"◈3 out 20m · 1 silent 12m", "├─◍ Red-team the plugin"} {
+	for _, want := range []string{"◈3 out 20m · 2 silent 18m", "├─◍ Red-team the plugin", "├─◍ Review /auto-resume"} {
 		if !strings.Contains(col, want) {
 			t.Errorf("the board column lacks %q:\n%s", want, col)
 		}
@@ -203,15 +203,18 @@ func TestAnOpenLaneIsJudgedByItsOwnFile(t *testing.T) {
 	if strings.Contains(col, "quiet 15m") {
 		t.Errorf("the parked clause still restates the lead's silence:\n%s", col)
 	}
-	if chips := ansi.Strip(m.statusChips()); !strings.Contains(chips, "◈3 out · 1 silent 12m") {
+	if chips := ansi.Strip(m.statusChips()); !strings.Contains(chips, "◈3 out · 2 silent 18m") {
 		t.Errorf("the header chip does not count the silent lane: %q", chips)
 	}
 	pressTab(m) // the session view, cursor on the present: the newest lane
 	trail := strings.Join(m.trailColumn(55, 30), "\n")
-	for _, want := range []string{"└ ● Bash: python dla.py --model moe_…  wrote 40s ago", "└ ⋯ nothing written yet", "▸─◍ Red-team the plugin architecture →1", "└ ◍ Bash: pytest -x tests/plugins"} {
+	for _, want := range []string{"└ ● Bash: python dla.py --model moe_…  wrote 40s ago", "└ ◍ nothing written", "silent 18m", "▸─◍ Red-team the plugin architecture ", "└ ◍ Bash: pytest -x tests/plugins"} {
 		if !strings.Contains(trail, want) {
 			t.Errorf("the session view's lanes lack %q:\n%s", want, trail)
 		}
+	}
+	if strings.Contains(trail, "→1") {
+		t.Errorf("a lane whose own file was read still wears the →N hedge:\n%s", trail)
 	}
 }
 

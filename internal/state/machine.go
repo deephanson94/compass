@@ -185,19 +185,20 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 		if m.hasLastUse {
 			act = activityFor(m.lastUse)
 		}
-		if quiet < StuckAfter {
-			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "tool call in flight", Activity: act}
-		}
 		// A shell command is allowed its own budget before its silence means
 		// anything: the harness gives Bash a timeout (two minutes unless the
 		// call names one, up to ten) and kills the command when it runs out,
 		// so a `sleep 420` under a ten-minute budget is a session doing what
 		// it said, not one that has hung. The person reading "stuck" over a
-		// deliberate wait stopped trusting the word.
-		if allow := allowance(oldest.use); allow > 0 {
-			if at := m.since(oldest.at); now.Before(at.Add(allow)) {
-				return Snapshot{State: Working, Since: at, Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
-			}
+		// deliberate wait stopped trusting the word. The budget is the
+		// latest of every call in flight: Claude Code batches calls, and a
+		// Read issued beside the sleep is the oldest pending one.
+		allow, deadline := m.budget(now)
+		if quiet < StuckAfter {
+			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "tool call in flight", Activity: act, Allowed: allow}
+		}
+		if allow > 0 && now.Before(deadline) {
+			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
 		}
 		return Snapshot{State: Stuck, Since: m.since(oldest.at), Reason: stuckReason(quiet), Activity: act}
 	}
@@ -331,8 +332,28 @@ func apiErrorText(s string) string {
 // apiErrorMarker is the phrase Claude Code writes before the status it got.
 const apiErrorMarker = "API Error:"
 
-// bashTimeout is the budget the harness gives a Bash call that names none.
-const bashTimeout = 2 * time.Minute
+// bashTimeout is the budget the harness gives a Bash call that names none,
+// and bashTimeoutMax the most it grants however large the call's own.
+const (
+	bashTimeout    = 2 * time.Minute
+	bashTimeoutMax = 10 * time.Minute
+)
+
+// budget is the budget of the pending call that is allowed the longest,
+// and the moment it runs out: zero when no call in flight has one, or
+// every one has run out.
+func (m *Machine) budget(now time.Time) (allow time.Duration, deadline time.Time) {
+	for _, p := range m.pending {
+		a := allowance(p.use)
+		if a == 0 {
+			continue
+		}
+		if d := m.since(p.at).Add(a); now.Before(d) && d.After(deadline) {
+			allow, deadline = a, d
+		}
+	}
+	return allow, deadline
+}
 
 // allowance is how long a pending call may run before its silence counts —
 // the Bash timeout, in milliseconds on the call's input, or the harness's
@@ -342,7 +363,7 @@ func allowance(use transcript.ToolUse) time.Duration {
 		return 0
 	}
 	if ms := rawNumber(use.Input, "timeout"); ms > 0 {
-		return time.Duration(ms) * time.Millisecond
+		return min(time.Duration(ms)*time.Millisecond, bashTimeoutMax)
 	}
 	return bashTimeout
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // liveManager is the M0-era Manager these tests were written against: every
@@ -797,4 +798,58 @@ func TestAnArchivedSessionClaimsNoClass(t *testing.T) {
 			t.Errorf("a sleeping session still claims to be doing %v", asleep[0].Class)
 		}
 	})
+}
+
+// A source's sessions join the fleet as discovered ones do — keyed by
+// their scheme path, tailed through it, judged by the same machine — and
+// the model that last answered is kept on the session (#50).
+func TestASourceJoinsTheFleet(t *testing.T) {
+	root := t.TempDir()
+	m := liveManager(root)
+	src := &fakeSource{events: []transcript.Event{
+		{Type: transcript.EventUser, Timestamp: ago(3 * time.Minute), Text: "run the gates", CWD: "/home/user/ocproj"},
+		{Type: transcript.EventAssistant, Timestamp: ago(time.Minute), Text: "Running them.", Model: "mock-1", CWD: "/home/user/ocproj",
+			ToolUses: []transcript.ToolUse{{ID: "call_1", Name: "Bash", Input: json.RawMessage(`{"command":"pytest -q"}`)}}},
+	}}
+	transcript.RegisterScheme("fake", func(path string) transcript.Source { return src })
+	m.AddSource(func() ([]fleet.SessionInfo, error) {
+		return []fleet.SessionInfo{{ID: "ses_x", TranscriptPath: "fake://ses_x", ProjectSlug: "fake", CWD: "/home/user/ocproj", OriginCWD: "/home/user/ocproj",
+			Title: "run the gates", StartedAt: ago(3 * time.Minute), LastEventAt: ago(2 * time.Minute), Tool: "opencode", Model: "mock/mock-1"}}, nil
+	})
+	sessions, err := m.Refresh(fleetNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *fleet.Session
+	for i := range sessions {
+		if sessions[i].Info.Key() == "fake://ses_x" {
+			got = &sessions[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("the source's session is not in the fleet: %+v", sessions)
+	}
+	if !got.Live || got.Snap.State != state.Working || got.Snap.Activity != "Bash: pytest -q" {
+		t.Errorf("the source's session = live %v %v %q, want a working session with its call in flight", got.Live, got.Snap.State, got.Snap.Activity)
+	}
+	if got.Info.Tool != "opencode" || got.Info.Model != "mock-1" || got.Info.ToolName() != "opencode" {
+		t.Errorf("tool/model = %q/%q, want opencode and the model that answered", got.Info.Tool, got.Info.Model)
+	}
+	if !got.HasClass || got.Class != journey.Test {
+		t.Errorf("the session's class = %v %v, want test from the pytest call", got.HasClass, got.Class)
+	}
+}
+
+// fakeSource hands its events out once.
+type fakeSource struct {
+	events []transcript.Event
+	served bool
+}
+
+func (f *fakeSource) Poll() ([]transcript.Event, error) {
+	if f.served {
+		return nil, nil
+	}
+	f.served = true
+	return f.events, nil
 }

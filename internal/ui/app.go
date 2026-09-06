@@ -64,7 +64,7 @@ type fleetMsg struct {
 	hasTrail bool // the transcript was polled; without it the trail stands
 	events   []transcript.Event
 	todos    []todo.Item
-	trailFor string // the session the payload belongs to; "" if none was polled
+	trailFor string                          // the session the payload belongs to; "" if none was polled
 	agents   map[string]map[string]agentLive // what the subagents' own files say, per session, per call
 
 	// trails is every board column's journey, keyed by session; nil when the
@@ -266,7 +266,7 @@ type Model struct {
 
 	// The board's data: one trail per column, and each column's narrated
 	// labels. The selected session's trail is here as well as in trail.
-	trails      map[string]journey.Trail
+	trails map[string]journey.Trail
 	// agents is what the subagents' own transcripts say, per session, per
 	// Agent call: read by refresh for every open lane on the board, kept
 	// with events for the lane the reader is on (#49).
@@ -274,7 +274,7 @@ type Model struct {
 	// readerLane is the Agent call whose conversation the reader shows in
 	// place of the lead's: Tab on a lane opens it, leaving the reader
 	// clears it.
-	readerLane string
+	readerLane  string
 	boardLabels map[string]map[string]string
 	fleetQuery  string               // the fleet search in force; "" = none
 	searchFleet bool                 // the search being typed is the fleet's, not the reader's
@@ -2034,6 +2034,12 @@ func (m *Model) toggleArchive() {
 		m.pointQuiet(key)
 	}
 	m.clampSelection()
+	if !m.archiveView && m.level == levelBoard && m.boardFits() && len(m.viewOrder()) == 1 {
+		// Back to a fleet of one: the session view it opened on, with
+		// the recent band, not a board of one column over blank rows.
+		m.level = levelWaypoints
+		m.cursorMove(0)
+	}
 }
 
 // point moves the selection. Trail and mirror belong to the session that was
@@ -2678,7 +2684,9 @@ func (m *Model) headerLine(w int) string {
 	}
 	room := w - lipgloss.Width(right) - 1 // a cell of air before the chips
 	compose := func(board, tag, query string, name string) string {
-		left := titleStyle.Render("⌂ compass") + dimStyle.Render(board)
+		// The identity first, in the same cells at every level: the board
+		// word after it, so a Tab out of the board moves nothing.
+		left := titleStyle.Render("⌂ compass")
 		if name != "" {
 			who := name
 			if digit != "" {
@@ -2689,7 +2697,7 @@ func (m *Model) headerLine(w int) string {
 				left += dimStyle.Render(" · " + tag)
 			}
 		}
-		return left + dimStyle.Render(query)
+		return left + dimStyle.Render(board) + dimStyle.Render(query)
 	}
 	left := compose(board, tag, query, name)
 	for _, try := range []func() string{
@@ -2726,12 +2734,14 @@ func (m *Model) headerLine(w int) string {
 // is selected.
 func (m *Model) headerName() (digit, name, tag string) {
 	s, ok := m.selected()
-	if !ok || (s.Live == m.archiveView) {
+	if !ok {
 		return "", "", ""
 	}
 	name = sessionName(s.Info)
 	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
 		digit = strconv.Itoa(r.num)
+	} else if d := m.digits[s.Info.Key()]; d > 0 && !m.archiveView {
+		digit = strconv.Itoa(d) // off the view under a search: the digit is still its own
 	}
 	for _, o := range m.sessions {
 		if o.Info.Key() != s.Info.Key() && o.Live == s.Live && sessionName(o.Info) == name {
@@ -2834,13 +2844,7 @@ func (m *Model) statusChips() string {
 			if !m.onBoard(s) || s.Snap.State == state.Idle {
 				continue
 			}
-			var lanes []string
-			for _, b := range m.trails[s.Info.Key()].Branches {
-				if !b.Done {
-					lanes = append(lanes, b.ToolUseID)
-				}
-			}
-			n, d, _, _ := lanesLive(m.agentsFor(s.Info.Key()), lanes, m.now)
+			n, d, _, _ := lanesLive(m.agentsFor(s.Info.Key()), openLanes(m.trails[s.Info.Key()]), m.now)
 			silent += n
 			longest = max(longest, d)
 		}
@@ -2924,18 +2928,18 @@ func (m *Model) keymap() string {
 			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
-		keys = "j/k move · ctrl+d/u ½ page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
+		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · ctrl+d/u ½ page · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
+			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · ctrl+d/u ½ page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
-		keys = "j/k scroll · ctrl+d/u ½ page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · ctrl+d/u ½ page · h/l session · [ ] chapters · m live pane · r reply · a ask · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · ctrl+d/u ½ page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
 	}
 	if m.archiveView {
 		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
@@ -3189,7 +3193,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 	}
 	// The page key goes first: it is a shortcut for a distance `j` covers,
 	// and the help teaches it (#42).
-	order := []string{" · ctrl+d/u ½ page", attachHint, mirror, " · h/l session"}
+	order := []string{" · ctrl+d/u half page", attachHint, mirror, " · h/l session"}
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
 	// this level — so they stand with the level's own keys below, ranked

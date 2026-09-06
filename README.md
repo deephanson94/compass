@@ -108,9 +108,18 @@ compass                              # the deck, full screen — run it in its o
 compass -readonly                    # observe only: Enter no longer attaches
 compass -narrator off                # heuristic labels only, no claude calls
 compass -live-within 0               # only sessions tmux is holding count as live
+compass -opencode-db ""              # leave OpenCode's sessions out (default: its store, if present)
 compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1"
 compass panes                        # diagnostic: which pane holds which session
 ```
+
+### OpenCode too
+
+If OpenCode is on the machine, its sessions join the fleet: compass reads its
+store (`~/.local/share/opencode/opencode.db`, or `-opencode-db path`) read-only and
+shows each session the way it shows a Claude Code one — same states, same trail,
+same reader. Where two tools share a fleet the tag row says which is which and
+what model last answered: `claude · opus-4-1`, `opencode · sonnet-4-5`.
 
 ### Beside a session, not instead of it
 

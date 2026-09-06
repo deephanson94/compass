@@ -747,10 +747,18 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	}
 	// The third row is the tag's row, always: the digest or the trace
 	// takes the left of it and the tmux session the right, so where a
-	// column lives never moves and is never evicted by what is new.
-	tag := m.boardTag(s)
+	// column lives never moves and is never evicted by what is new. The
+	// tool and its model stand with the tag where the digest leaves room
+	// (#50), and go first when it does not.
+	tag := joinTag(m.toolTag(s), m.boardTag(s))
 	room := w
 	if tag != "" {
+		room = w - lipgloss.Width(tag) - 2
+	}
+	if room < 12 && m.toolTag(s) != "" && m.boardTag(s) == "no pane" {
+		// "no pane" is the one clause the tool outranks: the tool tells
+		// two rows apart, and a missing pane is said by the attach key.
+		tag = m.toolTag(s)
 		room = w - lipgloss.Width(tag) - 2
 	}
 	third := ""
@@ -1265,7 +1273,11 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
 		switch {
 		case out > 0 && back == 0:
-			parts = append(parts, fmt.Sprintf("↳ %d agents out, none back", out))
+			lanes := fmt.Sprintf("↳ %d agents out, none back", out)
+			if n, d, _, _ := lanesLive(m.agentsFor(key), openLanes(m.trails[key]), m.now); n > 0 {
+				lanes = fmt.Sprintf("↳ %d agents out · %d silent %s", out, n, state.ShortDuration(d))
+			}
+			parts = append(parts, lanes)
 		case out > 0:
 			parts = append(parts, fmt.Sprintf("↳ %d agents out · %d back", out, back))
 		default:
@@ -1503,6 +1515,63 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 			m.narrator.Request(key, tr, "")
 		}
 	}
+}
+
+// toolTag is which CLI runs the session and which model last answered —
+// "claude · opus-4-1", "opencode · mock-1" — so two sessions in one
+// directory are told apart by more than a name, and a fleet of two tools
+// says which is which (#50). "" for an archived row, which is not running.
+func (m *Model) toolTag(s fleet.Session) string {
+	if !s.Live || m.archiveView {
+		return ""
+	}
+	var parts []string
+	if s.Info.ToolName() != "claude" || m.toolsInFleet() > 1 {
+		// A fleet of claudes needs no word; a fleet of two tools needs
+		// the word on every row, and another tool's row always.
+		parts = append(parts, s.Info.ToolName())
+	}
+	if model := shortModel(s.Info.Model); model != "" {
+		parts = append(parts, model)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// toolsInFleet counts the CLIs the live fleet runs under.
+func (m *Model) toolsInFleet() int {
+	seen := map[string]bool{}
+	for _, s := range m.sessions {
+		if s.Live {
+			seen[s.Info.ToolName()] = true
+		}
+	}
+	return len(seen)
+}
+
+// shortModel is the model's name without the vendor's prefix and date:
+// "claude-opus-4-1-20250805" → "opus-4-1", "mock/mock-1" → "mock-1".
+func shortModel(model string) string {
+	model = strings.TrimSpace(model)
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		model = model[i+1:]
+	}
+	model = strings.TrimPrefix(model, "claude-")
+	if i := strings.LastIndex(model, "-"); i > 0 && len(model)-i-1 == 8 && strings.Trim(model[i+1:], "0123456789") == "" {
+		model = model[:i] // the release date
+	}
+	return model
+}
+
+// joinTag is the tool tag and the pane tag on one row, either alone
+// when the other is empty.
+func joinTag(tool, pane string) string {
+	switch {
+	case tool == "":
+		return pane
+	case pane == "":
+		return tool
+	}
+	return tool + " · " + pane
 }
 
 // sharesTmux says whether another session on the board lives in the same

@@ -675,7 +675,7 @@ func sceneVeryLong() scene {
 }
 
 func allScenes() []scene {
-	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay()}
+	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools()}
 }
 
 // quota is the refusal a session dead on its daily limit carries, in the
@@ -693,6 +693,36 @@ func sceneFirstSession() scene {
 	tr[sessionKey("hello")] = journey.Trail{Prompts: []journey.Prompt{{Text: "add a --version flag", At: n.Add(-50 * time.Second)}}}
 	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
 	return scene{name: "first-session", story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
+}
+
+// Two tools: a fleet where opencode sessions sit beside claude ones, each
+// on its own model, and one of each in the same directory — the person
+// wants to know which is which without attaching (#50).
+func sceneTwoTools() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+	add := func(id, name, cwd, title string, st state.State, since time.Duration, class journey.Class, reason, activity, tool, model string, legs ...legSpec) {
+		s := sess(id, name, cwd, "main", title, st, n.Add(-since), class, "", reason, activity)
+		s.Info.Tool, s.Info.Model = tool, model
+		ss = append(ss, s)
+		tr[s.Info.Key()] = trailOf(n.Add(-since-30*time.Minute), title, st != state.Idle, legs...)
+	}
+	add("api-claude", "api", "/home/user/api", "fix the 401 on token refresh", state.Working, 2*time.Minute, journey.Fix, "tool call in flight", "Edit: tokens.py", "", "claude-opus-4-1-20250805",
+		legSpec{journey.Scout, "middleware.py", 5 * time.Minute, []string{"middleware.py"}, "", nil},
+		legSpec{journey.Test, "pytest", 3 * time.Minute, nil, "18✓ 2✗", nil},
+		legSpec{journey.Fix, "tokens.py", 2 * time.Minute, []string{"tokens.py"}, "", nil})
+	add("api-oc", "api", "/home/user/api", "add rate limiting to the token endpoint", state.Working, 40*time.Second, journey.Build, "tool call in flight", "Bash: go test ./...", "opencode", "anthropic/claude-sonnet-4-5",
+		legSpec{journey.Scout, "limiter.go", 4 * time.Minute, []string{"limiter.go"}, "", nil},
+		legSpec{journey.Build, "limiter.go", 12 * time.Minute, []string{"limiter.go"}, "", nil},
+		legSpec{journey.Test, "go test", 1 * time.Minute, nil, "", nil})
+	add("docs-oc", "docs", "/home/user/docs", "rewrite the install page", state.Idle, 25*time.Minute, journey.Docs, "turn complete", "idle", "opencode", "openai/gpt-5",
+		legSpec{journey.Docs, "install.md", 18 * time.Minute, []string{"install.md"}, "", nil})
+	add("infra", "infra", "/home/user/infra", "tighten the vpc security groups", state.NeedsYou, 4*time.Minute, journey.Design, "waiting on your answer", "Open port 22 to the office CIDR? [office CIDR / keep bastion]", "", "claude-sonnet-4-5",
+		legSpec{journey.Scout, "main.tf", 18 * time.Minute, []string{"main.tf"}, "", nil},
+		legSpec{journey.Design, "AskUserQuestion", 4 * time.Minute, nil, "", nil})
+	panes, order := paneMap([]string{"api-claude", "api-oc", "docs-oc", "infra"}, []string{"dev:1.0", "dev:2.0", "dev:3.0", "ops:0.0"})
+	return scene{name: "two-tools", extra: []string{"2", "tab", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The second day: one session live, and yesterday's dozen behind it. The

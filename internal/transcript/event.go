@@ -62,6 +62,11 @@ type Event struct {
 	IsSidechain bool
 	Text        string // assistant: all text blocks joined "\n"; user: string content (empty if content is a block array)
 
+	// Model is the model an assistant event was produced by, as the
+	// transcript names it ("claude-opus-4-1-20250805"); "" on every other
+	// line and on a failed call.
+	Model string
+
 	// APIError marks an assistant event that is not the model speaking but the
 	// call to it failing: a quota refusal, an expired login, a 5xx. Status and
 	// ErrorKey are the API's own, e.g. 403 and "authentication_failed"; Text
@@ -212,6 +217,9 @@ func ParseLine(line []byte) (Event, error) {
 			// which is what the person sees on their screen.
 			ev.Status, ev.ErrorKey = firstNonZero(msg.APIStatus, raw.LineStatus), firstNonEmpty(msg.APIErrorKey, raw.LineErrorKey)
 			ev.APIError = msg.IsAPIError || raw.LineAPIError || msg.Model == "<synthetic>"
+			if ev.Type == EventAssistant && msg.Model != "" && msg.Model != "<synthetic>" {
+				ev.Model = msg.Model
+			}
 			if ev.Type == EventAssistant {
 				if status, ok := apiErrorInText(ev.Text); ok {
 					ev.APIError = true
