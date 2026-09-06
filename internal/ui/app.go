@@ -3373,7 +3373,14 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// The archive door stands with the way out, as `A fleet` does
 		// below the archive's list (#56, #62): it outlasts the reader's
 		// own keys, which the help teaches, and goes before `esc`.
-		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · [ ] turns", " · space unfold", " · A archive"}
+		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane",
+			// A lane's page with no turns offers the attach key first and
+			// the way out behind it, so the separator-led fragments above
+			// match nothing and `esc back` was the only key left to shed
+			// (#24: the way out is the last key to go). The attach key
+			// sheds at its own rank wherever it leads the row.
+			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
+			" · esc back", " · esc board", " · [ ] turns", " · space unfold", " · A archive"}
 	case m.level >= levelWaypoints:
 		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
 	default:
