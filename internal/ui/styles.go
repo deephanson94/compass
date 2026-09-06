@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -185,7 +186,28 @@ func clip(s string, w int) string {
 		}
 		out = string(runes[:i])
 	}
-	return strings.TrimRight(out, " ") + "…"
+	return strings.TrimRight(strings.TrimRight(out, " "), "·") + "…"
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// truncateWhole is ansi.Truncate that never cuts a number in half and
+// never leaves a bare separator before the mark (#54).
+func truncateWhole(line string, n int) string {
+	full := []rune(ansi.Strip(line))
+	for n > 0 {
+		t := ansi.Truncate(line, n, "")
+		kept := []rune(ansi.Strip(t))
+		k := len(kept)
+		if k < len(full) && k > 0 && isDigit(kept[k-1]) && isDigit(full[k]) {
+			n--
+			continue
+		}
+		if k > 0 && (kept[k-1] == '·' || kept[k-1] == ' ') && k < len(full) {
+			n--
+			continue
+		}
+		return t
+	}
+	return ""
+}

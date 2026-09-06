@@ -1477,6 +1477,8 @@ func (m *Model) zoomOut() {
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
 		m.commitLook(m.selectedKey)
+	case m.level == levelTrail && m.liveCount() == 1 && !m.archiveView:
+		m.note = "the only session · nothing to zoom out to" // no board at any width (#31)
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	case m.level == levelBoard:
@@ -2393,7 +2395,7 @@ func overlay(rows, panel []string, left, top int) {
 		if lipgloss.Width(line) > left && left > 1 {
 			// A row cut by the panel's edge says it was cut: "✗ red
 			// 310✓ 2✗ · shipped" alone inverted "shipped on red".
-			before = ansi.Truncate(line, left-1, "") + "…"
+			before = truncateWhole(line, left-1) + "…"
 		}
 		if w := lipgloss.Width(before); w < left {
 			before += strings.Repeat(" ", left-w)

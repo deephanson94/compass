@@ -149,6 +149,9 @@ func (m *Model) openRecent(num int) bool {
 			key := m.sessions[r.sess].Info.Key()
 			m.archiveView = true
 			m.restSelKey, m.selectedKey = m.selectedKey, ""
+			m.restLevel = m.level // the way back lands where the digit was pressed (#54)
+			m.level = levelTrail  // the archive is a list; it opens as one
+			m.cursor, m.anchor = -1, -1
 			m.fleetScroll = 0
 			m.pointQuiet(key)
 			m.clampSelection()

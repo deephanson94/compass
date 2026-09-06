@@ -988,8 +988,12 @@ func joinFit(parts []string, w int) string {
 // stuck session is hung on, the question a waiting one is asking. "" for
 // the rest — the plan and the leg's own label do.
 func (m *Model) headFor(s fleet.Session) string {
-	switch s.Snap.State {
-	case state.Stuck, state.NeedsYou:
+	switch {
+	case s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou,
+		s.Snap.State == state.Working && s.Snap.Allowed > 0:
+		// The hung call, the question — and the call a budget is for:
+		// "for 4m of 10m" over a leg's label named the wait and not
+		// what was waited on (#54).
 		if txt := strings.TrimSpace(s.Snap.Activity); txt != "" && txt != "idle" {
 			return txt
 		}
