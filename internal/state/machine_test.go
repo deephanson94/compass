@@ -739,3 +739,19 @@ func TestTheBudgetIsCappedAndABackgroundCallHasNone(t *testing.T) {
 	)
 	assertState(t, bg.Evaluate(at(3*time.Minute)), state.Stuck)
 }
+
+// The row counts from the call the budget belongs to: a Read pending since
+// the turn began beside a sleep sent forty minutes in says "for 5m of
+// 10m", not "for 45m of 10m" (#52).
+func TestTheBudgetsClockIsItsOwnCalls(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "wait for the run"),
+		assistantTool(0, "toolu_r", "Read", `{"file_path":"main.go"}`),
+		assistantTool(40*time.Minute, "toolu_b", "Bash", `{"command":"sleep 420","timeout":600000}`),
+	)
+	snap := m.Evaluate(at(45 * time.Minute))
+	assertState(t, snap, state.Working)
+	if !snap.Since.Equal(at(40 * time.Minute)) {
+		t.Errorf("Since = %v, want the sleep's own start %v", snap.Since, at(40*time.Minute))
+	}
+}

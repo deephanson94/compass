@@ -793,13 +793,18 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 // times in a fleet says less than nothing.
 func (m *Model) secondLine(s fleet.Session, w int) string {
 	if m.archiveView {
+		// A hidden live session: where it lives, and the tool where the
+		// fleet runs two — that is how its namesake on the board is told
+		// from it (#53). The word alone: the model is the card's.
+		word := ""
+		if tool := m.toolTag(s); tool != "" && strings.SplitN(tool, " · ", 2)[0] != shortModel(s.Info.Model) {
+			word = " · " + strings.SplitN(tool, " · ", 2)[0]
+		}
 		if pane, ok := m.panes[s.Info.Key()]; ok && s.Live && pane.Target != "" {
-			// A hidden live session: where it lives, since that is how
-			// its namesake on the board is told from it.
-			return dimStyle.Render(clip(mirrorMark+" "+pane.Target+" · "+branchOf(s.Info), w))
+			return dimStyle.Render(clip(mirrorMark+" "+pane.Target+word+" · "+branchOf(s.Info), w))
 		}
 		if s.Live {
-			return dimStyle.Render(clip("no pane · "+branchOf(s.Info), w))
+			return dimStyle.Render(clip("no pane"+word+" · "+branchOf(s.Info), w))
 		}
 		return dimStyle.Render(clip(branchOf(s.Info), w))
 	}

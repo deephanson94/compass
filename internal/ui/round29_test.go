@@ -83,3 +83,28 @@ func TestAnOpencodeSessionIsARow(t *testing.T) {
 		t.Errorf("the narrow list does not name the opencode session and its tool:\n%s", list)
 	}
 }
+
+// The page key sheds after the attach aside (#51, #52): pinned, since the
+// fold went missing once between two decisions with nothing holding it.
+func TestThePageKeyOutlastsTheAttachAside(t *testing.T) {
+	m := boardModel(152, 40)
+	openTrail(m)
+	m.level = levelWaypoints // the legs: the reader's own footer is the held case (#53)
+	order := m.shedOrder(false)
+	aside, page := -1, -1
+	for i, o := range order {
+		switch o {
+		case attachHint:
+			aside = i
+		case " · ctrl+d/u half page":
+			page = i
+		}
+	}
+	if aside < 0 || page < 0 || aside > page {
+		t.Fatalf("shed order ranks the aside %d and the page key %d: the aside must go first\n%q", aside, page, order)
+	}
+	m.inTmux = false
+	if foot := ansi.Strip(m.footerLine(150)); !strings.Contains(foot, "ctrl+d/u half page") || strings.Contains(foot, "(prefix d returns)") {
+		t.Errorf("the 152 legs footer should carry the page key and shed the aside: %q", foot)
+	}
+}

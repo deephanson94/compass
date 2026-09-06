@@ -2455,6 +2455,13 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 		target = pane.Target
 	}
 	title := " reply to " + who + name
+	if s, ok := m.selected(); ok {
+		// The one panel that types into another CLI says which (#53):
+		// the tool's word, in the header's own form (#46).
+		if tool := m.toolTag(s); tool != "" && strings.SplitN(tool, " · ", 2)[0] != shortModel(s.Info.Model) {
+			title += " · " + strings.SplitN(tool, " · ", 2)[0]
+		}
+	}
 	if target != "" {
 		title += " · " + mirrorMark + " " + target
 	}

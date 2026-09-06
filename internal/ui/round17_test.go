@@ -89,7 +89,7 @@ func TestADeadSessionsPanelStatesItselfOnOneRow(t *testing.T) {
 		t.Errorf("the dead session's panel is %d rows tall", len(panel))
 	}
 	view := ansi.Strip(m.View())
-	for _, head := range []string{"1 ▲ infra", "2 ◍ etl", "7 ↻ api", "▸4 ⊘ mobile"} {
+	for _, head := range []string{"1 ▲ infra", "2 ◍ etl", "↻ api", "▸4 ⊘ mobile"} {
 		if !strings.Contains(view, head) {
 			t.Errorf("the panel covers the head row %q:\n%s", head, view)
 		}

@@ -801,7 +801,10 @@ func sceneAlarmStorm() scene {
 	}
 	loop = append(loop, legSpec{journey.Fix, "tokens.py", 2 * time.Minute, []string{"tokens.py"}, "", nil})
 	tr[sessionKey("api")] = trailOf(n.Add(-80*time.Minute), "fix the 401 on token refresh", true, loop...)
-	ss = append(ss, sess("cli", "cli", "/home/user/cli", "main", "add --json to every command", state.Working, n.Add(-20*time.Second), journey.Build, "", "tool call in flight", "Edit: main.go"))
+	// The fine one is four minutes into a ten-minute test run: inside its
+	// budget, the row says "for 4m of 10m" and never "stuck" (#45).
+	ss = append(ss, sess("cli", "cli", "/home/user/cli", "main", "add --json to every command", state.Working, n.Add(-4*time.Minute), journey.Test, "", "Bash allowed 10m", "Bash: go test ./... -count=3"))
+	ss[len(ss)-1].Snap.Allowed = 10 * time.Minute
 	tr[sessionKey("cli")] = trailOf(n.Add(-25*time.Minute), "add --json to every command", true,
 		legSpec{journey.Scout, "the command table", 5 * time.Minute, []string{"main.go"}, "", nil},
 		legSpec{journey.Build, "the flag", 15 * time.Minute, []string{"main.go"}, "", nil})

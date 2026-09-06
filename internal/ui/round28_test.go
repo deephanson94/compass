@@ -144,7 +144,7 @@ func TestAFleetOfOneKeepsItsRecentPast(t *testing.T) {
 	// the verdict there is no room for.
 	n := sceneModel(sceneSecondDay(), 80, 24)
 	list := strings.Join(n.fleetLines(33, 18), "\n")
-	if !strings.Contains(list, "recent · 12 archived · A browses") || !strings.Contains(list, ` 2 ○ api · "fix the 40…  ✗ red 2h`) {
+	if !strings.Contains(list, "recent · 12 archived · A browses") || !strings.Contains(list, ` 2 ○ api · "fix the…     ✗ red 2h`) {
 		t.Errorf("the narrow list's band is missing or misdrawn:\n%s", list)
 	}
 	if strings.Count(list, "archived") != 1 {

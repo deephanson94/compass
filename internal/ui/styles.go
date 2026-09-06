@@ -163,13 +163,29 @@ func clip(s string, w int) string {
 	// branches and tmux window names are all arbitrary user text.
 	var b strings.Builder
 	used := 0
-	for _, r := range s {
+	runes := []rune(s)
+	kept := 0
+	for _, r := range runes {
 		cw := lipgloss.Width(string(r))
 		if used+cw > w-1 {
 			break
 		}
 		b.WriteRune(r)
 		used += cw
+		kept++
 	}
-	return strings.TrimRight(b.String(), " ") + "…"
+	out := b.String()
+	if kept < len(runes) && isDigit(runes[kept]) && kept > 0 && isDigit(runes[kept-1]) {
+		// Never cut a number in half: "API Error: 4…" read as a one-digit
+		// status, and 403 against 429 is the difference the row is for.
+		// The whole number goes instead (#53).
+		i := kept
+		for i > 0 && isDigit(runes[i-1]) {
+			i--
+		}
+		out = string(runes[:i])
+	}
+	return strings.TrimRight(out, " ") + "…"
 }
+
+func isDigit(r rune) bool { return r >= '0' && r <= '9' }
