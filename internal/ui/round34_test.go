@@ -157,24 +157,20 @@ func TestALaneRowAtTheFoldStays(t *testing.T) {
 	m := sceneModel(sceneSubagents(), 80, 24)
 	pressTab(m)
 	tr := m.trail
-	doc, _ := trailDoc(tr, m.trailOpts(43, 40))
-	lane := -1
-	for i, l := range doc {
-		if strings.Contains(ansi.Strip(l), "├─◈ Score encoder") {
-			lane = i
-		}
-	}
-	if lane < 0 {
-		t.Fatalf("no returned lane in the trail")
-	}
-	// A pinned viewport whose first row is the lane: the height that puts
-	// it there.
-	for h := 4; h < len(doc); h++ {
+	seen := false
+	for h := 3; h < 60; h++ {
 		rows := trailRows(tr, m.trailOpts(43, h))
-		if len(rows) > 0 && len(doc)-h == lane {
+		if len(rows) < 2 {
+			continue
+		}
+		if strings.Contains(ansi.Strip(rows[1]), "3 defects found") {
+			seen = true
 			if first := ansi.Strip(rows[0]); !strings.Contains(first, "├─◈ Score encoder") {
-				t.Errorf("at height %d the lane at the fold was drawn over: %q", h, first)
+				t.Errorf("at height %d the finding stands under %q, not its lane", h, first)
 			}
 		}
+	}
+	if !seen {
+		t.Fatalf("no height put the finding second")
 	}
 }
