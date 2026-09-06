@@ -792,7 +792,7 @@ func sceneSecondDay() scene {
 		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
-	return scene{name: "second-day", extra: []string{"tab", "2", "tab", "tab", "A"}, story: "The second day: one session live, fifty seconds into its first prompt, and yesterday's dozen sessions behind it. The person wants the one they walked away from two hours ago without going through the archive.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "second-day", extra: []string{"tab", "2", "tab", "tab", "A", "6", "9", "8", "tab", "tab"}, story: "The second day: one session live, fifty seconds into its first prompt, and yesterday's dozen sessions behind it. The person wants the one they walked away from two hours ago without going through the archive.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The alarm storm: three sessions dead on quota at once, one asking a
