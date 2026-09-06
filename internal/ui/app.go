@@ -3256,7 +3256,7 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 // chapterNote says whether the note is a chapter key's: a chapter counted,
 // or a chapter key's refusal — either keeps the chapter keys (#24).
 func (m *Model) chapterNote() bool {
-	for _, p := range []string{glyphSaid, glyphPrompt, "no later prompt", "no earlier prompt", "no later turn", "no earlier turn"} {
+	for _, p := range []string{glyphSaid, glyphPrompt, glyphBranch + " 1/", "no later prompt", "no earlier prompt", "no later turn", "no earlier turn"} {
 		if strings.HasPrefix(m.note, p) {
 			return true
 		}
@@ -3379,7 +3379,9 @@ func fitQuoteMin(form string, room, min int) string {
 
 func noteForms(note string) []string {
 	forms := []string{note}
-	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) {
+	if strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) || strings.HasPrefix(note, glyphBranch) {
+		// The lane reader's note is a chapter note too (#59): its quote
+		// goes before the level's keys do.
 		if i, j := strings.Index(note, " · "), strings.LastIndex(note, " · "); i > 0 && i != j && strings.Contains(note[i:j], `"`) {
 			forms = append(forms, note[:i]+note[j:])
 		}

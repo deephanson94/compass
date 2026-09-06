@@ -2002,8 +2002,12 @@ func (m *Model) trailTitle(w int) string {
 			// The archive's rows are titled by what they asked for; the
 			// project is the group header. "TRAIL · api" over a row that
 			// read "why does the nightly build take 40 minutes" named the
-			// group, not the row.
+			// group, not the row. A hidden live session's row keeps its
+			// name before its prompt, and so does its title (#59).
 			name = archiveHeadline(s)
+			if s.Live {
+				name = sessionName(s.Info) + ` · "` + archiveHeadline(s) + `"`
+			}
 		}
 	}
 	level := "[trail]"
