@@ -59,11 +59,12 @@ func (m *Model) laneSilenceWord() string {
 	}
 	if d, silent := laneSilence(a, b, m.now); silent {
 		word := "silent " + state.ShortDuration(d)
-		// Below the deck's width the reader owns the screen at Lv3: no
-		// trail panel and no fleet row carries the lane's "→N", so the
-		// stub under the hung call takes the fresher reading the lane's
-		// sub-row says wider (#66's rule, #68's clause, #69).
-		if m.width < deckWideCols {
+		// Wherever no row beside the reader carries the lane's "→N", the
+		// stub under the hung call takes the fresher reading: below the
+		// deck's width there is no trail panel at all, and at 120 the
+		// trail's sub-row sheds the clause for want of cells, so the
+		// silence stood alone on the whole frame (#66, #68, #69).
+		if !m.trailRowSaysWrote(b) {
 			tr := m.trails[m.selectedKey]
 			agents := m.agentsFor(m.selectedKey)
 			if n, ok := m.laneLinks(tr, agents)[b.Label]; ok && n > 0 {
@@ -75,6 +76,45 @@ func (m *Model) laneSilenceWord() string {
 		return word
 	}
 	return ""
+}
+
+// trailRowSaysWrote says whether the trail panel beside the reader already
+// carries the lane's "→N wrote …" on its sub-row — the same arithmetic
+// trailBody uses (#68), so the stub adds the clause only where that row
+// cannot: at 120 the trail is drawn and the clause does not fit it.
+func (m *Model) trailRowSaysWrote(b journey.Branch) bool {
+	if m.width < deckWideCols {
+		return false // the reader owns the screen: no trail panel beside it
+	}
+	inner := m.width - 2*edgePad
+	if inner < 10 {
+		inner = m.width
+	}
+	_, _, trailW := m.layout(inner)
+	if trailW <= 0 {
+		return false
+	}
+	tr := m.trails[m.selectedKey]
+	agents := m.agentsFor(m.selectedKey)
+	n, ok := m.laneLinks(tr, agents)[b.Label]
+	if !ok || n <= 0 {
+		return false
+	}
+	at, had := m.laneLinkWrote(tr, agents)[b.Label]
+	if !had || at.IsZero() {
+		return false
+	}
+	live, known := agents[b.ToolUseID]
+	g, text, clock := laneHead(live, b, known, m.now)
+	if text == "" || clock == "" {
+		return false
+	}
+	body := trailW - trailWayWidth
+	if body < trailMinLabel {
+		return false
+	}
+	long := clock + fmt.Sprintf(" · →%d wrote %s ago", n, relAge(m.now, at))
+	return body-len([]rune(long))-2 >= len([]rune(g+" "+text))
 }
 
 // nameAndBracket says whether a clause is the name with only a bracket

@@ -240,7 +240,7 @@ func TestADigitFromALaneReaderLandsOnTheSessionsOwnReader(t *testing.T) {
 func TestTheLaneReaderAloneSaysTheFresherClock(t *testing.T) {
 	forceASCII(t)
 	sc := sceneSubagents()
-	for _, w := range []int{80, 100, 120} {
+	for _, w := range []int{80, 100, 120, 152, 220} {
 		m := sceneModel(sc, w, 34)
 		seen := ""
 		for _, k := range append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...) {
@@ -254,8 +254,23 @@ func TestTheLaneReaderAloneSaysTheFresherClock(t *testing.T) {
 		if seen == "" {
 			t.Fatalf("at %d the walkthrough never opens the silent lane's reader", w)
 		}
-		if got := strings.Contains(seen, "silent 12m · →1 wrote 30s ago"); got != (w < deckWideCols) {
-			t.Errorf("at %d the stub's fresher clock = %v:\n%s", w, got, seen)
+		// The stub carries the clause wherever no other row on the frame
+		// does: below the deck's width no trail panel is drawn at all,
+		// and at 120 the trail's sub-row sheds it for want of cells.
+		trailSays, stubSays := false, false
+		for _, line := range strings.Split(seen, "\n") {
+			if !strings.Contains(line, "→1 wrote 30s ago") {
+				continue
+			}
+			if strings.Contains(line, "Bash: pytest -x tests/plugins") {
+				trailSays = true
+			}
+			if strings.Contains(line, "no result yet") {
+				stubSays = true
+			}
+		}
+		if stubSays == trailSays {
+			t.Errorf("at %d the frame says the fresher clock on %d rows:\n%s", w, map[bool]int{true: 2, false: 0}[stubSays], seen)
 		}
 	}
 }
