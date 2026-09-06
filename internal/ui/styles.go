@@ -186,7 +186,7 @@ func clip(s string, w int) string {
 		}
 		out = string(runes[:i])
 	}
-	return strings.TrimRight(strings.TrimRight(out, " "), "·") + "…"
+	return strings.TrimRight(out, " ·") + "…" // the separator and the space it stood on, in any order
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }

@@ -3224,6 +3224,15 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 			break
 		}
 	}
+	if gone[attachHint] {
+		// The aside is not a key: it finishes a sentence a key already
+		// began, so it comes back whenever it fits, whatever stayed shed
+		// above it (#55) — a 152 footer stood twenty cells short.
+		gone[attachHint] = false
+		if !fits(build()) {
+			gone[attachHint] = true
+		}
+	}
 	return build()
 }
 
