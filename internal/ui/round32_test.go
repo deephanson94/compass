@@ -44,8 +44,16 @@ func TestAClipKeepsNumbersWholeAndNoBareSeparator(t *testing.T) {
 			t.Errorf("clip(%q, %d) = %q, want %q", in[0], in[1], got, want)
 		}
 	}
-	if got := ansi.Strip(truncateWhole("↪ answered 1 · 50s ago", 17)); strings.HasSuffix(got, "5") || strings.HasSuffix(got, "·") || strings.HasSuffix(got, " ") {
-		t.Errorf("truncateWhole cut a number or left a bare separator: %q", got)
+	for _, n := range []int{16, 17} {
+		if got := ansi.Strip(truncateWhole("↪ answered 1 · 50s ago", n)); strings.HasSuffix(got, "5") || strings.HasSuffix(got, "·") || strings.HasSuffix(got, " ") {
+			t.Errorf("truncateWhole(%d) cut a number or left a bare separator: %q", n, got)
+		}
+	}
+	if got := ansi.Strip(truncateWhole("↪ answered 1 · 50s ago", 16)); got != "↪ answered 1" {
+		t.Errorf("truncateWhole(16) = %q, want the clause before the number", got)
+	}
+	if legend := strings.Join(helpLegendLines(200, true), "\n"); !strings.Contains(legend, "of 10m") {
+		t.Errorf("the legend does not gloss the budget's clock")
 	}
 }
 

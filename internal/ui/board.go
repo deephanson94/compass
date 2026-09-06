@@ -1573,9 +1573,17 @@ func (m *Model) tagLadder(s fleet.Session) []string {
 			word = "" // the model alone: no tool word was earned
 		}
 	}
+	rungs := []string{joinTag(tool, pane), joinTag(word, pane), pane, tool, word}
+	if word != "" {
+		// The word was earned — the fleet runs two tools, or this is the
+		// other one — so a ladder that dropped it at the third rung and
+		// took it back at the fifth said less on a wider column (#56):
+		// the bare pane comes last.
+		rungs = []string{joinTag(tool, pane), joinTag(word, pane), tool, word, pane}
+	}
 	var out []string
 	seen := map[string]bool{}
-	for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), pane, tool, word} {
+	for _, c := range rungs {
 		if c != "" && !seen[c] {
 			out = append(out, c)
 			seen[c] = true

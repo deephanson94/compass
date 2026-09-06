@@ -1718,30 +1718,6 @@ func (m *Model) cardSecond(w int) string {
 		return ""
 	}
 	room := w - 4
-	verdict := strings.Split(boardVerdictWith(s, m.trail, m.now, m.agentsFor(m.selectedKey)), " · ")
-	if s.Snap.State != state.Idle && len(verdictPartsWith(m.trail, m.now, true, m.agentsFor(m.selectedKey))) == 0 {
-		// Nothing to count: the fleet row's own sentence — the hung call,
-		// the question, the present — not the last finished leg. The
-		// board's column says the present; zooming in lost it.
-		if r, ok := m.boardRows()[m.selectedKey]; ok {
-			// entryLines indents its rows by four: give it the card's
-			// full width so the sentence is not cut for a margin it
-			// then does not draw.
-			if lines := m.entryLines(r, room+4); len(lines) > 1 {
-				if head := oneSpace(ansi.Strip(lines[1])); head != "" {
-					verdict = []string{head}
-				}
-			}
-		}
-	} else if s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou {
-		if r, ok := m.boardRows()[m.selectedKey]; ok {
-			if lines := m.entryLines(r, room+4); len(lines) > 1 {
-				if head := oneSpace(ansi.Strip(lines[1])); head != "" {
-					verdict = []string{head}
-				}
-			}
-		}
-	}
 	tmux := m.tagFor(s, room, 24, "verdict") // the column's tag, with the tool and model where the verdict leaves room (#50)
 	// The tmux session is always kept — `enter` attaches from here — and
 	// the day is added after the verdict, so joinFit sheds the day's
@@ -1750,6 +1726,31 @@ func (m *Model) cardSecond(w int) string {
 	fit := room
 	if tmux != "" {
 		fit -= lipgloss.Width(tmux) + 2
+	}
+	verdict := strings.Split(boardVerdictWith(s, m.trail, m.now, m.agentsFor(m.selectedKey)), " · ")
+	if s.Snap.State != state.Idle && len(verdictPartsWith(m.trail, m.now, true, m.agentsFor(m.selectedKey))) == 0 {
+		// Nothing to count: the fleet row's own sentence — the hung call,
+		// the question, the present — not the last finished leg. The
+		// board's column says the present; zooming in lost it.
+		if r, ok := m.boardRows()[m.selectedKey]; ok {
+			// entryLines indents its rows by four, and the sentence is
+			// built at the width it is drawn at — beside the tag — so
+			// the row's own shedder cuts the call and keeps the clock:
+			// a second cut here ate "for 4m of 10m" to "for…" (#56).
+			if lines := m.entryLines(r, fit+4); len(lines) > 1 {
+				if head := oneSpace(ansi.Strip(lines[1])); head != "" {
+					verdict = []string{head}
+				}
+			}
+		}
+	} else if s.Snap.State == state.Stuck || s.Snap.State == state.NeedsYou {
+		if r, ok := m.boardRows()[m.selectedKey]; ok {
+			if lines := m.entryLines(r, fit+4); len(lines) > 1 {
+				if head := oneSpace(ansi.Strip(lines[1])); head != "" {
+					verdict = []string{head}
+				}
+			}
+		}
 	}
 	best := ""
 	for _, compact := range []bool{false, true} {
