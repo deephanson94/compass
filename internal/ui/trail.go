@@ -223,15 +223,14 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 	return rows
 }
 
-// isDetailRow recognises a Lv2 child row by its hanger: "│  ├", "│  └" or
-// their unrailed forms under HEAD.
-
 // isCursorRow says whether the trail's cursor stands on this row.
 func isCursorRow(line string) bool {
 	r := []rune(ansi.Strip(line))
 	return len(r) > 1 && r[1] == '▸'
 }
 
+// isDetailRow recognises a Lv2 child row by its hanger: "│  ├", "│  └" or
+// their unrailed forms under HEAD.
 func isDetailRow(line string) bool {
 	plain := ansi.Strip(line)
 	if len([]rune(plain)) > 1 && []rune(plain)[1] == '▸' {
@@ -884,7 +883,11 @@ func tickRow(l journey.Leg, stroke string, width int) string {
 	// The leg's own label rides on the tick when it has one: "│ build" ten
 	// times down a column said nothing about what was built.
 	if label := strings.TrimSpace(l.Label); label != "" && label != l.Class.String() {
-		if room := width - lipgloss.Width(head) - 1 - len([]rune(legSpan(l))) - 4; room >= trailMinLabel {
+		// The label's room is what the padded verb, a cell of air and
+		// the span leave: a four-cell reserve for a `?` no tick row can
+		// carry (a test leg is never a tick) cut "where the audit log
+		// lives" to "…log l…" in a field exactly its width (#62).
+		if room := width - lipgloss.Width(stroke) - 1 - trailVerbWidth - 1 - len([]rune(legSpan(l))) - 1; room >= trailMinLabel {
 			// Padded like a leg row's class, so the labels line up down
 			// the column.
 			head = ruleStyle.Render(stroke) + " " + dimStyle.Render(pad(l.Class.String(), trailVerbWidth)) + " " + dimStyle.Render(clip(label, room))
@@ -1686,7 +1689,13 @@ func (m *Model) sessionCard(w int) []string {
 		right = strings.TrimSpace("↓ G  " + right)
 	}
 	body := w - 1
-	hdr := m.columnHeader(m.selectedKey, r, body-lipgloss.Width(right)-1)
+	hw := body
+	if right != "" {
+		hw -= lipgloss.Width(right) + 1 // the marker and a cell of air before it
+	}
+	// With no marker the clock takes the column's last cell, where every
+	// other row's age ends: it stopped one short on every tab (#62).
+	hdr := m.columnHeader(m.selectedKey, r, hw)
 	// One session on screen: the fleet's selection arrow says nothing here.
 	first := m.titleMark(panelTrail) + strings.Replace(hdr[0], "▸", " ", 1)
 	gap := w - lipgloss.Width(first) - lipgloss.Width(right)

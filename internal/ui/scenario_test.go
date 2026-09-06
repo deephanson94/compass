@@ -282,7 +282,20 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 				at = end.Add(30 * time.Second)
 			}
 		}
-		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: at, Text: "Running the backfill over every shard.",
+		// The line before the call is about the call: the backfill's
+		// sentence over a `go test` contradicted the row under it (#62).
+		said := "Running it."
+		switch {
+		case strings.Contains(cmd, "backfill"):
+			said = "Running the backfill over every shard."
+		case strings.HasPrefix(cmd, "go test"), strings.HasPrefix(cmd, "pytest"):
+			said = "Running the suite again."
+		case strings.HasPrefix(cmd, "python"):
+			said = "Running the split now."
+		case strings.HasPrefix(cmd, "sleep"):
+			said = "Waiting for the deploy to settle."
+		}
+		add(transcript.Event{Type: transcript.EventAssistant, Timestamp: at, Text: said,
 			ToolUses: []transcript.ToolUse{{ID: "toolu_hung", Name: "Bash", Input: json.RawMessage(fmt.Sprintf(`{"command":%q}`, cmd))}}})
 	}
 	sort.SliceStable(evs, func(i, j int) bool { return evs[i].Timestamp.Before(evs[j].Timestamp) })

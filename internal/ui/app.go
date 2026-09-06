@@ -918,7 +918,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// The live pane has no keys: they go back to the trail.
 			m.level = levelWaypoints
 			m.anchorReader()
-			m.note = "the live pane · m again for the conversation"
+			m.note = "the live pane" // and the footer keeps `m conversation`: the way back is a key, not a clause (#62)
 		case !m.sessionView() && m.level != levelTrail:
 			m.note = "the mirror shows beside the trail (esc to zoom out)"
 		}
@@ -932,6 +932,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// The digit is a hidden session's: the refusal names
 					// it and the way to it, as the strip beside it does (#57).
 					m.note = fmt.Sprintf("%d %s is hidden · A, then x", i+1, sessionName(s.Info))
+					if pane, ok := m.panes[s.Info.Key()]; ok && m.sharesTmux(s) {
+						m.note += " · " + mirrorMark + " " + pane.Target // the hide note's own form (#62)
+					}
 				}
 			}
 		}
@@ -2408,7 +2411,9 @@ func overlay(rows, panel []string, left, top int) {
 		if lipgloss.Width(line) > left && left > 1 {
 			// A row cut by the panel's edge says it was cut: "✗ red
 			// 310✓ 2✗ · shipped" alone inverted "shipped on red".
-			before = truncateWhole(line, left-1) + "…"
+			// The mark stands at the cut, not where the text ran out:
+			// twelve cells left of the panel it read as a clipped prompt (#62).
+			before = pad(truncateWhole(line, left-1), left-1) + "…"
 		}
 		if w := lipgloss.Width(before); w < left {
 			before += strings.Repeat(" ", left-w)
@@ -2766,8 +2771,23 @@ func (m *Model) headerLine(w int) string {
 		return left + dimStyle.Render(board) + dimStyle.Render(query)
 	}
 	left := compose(board, tag, query, name)
+	// The model goes before the tool word (#52): "1 api · opencode ·
+	// ⌁ dev:2.0" is the rung between the full tag and none, and the
+	// header skipped it and threw the tool away with a cell to spare (#62).
+	word := ""
+	if s, ok := m.selected(); ok && tool != "" {
+		if w := strings.SplitN(tool, " · ", 2)[0]; w != tool && w != shortModel(s.Info.Model) {
+			word = w
+		}
+	}
 	for _, try := range []func() string{
 		func() string { board = ""; return compose(board, tag, query, name) },
+		func() string {
+			if word != "" {
+				tool = word
+			}
+			return compose(board, tag, query, name)
+		},
 		func() string { tool = ""; return compose(board, tag, query, name) },
 		func() string { tag = ""; return compose(board, tag, query, name) },
 		func() string { query = ""; return compose(board, tag, query, name) },
@@ -3011,6 +3031,11 @@ func (m *Model) keymap() string {
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
 	}
+	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && m.width < deckWideCols {
+		// Below the board's width the reader takes the whole screen and
+		// no band or fleet row names the archive: the footer does (#62).
+		keys = strings.Replace(keys, " · esc back", " · esc back · A archive", 1)
+	}
 	if m.archiveView {
 		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
 			keys = strings.Replace(keys, " · x unhide", "", 1) // the cursor is not on a hidden row: the key answers no question
@@ -3091,6 +3116,17 @@ func (m *Model) footerWith(keys string, w int) string {
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
 	drops := m.shedOrder(m.chapterNote())
+	if m.mirrorNote() {
+		// `m` is the one key that replaces the panel, and its note is the
+		// frame its undo must be named on: the key is not optional there,
+		// whichever side the toggle is on (#62).
+		for i := 0; i < len(drops); i++ {
+			if drops[i] == " · m live pane" || drops[i] == " · m conversation" {
+				drops = append(drops[:i], drops[i+1:]...)
+				i--
+			}
+		}
+	}
 	note := m.note
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
@@ -3271,6 +3307,11 @@ func (m *Model) chapterNote() bool {
 	return false
 }
 
+// mirrorNote says whether the note is `m`'s own: the frame it was pressed on.
+func (m *Model) mirrorNote() bool {
+	return m.note == "the live pane" || m.note == "the conversation" || strings.HasPrefix(m.note, "mirror on")
+}
+
 // shedOrder is the order the footer gives up its optional keys in, first
 // to go first. The way in (`tab deeper`) outlasts `x hide` and `g grab`,
 // which refuse on a fleet of one, on the list — deeper in, the person has
@@ -3300,7 +3341,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 	var own []string
 	switch {
 	case m.level >= levelReader:
-		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · [ ] turns", " · space unfold"}
+		// The archive door stands with the way out, as `A fleet` does
+		// below the archive's list (#56, #62): it outlasts the reader's
+		// own keys, which the help teaches, and goes before `esc`.
+		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · [ ] turns", " · space unfold", " · A archive"}
 	case m.level >= levelWaypoints:
 		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
 	default:
