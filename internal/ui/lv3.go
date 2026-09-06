@@ -507,7 +507,11 @@ func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
 		text = string([]rune(text)[:doc[t].dim]) // without the clock
 	}
 	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid))
-	m.note = fmt.Sprintf("%s %d/%d · %s · %s", glyphSaid, i+1, len(turns), `"`+m.anchorText+`"`, doc[t].at.Local().Format("15:04")) // the footer clips the quote to its room
+	glyph := glyphSaid
+	if m.readerLane != "" && i == 0 {
+		glyph = glyphBranch // the assignment, not a turn of yours (#56)
+	}
+	m.note = fmt.Sprintf("%s %d/%d · %s · %s", glyph, i+1, len(turns), `"`+m.anchorText+`"`, doc[t].at.Local().Format("15:04")) // the footer clips the quote to its room
 }
 
 // readerHeight is the rows the document gets: the deck body minus the

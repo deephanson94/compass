@@ -132,16 +132,32 @@ func withCompactions(tr journey.Trail, at ...time.Time) journey.Trail {
 // agentEvents is a subagent's own short conversation: the lead's assignment,
 // a look around, and a shell command nothing has answered.
 func agentEvents(start time.Time, assignment string) []transcript.Event {
+	return agentConversation(start, assignment, "/home/user/src/plugins/loader.go", "pytest -x tests/plugins",
+		"I'll read the loader and the plugin contract first, then try to break the boundary.",
+		"The loader trusts the manifest's entry point without checking it stays under the plugin's own directory. Running the plugin suite with a manifest that escapes it:", "")
+}
+
+// agentConversation is one agent's own short conversation: the lead's
+// assignment, a look at file, a shell command — and, when finding is
+// given, its result and the agent's closing words.
+func agentConversation(start time.Time, assignment, file, command, first, second, finding string) []transcript.Event {
 	at := func(d time.Duration) time.Time { return start.Add(d) }
-	return []transcript.Event{
+	evs := []transcript.Event{
 		{UUID: "g1", SessionID: "s", Type: transcript.EventUser, Timestamp: at(0), Text: assignment},
-		{UUID: "g2", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(20 * time.Second), Text: "I'll read the loader and the plugin contract first, then try to break the boundary.",
-			ToolUses: []transcript.ToolUse{{ID: "toolu_g1", Name: "Read", Input: json.RawMessage(`{"file_path":"/home/user/src/plugins/loader.go"}`)}}},
+		{UUID: "g2", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(20 * time.Second), Text: first,
+			ToolUses: []transcript.ToolUse{{ID: "toolu_g1", Name: "Read", Input: json.RawMessage(`{"file_path":"` + file + `"}`)}}},
 		{UUID: "g3", SessionID: "s", Type: transcript.EventUser, Timestamp: at(40 * time.Second),
 			ToolResults: []transcript.ToolResult{{ToolUseID: "toolu_g1", Text: "     1\tpackage plugins\n     2\t\n     3\tfunc Load(path string) (Plugin, error) {"}}},
-		{UUID: "g4", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(3 * time.Minute), Text: "The loader trusts the manifest's entry point without checking it stays under the plugin's own directory. Running the plugin suite with a manifest that escapes it:",
-			ToolUses: []transcript.ToolUse{{ID: "toolu_g2", Name: "Bash", Input: json.RawMessage(`{"command":"pytest -x tests/plugins"}`)}}},
+		{UUID: "g4", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(3 * time.Minute), Text: second,
+			ToolUses: []transcript.ToolUse{{ID: "toolu_g2", Name: "Bash", Input: json.RawMessage(`{"command":"` + command + `"}`)}}},
 	}
+	if finding != "" {
+		evs = append(evs,
+			transcript.Event{UUID: "g5", SessionID: "s", Type: transcript.EventUser, Timestamp: at(5 * time.Minute),
+				ToolResults: []transcript.ToolResult{{ToolUseID: "toolu_g2", Text: "3 failed, 17 passed in 12.4s"}}},
+			transcript.Event{UUID: "g6", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(6 * time.Minute), Text: finding})
+	}
+	return evs
 }
 
 func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
@@ -558,8 +574,11 @@ func sceneSubagents() scene {
 	// the reviewer has written nothing, the red-teamer has been silent
 	// twelve minutes on a pytest — and its conversation is there to read.
 	agents := map[string]map[string]agentLive{sessionKey("porter"): {
-		"a1": {Wrote: n.Add(-161 * time.Minute), Snap: state.Snapshot{State: state.Idle, Reason: "turn complete", Activity: "idle"},
-			Events: agentEvents(n.Add(-165*time.Minute), "Score encoder gates vs oracle defects")},
+		"a1": {Wrote: n.Add(-159 * time.Minute), Snap: state.Snapshot{State: state.Idle, Reason: "turn complete", Activity: "idle"},
+			Events: agentConversation(n.Add(-165*time.Minute), "Score encoder gates vs oracle defects", "/home/user/src/gates.md", "pytest tests/gates -q",
+				"I'll read the gate definitions, then score each against the oracle's defect list.",
+				"Three gates disagree with the oracle. Running the gate suite to see which are real:",
+				"3 defects found against the oracle; two are the same root cause — gate 4 and gate 7 both read the encoder's stale length field.")},
 		"a2": {Wrote: n.Add(-40 * time.Second), Snap: state.Snapshot{State: state.Working, Reason: "tool call in flight", Activity: "Bash: python dla.py --model moe_by_andy --split dx6"}},
 		"a3": {},
 		"a4": {Wrote: n.Add(-12 * time.Minute), Snap: state.Snapshot{State: state.Stuck, Reason: "no output for 12m mid-turn", Activity: "Bash: pytest -x tests/plugins"},

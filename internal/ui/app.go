@@ -3032,6 +3032,13 @@ func (m *Model) keymap() string {
 		// The agent's own conversation: `r` and `a` are the lead's, and
 		// a footer offering them here read as steering the agent (#49).
 		keys = strings.Replace(strings.Replace(keys, " · r reply", "", 1), " · a ask", "", 1)
+		if len(m.readerEvents()) == 0 {
+			// Nothing to scroll, unfold, search or step: a page with no
+			// turns offers only the way out (#56).
+			for _, drop := range []string{"j/k scroll · ", "ctrl+d/u half page · ", "space unfold · ", "/ search · ", "n/N · ", "[ ] turns · ", " · h/l session"} {
+				keys = strings.Replace(keys, drop, "", 1)
+			}
+		}
 	}
 	return keys
 }
