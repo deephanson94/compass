@@ -259,3 +259,21 @@ func TestTheLaneReaderAloneSaysTheFresherClock(t *testing.T) {
 		}
 	}
 }
+
+// A digit inside the trail finishes its arrival on the present, as tab and
+// h/l do: the cursor is on a row and the companion reader has its clause (#70).
+func TestADigitInsideTheTrailOpensOnThePresent(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, w := range []int{80, 220} {
+		m := sceneModel(sc, w, 48)
+		for _, k := range []string{"tab", "G", "1"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		view := ansi.Strip(m.View())
+		if m.level < levelWaypoints || m.cursor < 0 || !strings.Contains(view, "▸scout") {
+			t.Errorf("at %d the digit left no row under the cursor (level %d, cursor %d):\n%s", w, m.level, m.cursor, view)
+		}
+	}
+}

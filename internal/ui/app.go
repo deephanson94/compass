@@ -2138,6 +2138,12 @@ func (m *Model) pointAs(key string, quiet bool) {
 		// enter attached instead of keeping the query.
 		m.query, m.draft, m.searching = "", "", false
 	}
+	if m.level >= levelWaypoints {
+		// Switching sessions inside the trail opens on the present, the
+		// way tab and h/l do: a digit landed with the keys in the trail
+		// and no row under the cursor, and the first j placed it (#70).
+		m.cursorMove(0)
+	}
 }
 
 // selectIndex is the `1`–`9` keys: an index into the rendered order, groups
