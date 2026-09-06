@@ -752,12 +752,15 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		if pane != "" {
 			short = mirrorMark + " " + paneSuffix(strings.TrimPrefix(pane, mirrorMark+" "))
 		}
-		for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), joinTag(word, short), pane, short, word} {
+		// The word before the pane here: the group header two rows up
+		// already names the tmux session, and `enter` attaches by the
+		// row's own pane whatever the row shows.
+		for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), joinTag(word, short), word, pane, short} {
 			if c != "" && w-4-lipgloss.Width(c)-2 >= 16 {
 				tag = c
 				break
 			}
-			if c != "" && tag == "" && (pane == "" || c == short || c == word) {
+			if c != "" && tag == "" && (c == short || c == word || (pane == "" && c == tool)) {
 				tag = c // the shortest form stands when none leaves the floor
 			}
 		}
