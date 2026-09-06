@@ -1594,6 +1594,19 @@ func (m *Model) trailColumn(w, h int) []string {
 	if h > len(rows) {
 		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-len(rows)))...)
 	}
+	if band := m.recentRows(h - len(rows) - 2); m.sessionView() && len(band) > 0 {
+		// The rows a short trail leaves are the recent band's (#47): a
+		// rule where the trail ends, then the sessions that ended last.
+		// The band is drawn into what is left over, never over a leg.
+		head := m.recentHeader()
+		if n := w - lipgloss.Width(head) - 1; n > 0 {
+			head += " " + strings.Repeat("─", n) // a rule to the gutter, the read-line's own form
+		}
+		rows = append(rows, "", dimStyle.Render(clip(head, w)))
+		for _, r := range band {
+			rows = append(rows, m.recentLine(r, w))
+		}
+	}
 	return rows
 }
 

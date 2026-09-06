@@ -118,3 +118,68 @@ func TestTheHeaderShedsTheNameBeforeTheChips(t *testing.T) {
 		t.Errorf("the tag should go before the digit: %q", got)
 	}
 }
+
+// A fleet of one keeps its past on screen: the rows the live list leaves
+// blank carry the sessions that ended last, numbered on from the live
+// fleet's digits, each with its verdict where there is room — and a digit
+// opens one in the archive, where `A` comes back (#47).
+func TestAFleetOfOneKeepsItsRecentPast(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	if !m.sessionView() {
+		t.Fatalf("a fleet of one at 120 should open on the session view")
+	}
+	col := strings.Join(m.trailColumn(55, 28), "\n")
+	for _, want := range []string{"recent · 12 archived · A browses", ` 2 ○ api · "fix the 401 on token`, `  ✗ red 12✓ 1✗ 2h`, ` 9 ○ migrate`} {
+		if !strings.Contains(col, want) {
+			t.Errorf("the session view's band lacks %q:\n%s", want, col)
+		}
+	}
+	if strings.Contains(col, "10 ○") || strings.Count(col, "\n ○") > 0 {
+		t.Errorf("the band ran past the digits:\n%s", col)
+	}
+	// The narrow list draws the same band in the fleet column, without
+	// the verdict there is no room for.
+	n := sceneModel(sceneSecondDay(), 80, 24)
+	list := strings.Join(n.fleetLines(33, 18), "\n")
+	if !strings.Contains(list, "recent · 12 archived · A browses") || !strings.Contains(list, ` 2 ○ api · "fix the 401 on to… 2h`) {
+		t.Errorf("the narrow list's band is missing or misdrawn:\n%s", list)
+	}
+	if strings.Count(list, "archived") != 1 {
+		t.Errorf("the archive's line is said twice:\n%s", list)
+	}
+	// A digit the live fleet does not use opens the band's row.
+	press(n, "2")
+	if !n.archiveView || n.selectedKey != sessionKey("p-api") {
+		t.Errorf("2 did not open the archive on api: archive=%v selected=%q", n.archiveView, n.selectedKey)
+	}
+	if !strings.Contains(n.note, "A returns") {
+		t.Errorf("the note does not say the way back: %q", n.note)
+	}
+	press(n, "A")
+	if n.archiveView || n.selectedKey != sessionKey("hello") {
+		t.Errorf("A did not return to the live fleet on hello: archive=%v selected=%q", n.archiveView, n.selectedKey)
+	}
+}
+
+// The band is the live list's alone: never on the board, whose blank
+// rows are more columns' (#43), and never under a search.
+func TestTheRecentBandStaysOffTheBoard(t *testing.T) {
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	m.level = levelBoard // the one-column board
+	if !m.boardShown() {
+		t.Fatalf("a 120-column deck should show the board")
+	}
+	if rows := m.recentRows(9); len(rows) != 0 {
+		t.Errorf("the board draws a band of %d rows", len(rows))
+	}
+	press(m, "2")
+	if m.archiveView {
+		t.Errorf("a digit on the board opened the archive")
+	}
+	n := sceneModel(sceneSecondDay(), 80, 24)
+	n.fleetQuery = "api"
+	if rows := n.recentRows(9); len(rows) != 0 {
+		t.Errorf("a search draws a band of %d rows", len(rows))
+	}
+}

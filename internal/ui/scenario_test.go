@@ -649,7 +649,7 @@ func sceneVeryLong() scene {
 }
 
 func allScenes() []scene {
-	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene()}
+	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay()}
 }
 
 // quota is the refusal a session dead on its daily limit carries, in the
@@ -667,6 +667,42 @@ func sceneFirstSession() scene {
 	tr[sessionKey("hello")] = journey.Trail{Prompts: []journey.Prompt{{Text: "add a --version flag", At: n.Add(-50 * time.Second)}}}
 	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
 	return scene{name: "first-session", story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
+}
+
+// The second day: one session live, and yesterday's dozen behind it. The
+// person is back at the one fleet that hid everything but the live row,
+// and wants the session they walked away from without a search.
+func sceneSecondDay() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+	ss = append(ss, sess("hello", "hello", "/home/user/hello", "main", "add a --version flag", state.Working, n.Add(-40*time.Second), journey.Scout, "", "starting turn", "thinking…"))
+	ss[0].Info.StartedAt = n.Add(-50 * time.Second)
+	tr[sessionKey("hello")] = journey.Trail{Prompts: []journey.Prompt{{Text: "add a --version flag", At: n.Add(-50 * time.Second)}}}
+	past := []struct {
+		id, name, title string
+		ago             time.Duration
+	}{
+		{"p-api", "api", "fix the 401 on token refresh", 2 * time.Hour},
+		{"p-webapp", "webapp", "the checkout suite flakes on CI", 4 * time.Hour},
+		{"p-billing", "billing", "reconcile the invoice totals", 6 * time.Hour},
+		{"p-etl", "etl", "dedupe the nightly load", 9 * time.Hour},
+		{"p-cli", "cli", "add --json to every command", 26 * time.Hour},
+		{"p-notes", "notes", "rewrite the install page", 28 * time.Hour},
+		{"p-perf", "perf", "profile the import", 50 * time.Hour},
+		{"p-migrate", "migrate", "move the shard map", 52 * time.Hour},
+		{"p-old1", "api", "port the client to the new sdk", 80 * time.Hour},
+		{"p-old2", "webapp", "why does the nightly build take 40 minutes", 100 * time.Hour},
+		{"p-old3", "etl", "reconcile the state file", 120 * time.Hour},
+		{"p-old4", "cli", "add --json to every command", 140 * time.Hour},
+	}
+	for _, p := range past {
+		g := gone(p.id, p.name, p.title, n.Add(-p.ago))
+		ss = append(ss, g)
+		tr[g.Info.Key()] = pastTrail(g)
+	}
+	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
+	return scene{name: "second-day", extra: []string{"2", "A"}, story: "The second day: one session live, fifty seconds into its first prompt, and yesterday's dozen sessions behind it. The person wants the one they walked away from two hours ago without going through the archive.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The alarm storm: three sessions dead on quota at once, one asking a

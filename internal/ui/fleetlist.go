@@ -133,6 +133,17 @@ func (m *Model) fleetLines(w, h int) []string {
 		body = 1
 	}
 	lines, selStart, selEnd := m.fleetBlock(rows, w)
+	if free := body - len(lines) - 1; free >= 2 && !m.archiveView && m.archivedCount() > 0 && len(m.overlaps()) == 0 {
+		// The rows the live list leaves belong to the sessions that
+		// ended last (#47): the band takes the archive's line as its
+		// header, so the key is said once, and the rows below it.
+		if band := m.recentLines(w, free); len(band) > 1 {
+			tail = nil
+			lines = append(lines, "")
+			lines = append(lines, band...)
+			body = h
+		}
+	}
 	win := m.scrollFleet(lines, selStart, selEnd, body)
 	if len(lines) > body && len(win) < body {
 		// A folded list short of its body — the rows an entry-whole

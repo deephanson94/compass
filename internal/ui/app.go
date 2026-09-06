@@ -853,7 +853,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.capture()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		i := int(key[0] - '1')
-		if !m.selectIndex(i) {
+		if !m.selectIndex(i) && !m.openRecent(i+1) {
 			m.note = fmt.Sprintf("no session %d", i+1)
 		}
 		return m, m.refresh()
