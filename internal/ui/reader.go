@@ -60,6 +60,10 @@ type ReaderOpts struct {
 	// than ❯ — nobody typed it (#55).
 	Lane bool
 
+	// LaneSilence is the open lane's own silence, in the lane row's words
+	// ("silent 12m"), for the stub under the call it is hung on (#66).
+	LaneSilence string
+
 	// Lanes is what each open Agent call's own transcript says, by the
 	// call's id — "◍ silent 12m", "wrote 40s ago" — so the stub under the
 	// call is judged, not just counted (#49). Nil when none was read.
@@ -238,13 +242,14 @@ func readerStyle(k readerKind) lipgloss.Style {
 // docBuilder assembles the document, keeping the air between blocks honest:
 // one blank line between turns, none between a call and what it returned.
 type docBuilder struct {
-	lines []readerLine
-	width int
-	cwd   string
-	now   time.Time
-	lanes map[string]string // an open Agent call's own verdict, by call id (#49)
-	lane  bool              // an agent's own conversation (#55)
-	said_ int               // human turns drawn so far
+	laneSilence string // the open lane's silence, for the stub under its hung call (#66)
+	lines       []readerLine
+	width       int
+	cwd         string
+	now         time.Time
+	lanes       map[string]string // an open Agent call's own verdict, by call id (#49)
+	lane        bool              // an agent's own conversation (#55)
+	said_       int               // human turns drawn so far
 }
 
 func (d *docBuilder) push(text string, kind readerKind, event int, at time.Time) {
@@ -282,7 +287,7 @@ func (d *docBuilder) last() readerKind {
 // readerDoc flattens the events into rows. Sidechains are skipped: a subagent's
 // own conversation is the trail's branch lane, not this document's business.
 func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
-	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now, lanes: o.Lanes, lane: o.Lane}
+	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now, lanes: o.Lanes, lane: o.Lane, laneSilence: o.LaneSilence}
 	unfolded := o.Unfolded
 	answered := map[string]bool{}
 	for _, ev := range events {
@@ -577,6 +582,12 @@ func (d *docBuilder) pending(event int, at time.Time, use transcript.ToolUse) {
 		}
 	case "AskUserQuestion":
 		word = "⋯ no answer yet"
+	default:
+		if d.lane && d.laneSilence != "" {
+			// The agent's own hung call: the silence the lane row says,
+			// on the row that is silent (#49, #66).
+			word += " · " + d.laneSilence
+		}
 	}
 	d.push(resultIndent+glyphResult+" "+clip(word, d.width-len(resultIndent)-2), readerBody, event, at)
 }

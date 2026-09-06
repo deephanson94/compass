@@ -22,11 +22,11 @@ func (m *Model) doc(width int) []readerLine {
 	c := &m.docCache
 	cwd := m.readerCWD()
 	events := m.readerEvents()
-	lanes := fmt.Sprint(m.laneClauses())
+	lanes := fmt.Sprint(m.laneClauses()) + "|" + m.laneSilenceWord()
 	if c.valid && c.n == len(events) && c.w == width && c.ver == m.docVer && c.cwd == cwd && c.lane == m.readerLane && c.lanes == lanes {
 		return c.lines
 	}
-	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now, Lanes: m.laneClauses(), Lane: m.readerLane != ""})
+	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now, Lanes: m.laneClauses(), Lane: m.readerLane != "", LaneSilence: m.laneSilenceWord()})
 	m.docCache = readerCache{lines: lines, valid: true, n: len(events), w: width, ver: m.docVer, cwd: cwd, lane: m.readerLane, lanes: lanes}
 	return lines
 }
@@ -41,6 +41,33 @@ func (m *Model) readerEvents() []transcript.Event {
 		return nil
 	}
 	return m.events
+}
+
+// laneSilenceWord is the open lane's silence as its row says it — "silent
+// 12m" — or "" for a lane that is writing, done, or not the reader's.
+func (m *Model) laneSilenceWord() string {
+	if m.readerLane == "" {
+		return ""
+	}
+	b, ok := m.laneOpen()
+	if !ok || b.Done {
+		return ""
+	}
+	a, has := m.agentsFor(m.selectedKey)[m.readerLane]
+	if !has {
+		return ""
+	}
+	if d, silent := laneSilence(a, b, m.now); silent {
+		return "silent " + state.ShortDuration(d)
+	}
+	return ""
+}
+
+// nameAndBracket says whether a clause is the name with only a bracket
+// after it — "fix the 401 on token refresh (commit)": the leg's bracket is
+// not worth a second copy of the name on the row (#64, #66).
+func nameAndBracket(name, clause string) bool {
+	return strings.HasPrefix(clause, name+" (") && strings.HasSuffix(clause, ")")
 }
 
 // laneOpen is the lane the reader is on, if it is one the trail still has.
@@ -140,18 +167,37 @@ func (m *Model) readerColumn(w, h int) []string {
 	}
 	if h > 2 {
 		frame := RenderReader(events, ReaderOpts{
-			Width:    w,
-			Height:   h - 2,
-			Scroll:   readerTopIn(m.doc(w), m.scroll, h-2), // never a result row without its owner
-			Unfolded: m.unfolded,
-			Query:    m.query,
-			Anchor:   m.anchor,
-			CWD:      m.readerCWD(),
-			Now:      m.now,
-			Lanes:    m.laneClauses(),
-			Lane:     m.readerLane != "",
+			Width:       w,
+			Height:      h - 2,
+			Scroll:      readerTopIn(m.doc(w), m.scroll, h-2), // never a result row without its owner
+			Unfolded:    m.unfolded,
+			Query:       m.query,
+			Anchor:      m.anchor,
+			CWD:         m.readerCWD(),
+			Now:         m.now,
+			Lanes:       m.laneClauses(),
+			Lane:        m.readerLane != "",
+			LaneSilence: m.laneSilenceWord(),
 		})
 		rows = append(rows, strings.Split(frame, "\n")...)
+	}
+	if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 && len(m.trail.Legs) == 0 && m.readerLane == "" {
+		// The reader owns the screen: no trail panel and no fleet row is
+		// on it to say the session is alive, and "⎿ ⋯ no reply yet" over
+		// twenty blank rows was an abandoned session's screen too. The
+		// tail carries the present the trail draws (§4; the shape of
+		// #62, #66).
+		if row := bareHeadRow(m.trailOpts(w, h), w); row != "" {
+			last := -1
+			for i, r := range rows {
+				if lipgloss.Width(strings.TrimSpace(r)) > 0 {
+					last = i
+				}
+			}
+			if last >= 0 && last+2 < len(rows) {
+				rows[last+2] = row
+			}
+		}
 	}
 	return rows
 }
@@ -289,7 +335,7 @@ func (m *Model) readerTitle(w int) string {
 		right = m.anchorAt.Local().Format("15:04")
 		if m.anchorText != "" {
 			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
-			if note := clipQuestion(m.anchorText, room); room >= 8 && !strings.HasPrefix(name, strings.TrimSuffix(note, "…")) {
+			if note := clipQuestion(m.anchorText, room); room >= 8 && !strings.HasPrefix(name, strings.TrimSuffix(note, "…")) && !nameAndBracket(name, note) {
 				// The bracket clause whole or gone; clip marks the cut
 				// with …. And the clause goes when what survives the cut
 				// is the name already on the row: "fix the 401 on token

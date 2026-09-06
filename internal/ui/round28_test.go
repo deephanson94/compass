@@ -195,7 +195,9 @@ func TestAnOpenLaneIsJudgedByItsOwnFile(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneSubagents(), 120, 34)
 	col := strings.Join(m.boardColumn(sessionKey("porter"), rowFor(t, m, sessionKey("porter")), 37, 30), "\n")
-	for _, want := range []string{"◈3 out 20m · 2 silent 18m", "├─◍ Red-team the plugin", "├─◍ Review /auto-resume"} {
+	// At 37 cells the card borrows the header's form of the out clause to
+	// keep the lane back (#66): the silent clause is what this pins.
+	for _, want := range []string{"◈3 out · 2 silent 18m · 1 back", "├─◍ Red-team the plugin", "├─◍ Review /auto-resume"} {
 		if !strings.Contains(col, want) {
 			t.Errorf("the board column lacks %q:\n%s", want, col)
 		}

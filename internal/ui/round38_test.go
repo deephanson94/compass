@@ -295,7 +295,7 @@ func TestTheLeadsCardSaysBackAndTheDigestSaysNoneBack(t *testing.T) {
 	if !strings.Contains(view, "◈3 out 20m · 2 silent 18m · 1 back") {
 		t.Errorf("porter's card should count the lane back beside the three out:\n%s", view)
 	}
-	if !strings.Contains(view, "↳ 3 agents out, none back") || strings.Contains(view, "↳ 2 silent 18m") {
+	if !strings.Contains(view, "↳ 3 sent since, none back") || strings.Contains(view, "↳ 2 silent 18m") {
 		t.Errorf("the digest should keep none back under a row that says the silence:\n%s", view)
 	}
 }

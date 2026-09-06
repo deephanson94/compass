@@ -761,7 +761,7 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 		// the last row of the trail — so the header says what HEAD cannot:
 		// how the suite stands, what shipped, what is still out.
 		if parts := verdictPartsWith(tr, m.now, true, m.agentsFor(key)); len(parts) > 0 {
-			second = "    " + dimStyle.Render(joinFit(parts, w-4))
+			second = "    " + dimStyle.Render(fitWithBack(parts, w-4))
 		}
 	}
 	// The third row is the tag's row, always: the digest or the trace
@@ -1309,7 +1309,10 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
 		switch {
 		case out > 0 && back == 0:
-			lanes := fmt.Sprintf("↳ %d agents out, none back", out)
+			// "sent since": the digest counts the lanes dispatched after
+			// the look, and the card's "1 back" a row above counts them
+			// all — one word for two scopes on rows that touch (#66).
+			lanes := fmt.Sprintf("↳ %d sent since, none back", out)
 			if n, d, _, _ := lanesLive(m.agentsFor(key), openLanes(m.trails[key]), m.now); n > 0 && !strings.Contains(headTail(m.trails[key], m.now, true, m.agentsFor(key)), "silent") {
 				// The row above already counts the lanes out: the digest
 				// carries the one fact it does not, whole (#52) — and
@@ -1320,9 +1323,19 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 			}
 			parts = append(parts, lanes)
 		case out > 0:
-			parts = append(parts, fmt.Sprintf("↳ %d agents out · %d back", out, back))
+			parts = append(parts, fmt.Sprintf("↳ %d sent since · %d back", out, back))
 		default:
-			parts = append(parts, "↳ "+plural(back, "agent")+" back")
+			// "back" alone means a finding beneath (the help's own
+			// glossary): a lane that came back with nothing is "back,
+			// empty", the trail's word for it (#66).
+			switch empty := emptyLanesSince(m.trails[key], seen); {
+			case empty == back:
+				parts = append(parts, fmt.Sprintf("↳ %d back, empty", back))
+			case empty > 0:
+				parts = append(parts, fmt.Sprintf("↳ %d back · %d empty", back, empty))
+			default:
+				parts = append(parts, "↳ "+plural(back, "agent")+" back")
+			}
 		}
 		parts = append(parts, plural(legs, "new leg"))
 	} else {
@@ -1340,6 +1353,47 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 	}
 	parts = append(parts, "looked "+state.ShortDuration(m.now.Sub(seen))+" ago")
 	return dimStyle.Render(joinFit(parts, w))
+}
+
+// fitWithBack joins the card's clauses to w — and where that sheds the
+// lanes-back clause, tries the header's own form of the out clause first
+// (`◈3 out · 2 silent 18m`, the dispatch age the lane rows carry anyway):
+// at 120 the clause was a single cell short, and a lane back with a
+// finding is the fact nowhere else on the column (#66).
+func fitWithBack(parts []string, w int) string {
+	fit := joinFit(parts, w)
+	back := -1
+	for i, p := range parts {
+		if i > 0 && strings.HasSuffix(p, " back") || strings.Contains(p, " back · ") {
+			back = i
+		}
+	}
+	if back < 0 || strings.Contains(fit, parts[back]) || !strings.HasPrefix(parts[0], "◈") {
+		return fit
+	}
+	short := append([]string(nil), parts...)
+	if head := strings.SplitN(short[0], " · ", 2); strings.HasPrefix(head[0], "◈") {
+		if f := strings.Fields(head[0]); len(f) == 3 && f[1] == "out" {
+			head[0] = f[0] + " out"
+			short[0] = strings.Join(head, " · ")
+		}
+	}
+	if try := joinFit(short, w); strings.Contains(try, short[back]) {
+		return try
+	}
+	return fit
+}
+
+// emptyLanesSince counts the lanes dispatched after the look that came
+// back with no report.
+func emptyLanesSince(tr journey.Trail, looked time.Time) int {
+	n := 0
+	for _, b := range tr.Branches {
+		if b.Start.After(looked) && b.Done && strings.TrimSpace(b.Report) == "" {
+			n++
+		}
+	}
+	return n
 }
 
 // lanesSince counts the lanes dispatched after the look: still out, and
