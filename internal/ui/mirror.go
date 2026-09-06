@@ -96,6 +96,7 @@ func (m *Model) transcriptBody(w, h int) []string {
 		Width: w, Height: h, Scroll: readerEnd,
 		Unfolded: m.unfolded, Anchor: -1,
 		Now: m.now, CWD: m.readerCWD(), // the same document the reader draws, clocks and all
+		Lanes: m.laneClauses(),
 	})
 	if strings.TrimSpace(frame) == "" {
 		return m.transcriptFacts(w)

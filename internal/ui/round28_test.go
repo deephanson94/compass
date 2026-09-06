@@ -238,7 +238,7 @@ func TestTabOnALaneReadsTheAgentsOwnConversation(t *testing.T) {
 			t.Fatalf("at %d Tab on the lane did not open its conversation: level %d lane %q", w, m.level, m.readerLane)
 		}
 		view := ansi.Strip(m.View())
-		for _, want := range []string{"◍ Red-team the plugin architectu", "the agent's own conversation", "❯ Red-team the plugin architecture", "Bash(pytest -x tests/plugins)"} {
+		for _, want := range []string{"◍ Red-team the plugin architectu", "the agent's own conversation", "◈ Red-team the plugin architecture", "Bash(pytest -x tests/plugins)"} {
 			if !strings.Contains(view, want) {
 				t.Errorf("at %d the lane's reader lacks %q:\n%s", w, want, view)
 			}

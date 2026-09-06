@@ -55,6 +55,11 @@ type ReaderOpts struct {
 	// they walk the newest legs.
 	Anchor int
 
+	// Lane says the document is an agent's own conversation: its first
+	// turn is the lead's assignment, and wears the lane's glyph rather
+	// than ❯ — nobody typed it (#55).
+	Lane bool
+
 	// Lanes is what each open Agent call's own transcript says, by the
 	// call's id — "◍ silent 12m", "wrote 40s ago" — so the stub under the
 	// call is judged, not just counted (#49). Nil when none was read.
@@ -238,6 +243,8 @@ type docBuilder struct {
 	cwd   string
 	now   time.Time
 	lanes map[string]string // an open Agent call's own verdict, by call id (#49)
+	lane  bool              // an agent's own conversation (#55)
+	said_ int               // human turns drawn so far
 }
 
 func (d *docBuilder) push(text string, kind readerKind, event int, at time.Time) {
@@ -275,7 +282,7 @@ func (d *docBuilder) last() readerKind {
 // readerDoc flattens the events into rows. Sidechains are skipped: a subagent's
 // own conversation is the trail's branch lane, not this document's business.
 func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
-	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now, lanes: o.Lanes}
+	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now, lanes: o.Lanes, lane: o.Lane}
 	unfolded := o.Unfolded
 	answered := map[string]bool{}
 	for _, ev := range events {
@@ -396,11 +403,16 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 // read as the chapters they are and `[ ]` lands on a moment with a name.
 func (d *docBuilder) said(event int, at time.Time, text string) {
 	d.gap()
-	rows := wrapPrefix(text, glyphSaid+" ", "  ", d.measure())
+	glyph := glyphSaid
+	if d.lane && d.said_ == 0 {
+		glyph = glyphBranch // the lead's assignment, not the person's turn
+	}
+	d.said_++
+	rows := wrapPrefix(text, glyph+" ", "  ", d.measure())
 	if !at.IsZero() && d.width-len([]rune(rows[0]))-2 < 5 {
 		// A turn keeps its clock: the first row gives the clock its room
 		// rather than losing it to the wrap, or to a line that just fits.
-		rows = wrapPrefix(text, glyphSaid+" ", "  ", min(d.measure(), d.width)-7)
+		rows = wrapPrefix(text, glyph+" ", "  ", min(d.measure(), d.width)-7)
 	}
 	for i, row := range rows {
 		if i == 0 && !at.IsZero() {

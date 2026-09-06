@@ -26,7 +26,7 @@ func (m *Model) doc(width int) []readerLine {
 	if c.valid && c.n == len(events) && c.w == width && c.ver == m.docVer && c.cwd == cwd && c.lane == m.readerLane && c.lanes == lanes {
 		return c.lines
 	}
-	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now, Lanes: m.laneClauses()})
+	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now, Lanes: m.laneClauses(), Lane: m.readerLane != ""})
 	m.docCache = readerCache{lines: lines, valid: true, n: len(events), w: width, ver: m.docVer, cwd: cwd, lane: m.readerLane, lanes: lanes}
 	return lines
 }
@@ -122,13 +122,21 @@ func (m *Model) readerColumn(w, h int) []string {
 			}
 		}
 		rows = append(rows, dimStyle.Render(clip(empty, w)), "")
-		return append(rows, textStyle.Render(clip(glyphBranch+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
+		rows = append(rows, textStyle.Render(clip(glyphBranch+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
+		for len(rows) < h {
+			rows = append(rows, "") // the gutter runs the panel's height, as every other page
+		}
+		return rows
 	}
 	if h > 2 && len(events) == 0 && len(m.trail.Legs) > 0 {
 		// The trail is in hand and the conversation is not yet: it is being
 		// read, not absent. "nothing to read yet … as it happens" claimed a
 		// session with a day of legs had not started.
-		return append(rows, dimStyle.Render(clip(glyphSaid+" reading the transcript…", w)))
+		rows = append(rows, dimStyle.Render(clip(glyphSaid+" reading the transcript…", w)))
+		for len(rows) < h {
+			rows = append(rows, "")
+		}
+		return rows
 	}
 	if h > 2 {
 		frame := RenderReader(events, ReaderOpts{
@@ -141,6 +149,7 @@ func (m *Model) readerColumn(w, h int) []string {
 			CWD:      m.readerCWD(),
 			Now:      m.now,
 			Lanes:    m.laneClauses(),
+			Lane:     m.readerLane != "",
 		})
 		rows = append(rows, strings.Split(frame, "\n")...)
 	}
