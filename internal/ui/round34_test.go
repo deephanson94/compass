@@ -134,9 +134,47 @@ func TestTheNarrowHelpKeepsGAndTheLegendBindsItsSeparators(t *testing.T) {
 			t.Errorf("the board's gloss is clipped at the legend's width: %q", ansi.Strip(l))
 		}
 	}
-	if got := clip("Bash: go test ./... -count=3", 20); strings.HasSuffix(got, "...…") || strings.HasSuffix(got, "./…") {
-		t.Errorf("clip marks a token ending in dots: %q", got)
+	for _, w := range []int{17, 18, 20, 21} {
+		if got := clip("Bash: go test ./... -count=3", w); strings.HasSuffix(got, "...…") || strings.HasSuffix(got, "./…") || strings.HasSuffix(got, "/…") {
+			t.Errorf("clip(%d) marks a token ending in dots: %q", w, got)
+		}
+	}
+	// A number whole on screen stays (#53): only a cut inside it backs out.
+	if got := clip("Please run /login · API Error: 403 quota is exhausted", 35); !strings.Contains(got, "403") {
+		t.Errorf("clip walked a whole status off the row: %q", got)
+	}
+	if got := clip("took 4.03s to run the suite", 8); strings.HasSuffix(got, ".…") {
+		t.Errorf("the number guard handed back a trailing dot: %q", got)
 	}
 	_ = state.Working
 	_ = time.Second
+}
+
+// A lane row at the top of a pinned viewport stays: drawing its leg over
+// it orphaned the finding beneath (#58).
+func TestALaneRowAtTheFoldStays(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSubagents(), 80, 24)
+	pressTab(m)
+	tr := m.trail
+	doc, _ := trailDoc(tr, m.trailOpts(43, 40))
+	lane := -1
+	for i, l := range doc {
+		if strings.Contains(ansi.Strip(l), "├─◈ Score encoder") {
+			lane = i
+		}
+	}
+	if lane < 0 {
+		t.Fatalf("no returned lane in the trail")
+	}
+	// A pinned viewport whose first row is the lane: the height that puts
+	// it there.
+	for h := 4; h < len(doc); h++ {
+		rows := trailRows(tr, m.trailOpts(43, h))
+		if len(rows) > 0 && len(doc)-h == lane {
+			if first := ansi.Strip(rows[0]); !strings.Contains(first, "├─◈ Score encoder") {
+				t.Errorf("at height %d the lane at the fold was drawn over: %q", h, first)
+			}
+		}
+	}
 }

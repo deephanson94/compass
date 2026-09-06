@@ -175,30 +175,35 @@ func clip(s string, w int) string {
 		used += cw
 		kept++
 	}
-	out := b.String()
-	if kept < len(runes) && kept > 0 && runes[kept-1] == '.' {
-		// "go test ./...…": a mark after a dot reads as more of the
-		// token it cut. The token goes whole instead (#58).
-		i := kept
-		for i > 0 && runes[i-1] != ' ' {
-			i--
-		}
-		if i > 0 {
-			kept = i
-			out = string(runes[:i])
-		}
-	}
-	if kept < len(runes) && kept > 0 && isDigit(runes[kept-1]) {
+	if kept < len(runes) && kept > 0 && isDigit(runes[kept-1]) && isDigit(runes[kept]) {
 		// Never cut a number in half: "API Error: 4…" read as a one-digit
 		// status, and 403 against 429 is the difference the row is for.
-		// The whole number goes instead (#53).
-		i := kept
-		for i > 0 && isDigit(runes[i-1]) {
+		// The whole number goes instead (#53) — and only then: a number
+		// whole on screen stays, however the row ends after it (#59).
+		for kept > 0 && isDigit(runes[kept-1]) {
+			kept--
+		}
+	}
+	out := strings.TrimRight(string(runes[:kept]), " ·(") // the separator, a bracket, and the space they stood on
+	for {
+		// "go test ./...…", "go test ./…": a mark after a dot or a slash
+		// reads as more of the token it cut, whichever rune the cut fell
+		// on. The token goes whole instead, and so does whatever the
+		// trim then leaves the row ending on (#58, #59).
+		t := []rune(out)
+		if len(t) == 0 || (t[len(t)-1] != '.' && t[len(t)-1] != '/') {
+			break
+		}
+		i := len(t)
+		for i > 0 && t[i-1] != ' ' {
 			i--
 		}
-		out = string(runes[:i])
+		if i == 0 {
+			break
+		}
+		out = strings.TrimRight(string(t[:i]), " ·(")
 	}
-	return strings.TrimRight(out, " ·(") + "…" // the separator, a bracket, and the space they stood on
+	return out + "…"
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }

@@ -225,11 +225,6 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 
 // isDetailRow recognises a Lv2 child row by its hanger: "│  ├", "│  └" or
 // their unrailed forms under HEAD.
-// isLaneRow recognises a subagent lane's row: "├─◈ …", which hangs under a
-// leg the same way a detail row does.
-func isLaneRow(line string) bool {
-	return strings.HasPrefix(ansi.Strip(line), railFork)
-}
 
 // isCursorRow says whether the trail's cursor stands on this row.
 func isCursorRow(line string) bool {
