@@ -801,10 +801,10 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 			word = " · " + strings.SplitN(tool, " · ", 2)[0]
 		}
 		if pane, ok := m.panes[s.Info.Key()]; ok && s.Live && pane.Target != "" {
-			return dimStyle.Render(clip(mirrorMark+" "+pane.Target+word+" · "+branchOf(s.Info), w))
+			return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+mirrorMark+" "+pane.Target, " · ")+" · "+branchOf(s.Info), w))
 		}
 		if s.Live {
-			return dimStyle.Render(clip("no pane"+word+" · "+branchOf(s.Info), w))
+			return dimStyle.Render(clip(strings.TrimPrefix(word+" · no pane", " · ")+" · "+branchOf(s.Info), w))
 		}
 		return dimStyle.Render(clip(branchOf(s.Info), w))
 	}

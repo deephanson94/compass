@@ -523,8 +523,8 @@ func (m *Model) refresh() tea.Cmd {
 			}
 			for _, b := range tr.Branches {
 				path, ok := files[b.ToolUseID]
-				if !ok || b.Done {
-					continue
+				if !ok {
+					continue // a returned lane's file is read too: its conversation is the finding's (#54)
 				}
 				if msg.agents == nil {
 					msg.agents = map[string]map[string]agentLive{}
@@ -2456,18 +2456,22 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	if pane, ok := m.selectedPane(); ok {
 		target = pane.Target
 	}
-	title := " reply to " + who + name
+	toolWord := ""
 	if s, ok := m.selected(); ok {
 		// The one panel that types into another CLI says which (#53):
 		// the tool's word, in the header's own form (#46).
 		if tool := m.toolTag(s); tool != "" && strings.SplitN(tool, " · ", 2)[0] != shortModel(s.Info.Model) {
-			title += " · " + strings.SplitN(tool, " · ", 2)[0]
+			toolWord = " · " + strings.SplitN(tool, " · ", 2)[0]
 		}
 	}
-	if target != "" {
-		title += " · " + mirrorMark + " " + target
+	head := func(tool string) string {
+		title := " reply to " + who + name + tool
+		if target != "" {
+			title += " · " + mirrorMark + " " + target
+		}
+		return title + " "
 	}
-	title += " "
+	title := head(toolWord)
 
 	body := replyPanelMax
 	if max := inner - 8; body > max {
@@ -2482,6 +2486,13 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	}
 	if body < 20 {
 		body = 20
+	}
+	if lipgloss.Width(title) > body-2 && toolWord != "" {
+		// The head sheds the tool before the pane, §4's own order: the
+		// pane is what the write goes to, and "⌁ dev:2…" is a legal
+		// target that is not this one (#54). The header two rows up
+		// still says the tool.
+		title = head("")
 	}
 	var rows []readerLine
 	if ok {

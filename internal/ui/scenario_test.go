@@ -558,6 +558,8 @@ func sceneSubagents() scene {
 	// the reviewer has written nothing, the red-teamer has been silent
 	// twelve minutes on a pytest — and its conversation is there to read.
 	agents := map[string]map[string]agentLive{sessionKey("porter"): {
+		"a1": {Wrote: n.Add(-161 * time.Minute), Snap: state.Snapshot{State: state.Idle, Reason: "turn complete", Activity: "idle"},
+			Events: agentEvents(n.Add(-165*time.Minute), "Score encoder gates vs oracle defects")},
 		"a2": {Wrote: n.Add(-40 * time.Second), Snap: state.Snapshot{State: state.Working, Reason: "tool call in flight", Activity: "Bash: python dla.py --model moe_by_andy --split dx6"}},
 		"a3": {},
 		"a4": {Wrote: n.Add(-12 * time.Minute), Snap: state.Snapshot{State: state.Stuck, Reason: "no output for 12m mid-turn", Activity: "Bash: pytest -x tests/plugins"},
@@ -587,7 +589,7 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"porter", "harness", "redteam", "cli"}, []string{"tinker:0.0", "harness:0.0", "harness:1.0", "tools:0.0"})
-	return scene{name: "subagents", extra: []string{"esc", "esc", "tab", "k", "tab"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
 }
 
 // Two very long sessions — a day of work each, every class, dozens of prompts

@@ -112,16 +112,17 @@ func (m *Model) readerColumn(w, h int) []string {
 		// An agent whose file was read and holds no turn: the reader
 		// says so, with the lead's assignment as the one thing known,
 		// and how long the file has been empty (#53).
+		// One clock, the title's: "· 18m out" is the silence of a file
+		// that has nothing in it. The assignment wears the lane's own
+		// glyph, not ❯ — the person did not type it.
 		empty := "◍ the agent has written nothing since it was sent"
 		if a, has := m.agentsFor(m.selectedKey)[br.ToolUseID]; has {
-			if quiet, hung := laneSilence(a, br, m.now); !hung {
-				empty = "⋯ the agent has written nothing yet · sent " + state.ShortDuration(quiet) + " ago"
-			} else {
-				empty += " · silent " + state.ShortDuration(quiet)
+			if _, hung := laneSilence(a, br, m.now); !hung {
+				empty = "⋯ the agent has written nothing yet"
 			}
 		}
 		rows = append(rows, dimStyle.Render(clip(empty, w)), "")
-		return append(rows, textStyle.Render(clip(glyphSaid+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
+		return append(rows, textStyle.Render(clip(glyphBranch+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
 	}
 	if h > 2 && len(events) == 0 && len(m.trail.Legs) > 0 {
 		// The trail is in hand and the conversation is not yet: it is being
@@ -241,11 +242,27 @@ func (m *Model) readerTitle(w int) string {
 	if br, ok := m.laneOpen(); ok && !m.searching && m.query == "" {
 		// The lane as drawn, led by its glyph so the title cannot be read
 		// as the lead's own conversation, clocked by the lane (#49).
-		glyph := glyphBranch
-		if a, ok := m.agentsFor(m.selectedKey)[br.ToolUseID]; ok && a.silent() {
-			glyph = fleet.Glyph(state.Stuck)
+		glyph, clock := glyphBranch, relAge(m.now, br.Start)+" out"
+		switch {
+		case br.Done:
+			// Back: the lane's own mark and when, as the trail draws it.
+			back := br.End
+			if back.IsZero() {
+				back = br.Start
+			}
+			glyph, clock = branchDone, relAge(m.now, back)+" ago"
+			if strings.TrimSpace(br.Report) == "" {
+				glyph = branchEmpty
+			}
+			right = glyph + " " + branchName(br.Label) + " · " + clock
+		default:
+			if a, ok := m.agentsFor(m.selectedKey)[br.ToolUseID]; ok {
+				if _, hung := laneSilence(a, br, m.now); hung {
+					glyph = fleet.Glyph(state.Stuck)
+				}
+			}
+			right = glyph + " " + branchName(br.Label) + " · " + clock
 		}
-		right = glyph + " " + branchName(br.Label) + " · " + relAge(m.now, br.Start) + " out"
 	}
 	switch {
 	case right != "":
@@ -283,7 +300,7 @@ func (m *Model) readerTitle(w int) string {
 	if br, ok := m.laneOpen(); ok && lipgloss.Width(right) > room && !m.searching && m.query == "" {
 		// The lane's own title, clipped at the label: the glyph and the
 		// clock are what tell it from the lead's.
-		glyph, clock := right[:strings.Index(right, " ")], " · "+relAge(m.now, br.Start)+" out"
+		glyph, clock := right[:strings.Index(right, " ")], right[strings.LastIndex(right, " · "):]
 		if keep := room - lipgloss.Width(glyph) - 1 - lipgloss.Width(clock); keep >= 8 {
 			right = glyph + " " + clip(branchName(br.Label), keep) + clock
 		} else {

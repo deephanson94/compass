@@ -589,7 +589,11 @@ func (d *docBuilder) late(event int, at time.Time, use transcript.ToolUse, cwd s
 func (d *docBuilder) result(event int, at time.Time, use transcript.ToolUse, res transcript.ToolResult, open bool, cwd string) {
 	lines := resultBody(res.Text)
 	if len(lines) == 0 {
-		d.push(resultIndent+glyphResult+" "+clip("no output", d.width-len(resultIndent)-2), readerBody, event, at)
+		word := "no output"
+		if use.Name == "Agent" {
+			word = branchEmpty + " came back with no report" // the trail's own words for the lane (#54)
+		}
+		d.push(resultIndent+glyphResult+" "+clip(word, d.width-len(resultIndent)-2), readerBody, event, at)
 		return
 	}
 

@@ -1677,7 +1677,7 @@ func (m *Model) sessionCard(w int) []string {
 		right = ""
 	}
 	if n := m.legsAbove(); n > 0 {
-		right = strings.TrimSpace(fmt.Sprintf("↑ %d legs  %s", n, right))
+		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
 	if !m.trailPinned {
 		right = strings.TrimSpace("↓ G  " + right)
@@ -2018,7 +2018,7 @@ func (m *Model) trailTitle(w int) string {
 	// because the hunt for an hour is exactly when the count matters.
 	right := level
 	if n := m.legsAbove(); n > 0 {
-		right = fmt.Sprintf("↑ %d legs  %s", n, right)
+		right = fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right)
 	}
 	if !m.trailPinned {
 		right = "↓ G  " + right
