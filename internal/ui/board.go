@@ -754,21 +754,7 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	// where none does, the last rung (#59): a 120 column dropped
 	// "· 0s ago" to draw a pane the header and footer already named,
 	// while the 152 column beside it kept the clock.
-	tag := ""
-	if ladder := m.tagLadder(s); len(ladder) > 0 {
-		full := m.boardDelta(key, s, w)
-		tag = ladder[len(ladder)-1]
-		for _, c := range ladder {
-			if full == "" && lipgloss.Width(c) <= w {
-				tag = c
-				break
-			}
-			if m.boardDelta(key, s, w-lipgloss.Width(c)-2) == full {
-				tag = c
-				break
-			}
-		}
-	}
+	tag := tagBesideDigest(m.tagLadder(s), w, func(room int) string { return m.boardDelta(key, s, room) })
 	room := w
 	if tag != "" {
 		room = w - lipgloss.Width(tag) - 2
@@ -1608,6 +1594,39 @@ func (m *Model) tagLadder(s fleet.Session) []string {
 		}
 	}
 	return out
+}
+
+// tagBesideDigest picks the rung a row w wide draws beside its digest:
+// the longest that costs the digest no clause; else the longest that
+// draws the digest the shortest rung would; else the last (#59, #60). A
+// rule that fell straight to the last rung threw the tool word away on
+// both opening boards for a digest the longer rung drew the same.
+func tagBesideDigest(ladder []string, w int, digest func(room int) string) string {
+	if len(ladder) == 0 {
+		return ""
+	}
+	full := digest(w)
+	if full == "" {
+		for _, c := range ladder {
+			if lipgloss.Width(c) <= w {
+				return c
+			}
+		}
+		return ladder[len(ladder)-1]
+	}
+	for _, c := range ladder {
+		if digest(w-lipgloss.Width(c)-2) == full {
+			return c
+		}
+	}
+	last := ladder[len(ladder)-1]
+	least := digest(w - lipgloss.Width(last) - 2)
+	for _, c := range ladder {
+		if digest(w-lipgloss.Width(c)-2) == least {
+			return c
+		}
+	}
+	return last
 }
 
 // tagFor picks the tag a row w wide draws beside a clause that needs

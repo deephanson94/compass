@@ -2490,10 +2490,17 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	if max := inner - 8; body > max {
 		body = max
 	}
-	if fw, _, _ := m.layout(inner); fw > 0 && !m.boardShown() && m.level < levelReader {
+	if fw, mw, _ := m.layout(inner); fw > 0 && !m.boardShown() && m.level < levelReader {
 		// Beside a fleet list the panel stands over the trail and leaves
 		// the list legible; at eighty columns it was standing on both.
 		if max := inner - fw - gutterWidth - 6; body > max {
+			body = max
+		}
+	} else if fw == 0 && mw > 0 && m.sessionView() {
+		// In the session view the panel stands over the companion and
+		// never over the trail beside it: at 120 a 68-cell box over a
+		// 64-cell column took the rail, HEAD's clock and the band (#60).
+		if max := mw - 8; body > max { // the box is the body and its frame, three cells off the rail
 			body = max
 		}
 	}
@@ -3141,8 +3148,8 @@ func (m *Model) footerWith(keys string, w int) string {
 	// keys. `? help` goes last of all (#32): only when the note's first
 	// clause alone cannot stand beside it.
 	minimal := note
-	if m.chapterNote() && (strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt)) {
-		minimal = forms[len(forms)-1]
+	if m.chapterNote() && (strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphPrompt) || strings.HasPrefix(note, glyphBranch)) {
+		minimal = forms[len(forms)-1] // the lane reader's note too (#60): its quote goes before the keys
 	}
 	if !fits(minimal) {
 		keys = shed(minimal, " · ? help")

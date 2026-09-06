@@ -755,15 +755,19 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		// The word before the pane here: the group header two rows up
 		// already names the tmux session, and `enter` attaches by the
 		// row's own pane whatever the row shows.
+		var ladder []string
+		seen := map[string]bool{}
 		for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), joinTag(word, short), word, pane, short} {
-			if c != "" && w-4-lipgloss.Width(c)-2 >= 16 {
-				tag = c
-				break
-			}
-			if c != "" && tag == "" && (c == short || c == word || (pane == "" && c == tool)) {
-				tag = c // the shortest form stands when none leaves the floor
+			if c != "" && !seen[c] {
+				ladder, seen[c] = append(ladder, c), true
 			}
 		}
+		tag = tagBesideDigest(ladder, w-4, func(room int) string {
+			if room < 12 {
+				return ""
+			}
+			return m.boardDelta(s.Info.Key(), s, room)
+		})
 		room := w - 4
 		if tag != "" {
 			room -= lipgloss.Width(tag) + 2

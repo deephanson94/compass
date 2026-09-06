@@ -160,8 +160,10 @@ func laneHead(a agentLive, b journey.Branch, ok bool, now time.Time) (glyph, tex
 		return "", "", ""
 	}
 	if a.Wrote.IsZero() {
-		if quiet, hung := laneSilence(a, b, now); hung {
-			return "◍", "nothing written", "silent " + state.ShortDuration(quiet)
+		// The lane's own row says how long it has been out, and an empty
+		// file's silence is that same figure: said once (#60).
+		if _, hung := laneSilence(a, b, now); hung {
+			return "◍", "nothing written since it was sent", ""
 		}
 		return "⋯", "nothing written yet", ""
 	}
