@@ -2433,7 +2433,12 @@ func overlay(rows, panel []string, left, top int) {
 					rest = strings.Repeat(" ", lipgloss.Width(rest))
 				}
 			}
-			after = "…" + rest
+			if strings.TrimSpace(ansi.Strip(rest)) != "" {
+				// A mark for a peek with something in it: when the rule
+				// above blanked the whole peek, the left mark already says
+				// the row was cut (#64).
+				after = "…" + rest
+			}
 		}
 		// No paint past the panel: a row that ended in the box's own
 		// padding stood a cell into the terminal's margin (#63).

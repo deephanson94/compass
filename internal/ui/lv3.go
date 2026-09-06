@@ -289,8 +289,13 @@ func (m *Model) readerTitle(w int) string {
 		right = m.anchorAt.Local().Format("15:04")
 		if m.anchorText != "" {
 			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
-			if room >= 8 {
-				right = clipQuestion(m.anchorText, room) + " · " + right // the bracket clause whole or gone; clip marks the cut with …
+			if note := clipQuestion(m.anchorText, room); room >= 8 && !strings.HasPrefix(name, strings.TrimSuffix(note, "…")) {
+				// The bracket clause whole or gone; clip marks the cut
+				// with …. And the clause goes when what survives the cut
+				// is the name already on the row: "fix the 401 on token
+				// refresh (commit)" cut before its bracket said the
+				// title's name twice and the leg never (#64).
+				right = note + " · " + right
 			}
 		}
 	}

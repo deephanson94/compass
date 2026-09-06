@@ -147,3 +147,51 @@ func TestTheOverlayPaintsNothingPastThePanel(t *testing.T) {
 		}
 	}
 }
+
+// The reader's title never says its name twice: the anchored row's clause
+// goes when what survives its cut is the name already on the row (#64).
+func TestTheReaderTitleNeverRepeatsItsName(t *testing.T) {
+	forceASCII(t)
+	for _, w := range []int{80, 120} {
+		m := sceneModel(sceneSecondDay(), w, 34)
+		pressTab(m)
+		press(m, "2")
+		pressTab(m)
+		pressTab(m)
+		title := ansi.Strip(m.readerTitle(w - 2))
+		name := "fix the 401 on token refresh"
+		if strings.Count(title, name) != 1 {
+			t.Errorf("at %d the reader's title = %q", w, title)
+		}
+	}
+}
+
+// A panel titled TRAIL wears the help's word for its level, `legs`, at
+// every width; `session` is the card's word alone (#64).
+func TestTheTrailTitleWearsLegsAtEveryWidth(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	pressTab(m)
+	press(m, "2")
+	pressTab(m)
+	if title := ansi.Strip(m.trailTitle(50)); !strings.Contains(title, "[legs]") || strings.Contains(title, "[session]") {
+		t.Errorf("the archive's trail title at 120 = %q", title)
+	}
+	one := sceneModel(sceneSecondDay(), 120, 34)
+	if one.level != levelWaypoints {
+		t.Fatalf("a fleet of one opens on its card, level %d", one.level)
+	}
+	if card := ansi.Strip(one.sessionCard(52)[0]); !strings.Contains(card, "[session]") {
+		t.Errorf("the card keeps its own word: %q", card)
+	}
+}
+
+// The overlay draws no right-hand mark when the peek rule blanked the
+// whole peek (#64).
+func TestTheOverlayDrawsNoMarkForAnEmptyPeek(t *testing.T) {
+	rows := []string{strings.Repeat("x", 30)}
+	overlay(rows, []string{"┌──┐"}, 10, 0) // the peek starts inside one token with no space after it: blanked whole
+	if strings.Count(ansi.Strip(rows[0]), "…") != 1 {
+		t.Errorf("an empty peek should draw no mark: %q", rows[0])
+	}
+}

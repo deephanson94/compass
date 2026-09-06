@@ -2028,10 +2028,11 @@ func (m *Model) trailTitle(w int) string {
 			level = "" // the reader's bar carries the word on a deck with a board
 		}
 	case m.level >= levelWaypoints:
+		// The help's word for this level is `legs` at every width
+		// (`trail → legs → reader`); `session` is the card's word, where
+		// the row is the session, and read wrong on a panel titled
+		// TRAIL (#20, #64).
 		level = "[legs]"
-		if m.boardFits() {
-			level = "[session]" // the board's words, card or no card
-		}
 	}
 	// Scrolled off the present, the title says so: the trail is no longer
 	// showing the newest work, and `G` is the way back to it.
