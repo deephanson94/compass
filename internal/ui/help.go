@@ -424,7 +424,8 @@ func helpLegendRaw() []string {
 		// `↪` is a fleet row's mark, and its gloss rides the fleet's row:
 		// the 120x34 help drew the mark on its board and cut the trail row
 		// that defined it (#62).
-		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened · ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
+		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
+		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent  ◍ silent agent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
@@ -540,7 +541,10 @@ func helpLegendFill(core, full []string, rows int) []string {
 	// rules and counts, the loop, the trace and the read-line — and the
 	// sentences about the panel last.
 	var order []string
-	for _, want := range []string{"you\u00a0were\u00a0here", "⌁ dev", "⟲ context compacted", "↪ sent", "2nd\u00a0failure", "on\u00a0you", "board:", "▌", "compass observes"} {
+	// The trace before the compaction: `↪` is drawn on the fleet rows of
+	// every scene that replied, where `⟲` rides the trails that compacted
+	// — the mark on the panel the person is looking at comes back first (#63).
+	for _, want := range []string{"you\u00a0were\u00a0here", "⌁ dev", "↪ sent", "⟲ context compacted", "2nd\u00a0failure", "on\u00a0you", "board:", "▌", "compass observes"} {
 		for _, l := range full {
 			if strings.Contains(l, want) && !kept[l] {
 				order = append(order, l)

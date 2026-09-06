@@ -190,7 +190,10 @@ func clip(s string, w int) string {
 	// "go test ./..." is "go test…" — never the token, which cost a
 	// wider column the name of the hung run (#58, #59, #61). The
 	// separator, a bracket and the spaces they stood on go with it.
-	return strings.TrimRight(string(runes[:kept]), " ·(./") + "…"
+	// A dash that stands alone is a separator too ("porter_tui —…"
+	// promised a phrase), where a hyphen inside a token is the token's
+	// (`--all`, `-run`): the spaced dashes go, the hyphen stays (#63).
+	return strings.TrimRight(string(runes[:kept]), " ·(./—–") + "…"
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }

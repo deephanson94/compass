@@ -1,7 +1,7 @@
  ⌂ compass · 2 api                                      ▲1 2m  ●1  ○1  1 unread
  ──────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · live                    │  TRAIL · api                        [trail]
+ ▌FLEET · live            [fleet] │  TRAIL · api
                                   │
   ⌁ dev                           │ ◉ "fix the 401 bug"                 38m ago
  ▸2 ● api                      3m │ ╷

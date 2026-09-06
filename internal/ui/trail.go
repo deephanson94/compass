@@ -998,14 +998,17 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 		badge, badgeW = "", 0
 		labelWidth = width - trailPrefixWidth - 1 - len([]rune(age))
 	}
-	if labelWidth < trailMinLabel && l.Current && strings.Contains(age, " · ") {
+	if labelWidth < len([]rune(label)) && l.Current && strings.Contains(age, " · ") {
 		// HEAD's figure can be a sentence — "◈3 out 20m · quiet 15m". A
-		// narrow column keeps the label and the first clause: a row that
-		// says what it is doing and that agents are out beats one that
-		// says how long, with no name. (The person reading the real thing
-		// wanted the name.)
+		// column that would cut the label keeps the label and the first
+		// clause: a row that says what it is doing and that agents are
+		// out beats one that says how long, with no name. (The person
+		// reading the real thing wanted the name.) The second half is on
+		// the card and the digest already; the name is nowhere else
+		// (#51, #63) — so it yields whenever the label is being cut, not
+		// only when six cells were left of it.
 		first := strings.SplitN(age, " · ", 2)[0]
-		if w := width - trailPrefixWidth - 1 - len([]rune(first)); w >= trailMinLabel {
+		if w := width - trailPrefixWidth - 1 - len([]rune(first)) - badgeW; w > labelWidth && w >= trailMinLabel {
 			age, labelWidth = first, w
 		}
 	}
@@ -1699,8 +1702,8 @@ func (m *Model) sessionCard(w int) []string {
 	// One session on screen: the fleet's selection arrow says nothing here.
 	first := m.titleMark(panelTrail) + strings.Replace(hdr[0], "▸", " ", 1)
 	gap := w - lipgloss.Width(first) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+	if gap < 1 && right != "" {
+		gap = 1 // the cell of air before the marker — and only before one: it pushed the rule a cell at Lv3 (#63)
 	}
 	first += strings.Repeat(" ", gap) + dimStyle.Render(right)
 	card := []string{first, m.cardSecond(w)}
@@ -2014,7 +2017,10 @@ func (m *Model) trailTitle(w int) string {
 			}
 		}
 	}
-	level := "[trail]"
+	// At Lv1 the keys are in the fleet, and the fleet's title wears the
+	// word (#20, #63): a bracket on the trail while the mark was on the
+	// fleet pointed at two panels.
+	level := ""
 	switch {
 	case m.level >= levelReader:
 		level = "[reader]"
@@ -2034,10 +2040,10 @@ func (m *Model) trailTitle(w int) string {
 	// because the hunt for an hour is exactly when the count matters.
 	right := level
 	if n := m.legsAbove(); n > 0 {
-		right = fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right)
+		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
 	if !m.trailPinned {
-		right = "↓ G  " + right
+		right = strings.TrimSpace("↓ G  " + right)
 	}
 	mark := m.titleMark(panelTrail)
 	body := w - 1

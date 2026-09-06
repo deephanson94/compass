@@ -38,9 +38,20 @@ func TestTheCardSaysWhereTheKeysAre(t *testing.T) {
 
 	// And the narrow deck, which has no board, names its own depths.
 	n := boardModel(100, 30)
-	for _, want := range []string{"[trail]", "[legs]", "[reader]"} {
+	// At Lv1 the keys are in the fleet, and the fleet's title says so (#63).
+	if got := ansi.Strip(n.fleetColumn(40, 5)[0]); !strings.Contains(got, "[fleet]") {
+		t.Errorf("want [fleet] on the fleet's title at Lv1: %q", got)
+	}
+	if got := n.trailTitle(60); strings.Contains(got, "[") {
+		t.Errorf("the trail wears no bracket while the keys are in the fleet: %q", got)
+	}
+	pressTab(n)
+	for _, want := range []string{"[legs]", "[reader]"} {
 		if got := n.trailTitle(60); !strings.Contains(got, want) {
 			t.Errorf("want %q in the title: %q", want, got)
+		}
+		if got := ansi.Strip(n.fleetColumn(40, 5)[0]); strings.Contains(got, "[fleet]") {
+			t.Errorf("the fleet's title keeps no bracket once the keys have left it: %q", got)
 		}
 		pressTab(n)
 	}

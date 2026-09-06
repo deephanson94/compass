@@ -2435,7 +2435,9 @@ func overlay(rows, panel []string, left, top int) {
 			}
 			after = "…" + rest
 		}
-		rows[top+i] = before + pad(p, pw) + after
+		// No paint past the panel: a row that ended in the box's own
+		// padding stood a cell into the terminal's margin (#63).
+		rows[top+i] = strings.TrimRight(before+pad(p, pw)+after, " ")
 	}
 }
 
@@ -3077,7 +3079,7 @@ func (m *Model) keymap() string {
 		if len(m.readerEvents()) == 0 {
 			// Nothing to scroll, unfold, search or step: a page with no
 			// turns offers only the way out (#56).
-			for _, drop := range []string{"j/k scroll · ", "ctrl+d/u half page · ", "space unfold · ", "/ search · ", "n/N · ", "[ ] turns · ", " · h/l session"} {
+			for _, drop := range []string{"j/k scroll · ", "ctrl+d/u half page · ", "space unfold · ", "/ search · ", "n/N · ", "[ ] turns · ", " · h/l session", "h/l session · "} {
 				keys = strings.Replace(keys, drop, "", 1)
 			}
 		}
@@ -3193,11 +3195,19 @@ func (m *Model) footerWith(keys string, w int) string {
 			keys = shed(minimal, "")
 		}
 	}
-	if pane != "" && strings.Contains(keys, attachHint) {
+	if pane != "" {
 		// The pane clause goes before a key — not before the attach
 		// hint, which #31 ranks beneath a key or a note: the parenthetical
-		// stood where the hidden session's pane should have been.
-		if bare := strings.Replace(keys, attachHint, "", 1); fitsWith(bare, note+pane) {
+		// stood where the hidden session's pane should have been. And it
+		// comes back whenever the keys leave it room, whether or not the
+		// hint is still there to give up: a refusal three cells longer
+		// than the hide note lost the pane the hide note kept (#63).
+		bare := strings.Replace(keys, attachHint, "", 1)
+		switch {
+		case fitsWith(keys, note+pane):
+			note += pane
+			forms = noteForms(note)
+		case fitsWith(bare, note+pane):
 			keys, note = bare, note+pane
 			forms = noteForms(note)
 		}

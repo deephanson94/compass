@@ -34,11 +34,11 @@ func TestABudgetedHeadIsNamedByItsCall(t *testing.T) {
 // or the space it stood on before the mark (#53, #55).
 func TestAClipKeepsNumbersWholeAndNoBareSeparator(t *testing.T) {
 	for in, want := range map[[2]any]string{
-		{"API Error: 403 quota", 14}: "API Error:…",
-		{"a · b", 4}:                 "a…",
-		{"x 12", 3}:                  "x…",
+		{"API Error: 403 quota", 14}:    "API Error:…",
+		{"a · b", 4}:                    "a…",
+		{"x 12", 3}:                     "x…",
 		{"Please run /login · API", 20}: "Please run /login…",
-		{"hello world", 20}:          "hello world",
+		{"hello world", 20}:             "hello world",
 	} {
 		if got := clip(in[0].(string), in[1].(int)); got != want {
 			t.Errorf("clip(%q, %d) = %q, want %q", in[0], in[1], got, want)

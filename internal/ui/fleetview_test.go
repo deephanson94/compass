@@ -819,10 +819,8 @@ func TestScrolledTrailSaysItIsBehind(t *testing.T) {
 		t.Fatal("ctrl+u did not unpin the panel; nothing to announce")
 	}
 	title := m.trailTitle(30)
-	for _, want := range []string{"G", "[trail]"} {
-		if !strings.Contains(title, want) {
-			t.Errorf("a scrolled trail's title %q is missing %q", title, want)
-		}
+	if !strings.Contains(title, "↓ G") {
+		t.Errorf("a scrolled trail's title %q is missing the way back", title)
 	}
 	if got := lipgloss.Width(title); got != 30 {
 		t.Errorf("the cue broke the title's width: %d columns, want 30", got)

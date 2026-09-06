@@ -60,7 +60,15 @@ func (m *Model) fleetColumn(w, h int) []string {
 	if m.fleetQuery != "" {
 		title += " · /" + m.fleetQuery
 	}
-	rows := []string{m.titleMark(panelFleet) + m.titleStyleFor(panelFleet).Render(clip(title, w-1)), ""}
+	head := m.titleMark(panelFleet) + m.titleStyleFor(panelFleet).Render(clip(title, w-1))
+	if m.level == levelTrail && !m.showHelp {
+		// Where the keys are, in the help's own words (#20): at Lv1 they
+		// are here, and the word stands with the mark (#63).
+		if word := "[fleet]"; lipgloss.Width(head)+1+len(word) <= w {
+			head = pad(head, w-len(word)) + dimStyle.Render(word)
+		}
+	}
+	rows := []string{head, ""}
 	if h > 2 {
 		rows = append(rows, m.fleetLines(w, h-2)...)
 	}

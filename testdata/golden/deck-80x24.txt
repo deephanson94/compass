@@ -1,7 +1,7 @@
  ⌂ compass · 1 infra                                    ▲1 2m  ●1  ○1  1 unread
  ──────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · live                    │  TRAIL · infra                      [trail]
+ ▌FLEET · live            [fleet] │  TRAIL · infra
                                   │
  ▸1 ▲ infra        needs you   2m │ ▲ design AskUserQuestion         waiting 2m
      AskUserQuestion              │

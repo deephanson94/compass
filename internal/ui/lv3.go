@@ -295,9 +295,11 @@ func (m *Model) readerTitle(w int) string {
 		}
 	}
 	tag := ""
-	if m.sessionView() && m.level >= levelReader {
+	if m.level >= levelReader && (m.sessionView() || m.boardFits()) {
 		// The keys are here, and the card across the gutter has stopped
-		// saying so: the word goes where the bar is.
+		// saying so: the word goes where the bar is — in the archive as
+		// in the live view, since the trail's title gave it up on every
+		// deck with a board (#20, #63).
 		tag = "[reader]"
 	}
 	// The name is never clipped for the row: "▌READE… the question…" lost
