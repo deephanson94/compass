@@ -85,7 +85,11 @@ func TestTheReaderPageKeepsAResultWithItsOwner(t *testing.T) {
 		}
 	}
 	pressKey(m, "tab")
-	pressKey(m, "k") // off the newest lane, whose Tab opens the agent's own conversation (#49)
+	// Off the newest lanes: Tab on a lane opens the agent's own
+	// conversation (#49), and this page is the lead's.
+	for rows := TrailRows(m.trail, m.level); m.cursor > 0 && rows[m.cursor].Kind == "branch"; {
+		pressKey(m, "k")
+	}
 	pressKey(m, "tab")
 	doc := m.doc(m.readerWidth())
 	top := m.readerTop(doc)
