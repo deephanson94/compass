@@ -244,6 +244,7 @@ type Model struct {
 	// column is scrolled (in rendered lines).
 	archiveView bool
 	restSelKey  string // the other view's selection, also a Key()
+	restLevel   int    // the level the archive was opened from, for the way back (#53)
 	fleetScroll int
 
 	showHelp    bool
@@ -850,18 +851,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// a list, not a board: three hundred columns of "reading its
 		// transcript…" answered nothing, and the list has the prompts.
 		was := m.archiveView
+		from := m.level
 		m.toggleArchive()
 		switch {
 		case m.archiveView == was:
 			// Nothing archived: the note says so, and the deck stays.
-		case m.archiveView && m.level != levelTrail:
-			// The archive is a list; it opens as one, whatever the depth.
-			m.level = levelTrail
+		case m.archiveView:
+			// The archive is a list; it opens as one, whatever the depth,
+			// and remembers the depth for the way back.
+			m.restLevel = from
+			if m.level != levelTrail {
+				m.level = levelTrail
+				m.cursor, m.anchor = -1, -1
+			}
+		case !m.archiveView && (!m.boardFits() || len(m.viewOrder()) == 1) && m.restLevel >= levelWaypoints:
+			// Back where `A` was pressed: the legs with their cursor, or
+			// the reader — a fleet of one has no board to land on (#47),
+			// and a narrow deck's list beside one trail had lost its
+			// cursor on the way back (#53).
+			m.level = levelWaypoints
 			m.cursor, m.anchor = -1, -1
+			m.cursorMove(0)
+			if m.restLevel >= levelReader {
+				m.enterReader()
+			}
 		case !m.archiveView && m.boardFits() && len(m.viewOrder()) == 1:
-			// A fleet of one: back to the session view it opened on, with
-			// the recent band (#47) — not a board of one column over
-			// blank rows, which is the screen ⇧tab itself refuses.
 			m.level = levelWaypoints
 			m.cursor, m.anchor = -1, -1
 			m.cursorMove(0)
@@ -2294,7 +2308,10 @@ func (m *Model) View() string {
 	var body []string
 	switch {
 	case m.showHelp:
-		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits(), refused: m.refusedKeys(), keymap: m.keymapAt(inner)})
+		// A fleet of one at any width has no board (#31): the help that
+		// taught "board → trail" beside a ⇧tab that refuses it was
+		// keyed on the terminal's width, not on what the deck draws (#53).
+		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, refused: m.refusedKeys(), keymap: m.keymapAt(inner)})
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -2968,10 +2985,13 @@ func (m *Model) keymap() string {
 			keys = strings.Replace(keys, drop, "", 1)
 		}
 	}
+	if m.liveCount() == 1 && m.archiveView {
+		keys = strings.Replace(keys, " · ⇧tab board", "", 1) // no board to go back to: A is the way (#53)
+	}
 	if m.showMirror {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
-	if s, ok := m.selected(); ok && !m.archiveView {
+	if s, ok := m.selected(); ok {
 		if pane, has := m.panes[s.Info.Key()]; !has || pane.Target == "" {
 			// `r` types into a pane, like `enter` attaches to one: a row
 			// that says "no pane" does not offer the other write either.

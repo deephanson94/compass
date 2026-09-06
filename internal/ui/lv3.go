@@ -108,6 +108,21 @@ func (m *Model) readerWidth() int {
 func (m *Model) readerColumn(w, h int) []string {
 	rows := []string{m.readerTitle(w), m.readerAbove(w)}
 	events := m.readerEvents()
+	if br, ok := m.laneOpen(); ok && h > 2 && len(events) == 0 {
+		// An agent whose file was read and holds no turn: the reader
+		// says so, with the lead's assignment as the one thing known,
+		// and how long the file has been empty (#53).
+		empty := "◍ the agent has written nothing since it was sent"
+		if a, has := m.agentsFor(m.selectedKey)[br.ToolUseID]; has {
+			if quiet, hung := laneSilence(a, br, m.now); !hung {
+				empty = "⋯ the agent has written nothing yet · sent " + state.ShortDuration(quiet) + " ago"
+			} else {
+				empty += " · silent " + state.ShortDuration(quiet)
+			}
+		}
+		rows = append(rows, dimStyle.Render(clip(empty, w)), "")
+		return append(rows, textStyle.Render(clip(glyphSaid+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
+	}
 	if h > 2 && len(events) == 0 && len(m.trail.Legs) > 0 {
 		// The trail is in hand and the conversation is not yet: it is being
 		// read, not absent. "nothing to read yet … as it happens" claimed a
@@ -172,7 +187,7 @@ func isResultRow(l readerLine) bool {
 func (m *Model) readerAbove(w int) string {
 	if len(m.readerEvents()) == 0 {
 		if m.readerLane != "" {
-			return dimStyle.Render(clip(" the agent's own conversation · nothing read yet", w))
+			return dimStyle.Render(clip(" the agent's own conversation", w))
 		}
 		return ""
 	}
@@ -633,4 +648,12 @@ func trailShape(key string, tr journey.Trail) string {
 		last = tr.Legs[closed-1].Start.String()
 	}
 	return key + "|" + strconv.Itoa(closed) + "|" + last
+}
+
+// readerName is the selected session's name, for the reader's sentences.
+func (m *Model) readerName() string {
+	if s, ok := m.selected(); ok {
+		return sessionName(s.Info)
+	}
+	return "the lead"
 }

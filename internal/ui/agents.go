@@ -257,7 +257,7 @@ func (m *Model) laneClauses() map[string]string {
 		g, text, clock := laneHead(a, b, ok, m.now)
 		switch {
 		case g == "◍" && a.Wrote.IsZero():
-			out[b.ToolUseID] = "◍ nothing written · " + clock
+			out[b.ToolUseID] = "◍ nothing written" // its silence is the stub's own clock
 		case g == "◍":
 			out[b.ToolUseID] = "◍ " + clock
 		case clock != "":
