@@ -216,3 +216,46 @@ func TestTheLinkedLanesSubRowSaysTheFresherClock(t *testing.T) {
 		}
 	}
 }
+
+// A session change at Lv3 leaves the lane with the session that left: the
+// digit →N names lands on that session's own reader (#69).
+func TestADigitFromALaneReaderLandsOnTheSessionsOwnReader(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, w := range []int{80, 220} {
+		m := sceneModel(sc, w, 48)
+		for _, k := range []string{"tab", "G", "tab", "1"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		view := ansi.Strip(m.View())
+		if m.readerLane != "" || strings.Contains(view, "reading the transcript…") || !strings.Contains(view, "the start of the conversation") {
+			t.Errorf("at %d the digit left the reader on the old session's lane (lane %q):\n%s", w, m.readerLane, view)
+		}
+	}
+}
+
+// Below the deck's width the silent agent's own page says the fresher
+// reading beside its silence, since no trail panel carries the link (#69).
+func TestTheLaneReaderAloneSaysTheFresherClock(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, w := range []int{80, 100, 120} {
+		m := sceneModel(sc, w, 34)
+		seen := ""
+		for _, k := range append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...) {
+			pressKey(m, k)
+			poll(m, sc)
+			view := ansi.Strip(m.View())
+			if m.readerLane != "" && strings.Contains(view, "⋯ no result yet · silent") {
+				seen = view
+			}
+		}
+		if seen == "" {
+			t.Fatalf("at %d the walkthrough never opens the silent lane's reader", w)
+		}
+		if got := strings.Contains(seen, "silent 12m · →1 wrote 30s ago"); got != (w < deckWideCols) {
+			t.Errorf("at %d the stub's fresher clock = %v:\n%s", w, got, seen)
+		}
+	}
+}

@@ -2121,6 +2121,11 @@ func (m *Model) pointAs(key string, quiet bool) {
 	}
 	m.mirror = ""
 	m.events = nil
+	// The lane belonged to the session that left: a digit or h/l at Lv3
+	// opened the new session's reader on an agent it does not have, and
+	// drew "reading the transcript…" under "the agent's own conversation"
+	// for good. The reader comes back to the session it is on (#69).
+	m.readerLane = ""
 	m.docCache.valid = false
 	m.unfolded = map[int]bool{}
 	m.scroll = 0

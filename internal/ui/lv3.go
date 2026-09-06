@@ -58,7 +58,21 @@ func (m *Model) laneSilenceWord() string {
 		return ""
 	}
 	if d, silent := laneSilence(a, b, m.now); silent {
-		return "silent " + state.ShortDuration(d)
+		word := "silent " + state.ShortDuration(d)
+		// Below the deck's width the reader owns the screen at Lv3: no
+		// trail panel and no fleet row carries the lane's "→N", so the
+		// stub under the hung call takes the fresher reading the lane's
+		// sub-row says wider (#66's rule, #68's clause, #69).
+		if m.width < deckWideCols {
+			tr := m.trails[m.selectedKey]
+			agents := m.agentsFor(m.selectedKey)
+			if n, ok := m.laneLinks(tr, agents)[b.Label]; ok && n > 0 {
+				if at, ok := m.laneLinkWrote(tr, agents)[b.Label]; ok && !at.IsZero() {
+					word += fmt.Sprintf(" · →%d wrote %s ago", n, relAge(m.now, at))
+				}
+			}
+		}
+		return word
 	}
 	return ""
 }
