@@ -1055,11 +1055,35 @@ func (m *Model) unread(s fleet.Session) bool {
 // carries no real link between a lead and a teammate, so the mark is a
 // hedge — "→3" — and `3` is the key that goes and looks.
 func (m *Model) laneLinks(tr journey.Trail, agents map[string]agentLive) map[string]int {
+	links := map[string]int{}
+	for label, l := range m.laneMatches(tr, agents) {
+		links[label] = l.num
+	}
+	return links
+}
+
+// laneLinkWrote is when each linked session last wrote, by the lane's
+// label: the fresher reading's clock, for the lane's own sub-row (#68).
+func (m *Model) laneLinkWrote(tr journey.Trail, agents map[string]agentLive) map[string]time.Time {
+	wrote := map[string]time.Time{}
+	for label, l := range m.laneMatches(tr, agents) {
+		wrote[label] = l.wrote
+	}
+	return wrote
+}
+
+// laneLink is a lane's matched session: its board digit and its last event.
+type laneLink struct {
+	num   int
+	wrote time.Time
+}
+
+func (m *Model) laneMatches(tr journey.Trail, agents map[string]agentLive) map[string]laneLink {
 	if len(tr.Branches) == 0 {
 		return nil
 	}
 	rows := m.boardRows()
-	links := map[string]int{}
+	links := map[string]laneLink{}
 	for _, b := range tr.Branches {
 		label := strings.ToLower(strings.TrimSpace(b.Label))
 		if len([]rune(label)) < 12 {
@@ -1083,7 +1107,7 @@ func (m *Model) laneLinks(tr journey.Trail, agents map[string]agentLive) map[str
 					break
 				}
 				if r, ok := rows[s.Info.Key()]; ok && r.num > 0 {
-					links[b.Label] = r.num
+					links[b.Label] = laneLink{num: r.num, wrote: s.Info.LastEventAt}
 				}
 				break
 			}

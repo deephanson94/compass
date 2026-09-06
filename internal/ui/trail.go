@@ -102,6 +102,9 @@ type TrailOpts struct {
 	// whose first prompt begins with it: a teammate that looks like this
 	// agent's, hedged as "→3" because the transcript carries no real link.
 	LaneLinks map[string]int
+	// LaneWrote is when each linked session last wrote, by label: the
+	// fresher reading's clock beside the lane file's own (#68).
+	LaneWrote map[string]time.Time
 
 	// NoInline keeps a leg's detail off its row whatever the width: for
 	// asking what Lv2 would hang beneath the legs, not for drawing.
@@ -1605,6 +1608,17 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 			g, text, clock := laneHead(live, br, known, o.Now)
 			if body := width - trailWayWidth; body >= trailMinLabel && text != "" {
 				row := g + " " + text
+				if n, ok := o.LaneLinks[br.Label]; ok && n > 0 && clock != "" {
+					// The link exists because the session is fresher, and
+					// the sub-row is the one place with room to say so:
+					// "silent 12m · →1 wrote 30s ago", where the whole
+					// row still fits (#68).
+					if at, ok := o.LaneWrote[br.Label]; ok && !at.IsZero() {
+						if long := clock + fmt.Sprintf(" · →%d wrote %s ago", n, relAge(o.Now, at)); body-len([]rune(long))-2 >= len([]rune(row)) {
+							clock = long
+						}
+					}
+				}
 				if clock != "" {
 					if keep := body - len([]rune(clock)) - 2; keep >= trailMinLabel {
 						row = pad(clip(row, keep), keep) + "  " + clock
@@ -1857,6 +1871,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Todos:        m.todos,
 		Labels:       m.labels,
 		LaneLinks:    m.laneLinks(m.trail, m.agentsFor(m.selectedKey)),
+		LaneWrote:    m.laneLinkWrote(m.trail, m.agentsFor(m.selectedKey)),
 		Head:         head,
 		HeadState:    headState,
 		HeadSince:    since,

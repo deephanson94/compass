@@ -260,6 +260,17 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			}
 		}
 	}
+	// The lane's link is drawn at eighty since #67 and its gloss went
+	// with the folded ◌ row: the read-line's row takes it wherever the
+	// tag's own gloss already stands elsewhere and the cells are there (#68).
+	if joined := strings.Join(lines, "\n"); !strings.Contains(joined, "→3") && strings.Contains(joined, "⌁ ") {
+		for i, l := range lines {
+			if plain := ansi.Strip(l); strings.Contains(plain, "you were here") && ansi.StringWidth(plain)+ansi.StringWidth(" · →3 its session") <= w {
+				lines[i] = dimStyle.Render(plain + " · →3 its session")
+				break
+			}
+		}
+	}
 	return lines
 }
 

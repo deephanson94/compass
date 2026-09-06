@@ -175,3 +175,44 @@ func TestTheDigestNamesItsScopeWhereItCostsNoClause(t *testing.T) {
 		t.Errorf("at 80 the scope would clip the clause:\n%s", view)
 	}
 }
+
+// The 80 help glosses →N on the read-line's row, where the folded ◌ row
+// shed it (#68).
+func TestTheNarrowHelpGlossesTheLaneLink(t *testing.T) {
+	m := sceneModel(sceneSubagents(), 80, 24)
+	press(m, "?")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "→3 its session") {
+		t.Errorf("the 80 help never says what →N means:\n%s", view)
+	}
+	one := sceneModel(sceneSecondDay(), 80, 24)
+	press(one, "?")
+	if view := ansi.Strip(one.View()); !strings.Contains(view, "⌁ ") {
+		t.Errorf("the fleet of one keeps its tag gloss:\n%s", view)
+	}
+}
+
+// A linked lane's sub-row says the fresher reading's clock where the whole
+// row still fits, and keeps its own alone where it would not (#68).
+func TestTheLinkedLanesSubRowSaysTheFresherClock(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, w := range []int{220, 120} {
+		m := sceneModel(sc, w, 48)
+		found := ""
+		for _, k := range []string{"tab", "tab"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if strings.Contains(l, "pytest -x tests/plugins") && strings.Contains(l, "silent") {
+				found = l
+			}
+		}
+		if found == "" {
+			t.Fatalf("at %d no lane sub-row for the silent lane:\n%s", w, ansi.Strip(m.View()))
+		}
+		if long := strings.Contains(found, "· →1 wrote 30s ago"); long != (w == 220) {
+			t.Errorf("at %d the sub-row = %q", w, found)
+		}
+	}
+}

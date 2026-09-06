@@ -700,6 +700,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Todos:        planItems(tr.Tasks),
 		Labels:       m.boardLabels[key],
 		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
+		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
 		Head:         m.headFor(s),
 		HeadState:    s.Snap.State,
 		HeadSince:    headSince(s),
