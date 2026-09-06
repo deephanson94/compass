@@ -542,8 +542,20 @@ func (b *trailBuilder) ghosts(items []todo.Item, width, height int) {
 	for i := 0; i < show; i++ {
 		rail := ruleStyle.Render(railGhost)
 		if i == 0 && total > 0 {
+			// Three words, one per status: an item in progress is neither
+			// to go nor done, and "2 done" counted the measurement whose
+			// lane three rows up was twenty minutes out (#65).
 			count := fmt.Sprintf("%d to go", len(pending))
-			if done := total - len(pending); done > 0 {
+			doing := 0
+			for _, it := range items {
+				if it.Status == todo.InProgress {
+					doing++
+				}
+			}
+			if doing > 0 {
+				count += fmt.Sprintf(" · %d doing", doing)
+			}
+			if done := total - len(pending) - doing; done > 0 {
 				count += fmt.Sprintf(" · %d done", done)
 			}
 			rail += " " + dimStyle.Render(clip(count, body))

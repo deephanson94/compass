@@ -284,7 +284,7 @@ func TestGhostRailCountsWhatIsToGo(t *testing.T) {
 		{ID: "5", Subject: "Old idea", Status: "deleted"},
 	}
 	got := RenderTrail(tr, TrailOpts{Todos: planItems(tr.Tasks), Now: fixtureBase.Add(40 * time.Minute), Width: 44, Height: 30, Level: 1, Cursor: -1, Pinned: true})
-	if !strings.Contains(got, "┊ 2 to go · 2 done") {
+	if !strings.Contains(got, "┊ 2 to go · 1 doing · 1 done") {
 		t.Errorf("the ghost rail does not count the plan:\n%s", got)
 	}
 }
@@ -954,8 +954,10 @@ func TestVerdictCountsAgentsBack(t *testing.T) {
 		t.Errorf("verdict = %q, want '◈3 back' alone", got)
 	}
 	tr.Branches = append(tr.Branches, journey.Branch{Label: "d", Start: base})
-	if got := boardVerdict(fleet.Session{}, tr, base.Add(time.Hour)); strings.Contains(got, "back") {
-		t.Errorf("verdict = %q, counts agents back while one is still out", got)
+	// One still out: the out clause leads, and the ones back are said
+	// beside it without a second glyph (#65).
+	if got := boardVerdict(fleet.Session{}, tr, base.Add(time.Hour)); !strings.Contains(got, "◈1 out 1h · 3 back") || strings.Contains(got, "◈3 back") {
+		t.Errorf("verdict = %q, want the lanes out and the lanes back in one clause", got)
 	}
 }
 

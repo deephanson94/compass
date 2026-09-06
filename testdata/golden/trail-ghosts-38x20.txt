@@ -8,7 +8,7 @@
 ├─◈ scout the payments module ⌀ 7m ago
 │  └ came back with no report
 ● fix    fix the token refresh  for 3m
-┊ 2 to go · 2 done
+┊ 2 to go · 1 doing · 1 done
 ◌ add a regression test
 ┊
 ◌ update the changelog

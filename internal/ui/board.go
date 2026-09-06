@@ -1037,6 +1037,25 @@ func verdictPartsWith(tr journey.Trail, now time.Time, live bool, agents map[str
 		if !strings.HasPrefix(parts[len(parts)-1], "◈") {
 			parts[len(parts)-1] = fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
 		}
+		// And the lanes back, beside the ones out, before the verdict:
+		// "◈3 out 20m · 2 silent 18m · 1 back" — the finding in hand was
+		// invisible on the card a delegator reads first (#65).
+		back, empty := 0, 0
+		for _, b := range tr.Branches {
+			if b.Done {
+				back++
+				if strings.TrimSpace(b.Report) == "" {
+					empty++
+				}
+			}
+		}
+		if back > 0 {
+			line := fmt.Sprintf("%d back", back)
+			if empty > 0 {
+				line += fmt.Sprintf(" · %d empty", empty)
+			}
+			parts = append(parts, line)
+		}
 	}
 
 	// The newest completed leg: shipped, or what it was.
@@ -1291,9 +1310,12 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 		switch {
 		case out > 0 && back == 0:
 			lanes := fmt.Sprintf("↳ %d agents out, none back", out)
-			if n, d, _, _ := lanesLive(m.agentsFor(key), openLanes(m.trails[key]), m.now); n > 0 {
+			if n, d, _, _ := lanesLive(m.agentsFor(key), openLanes(m.trails[key]), m.now); n > 0 && !strings.Contains(headTail(m.trails[key], m.now, true, m.agentsFor(key)), "silent") {
 				// The row above already counts the lanes out: the digest
-				// carries the one fact it does not, whole (#52).
+				// carries the one fact it does not, whole (#52) — and
+				// since #49 the row above says the silence itself, so the
+				// digest keeps "none back", the answer the row above has
+				// no room for (#65).
 				lanes = fmt.Sprintf("↳ %d silent %s", n, state.ShortDuration(d))
 			}
 			parts = append(parts, lanes)

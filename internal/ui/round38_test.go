@@ -274,3 +274,28 @@ func TestAFailedResultNeverLeadsWithAPass(t *testing.T) {
 		t.Error("a verdict or a sentence is not a pass line")
 	}
 }
+
+// The plan strip counts an item in progress as neither to go nor done (#65).
+func TestThePlanStripCountsDoing(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSubagents(), 80, 24)
+	press(m, "2")
+	pressTab(m)
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "┊ 1 to go · 1 doing · 1 done") {
+		t.Errorf("porter's plan is one of each:\n%s", view)
+	}
+}
+
+// The lead's digest keeps "none back" where the row above already says the
+// silence, and the card says how many lanes are back beside the ones out (#65).
+func TestTheLeadsCardSaysBackAndTheDigestSaysNoneBack(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSubagents(), 220, 48)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "◈3 out 20m · 2 silent 18m · 1 back") {
+		t.Errorf("porter's card should count the lane back beside the three out:\n%s", view)
+	}
+	if !strings.Contains(view, "↳ 3 agents out, none back") || strings.Contains(view, "↳ 2 silent 18m") {
+		t.Errorf("the digest should keep none back under a row that says the silence:\n%s", view)
+	}
+}
