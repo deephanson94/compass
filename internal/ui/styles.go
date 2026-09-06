@@ -188,7 +188,7 @@ func clip(s string, w int) string {
 			out = string(runes[:i])
 		}
 	}
-	if kept < len(runes) && isDigit(runes[kept]) && kept > 0 && isDigit(runes[kept-1]) {
+	if kept < len(runes) && kept > 0 && isDigit(runes[kept-1]) {
 		// Never cut a number in half: "API Error: 4…" read as a one-digit
 		// status, and 403 against 429 is the difference the row is for.
 		// The whole number goes instead (#53).
@@ -198,7 +198,7 @@ func clip(s string, w int) string {
 		}
 		out = string(runes[:i])
 	}
-	return strings.TrimRight(out, " ·") + "…" // the separator and the space it stood on, in any order
+	return strings.TrimRight(out, " ·(") + "…" // the separator, a bracket, and the space they stood on
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }

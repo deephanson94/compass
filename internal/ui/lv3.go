@@ -246,6 +246,9 @@ func (m *Model) readerTitle(w int) string {
 	name := "—"
 	if s, ok := m.selected(); ok {
 		name = sessionName(s.Info)
+		if m.archiveView && !s.Live {
+			name = archiveHeadline(s) // as the trail beside it and the header above name it (#59)
+		}
 	}
 	right := ""
 	if br, ok := m.laneOpen(); ok && !m.searching && m.query == "" {

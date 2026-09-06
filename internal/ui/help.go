@@ -54,6 +54,7 @@ func helpLines(w, h int) []string {
 // carrying — the last so a body too short for every row keeps the rows for
 // the keys the person can see being offered.
 type helpOpts struct {
+	recent  bool // an archive exists: the digit row may name the band
 	board   bool
 	refused []string
 	keymap  string
@@ -110,11 +111,11 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			legend = kept
 		}
 		return joinColumns(h, []column{
-			{left, helpKeyLinesFor(left, board, refused...)},
+			{left, withoutRecent(helpKeyLinesFor(left, board, refused...), o.recent)},
 			{right, legend},
 		})
 	}
-	lines := helpKeyLinesFor(w, board, refused...)
+	lines := withoutRecent(helpKeyLinesFor(w, board, refused...), o.recent)
 	legend := helpLegendLines(w, false)
 	if !board {
 		// No board on this terminal: its legend line would describe a
@@ -591,4 +592,19 @@ func dropBoardLegend(lines []string) []string {
 		out = append(out, l)
 	}
 	return out
+}
+
+// withoutRecent takes the band's clause off the digit row when nothing is
+// archived: the help teaches keys the deck binds, not regions it cannot
+// draw (#59).
+func withoutRecent(lines []string, recent bool) []string {
+	if recent {
+		return lines
+	}
+	for i, l := range lines {
+		if strings.Contains(l, "a digit under recent") {
+			lines[i] = strings.Replace(l, " · a digit under recent opens that finished one", "", 1)
+		}
+	}
+	return lines
 }

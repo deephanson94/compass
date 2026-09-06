@@ -2326,7 +2326,7 @@ func (m *Model) View() string {
 		// A fleet of one at any width has no board (#31): the help that
 		// taught "board → trail" beside a ⇧tab that refuses it was
 		// keyed on the terminal's width, not on what the deck draws (#53).
-		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, refused: m.refusedKeys(), keymap: m.keymapAt(inner)})
+		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, refused: m.refusedKeys(), keymap: m.keymapAt(inner), recent: m.archivedCount() > 0})
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -2798,6 +2798,9 @@ func (m *Model) headerName() (digit, name, tag string) {
 		return "", "", ""
 	}
 	name = sessionName(s.Info)
+	if m.archiveView && !s.Live {
+		name = archiveHeadline(s) // the archive's rows are titled by what they asked for (#56, #59)
+	}
 	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
 		digit = strconv.Itoa(r.num)
 	} else if d := m.digits[s.Info.Key()]; d > 0 && !m.archiveView {
