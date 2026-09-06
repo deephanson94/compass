@@ -3268,11 +3268,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// The attach aside goes first, then the page key — a shortcut for a
 	// distance `j` covers, which the help teaches (#42, #51).
 	order := []string{attachHint, " · ctrl+d/u half page", mirror, " · h/l session"}
-	if m.level >= levelWaypoints {
-		// Below the list `A fleet` is a courtesy that sheds early; on the
-		// list it is the way home and never sheds.
-		order = append(order, " · A fleet")
-	}
+	homeKey := m.level >= levelWaypoints && m.archiveView
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
 	// this level — so they stand with the level's own keys below, ranked
@@ -3313,6 +3309,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 		}
 	}
 	order = append(order, out...)
+	if homeKey {
+		// Below the archive's list `A fleet` is the way home: it goes with
+		// the way out, after the level's own keys (#56).
+		order = append(order, " · A fleet")
+	}
 	if chapter {
 		// A chapter key's note keeps the chapter keys over everything but
 		// the way out and the help (#24).

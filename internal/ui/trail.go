@@ -1638,6 +1638,11 @@ func (m *Model) trailColumn(w, h int) []string {
 	if h > len(rows) {
 		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-len(rows)))...)
 	}
+	if m.sessionView() && m.fleetQuery != "" && m.archivedCount() > 0 && h-len(rows) >= 2 {
+		// Under a search the band is off (#47), but the archive's door
+		// stays: the fleet of one has no list to say it on (#56).
+		rows = append(rows, "", dimStyle.Render(clip(fmt.Sprintf("%d archived · A browses", m.archivedCount()), w)))
+	}
 	if band := m.recentRows(h - len(rows) - 2); m.sessionView() && len(band) > 0 {
 		// The rows a short trail leaves are the recent band's (#47): a
 		// rule where the trail ends, then the sessions that ended last.
@@ -2035,8 +2040,8 @@ func (m *Model) trailTitle(w int) string {
 	}
 	if len([]rune(title)) > room {
 		title = "TRAIL · " + name + trailDay(m.trail, m.now, true)
-		for len([]rune(title)) > room && strings.Contains(title, " · ") {
-			title = title[:strings.LastIndex(title, " · ")] // clauses go whole, the day's tail first
+		for len([]rune(title)) > room && len([]rune(title)) > len([]rune("TRAIL · "+name)) {
+			title = title[:strings.LastIndex(title, " · ")] // the day's clauses go whole, its tail first — never the name (#56)
 		}
 	}
 	if len([]rune(title)) > room {
