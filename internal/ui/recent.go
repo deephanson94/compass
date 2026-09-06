@@ -82,10 +82,37 @@ func (m *Model) recentLines(w, avail int) []string {
 		return nil
 	}
 	out := []string{dimStyle.Render(clip(m.recentHeader(), w))}
+	// One verdict form for the band: the counts go for every row when
+	// any row would have to buy them out of its prompt, so two rows do
+	// not keep "212✓" while two beside them drop it (#57).
+	short := false
 	for _, r := range rows {
-		out = append(out, m.recentLine(r, w))
+		if _, full := m.recentVerdict(r, w); !full {
+			short = true
+		}
+	}
+	for _, r := range rows {
+		out = append(out, m.recentLineWith(r, w, short))
 	}
 	return out
+}
+
+// recentVerdict is the row's verdict clause and whether its full form
+// fits beside the prompt's floor.
+func (m *Model) recentVerdict(r recentRow, w int) (verdict string, full bool) {
+	s := m.sessions[r.sess]
+	if tr, ok := m.trails[s.Info.Key()]; ok && len(tr.Legs) > 0 {
+		verdict = strings.SplitN(boardVerdict(s, tr, m.now), " · ", 2)[0]
+		if f := strings.Fields(verdict); len(f) > 2 && f[len(f)-1] == "ago" {
+			verdict = strings.Join(f[:len(f)-2], " ")
+		}
+	}
+	if verdict == "" {
+		return "", true
+	}
+	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
+	room := w - lipgloss.Width(lead) - lipgloss.Width(m.age(s.Info.LastEventAt)) - 1
+	return verdict, room-lipgloss.Width(verdict)-2 >= recentPromptFloor
 }
 
 // recentLine is one band row, in shed order: digit · ○ · name · "the
@@ -94,6 +121,12 @@ func (m *Model) recentLines(w, avail int) []string {
 // than a name: it answers whether to reopen this one. Narrow, it goes
 // first; the identity and the clock stay.
 func (m *Model) recentLine(r recentRow, w int) string {
+	return m.recentLineWith(r, w, false)
+}
+
+// recentLineWith is recentLine with the band's verdict form decided:
+// short keeps the verdict's first two words for every row.
+func (m *Model) recentLineWith(r recentRow, w int, short bool) string {
 	s := m.sessions[r.sess]
 	age := m.age(s.Info.LastEventAt)
 	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
@@ -101,20 +134,17 @@ func (m *Model) recentLine(r recentRow, w int) string {
 	if t := strings.TrimSpace(s.Info.Title); t != "" {
 		name += ` · "` + t + `"`
 	}
-	verdict := ""
-	if tr, ok := m.trails[s.Info.Key()]; ok && len(tr.Legs) > 0 {
-		// The first clause alone, and without its clock: "✓ shipped 2h
-		// ago" beside "2h" said the hour twice.
-		verdict = strings.SplitN(boardVerdict(s, tr, m.now), " · ", 2)[0]
-		if f := strings.Fields(verdict); len(f) > 2 && f[len(f)-1] == "ago" {
-			verdict = strings.Join(f[:len(f)-2], " ")
-		}
+	// The first clause alone, and without its clock: "✓ shipped 2h ago"
+	// beside "2h" said the hour twice.
+	verdict, _ := m.recentVerdict(r, w)
+	if short {
+		verdict = firstWords(verdict, 2)
 	}
 	room := w - lipgloss.Width(lead) - lipgloss.Width(age) - 1
 	body := clip(name, room)
 	// The verdict outranks the prompt's tail: "webapp · "the checkout
 	// suite …  ✗ red 18✓ 2✗" answers whether to reopen, and the whole
-	// prompt does not. It goes only when the name's own floor would —
+	// prompt does not. It goes only when the prompt's own floor would —
 	// and its counts go first, so a red row keeps "✗ red" where a green
 	// one keeps its tick.
 	for _, v := range []string{verdict, firstWords(verdict, 2)} {
@@ -138,7 +168,13 @@ func firstWords(s string, n int) string {
 
 // recentNameFloor is the least of a band row's name and prompt kept
 // beside a verdict: enough for the name and the prompt's first words.
-const recentNameFloor = 18
+// recentPromptFloor is what the full verdict, counts and all, must leave:
+// a band at a hundred columns showed less prompt than one at eighty
+// because the counts bought their cells out of it (#57).
+const (
+	recentNameFloor   = 18
+	recentPromptFloor = 26
+)
 
 // openRecent answers a digit the live fleet does not use: the band's row
 // with that number opens the archive on that session, as `A` and a search
@@ -155,7 +191,7 @@ func (m *Model) openRecent(num int) bool {
 			m.fleetScroll = 0
 			m.pointQuiet(key)
 			m.clampSelection()
-			m.note = "in the archive · A returns"
+			m.note = "" // the footer's `A fleet` says the way home; a note cost `tab deeper` at eighty (#57)
 			return true
 		}
 	}

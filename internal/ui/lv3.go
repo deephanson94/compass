@@ -506,7 +506,10 @@ func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
 	if doc[t].dim > 0 {
 		text = string([]rune(text)[:doc[t].dim]) // without the clock
 	}
-	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid))
+	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid), glyphBranch))
+	if t+1 < len(doc) && doc[t+1].kind == readerSaid && doc[t+1].event == doc[t].event {
+		m.anchorText += "…" // the first row of a wrapped turn: the cut is marked (#57)
+	}
 	glyph := glyphSaid
 	if m.readerLane != "" && i == 0 {
 		glyph = glyphBranch // the assignment, not a turn of yours (#56)

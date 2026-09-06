@@ -155,8 +155,8 @@ func TestAFleetOfOneKeepsItsRecentPast(t *testing.T) {
 	if !n.archiveView || n.selectedKey != sessionKey("p-api") {
 		t.Errorf("2 did not open the archive on api: archive=%v selected=%q", n.archiveView, n.selectedKey)
 	}
-	if !strings.Contains(n.note, "A returns") {
-		t.Errorf("the note does not say the way back: %q", n.note)
+	if foot := ansi.Strip(n.footerLine(78)); !strings.Contains(foot, "A fleet") {
+		t.Errorf("the footer does not say the way back: %q", foot)
 	}
 	press(n, "A")
 	if n.archiveView || n.selectedKey != sessionKey("hello") {

@@ -176,6 +176,13 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
 		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space")
+		if !o.board {
+			// Below the board's width `m` is refused ("needs 110 columns"):
+			// a refused key's row is the first cut when rows are short,
+			// and it was keeping its row while `g`, a key that works,
+			// lost its own (#57).
+			order = append([]string{"m"}, order...)
+		}
 		for _, key := range order {
 			if len(lines) <= h {
 				break

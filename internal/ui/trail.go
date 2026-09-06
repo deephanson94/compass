@@ -205,8 +205,17 @@ func trailRows(tr journey.Trail, o TrailOpts) []string {
 		// A pinned column that opens on a lane opens on the lane's leg
 		// instead; a scrolled viewport keeps every row where it stands.
 		parent := top - 1
-		for parent > 0 && (isDetailRow(doc[parent]) || (o.Pinned && isLaneRow(doc[parent]))) {
-			parent--
+		if isDetailRow(rows[0]) {
+			// A finding's parent is the lane that brought it, a detail's
+			// the leg: the first row above that is not a detail. Walking
+			// past the lane put "3 defects found" under "◆ scout" (#57).
+			for parent > 0 && isDetailRow(doc[parent]) {
+				parent--
+			}
+		} else {
+			for parent > 0 && (isDetailRow(doc[parent]) || isLaneRow(doc[parent])) {
+				parent--
+			}
 		}
 		if isCursorRow(rows[0]) {
 			// The cursor's own row is never drawn over: the parent takes
