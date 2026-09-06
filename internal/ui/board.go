@@ -1592,11 +1592,25 @@ func (m *Model) tagFor(s fleet.Session, w, floor int, clause string) string {
 	if len(ladder) == 0 {
 		return ""
 	}
+	if clause == "" {
+		for _, c := range ladder {
+			if lipgloss.Width(c) <= w {
+				return c
+			}
+		}
+		return ladder[len(ladder)-1]
+	}
+	// The longest rung beside the whole clause first: a column widened by
+	// a hide spent its new cells on the model and clipped "answered 1 ·
+	// 0s ago" that a narrower column had drawn whole (#55). Then the
+	// longest rung that leaves the clause its floor.
 	for _, c := range ladder {
-		if clause == "" && lipgloss.Width(c) <= w {
+		if w-lipgloss.Width(c)-2 >= lipgloss.Width(clause) {
 			return c
 		}
-		if clause != "" && w-lipgloss.Width(c)-2 >= floor {
+	}
+	for _, c := range ladder {
+		if w-lipgloss.Width(c)-2 >= floor {
 			return c
 		}
 	}

@@ -104,10 +104,8 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		if !board {
 			// A fleet of one on a wide terminal has no board either (#53).
 			kept := legend[:0]
-			for _, l := range legend {
-				if !strings.Contains(l, "board:") {
-					kept = append(kept, l)
-				}
+			for _, l := range dropBoardLegend(legend) {
+				kept = append(kept, l)
 			}
 			legend = kept
 		}
@@ -122,10 +120,8 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// No board on this terminal: its legend line would describe a
 		// brightness the person never sees.
 		kept := legend[:0]
-		for _, l := range legend {
-			if !strings.Contains(l, "board:") {
-				kept = append(kept, l)
-			}
+		for _, l := range dropBoardLegend(legend) {
+			kept = append(kept, l)
 		}
 		legend = kept
 	}
@@ -560,6 +556,27 @@ func helpLegendFill(core, full []string, rows int) []string {
 		}
 		out = append(out[:pos], append([]string{l}, out[pos:]...)...)
 		kept[l] = true
+	}
+	return out
+}
+
+// dropBoardLegend takes the board's legend line out, and the continuation
+// rows a wrap hung under it: an orphan "band below" was the tail of a
+// sentence whose head had gone (#55).
+func dropBoardLegend(lines []string) []string {
+	var out []string
+	skipping := false
+	for _, l := range lines {
+		plain := ansi.Strip(l)
+		switch {
+		case strings.Contains(plain, "board:"):
+			skipping = true
+			continue
+		case skipping && strings.TrimSpace(plain) != "" && strings.HasPrefix(plain, " "):
+			continue // the wrapped tail of the line above
+		}
+		skipping = false
+		out = append(out, l)
 	}
 	return out
 }

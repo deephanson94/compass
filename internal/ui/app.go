@@ -397,6 +397,12 @@ func (m *Model) SetNarrator(n Narrator) {
 func (m *Model) SetEvents(events []transcript.Event) {
 	m.events = events
 	m.docCache.valid = false
+	if m.level >= levelWaypoints && m.cursor >= 0 && m.anchor < 0 && m.readerLane == "" && len(events) > 0 {
+		// The conversation landed after the cursor was placed — a way
+		// back from the archive, a digit — so the reader anchors now,
+		// and its title carries the row and its clock (#55).
+		m.anchorReader()
+	}
 }
 
 // SetSize sets the render dimensions (bubbletea does this via WindowSizeMsg;
@@ -3008,6 +3014,10 @@ func (m *Model) keymap() string {
 	if m.liveCount() == 1 && m.archiveView {
 		keys = strings.Replace(keys, " · ⇧tab board", "", 1) // no board to go back to: A is the way (#53)
 	}
+	if m.archiveView && m.level >= levelWaypoints && !strings.Contains(keys, "A fleet") {
+		// Below the list the archive's footer still names the way home (#55).
+		keys = strings.Replace(keys, " · ? help", " · A fleet · ? help", 1)
+	}
 	if m.showMirror {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
@@ -3249,6 +3259,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// The attach aside goes first, then the page key — a shortcut for a
 	// distance `j` covers, which the help teaches (#42, #51).
 	order := []string{attachHint, " · ctrl+d/u half page", mirror, " · h/l session"}
+	if m.level >= levelWaypoints {
+		// Below the list `A fleet` is a courtesy that sheds early; on the
+		// list it is the way home and never sheds.
+		order = append(order, " · A fleet")
+	}
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
 	// this level — so they stand with the level's own keys below, ranked
