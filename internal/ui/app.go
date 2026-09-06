@@ -2445,10 +2445,12 @@ func overlay(rows, panel []string, left, top int) {
 					rest = strings.Repeat(" ", lipgloss.Width(rest))
 				}
 			}
-			if strings.TrimSpace(ansi.Strip(rest)) != "" {
+			if peek := strings.TrimSpace(ansi.Strip(rest)); peek != "" && !(strings.IndexByte(peek, ' ') < 0 && strings.IndexAny(peek, "0123456789") < 0) {
 				// A mark for a peek with something in it: when the rule
 				// above blanked the whole peek, the left mark already says
-				// the row was cut (#64).
+				// the row was cut (#64). And a lone word with no digit —
+				// "ago", "still", "report" — answers nothing: #55 kept the
+				// peek for the "2✗ 3m" and "for 33m" that read (#73).
 				after = "…" + rest
 			}
 		}

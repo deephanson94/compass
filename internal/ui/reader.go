@@ -320,6 +320,22 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 		}
 		return -1
 	}
+	// And where a result — anyone's — lands: a call whose own answer comes
+	// after another call's answer is not adjacent to it either.
+	var resAt []int
+	for i, ev := range events {
+		if !ev.IsSidechain && len(ev.ToolResults) > 0 {
+			resAt = append(resAt, i)
+		}
+	}
+	nextResult := func(after int) int {
+		for _, r := range resAt {
+			if r > after {
+				return r
+			}
+		}
+		return -1
+	}
 	// And where the person spoke: a result landing after their next turn
 	// is late too — drawn under "❯" it read as the prompt's reply.
 	var saidAt []int
@@ -360,6 +376,10 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 					if use, ok := calls[res.ToolUseID]; ok {
 						d.late(i, ev.Timestamp, use, ev.CWD)
 					}
+					// And nothing is adjacent to its call any more: the
+					// next result is drawn under this one, not under the
+					// call, whoever made it.
+					lastCall = ""
 				}
 				d.result(i, ev.Timestamp, calls[res.ToolUseID], res, unfolded[i], ev.CWD)
 			}
@@ -386,7 +406,8 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 					// nothing, and an agent still out looked exactly like
 					// one returned and folded.
 					d.pending(i, ev.Timestamp, use)
-				case (nextCall(i) >= 0 && resultAt[use.ID] > nextCall(i)) || (nextSaid(i) >= 0 && resultAt[use.ID] >= nextSaid(i)):
+				case (nextCall(i) >= 0 && resultAt[use.ID] > nextCall(i)) || (nextSaid(i) >= 0 && resultAt[use.ID] >= nextSaid(i)) ||
+					(nextResult(i) >= 0 && resultAt[use.ID] > nextResult(i)):
 					// Answered, but only after other calls were made: the
 					// result is drawn where it landed, under "↩ result of",
 					// and the call site says so rather than looking hung.
