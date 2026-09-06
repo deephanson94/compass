@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // doc is the flattened reader document, cached between keypresses — scrolling,
@@ -18,12 +21,38 @@ import (
 func (m *Model) doc(width int) []readerLine {
 	c := &m.docCache
 	cwd := m.readerCWD()
-	if c.valid && c.n == len(m.events) && c.w == width && c.ver == m.docVer && c.cwd == cwd {
+	events := m.readerEvents()
+	if c.valid && c.n == len(events) && c.w == width && c.ver == m.docVer && c.cwd == cwd && c.lane == m.readerLane {
 		return c.lines
 	}
-	lines := readerDoc(m.events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now})
-	m.docCache = readerCache{lines: lines, valid: true, n: len(m.events), w: width, ver: m.docVer, cwd: cwd}
+	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now})
+	m.docCache = readerCache{lines: lines, valid: true, n: len(events), w: width, ver: m.docVer, cwd: cwd, lane: m.readerLane}
 	return lines
+}
+
+// readerEvents is the conversation the reader renders: the lead's, or the
+// agent's own when the reader was opened on a lane (#49).
+func (m *Model) readerEvents() []transcript.Event {
+	if m.readerLane != "" {
+		if a, ok := m.agentsFor(m.selectedKey)[m.readerLane]; ok {
+			return a.Events
+		}
+		return nil
+	}
+	return m.events
+}
+
+// laneOpen is the lane the reader is on, if it is one the trail still has.
+func (m *Model) laneOpen() (journey.Branch, bool) {
+	if m.readerLane == "" {
+		return journey.Branch{}, false
+	}
+	for _, b := range m.trail.Branches {
+		if b.ToolUseID == m.readerLane {
+			return b, true
+		}
+	}
+	return journey.Branch{}, false
 }
 
 // readerCWD is the directory the reader shortens paths against: where the
@@ -77,14 +106,15 @@ func (m *Model) readerWidth() int {
 // search when one is live, and the document.
 func (m *Model) readerColumn(w, h int) []string {
 	rows := []string{m.readerTitle(w), m.readerAbove(w)}
-	if h > 2 && len(m.events) == 0 && len(m.trail.Legs) > 0 {
+	events := m.readerEvents()
+	if h > 2 && len(events) == 0 && len(m.trail.Legs) > 0 {
 		// The trail is in hand and the conversation is not yet: it is being
 		// read, not absent. "nothing to read yet … as it happens" claimed a
 		// session with a day of legs had not started.
 		return append(rows, dimStyle.Render(clip(glyphSaid+" reading the transcript…", w)))
 	}
 	if h > 2 {
-		frame := RenderReader(m.events, ReaderOpts{
+		frame := RenderReader(events, ReaderOpts{
 			Width:    w,
 			Height:   h - 2,
 			Scroll:   readerTopIn(m.doc(w), m.scroll, h-2), // never a result row without its owner
@@ -138,7 +168,10 @@ func isResultRow(l readerLine) bool {
 // showing above its first line, so a conversation opened on its tail says
 // it is a tail — "↑ 212 lines above · 3 turns" — and air when nothing is.
 func (m *Model) readerAbove(w int) string {
-	if len(m.events) == 0 {
+	if len(m.readerEvents()) == 0 {
+		if m.readerLane != "" {
+			return dimStyle.Render(clip(" the agent's own conversation · nothing read yet", w))
+		}
 		return ""
 	}
 	doc := m.doc(w)
@@ -147,6 +180,9 @@ func (m *Model) readerAbove(w int) string {
 		// The row that says where you are says it here too: the answer is
 		// "the beginning", and a blank said nothing — at the widths where
 		// a conversation fits whole, least of all.
+		if m.readerLane != "" {
+			return dimStyle.Render(clip(" the start of the agent's own conversation", w))
+		}
 		return dimStyle.Render(clip(" the start of the conversation", w))
 	}
 	turns := 0
@@ -156,7 +192,11 @@ func (m *Model) readerAbove(w int) string {
 		}
 	}
 	text := "↑ " + plural(top, "line") + " above"
-	if turns > 0 {
+	if m.readerLane != "" {
+		// Not turns of yours: the person has no turns in an agent's
+		// conversation. The first turn is the lead's assignment.
+		text += " · the agent's own conversation"
+	} else if turns > 0 {
 		text += " · " + plural(turns, "turn") + " of yours"
 	}
 	if isResultRow(doc[top]) && doc[top-1].kind == readerCall {
@@ -181,7 +221,17 @@ func (m *Model) readerTitle(w int) string {
 		name = sessionName(s.Info)
 	}
 	right := ""
+	if br, ok := m.laneOpen(); ok && !m.searching && m.query == "" {
+		// The lane as drawn, led by its glyph so the title cannot be read
+		// as the lead's own conversation, clocked by the lane (#49).
+		glyph := glyphBranch
+		if a, ok := m.agentsFor(m.selectedKey)[br.ToolUseID]; ok && a.silent() {
+			glyph = fleet.Glyph(state.Stuck)
+		}
+		right = glyph + " " + branchName(br.Label) + " · " + relAge(m.now, br.Start) + " out"
+	}
 	switch {
+	case right != "":
 	case m.searching && !m.searchFleet:
 		right = "/" + m.draft + "▏" // the fleet's query is the header's to echo, not the reader's
 	case m.query != "":
@@ -260,7 +310,21 @@ func clipQuestion(text string, w int) string {
 // the middle panel has been following the cursor since Lv2 — so all this does
 // is hand it the keys.
 func (m *Model) enterReader() {
+	lane := m.laneWanted() // read where the cursor is before the level moves
 	m.level = levelReader
+	m.readerLane = ""
+	if lane != "" {
+		if _, ok := m.agentsFor(m.selectedKey)[lane]; ok {
+			// The cursor is on a lane whose own file was read: the reader
+			// shows the agent's conversation in place of the lead's, and
+			// opens on its newest line — what it is doing now (#49).
+			m.readerLane = lane
+			m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
+			m.scroll = 0
+			m.scrollBy(1 << 30)
+			return
+		}
+	}
 	m.anchorReader()
 }
 

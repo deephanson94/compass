@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -181,5 +183,93 @@ func TestTheRecentBandStaysOffTheBoard(t *testing.T) {
 	n.fleetQuery = "api"
 	if rows := n.recentRows(9); len(rows) != 0 {
 		t.Errorf("a search draws a band of %d rows", len(rows))
+	}
+}
+
+// An open lane is judged by its own transcript, not the lead's silence
+// (#49): a lane whose file has gone quiet wears ◍ and says so beneath it,
+// a lane that wrote forty seconds ago says so, a lane that has written
+// nothing says that, and the parked clause counts the agents — "1 silent
+// 12m" — where "quiet 15m" restated the newest lane's age.
+func TestAnOpenLaneIsJudgedByItsOwnFile(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSubagents(), 120, 34)
+	col := strings.Join(m.boardColumn(sessionKey("porter"), rowFor(t, m, sessionKey("porter")), 37, 30), "\n")
+	for _, want := range []string{"◈3 out 20m · 1 silent 12m", "├─◍ Red-team the plugin"} {
+		if !strings.Contains(col, want) {
+			t.Errorf("the board column lacks %q:\n%s", want, col)
+		}
+	}
+	if strings.Contains(col, "quiet 15m") {
+		t.Errorf("the parked clause still restates the lead's silence:\n%s", col)
+	}
+	if chips := ansi.Strip(m.statusChips()); !strings.Contains(chips, "◈3 out · 1 silent 12m") {
+		t.Errorf("the header chip does not count the silent lane: %q", chips)
+	}
+	pressTab(m) // the session view, cursor on the present: the newest lane
+	trail := strings.Join(m.trailColumn(55, 30), "\n")
+	for _, want := range []string{"└ ● Bash: python dla.py --model moe_…  wrote 40s ago", "└ ⋯ nothing written yet", "▸─◍ Red-team the plugin architecture →1", "└ ◍ Bash: pytest -x tests/plugins"} {
+		if !strings.Contains(trail, want) {
+			t.Errorf("the session view's lanes lack %q:\n%s", want, trail)
+		}
+	}
+}
+
+// Tab on a lane opens the reader on the agent's own conversation, in place
+// of the lead's — the same depth, aimed at a lane — titled by the lane
+// and clocked by it; leaving the reader brings the lead's back (#49).
+func TestTabOnALaneReadsTheAgentsOwnConversation(t *testing.T) {
+	forceASCII(t)
+	for _, w := range []int{80, 120} {
+		m := sceneModel(sceneSubagents(), w, 34)
+		pressTab(m)
+		if m.level < levelWaypoints {
+			pressTab(m)
+		}
+		rows := TrailRows(m.trail, m.level)
+		if m.cursor < 0 || rows[m.cursor].Kind != "branch" || rows[m.cursor].Lane != "a4" {
+			t.Fatalf("at %d the cursor does not open on the newest lane: %+v", w, rows[m.cursor])
+		}
+		pressTab(m)
+		if m.level != levelReader || m.readerLane != "a4" {
+			t.Fatalf("at %d Tab on the lane did not open its conversation: level %d lane %q", w, m.level, m.readerLane)
+		}
+		view := ansi.Strip(m.View())
+		for _, want := range []string{"◍ Red-team the plugin architectu", "the agent's own conversation", "❯ Red-team the plugin architecture", "Bash(pytest -x tests/plugins)"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("at %d the lane's reader lacks %q:\n%s", w, want, view)
+			}
+		}
+		if lead := strings.Count(view, "/kickoff porter_tui"); lead > 1 || (w < 110 && lead > 0) {
+			t.Errorf("at %d the lane's reader shows the lead's conversation:\n%s", w, view)
+		}
+		press(m, "esc")
+		if m.readerLane != "" || m.level != levelWaypoints {
+			t.Errorf("at %d leaving the reader kept the lane: level %d lane %q", w, m.level, m.readerLane)
+		}
+		if view := ansi.Strip(m.View()); !strings.Contains(view, "/kickoff porter_tui") && w >= 110 {
+			t.Errorf("at %d the lead's conversation did not come back:\n%s", w, view)
+		}
+	}
+}
+
+// The agents' files are paired to lanes by the call's id, from the meta
+// file beside each transcript — never by the lane's name.
+func TestAgentsArePairedByTheCallsID(t *testing.T) {
+	dir := t.TempDir()
+	tp := filepath.Join(dir, "sess.jsonl")
+	sub := filepath.Join(dir, "sess", "subagents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(sub, "agent-1.meta.json"), []byte(`{"agentType":"general-purpose","description":"Round 22: few ongoing","toolUseId":"toolu_A","spawnDepth":1}`), 0o644)
+	os.WriteFile(filepath.Join(sub, "agent-1.jsonl"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(sub, "agent-2.meta.json"), []byte(`{"toolUseId":"toolu_B"}`), 0o644) // no transcript beside it
+	got := pairAgents(agentDir(tp))
+	if len(got) != 1 || got["toolu_A"] != filepath.Join(sub, "agent-1.jsonl") {
+		t.Errorf("pairAgents = %v, want toolu_A alone", got)
+	}
+	if pairAgents(agentDir("")) != nil || pairAgents(filepath.Join(dir, "nowhere")) != nil {
+		t.Errorf("a missing directory should pair nothing")
 	}
 }

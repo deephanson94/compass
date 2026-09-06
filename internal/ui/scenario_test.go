@@ -39,6 +39,7 @@ type scene struct {
 	trails   map[string]journey.Trail
 	panes    map[string]tmuxop.Pane
 	order    []tmuxop.Pane
+	agents   map[string]map[string]agentLive // what the lanes' own files say, per session key
 }
 
 var sceneNow = fixtureBase.Add(6 * time.Hour)
@@ -126,6 +127,21 @@ func eventsFor(tr journey.Trail) []transcript.Event {
 func withCompactions(tr journey.Trail, at ...time.Time) journey.Trail {
 	tr.Compactions = append(tr.Compactions, at...)
 	return tr
+}
+
+// agentEvents is a subagent's own short conversation: the lead's assignment,
+// a look around, and a shell command nothing has answered.
+func agentEvents(start time.Time, assignment string) []transcript.Event {
+	at := func(d time.Duration) time.Time { return start.Add(d) }
+	return []transcript.Event{
+		{UUID: "g1", SessionID: "s", Type: transcript.EventUser, Timestamp: at(0), Text: assignment},
+		{UUID: "g2", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(20 * time.Second), Text: "I'll read the loader and the plugin contract first, then try to break the boundary.",
+			ToolUses: []transcript.ToolUse{{ID: "toolu_g1", Name: "Read", Input: json.RawMessage(`{"file_path":"/home/user/src/plugins/loader.go"}`)}}},
+		{UUID: "g3", SessionID: "s", Type: transcript.EventUser, Timestamp: at(40 * time.Second),
+			ToolResults: []transcript.ToolResult{{ToolUseID: "toolu_g1", Text: "     1\tpackage plugins\n     2\t\n     3\tfunc Load(path string) (Plugin, error) {"}}},
+		{UUID: "g4", SessionID: "s", Type: transcript.EventAssistant, Timestamp: at(3 * time.Minute), Text: "The loader trusts the manifest's entry point without checking it stays under the plugin's own directory. Running the plugin suite with a manifest that escapes it:",
+			ToolUses: []transcript.ToolUse{{ID: "toolu_g2", Name: "Bash", Input: json.RawMessage(`{"command":"pytest -x tests/plugins"}`)}}},
+	}
 }
 
 func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
@@ -538,6 +554,16 @@ func sceneSubagents() scene {
 		journey.Task{ID: "2", Subject: "Measure DLA on dx6", Active: "Measuring DLA on dx6", Status: "in_progress", Owner: "measurer"},
 		journey.Task{ID: "3", Subject: "Fold findings into DESIGN.md", Status: "pending"})
 
+	// The lanes' own files (#49): the measurer wrote forty seconds ago,
+	// the reviewer has written nothing, the red-teamer has been silent
+	// twelve minutes on a pytest — and its conversation is there to read.
+	agents := map[string]map[string]agentLive{sessionKey("porter"): {
+		"a2": {Wrote: n.Add(-40 * time.Second), Snap: state.Snapshot{State: state.Working, Reason: "tool call in flight", Activity: "Bash: python dla.py --model moe_by_andy --split dx6"}},
+		"a3": {},
+		"a4": {Wrote: n.Add(-12 * time.Minute), Snap: state.Snapshot{State: state.Stuck, Reason: "no output for 12m mid-turn", Activity: "Bash: pytest -x tests/plugins"},
+			Events: agentEvents(n.Add(-15*time.Minute), "Red-team the plugin architecture; report the top three risks")},
+	}}
+
 	ss = append(ss, sess("harness", "harness", "/home/user/harness", "main", "look at our kickoff skill", state.Idle, n.Add(-30*time.Minute), journey.Docs, "", "turn complete", "idle"))
 	t = trailOf(n.Add(-2*time.Hour), "look at our kickoff skill and the delegation contract", false,
 		legSpec{journey.Scout, "the skill and three transcripts", 15 * time.Minute, []string{"SKILL.md"}, "", nil},
@@ -561,7 +587,7 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"porter", "harness", "redteam", "cli"}, []string{"tinker:0.0", "harness:0.0", "harness:1.0", "tools:0.0"})
-	return scene{name: "subagents", story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "subagents", story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
 }
 
 // Two very long sessions — a day of work each, every class, dozens of prompts
@@ -824,7 +850,7 @@ func sceneModel(sc scene, w, h int) *Model {
 	// and events.
 	poll := func(first string) {
 		m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: first != "", trail: sc.trails[first],
-			events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails})
+			events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails, agents: sc.agents})
 	}
 	poll("")
 	first := ""
@@ -919,7 +945,7 @@ func poll(m *Model, sc scene) {
 		return
 	}
 	m.Update(fleetMsg{sessions: m.sessions, at: m.now, trailFor: key, hasTrail: true,
-		trail: tr, events: eventsBehind(tr, sc.activity(key)), trails: sc.trails})
+		trail: tr, events: eventsBehind(tr, sc.activity(key)), trails: sc.trails, agents: sc.agents})
 }
 
 func selectedName(m *Model) string {

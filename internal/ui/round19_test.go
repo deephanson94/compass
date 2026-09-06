@@ -85,6 +85,7 @@ func TestTheReaderPageKeepsAResultWithItsOwner(t *testing.T) {
 		}
 	}
 	pressKey(m, "tab")
+	pressKey(m, "k") // off the newest lane, whose Tab opens the agent's own conversation (#49)
 	pressKey(m, "tab")
 	doc := m.doc(m.readerWidth())
 	top := m.readerTop(doc)

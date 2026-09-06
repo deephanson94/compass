@@ -866,7 +866,7 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 	if m.isCircling(s) {
 		// A loop's row says the loop: the count that makes it one was
 		// off the fleet at every width without a board.
-		if parts := verdictParts(tr, m.now, s.Snap.State != state.Idle); len(parts) > 0 {
+		if parts := verdictPartsWith(tr, m.now, s.Snap.State != state.Idle, m.agentsFor(s.Info.Key())); len(parts) > 0 {
 			return dimStyle.Render(joinFit(parts, w))
 		}
 	}
@@ -892,7 +892,7 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 		// HEAD's own row, in HEAD's own words: the same glyph, label and
 		// figure the trail draws, so zooming in never changes the sentence.
 		o := TrailOpts{Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State,
-			HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, HeadWaits: headWaits(tr), HeadTail: headTail(tr, m.now, true), Now: m.now, Width: 1000}
+			HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, HeadWaits: headWaits(tr), HeadTail: headTail(tr, m.now, true, m.agentsFor(s.Info.Key())), Agents: m.agentsFor(s.Info.Key()), Now: m.now, Width: 1000}
 		label, _ := legLabel(l, o)
 		glyph, tail := headMark(o, l)
 		// The newest verdict rides beside the present: below 110 columns
@@ -930,7 +930,7 @@ func (m *Model) journeyLine(s fleet.Session, w int) string {
 		}
 		return lead + " " + dimStyle.Render(pad(clip(label, labelW), labelW)) + " " + dimStyle.Render(full)
 	}
-	if v := boardVerdict(s, tr, m.now); v != "" {
+	if v := boardVerdictWith(s, tr, m.now, m.agentsFor(s.Info.Key())); v != "" {
 		return dimStyle.Render(joinFit(strings.Split(v, " · "), w))
 	}
 	return ""

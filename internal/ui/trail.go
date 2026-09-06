@@ -78,6 +78,10 @@ type TrailOpts struct {
 	// still inside it — a Bash timeout — so the figure says "for 2m of
 	// 7m": the silence is the session doing what it said.
 	HeadAllowed time.Duration
+	// Agents is what the open lanes' own transcripts say, by the Agent
+	// call's id: the lane's glyph and its head row come from here, and
+	// nothing is drawn for a lane with no file (#49).
+	Agents map[string]agentLive
 	// HeadDead says the session is dead on the API: HEAD wears ⊘ and the
 	// refusal, not the needs-you glyph and a wait.
 	HeadDead bool
@@ -282,7 +286,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	}
 
 	o.HeadWaits = headWaits(tr)
-	o.HeadTail = headTail(tr, o.Now, o.HeadState != state.Idle)
+	o.HeadTail = headTail(tr, o.Now, o.HeadState != state.Idle, o.Agents)
 	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if o.HeadDead && len(tr.Legs) > 0 && !tr.Legs[len(tr.Legs)-1].Current {
@@ -762,6 +766,7 @@ type TrailRow struct {
 	Kind string    // "leg", "waypoint" or "branch"
 	Text string    // what the row says, undecorated
 	Leg  int       // index into Trail.Legs the row belongs to, or -1
+	Lane string    // a branch row: the Agent call's id, which its own transcript is paired by
 }
 
 // TrailRows enumerates the trail's selectable rows in the order RenderTrail
@@ -777,7 +782,7 @@ func TrailRows(tr journey.Trail, level int) []TrailRow {
 		for i := range tr.Branches {
 			if br := tr.Branches[i]; br.AfterLeg == after {
 				out = append(out, TrailRow{Time: br.Start, Kind: "branch",
-					Text: branchName(br.Label), Leg: after})
+					Text: branchName(br.Label), Leg: after, Lane: br.ToolUseID})
 			}
 		}
 	}
@@ -1142,7 +1147,7 @@ func headMark(o TrailOpts, l journey.Leg) (glyph, figure string) {
 // them ("quiet 15m": nothing of its own since the newest left) or still
 // working ("for 2h"). One sentence at every depth; zooming in must not
 // change the words.
-func headTail(tr journey.Trail, now time.Time, live bool) string {
+func headTail(tr journey.Trail, now time.Time, live bool, agents map[string]agentLive) string {
 	var head *journey.Leg
 	for i := range tr.Legs {
 		if tr.Legs[i].Current {
@@ -1153,9 +1158,11 @@ func headTail(tr journey.Trail, now time.Time, live bool) string {
 		return ""
 	}
 	out, oldest, newest := 0, time.Time{}, time.Time{}
+	var lanes []string
 	for _, b := range tr.Branches {
 		if !b.Done {
 			out++
+			lanes = append(lanes, b.ToolUseID)
 			if oldest.IsZero() || b.Start.Before(oldest) {
 				oldest = b.Start
 			}
@@ -1170,6 +1177,12 @@ func headTail(tr journey.Trail, now time.Time, live bool) string {
 	tail := fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
 	if head.End.After(newest) {
 		return tail + " · for " + relAge(now, head.Start)
+	}
+	// Parked on its agents. "quiet 15m" was the lead's silence, which is
+	// the age of the newest lane said again; the agents' own files say
+	// whether they are moving (#49) — "1 silent 12m", "newest 40s ago".
+	if clause := lanesClause(agents, lanes, now); clause != "" {
+		return tail + " · " + clause
 	}
 	return tail + " · quiet " + relAge(now, head.End)
 }
@@ -1542,9 +1555,37 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 			name = clip(branchName(br.Label), labelWidth-len([]rune(link))) + link
 		}
 		label := dimStyle.Render(pad(name, labelWidth))
-		b.selNode(sel, ruleStyle.Render(railFork)+textStyle.Render(glyphBranch)+" "+
+		live, known := o.Agents[br.ToolUseID]
+		glyph := textStyle.Render(glyphBranch)
+		if !br.Done && known && live.silent() {
+			// The agent's own file has gone quiet past the threshold:
+			// the lane wears the hung glyph, the whole answer at 80
+			// columns (#49).
+			glyph = stuckStyle.Render(fleet.Glyph(state.Stuck))
+		}
+		b.selNode(sel, ruleStyle.Render(railFork)+glyph+" "+
 			label+" "+dimStyle.Render(tail))
 		drawn++
+
+		// An open lane's own head, from its file — the call in flight and
+		// when it last wrote — beneath it where the finding of a returned
+		// lane goes (#49). Only from Lv2 down: at Lv1 the glyph says it.
+		if !br.Done && known && o.Level >= levelWaypoints && o.HeadState != state.Idle {
+			g, text, clock := laneHead(live, known, o.Now)
+			if body := width - trailWayWidth; body >= trailMinLabel && text != "" {
+				row := g + " " + text
+				if clock != "" {
+					if keep := body - len([]rune(clock)) - 2; keep >= trailMinLabel {
+						row = pad(clip(row, keep), keep) + "  " + clock
+					}
+				}
+				style := dimStyle
+				if live.silent() {
+					style = stuckStyle
+				}
+				b.details([]detailRow{{text: style.Render(clip(row, body)), sel: -1}})
+			}
+		}
 
 		// A returned agent says what it found, at every level: a ✓ that
 		// keeps its finding two keypresses down creates an obligation without
@@ -1664,8 +1705,8 @@ func (m *Model) cardSecond(w int) string {
 		return ""
 	}
 	room := w - 4
-	verdict := strings.Split(boardVerdict(s, m.trail, m.now), " · ")
-	if s.Snap.State != state.Idle && len(verdictParts(m.trail, m.now, true)) == 0 {
+	verdict := strings.Split(boardVerdictWith(s, m.trail, m.now, m.agentsFor(m.selectedKey)), " · ")
+	if s.Snap.State != state.Idle && len(verdictPartsWith(m.trail, m.now, true, m.agentsFor(m.selectedKey))) == 0 {
 		// Nothing to count: the fleet row's own sentence — the hung call,
 		// the question, the present — not the last finished leg. The
 		// board's column says the present; zooming in lost it.
@@ -1773,6 +1814,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		HeadState:    headState,
 		HeadSince:    since,
 		HeadAllowed:  allowed,
+		Agents:       m.agentsFor(m.selectedKey),
 		SessionKey:   m.selectedKey,
 		Now:          m.now,
 		Width:        w,

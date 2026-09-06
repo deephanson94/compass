@@ -420,7 +420,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	}
 	s := m.sessions[r.sess]
 	doc := TrailLines(tr, TrailOpts{
-		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed,
+		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, Agents: m.agentsFor(key),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 		Dense: true, Looked: m.looked(key),
 	})
@@ -685,6 +685,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		HeadState:    s.Snap.State,
 		HeadSince:    headSince(s),
 		HeadAllowed:  s.Snap.Allowed,
+		Agents:       m.agentsFor(key),
 		SessionKey:   key,
 		Now:          m.now,
 		Width:        w,
@@ -740,7 +741,7 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 		// A working column shows its HEAD row anyway — pinned, it is always
 		// the last row of the trail — so the header says what HEAD cannot:
 		// how the suite stands, what shipped, what is still out.
-		if parts := verdictParts(tr, m.now, true); len(parts) > 0 {
+		if parts := verdictPartsWith(tr, m.now, true, m.agentsFor(key)); len(parts) > 0 {
 			second = "    " + dimStyle.Render(joinFit(parts, w-4))
 		}
 	}
@@ -767,7 +768,13 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 // "did it work" with zero keys and zero inference, which for eleven of twelve
 // sessions on an afternoon board is the only thing anyone needed.
 func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
-	parts := verdictParts(tr, now, s.Snap.State != state.Idle)
+	return boardVerdictWith(s, tr, now, nil)
+}
+
+// boardVerdictWith is boardVerdict with what the open lanes' own files say,
+// so a parked HEAD's clause counts the agents' silence, not the lead's.
+func boardVerdictWith(s fleet.Session, tr journey.Trail, now time.Time, agents map[string]agentLive) string {
+	parts := verdictPartsWith(tr, now, s.Snap.State != state.Idle, agents)
 	if len(parts) == 0 {
 		// Nothing countable: the newest completed leg, so a quiet column
 		// still says what it last did.
@@ -977,6 +984,11 @@ func repeatRuns(l journey.Leg) int {
 // can count. A working column's header uses this — its HEAD row already
 // says what it is doing, and "test pytest" over it said less.
 func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
+	return verdictPartsWith(tr, now, live, nil)
+}
+
+// verdictPartsWith is verdictParts with the lanes' own files (#49).
+func verdictPartsWith(tr journey.Trail, now time.Time, live bool, agents map[string]agentLive) []string {
 	var parts []string
 
 	// Agents still out, oldest first: the number that changes what you do.
@@ -996,7 +1008,7 @@ func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
 	case out > 0:
 		// The same words HEAD uses, parked or not: "◈3 out 20m · quiet
 		// 15m" is the header's to say as much as the trail's.
-		parts = append(parts, strings.TrimPrefix(headTail(tr, now, true), "for "))
+		parts = append(parts, strings.TrimPrefix(headTail(tr, now, true, agents), "for "))
 		if !strings.HasPrefix(parts[len(parts)-1], "◈") {
 			parts[len(parts)-1] = fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
 		}

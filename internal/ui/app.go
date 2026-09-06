@@ -65,6 +65,7 @@ type fleetMsg struct {
 	events   []transcript.Event
 	todos    []todo.Item
 	trailFor string // the session the payload belongs to; "" if none was polled
+	agents   map[string]map[string]agentLive // what the subagents' own files say, per session, per call
 
 	// trails is every board column's journey, keyed by session; nil when the
 	// board was not polled (a narrow terminal). The selected session's is in
@@ -266,6 +267,14 @@ type Model struct {
 	// The board's data: one trail per column, and each column's narrated
 	// labels. The selected session's trail is here as well as in trail.
 	trails      map[string]journey.Trail
+	// agents is what the subagents' own transcripts say, per session, per
+	// Agent call: read by refresh for every open lane on the board, kept
+	// with events for the lane the reader is on (#49).
+	agents map[string]map[string]agentLive
+	// readerLane is the Agent call whose conversation the reader shows in
+	// place of the lead's: Tab on a lane opens it, leaving the reader
+	// clears it.
+	readerLane string
 	boardLabels map[string]map[string]string
 	fleetQuery  string               // the fleet search in force; "" = none
 	searchFleet bool                 // the search being typed is the fleet's, not the reader's
@@ -308,6 +317,7 @@ type readerCache struct {
 	w     int    // and the width it was wrapped to
 	ver   int    // and the fold generation
 	cwd   string // and the directory its paths were shortened against
+	lane  string // and the lane, when the reader is on an agent's conversation
 }
 
 // New returns a deck bound to a fleet Manager.
@@ -490,10 +500,39 @@ func (m *Model) refresh() tea.Cmd {
 		path, sessionID = s.Info.TranscriptPath, s.Info.ID
 	}
 	targets := m.boardTargets()
+	laneWanted := m.laneWanted()
+	agentPaths := map[string]string{} // session key → transcript path, for the lanes' files
+	if s, ok := m.selected(); ok {
+		agentPaths[s.Info.Key()] = s.Info.TranscriptPath
+	}
+	for _, t := range targets {
+		agentPaths[t.key] = t.path
+	}
 	return func() tea.Msg {
 		now := time.Now()
 		sessions, err := mgr.Refresh(now)
 		msg := fleetMsg{sessions: sessions, err: err, at: now}
+		// The agents' own files, for every open lane of every trail polled:
+		// paired by the call's id, never by its name.
+		pollAgents := func(key string, tr journey.Trail) {
+			files := pairAgents(agentDir(agentPaths[key]))
+			if len(files) == 0 {
+				return
+			}
+			for _, b := range tr.Branches {
+				path, ok := files[b.ToolUseID]
+				if !ok || b.Done {
+					continue
+				}
+				if msg.agents == nil {
+					msg.agents = map[string]map[string]agentLive{}
+				}
+				if msg.agents[key] == nil {
+					msg.agents[key] = map[string]agentLive{}
+				}
+				msg.agents[key][b.ToolUseID] = feeds.pollAgent(key, b.ToolUseID, path, now, key == selected && b.ToolUseID == laneWanted)
+			}
+		}
 		if selected != "" {
 			// The plan the session keeps for itself. A missing or unreadable
 			// todo file is not news: the trail simply has no future to draw.
@@ -505,6 +544,7 @@ func (m *Model) refresh() tea.Cmd {
 			if selected != "" && path != "" {
 				msg.trail, msg.events = feeds.poll(selected, path, true)
 				msg.hasTrail = true
+				pollAgents(selected, msg.trail)
 			}
 			// The board's columns. Each feed reads only what its transcript
 			// has grown since the last poll; the first poll of a new column
@@ -520,6 +560,7 @@ func (m *Model) refresh() tea.Cmd {
 					// kept for the selected session alone.
 					tr, _ := feeds.poll(t.key, t.path, false)
 					msg.trails[t.key] = tr
+					pollAgents(t.key, tr)
 				}
 			}
 		}
@@ -627,6 +668,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and the mirror falls back to the transcript — until the 5s pane tick.
 		first := !m.loaded
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
+		if msg.agents != nil || msg.hasTrail {
+			m.agents = msg.agents // a poll that read the lanes' files replaces what was known
+		}
 		m.clampSelection()
 		if first && len(m.sessions) > 0 {
 			m.refreshBoard(msg.trails)
@@ -1385,6 +1429,7 @@ func (m *Model) zoomOut() {
 	switch {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
+		m.readerLane = "" // the lead's conversation comes back with the cursor
 		// The reader goes back to following the cursor it left behind.
 		m.anchorReader()
 	case m.level > levelTrail:
@@ -2536,9 +2581,9 @@ func (m *Model) replyState(s fleet.Session) string {
 		// long the turn has been going.
 		tail := ""
 		if s.Info.Key() == m.selectedKey {
-			tail = headTail(m.trail, m.now, true)
+			tail = headTail(m.trail, m.now, true, m.agentsFor(m.selectedKey))
 		} else if tr, ok := m.trails[s.Info.Key()]; ok {
-			tail = headTail(tr, m.now, true)
+			tail = headTail(tr, m.now, true, m.agentsFor(s.Info.Key()))
 		}
 		if tail == "" {
 			tail = "for " + since
@@ -2781,7 +2826,28 @@ func (m *Model) statusChips() string {
 		}
 	}
 	if out > 0 {
-		parts = append(parts, dimStyle.Render(fmt.Sprintf("◈%d out · oldest %s", out, m.age(oldestOut))))
+		chip := fmt.Sprintf("◈%d out · oldest %s", out, m.age(oldestOut))
+		// A lane whose own file has gone quiet displaces "oldest", which
+		// is the wrong alarm: a lane out 20m that wrote 5s ago is fine.
+		silent, longest := 0, time.Duration(0)
+		for _, s := range m.sessions {
+			if !m.onBoard(s) || s.Snap.State == state.Idle {
+				continue
+			}
+			var lanes []string
+			for _, b := range m.trails[s.Info.Key()].Branches {
+				if !b.Done {
+					lanes = append(lanes, b.ToolUseID)
+				}
+			}
+			n, d, _, _ := lanesLive(m.agentsFor(s.Info.Key()), lanes, m.now)
+			silent += n
+			longest = max(longest, d)
+		}
+		if silent > 0 {
+			chip = fmt.Sprintf("◈%d out · %d silent %s", out, silent, state.ShortDuration(longest))
+		}
+		parts = append(parts, dimStyle.Render(chip))
 	}
 	if m.archiveView {
 		chip := fmt.Sprintf("archive %d", m.archivedCount())

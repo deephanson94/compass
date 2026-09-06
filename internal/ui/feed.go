@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -37,8 +38,9 @@ const feedEventCap = 20000
 // contract). The deck's commands run off the render loop and can overlap, so
 // the store carries its own lock.
 type feedStore struct {
-	mu    sync.Mutex
-	feeds map[string]*feed
+	mu     sync.Mutex
+	feeds  map[string]*feed
+	agents map[string]*agentFeed // the subagents' own transcripts, keyed session\x00call
 }
 
 func newFeedStore() *feedStore {
@@ -119,6 +121,12 @@ func (fs *feedStore) retain(sessions []fleet.Session) {
 	for key, f := range fs.feeds {
 		if !live[key] || f.polled.Before(cutoff) {
 			delete(fs.feeds, key)
+		}
+	}
+	for id, f := range fs.agents {
+		key, _, _ := strings.Cut(id, "\x00")
+		if !live[key] || f.polled.Before(cutoff) {
+			delete(fs.agents, id)
 		}
 	}
 }

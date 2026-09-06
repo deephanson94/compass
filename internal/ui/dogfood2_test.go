@@ -563,7 +563,7 @@ func TestTheReplyPanelClockIsTheTurns(t *testing.T) {
 	}
 	m.now = fixtureBase.Add(40 * time.Minute)
 	press(m, "r")
-	want := "● working " + headTail(m.trail, m.now, true) + " —"
+	want := "● working " + headTail(m.trail, m.now, true, nil) + " —"
 	if view := m.View(); !strings.Contains(view, want) || strings.Contains(view, "working for 40s") {
 		t.Errorf("the panel should carry HEAD's own figure %q:\n%s", want, view)
 	}
