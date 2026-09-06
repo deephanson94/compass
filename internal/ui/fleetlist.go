@@ -752,12 +752,14 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		if pane != "" {
 			short = mirrorMark + " " + paneSuffix(strings.TrimPrefix(pane, mirrorMark+" "))
 		}
-		// The word before the pane here: the group header two rows up
-		// already names the tmux session, and `enter` attaches by the
-		// row's own pane whatever the row shows.
+		// The group header two rows up names the tmux session, so every
+		// row's pane is its suffix — "⌁ :1.0" — one form for the group,
+		// not a full address on one row and a suffix on the next (#62);
+		// `enter` attaches by the row's own pane whatever the row shows.
+		// The word before the pane: the header said the session.
 		var ladder []string
 		seen := map[string]bool{}
-		for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), joinTag(word, short), word, pane, short} {
+		for _, c := range []string{joinTag(tool, short), joinTag(word, short), word, short} {
 			if c != "" && !seen[c] {
 				ladder, seen[c] = append(ladder, c), true
 			}

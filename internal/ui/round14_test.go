@@ -226,7 +226,7 @@ func TestTheFooterShedsTheParentheticalFirst(t *testing.T) {
 func TestTheNarrowListTagsNamesakes(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(100, 30)
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "⌁ dev:1.0") || !strings.Contains(view, "⌁ dev:2.1") {
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "⌁ :1.0") || !strings.Contains(view, "⌁ :2.1") {
 		t.Errorf("api and webapp share dev: the list should carry their panes:\n%s", view)
 	}
 	m.point(sessionKey("s-webapp"))

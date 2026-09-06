@@ -153,8 +153,10 @@ func TestTheNarrowHelpKeepsGAndTheLegendBindsItsSeparators(t *testing.T) {
 	if got := clip("Bash: python backfill.py --all", 22); !strings.Contains(got, "backfill") {
 		t.Errorf("the dotted rule dropped the token: %q", got)
 	}
-	if got := clip("ok  github.com/example/cli  4.03s", 28); !strings.Contains(got, "github.com/example") {
-		t.Errorf("the dotted rule dropped the path: %q", got)
+	for _, w := range []int{23, 24, 28} {
+		if got := clip("ok  github.com/example/cli  4.03s", w); !strings.Contains(got, "github.com/example") || strings.HasSuffix(got, "/…") || strings.HasSuffix(got, ".…") {
+			t.Errorf("the dotted rule at %d dropped the path or marked a dot: %q", w, got)
+		}
 	}
 	_ = state.Working
 	_ = time.Second
@@ -185,5 +187,36 @@ func TestALaneRowAtTheFoldStays(t *testing.T) {
 	}
 	if !seen {
 		t.Fatalf("no height opened the viewport on the finding's second row")
+	}
+}
+
+// The tag beside a digest: the longest rung that costs the digest no
+// clause; else the longest that draws the digest the shortest would;
+// else the last (#60).
+func TestTheTagBesideADigestTakesTheLongestHarmlessRung(t *testing.T) {
+	ladder := []string{"opencode · sonnet-4-5 · ⌁ dev:2.0", "opencode · ⌁ dev:2.0", "opencode · sonnet-4-5", "opencode", "⌁ dev:2.0"}
+	digest := func(room int) string {
+		switch {
+		case room >= 24:
+			return "↪ sent \"go on\" · 0s ago"
+		case room >= 14:
+			return "↪ sent \"go on\""
+		default:
+			return ""
+		}
+	}
+	if got := tagBesideDigest(ladder, 37, digest); got != "opencode" {
+		t.Errorf("at 37 = %q, want the longest rung that keeps the digest whole", got)
+	}
+	if got := tagBesideDigest(ladder, 30, digest); got != "opencode" {
+		t.Errorf("at 30 = %q, want the longest rung drawing what the shortest would", got)
+	}
+	// 12 cells: every rung leaves nothing, so the longest that draws
+	// what the last would — the tool word, which tells rows apart.
+	if got := tagBesideDigest(ladder, 12, digest); got != "opencode" {
+		t.Errorf("at 12 = %q, want the longest rung drawing what the last would", got)
+	}
+	if got := tagBesideDigest([]string{"claude · ⌁ ops", "⌁ ops"}, 8, digest); got != "⌁ ops" {
+		t.Errorf("at 8 = %q, want the last rung, the only one that fits", got)
 	}
 }

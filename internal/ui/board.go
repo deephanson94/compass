@@ -293,10 +293,18 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 		// terminal the more it hid. What is left has to hold either a
 		// band worth reading, or this band whole.
 		whole := pos < len(owed) // a band of owed columns may be cut short; the rest may not
-		if (rem < boardBandMin && (tallest > rem || rem < boardBandFloor)) || (!whole && tallest > rem) {
+		avail := rem
+		if pos+len(band) >= len(all) && !m.stripHasClauses() {
+			// The last band empties the strip, and an empty strip's row
+			// and its line of air are the band's: a session was named
+			// there over six blank rows when its column was two rows too
+			// tall for the rest (#62).
+			avail = rem + 2
+		}
+		if (avail < boardBandMin && (tallest > avail || avail < boardBandFloor)) || (!whole && tallest > avail) {
 			break
 		}
-		bh := min(tallest, rem) // as tall as its tallest trail, never padded to the minimum
+		bh := min(tallest, avail) // as tall as its tallest trail, never padded to the minimum
 		bands = append(bands, band)
 		heights = append(heights, bh)
 		rem -= bh + 1 // and the row of air under it
@@ -311,6 +319,17 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	// A band is as tall as its tallest trail, one band or three: the
 	// strip follows it, rather than thirty rows of bare rail.
 	return keys, heights
+}
+
+// stripHasClauses says whether the strip under the board has anything to
+// say besides the sessions without a column: the archive, a hide, an
+// overlap — the clauses that keep its row even when every session has a
+// column.
+func (m *Model) stripHasClauses() bool {
+	if m.archiveView {
+		return true
+	}
+	return m.archivedCount() > 0 || m.hiddenCount() > 0 || len(m.overlaps()) > 0
 }
 
 // boardPlace is where the selected column stands on the board: the
