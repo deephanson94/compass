@@ -927,6 +927,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		i := int(key[0] - '1')
 		if !m.selectIndex(i) && !m.openRecent(i+1) {
 			m.note = fmt.Sprintf("no session %d", i+1)
+			for _, s := range m.sessions {
+				if s.Live && m.hidden[s.Info.Key()] && m.digits[s.Info.Key()] == i+1 && !m.archiveView {
+					// The digit is a hidden session's: the refusal names
+					// it and the way to it, as the strip beside it does (#57).
+					m.note = fmt.Sprintf("%d %s is hidden · A, then x", i+1, sessionName(s.Info))
+				}
+			}
 		}
 		return m, m.refresh()
 	}

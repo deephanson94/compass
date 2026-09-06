@@ -430,7 +430,7 @@ func helpLegendRaw() []string {
 		"        on\u00a0you\u00a040m\u00a0today — its waits for your next prompt (3h+\u00a0=\u00a0away) · for\u00a04m\u00a0of\u00a010m — inside its shell command's budget",
 		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit · ↩ result of X — landed late; it is X's",
 		"        │\u00a0you\u00a0were\u00a0here — the read-line · ↳\u00a0what\u00a0came\u00a0after · ⚠\u00a0two\u00a0sessions, one thing",
-		"board:  columns for what owes you, in that order; the rest in a band below",
+		"board:  columns for what owes you, in order; the rest below",
 		"",
 		"every leg is one of seven classes, named on its row:",
 	}
