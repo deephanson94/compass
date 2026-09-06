@@ -55,6 +55,11 @@ type ReaderOpts struct {
 	// they walk the newest legs.
 	Anchor int
 
+	// Lanes is what each open Agent call's own transcript says, by the
+	// call's id — "◍ silent 12m", "wrote 40s ago" — so the stub under the
+	// call is judged, not just counted (#49). Nil when none was read.
+	Lanes map[string]string
+
 	// Now is the moment the document is read at: an agent still out says
 	// how long, the same clock its lane on the trail carries. Zero leaves
 	// the stub bare.
@@ -232,6 +237,7 @@ type docBuilder struct {
 	width int
 	cwd   string
 	now   time.Time
+	lanes map[string]string // an open Agent call's own verdict, by call id (#49)
 }
 
 func (d *docBuilder) push(text string, kind readerKind, event int, at time.Time) {
@@ -269,7 +275,7 @@ func (d *docBuilder) last() readerKind {
 // readerDoc flattens the events into rows. Sidechains are skipped: a subagent's
 // own conversation is the trail's branch lane, not this document's business.
 func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
-	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now}
+	d := &docBuilder{width: o.Width, cwd: o.CWD, now: o.Now, lanes: o.Lanes}
 	unfolded := o.Unfolded
 	answered := map[string]bool{}
 	for _, ev := range events {
@@ -553,6 +559,9 @@ func (d *docBuilder) pending(event int, at time.Time, use transcript.ToolUse) {
 			// The lane on the trail says "⋯ 20m out"; three bare stubs
 			// were three agents nobody could tell apart.
 			word += " · " + relDuration(d.now.Sub(at))
+		}
+		if verdict := d.lanes[use.ID]; verdict != "" {
+			word += " · " + verdict // the agent's own file: silent, or writing
 		}
 	case "AskUserQuestion":
 		word = "⋯ no answer yet"

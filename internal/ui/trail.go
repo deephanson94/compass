@@ -1660,6 +1660,11 @@ func (m *Model) trailColumn(w, h int) []string {
 func (m *Model) sessionCard(w int) []string {
 	r, ok := m.boardRows()[m.selectedKey]
 	if !ok {
+		if s, has := m.selected(); has && m.fleetQuery != "" && !m.matchesQuery(s) {
+			// The one session fails the search: the card says so, where a
+			// blank card and a blank band said nothing (#52).
+			return []string{m.trailTitle(w), dimStyle.Render(clip("no session matches /"+m.fleetQuery+" · esc clears it", w))}
+		}
 		return []string{m.trailTitle(w), ""}
 	}
 	// Where the keys are, in the words the help uses — board, session,
@@ -1732,7 +1737,7 @@ func (m *Model) cardSecond(w int) string {
 			}
 		}
 	}
-	tmux := joinTag(m.toolTag(s), m.boardTag(s)) // the column's tag verbatim, with the tool and model (#50)
+	tmux := m.tagFor(s, room, 24, "verdict") // the column's tag, with the tool and model where the verdict leaves room (#50)
 	// The tmux session is always kept — `enter` attaches from here — and
 	// the day is added after the verdict, so joinFit sheds the day's
 	// clauses before the verdict's; the long form when it all fits, the
@@ -1740,14 +1745,6 @@ func (m *Model) cardSecond(w int) string {
 	fit := room
 	if tmux != "" {
 		fit -= lipgloss.Width(tmux) + 2
-	}
-	if fit < 24 && m.toolTag(s) != "" {
-		// The verdict is the row's reason: the tool and model go first.
-		tmux = m.boardTag(s)
-		fit = room
-		if tmux != "" {
-			fit -= lipgloss.Width(tmux) + 2
-		}
 	}
 	best := ""
 	for _, compact := range []bool{false, true} {

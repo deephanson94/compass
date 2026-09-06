@@ -22,11 +22,12 @@ func (m *Model) doc(width int) []readerLine {
 	c := &m.docCache
 	cwd := m.readerCWD()
 	events := m.readerEvents()
-	if c.valid && c.n == len(events) && c.w == width && c.ver == m.docVer && c.cwd == cwd && c.lane == m.readerLane {
+	lanes := fmt.Sprint(m.laneClauses())
+	if c.valid && c.n == len(events) && c.w == width && c.ver == m.docVer && c.cwd == cwd && c.lane == m.readerLane && c.lanes == lanes {
 		return c.lines
 	}
-	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now})
-	m.docCache = readerCache{lines: lines, valid: true, n: len(events), w: width, ver: m.docVer, cwd: cwd, lane: m.readerLane}
+	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now, Lanes: m.laneClauses()})
+	m.docCache = readerCache{lines: lines, valid: true, n: len(events), w: width, ver: m.docVer, cwd: cwd, lane: m.readerLane, lanes: lanes}
 	return lines
 }
 
@@ -123,6 +124,7 @@ func (m *Model) readerColumn(w, h int) []string {
 			Anchor:   m.anchor,
 			CWD:      m.readerCWD(),
 			Now:      m.now,
+			Lanes:    m.laneClauses(),
 		})
 		rows = append(rows, strings.Split(frame, "\n")...)
 	}
@@ -350,7 +352,7 @@ func (m *Model) anchorReader() {
 	if m.cursor >= len(rows) {
 		return
 	}
-	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD(), Now: m.now}
+	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD(), Now: m.now, Lanes: m.laneClauses()}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
 		// The scroll is clamped to the last screenful at once: an offset
 		// past it drew the same frame, and the first j after it moved the

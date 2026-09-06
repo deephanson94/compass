@@ -364,6 +364,9 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 				// not fit fourteen rows, and a key with no row is a key
 				// the person cannot learn.
 				what = "move down / up (↓ ↑ too) · ctrl+d/u half a page · G newest"
+				if w >= 90 {
+					what = "move down / up (↓ ↑ too) · ctrl+d/u or PgDn/PgUp half a page · G newest"
+				}
 			case "ctrl+d/u":
 				what = ""
 			case "G":

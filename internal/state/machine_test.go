@@ -82,6 +82,19 @@ func assistantTool(offset time.Duration, id, name, input string) transcript.Even
 	}
 }
 
+// assistantTools is one assistant event carrying several calls, as a
+// batched turn is written.
+func assistantTools(offset time.Duration, uses ...transcript.ToolUse) transcript.Event {
+	return transcript.Event{
+		Type: transcript.EventAssistant, UUID: "a", SessionID: "s",
+		Timestamp: at(offset), ToolUses: uses,
+	}
+}
+
+func tool(id, name, input string) transcript.ToolUse {
+	return transcript.ToolUse{ID: id, Name: name, Input: json.RawMessage(input)}
+}
+
 func toolResult(offset time.Duration, id string) transcript.Event {
 	return transcript.Event{
 		Type: transcript.EventUser, UUID: "u", SessionID: "s",
@@ -684,4 +697,45 @@ func TestABashWithNoTimeoutHasTwoMinutes(t *testing.T) {
 	)
 	assertState(t, m.Evaluate(at(100*time.Second)), state.Working)
 	assertState(t, m.Evaluate(at(3*time.Minute)), state.Stuck)
+}
+
+// The budget is the latest of every call in flight: Claude Code batches
+// calls, and a Read issued beside the sleep is the oldest pending one (#51).
+func TestTheBudgetIsTheLatestOfEveryPendingCall(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "wait for the run"),
+		assistantTools(0, tool("toolu_r", "Read", `{"file_path":"main.go"}`), tool("toolu_b", "Bash", `{"command":"sleep 420","timeout":600000}`)),
+	)
+	for _, tc := range []struct {
+		at   time.Duration
+		want state.State
+	}{{100 * time.Second, state.Working}, {5 * time.Minute, state.Working}, {11 * time.Minute, state.Stuck}} {
+		snap := m.Evaluate(at(tc.at))
+		assertState(t, snap, tc.want)
+		if tc.want == state.Working && snap.Allowed != 10*time.Minute {
+			t.Errorf("at %v Allowed = %v, want 10m", tc.at, snap.Allowed)
+		}
+	}
+	// The budget is carried from the first second, so the row never blinks.
+	if snap := m.Evaluate(at(10 * time.Second)); snap.Allowed != 10*time.Minute {
+		t.Errorf("before the silence threshold Allowed = %v, want 10m", snap.Allowed)
+	}
+}
+
+// The harness grants ten minutes at most, and a background call nothing:
+// it returns at once, and its budget is not a promise the harness keeps.
+func TestTheBudgetIsCappedAndABackgroundCallHasNone(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_x", "Bash", `{"command":"make","timeout":3600000}`),
+	)
+	if snap := m.Evaluate(at(5 * time.Minute)); snap.State != state.Working || snap.Allowed != 10*time.Minute {
+		t.Errorf("an hour's timeout = %v %v, want working with 10m", snap.State, snap.Allowed)
+	}
+	assertState(t, m.Evaluate(at(12*time.Minute)), state.Stuck)
+	bg := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_y", "Bash", `{"command":"make","run_in_background":true,"timeout":600000}`),
+	)
+	assertState(t, bg.Evaluate(at(3*time.Minute)), state.Stuck)
 }

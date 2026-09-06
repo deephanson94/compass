@@ -730,22 +730,36 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		// the sent-trace ride under it, or a reply at eighty columns left
 		// no trace at all — and the pane, when a namesake shares the tmux
 		// session the header names.
-		tag := ""
+		// The pane when a namesake shares the tmux session, and the tool
+		// where the fleet runs two (#50): the ladder's longest form that
+		// leaves the digest its floor, the model going first, then the
+		// pane's session name (the group header says it two rows up).
+		pane := ""
 		if m.sharesTmux(s) {
-			if pane, ok := m.panes[s.Info.Key()]; ok {
-				tag = mirrorMark + " " + pane.Target
-				if w-4-lipgloss.Width(tag)-2 < 16 {
-					// The group header names the tmux session: a narrow
-					// row keeps the pane alone, so the digest is not cut
-					// mid-word beside a name said two rows up.
-					tag = mirrorMark + " " + paneSuffix(pane.Target)
-				}
+			if p, ok := m.panes[s.Info.Key()]; ok {
+				pane = mirrorMark + " " + p.Target
 			}
-		} else if s.Info.Tool != "" && s.Info.Tool != "claude" {
-			// Another tool's session says so where the pane tag would
-			// go: a fleet of claudes needs no word, a fleet of two tools
-			// needs the one that is not the default (#50).
-			tag = m.toolTag(s)
+		}
+		tag := ""
+		tool, word := m.toolTag(s), ""
+		if tool != "" {
+			word = strings.SplitN(tool, " · ", 2)[0]
+			if word == shortModel(s.Info.Model) {
+				word = ""
+			}
+		}
+		short := ""
+		if pane != "" {
+			short = mirrorMark + " " + paneSuffix(strings.TrimPrefix(pane, mirrorMark+" "))
+		}
+		for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), joinTag(word, short), pane, short, word} {
+			if c != "" && w-4-lipgloss.Width(c)-2 >= 16 {
+				tag = c
+				break
+			}
+			if c != "" && tag == "" && (pane == "" || c == short || c == word) {
+				tag = c // the shortest form stands when none leaves the floor
+			}
 		}
 		room := w - 4
 		if tag != "" {

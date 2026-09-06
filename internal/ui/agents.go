@@ -239,3 +239,32 @@ func lanesClause(agents map[string]agentLive, lanes []journey.Branch, now time.T
 	}
 	return "nothing written yet"
 }
+
+// laneClauses is each open lane's verdict from its own file, by the Agent
+// call's id, for the reader's stubs: "◍ silent 12m", "wrote 40s ago",
+// "◍ nothing written · silent 18m". Nil for a session with no file read.
+func (m *Model) laneClauses() map[string]string {
+	agents := m.agentsFor(m.selectedKey)
+	if len(agents) == 0 || m.readerLane != "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, b := range openLanes(m.trail) {
+		a, ok := agents[b.ToolUseID]
+		if !ok {
+			continue
+		}
+		g, text, clock := laneHead(a, b, ok, m.now)
+		switch {
+		case g == "◍" && a.Wrote.IsZero():
+			out[b.ToolUseID] = "◍ nothing written · " + clock
+		case g == "◍":
+			out[b.ToolUseID] = "◍ " + clock
+		case clock != "":
+			out[b.ToolUseID] = clock
+		default:
+			out[b.ToolUseID] = text
+		}
+	}
+	return out
+}

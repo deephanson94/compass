@@ -193,12 +193,16 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 		// deliberate wait stopped trusting the word. The budget is the
 		// latest of every call in flight: Claude Code batches calls, and a
 		// Read issued beside the sleep is the oldest pending one.
-		allow, deadline := m.budget(now)
+		allow, deadline, at := m.budget(now)
+		since := m.since(oldest.at)
+		if allow > 0 {
+			since = at // "for 2m of 10m" counts from the call the budget belongs to
+		}
 		if quiet < StuckAfter {
-			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "tool call in flight", Activity: act, Allowed: allow}
+			return Snapshot{State: Working, Since: since, Reason: "tool call in flight", Activity: act, Allowed: allow}
 		}
 		if allow > 0 && now.Before(deadline) {
-			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
+			return Snapshot{State: Working, Since: since, Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
 		}
 		return Snapshot{State: Stuck, Since: m.since(oldest.at), Reason: stuckReason(quiet), Activity: act}
 	}
@@ -342,17 +346,17 @@ const (
 // budget is the budget of the pending call that is allowed the longest,
 // and the moment it runs out: zero when no call in flight has one, or
 // every one has run out.
-func (m *Machine) budget(now time.Time) (allow time.Duration, deadline time.Time) {
+func (m *Machine) budget(now time.Time) (allow time.Duration, deadline, at time.Time) {
 	for _, p := range m.pending {
 		a := allowance(p.use)
 		if a == 0 {
 			continue
 		}
 		if d := m.since(p.at).Add(a); now.Before(d) && d.After(deadline) {
-			allow, deadline = a, d
+			allow, deadline, at = a, d, m.since(p.at)
 		}
 	}
-	return allow, deadline
+	return allow, deadline, at
 }
 
 // allowance is how long a pending call may run before its silence counts —
@@ -362,10 +366,26 @@ func allowance(use transcript.ToolUse) time.Duration {
 	if use.Name != "Bash" {
 		return 0
 	}
+	if rawBool(use.Input, "run_in_background") {
+		return 0 // returns at once; the harness enforces no budget on it
+	}
 	if ms := rawNumber(use.Input, "timeout"); ms > 0 {
 		return min(time.Duration(ms)*time.Millisecond, bashTimeoutMax)
 	}
 	return bashTimeout
+}
+
+// rawBool reads a boolean field off a tool call's input; false when absent.
+func rawBool(input json.RawMessage, key string) bool {
+	if len(input) == 0 {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return false
+	}
+	var b bool
+	return json.Unmarshal(obj[key], &b) == nil && b
 }
 
 // rawNumber reads a numeric field off a tool call's input; 0 when absent or

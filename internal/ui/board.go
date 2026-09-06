@@ -750,15 +750,9 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	// column lives never moves and is never evicted by what is new. The
 	// tool and its model stand with the tag where the digest leaves room
 	// (#50), and go first when it does not.
-	tag := joinTag(m.toolTag(s), m.boardTag(s))
+	tag := m.tagFor(s, w, 12, m.boardDelta(key, s, w))
 	room := w
 	if tag != "" {
-		room = w - lipgloss.Width(tag) - 2
-	}
-	if room < 12 && m.toolTag(s) != "" && m.boardTag(s) == "no pane" {
-		// "no pane" is the one clause the tool outranks: the tool tells
-		// two rows apart, and a missing pane is said by the attach key.
-		tag = m.toolTag(s)
 		room = w - lipgloss.Width(tag) - 2
 	}
 	third := ""
@@ -1275,7 +1269,9 @@ func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
 		case out > 0 && back == 0:
 			lanes := fmt.Sprintf("↳ %d agents out, none back", out)
 			if n, d, _, _ := lanesLive(m.agentsFor(key), openLanes(m.trails[key]), m.now); n > 0 {
-				lanes = fmt.Sprintf("↳ %d agents out · %d silent %s", out, n, state.ShortDuration(d))
+				// The row above already counts the lanes out: the digest
+				// carries the one fact it does not, whole (#52).
+				lanes = fmt.Sprintf("↳ %d silent %s", n, state.ShortDuration(d))
 			}
 			parts = append(parts, lanes)
 		case out > 0:
@@ -1522,7 +1518,7 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 // directory are told apart by more than a name, and a fleet of two tools
 // says which is which (#50). "" for an archived row, which is not running.
 func (m *Model) toolTag(s fleet.Session) string {
-	if !s.Live || m.archiveView {
+	if !s.Live {
 		return ""
 	}
 	var parts []string
@@ -1560,6 +1556,51 @@ func shortModel(model string) string {
 		model = model[:i] // the release date
 	}
 	return model
+}
+
+// tagLadder is the tag row's forms, longest first: the tool, its model
+// and the pane; the tool and the pane; the pane; the tool and its model;
+// the tool. A row takes the first that leaves its other clause the floor
+// it needs (#50): the digest keeps twelve cells, the card's verdict
+// twenty-four, and the model goes before the tool word or the pane, since
+// the word is what tells two rows apart and the pane is what attaches.
+func (m *Model) tagLadder(s fleet.Session) []string {
+	tool, pane := m.toolTag(s), m.boardTag(s)
+	word := ""
+	if tool != "" {
+		word = strings.SplitN(tool, " · ", 2)[0]
+		if word == shortModel(s.Info.Model) {
+			word = "" // the model alone: no tool word was earned
+		}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, c := range []string{joinTag(tool, pane), joinTag(word, pane), pane, tool, word} {
+		if c != "" && !seen[c] {
+			out = append(out, c)
+			seen[c] = true
+		}
+	}
+	return out
+}
+
+// tagFor picks the tag a row w wide draws beside a clause that needs
+// floor cells: the longest form of the ladder that leaves it, else the
+// shortest form. "" when the session has no tag at all.
+func (m *Model) tagFor(s fleet.Session, w, floor int, clause string) string {
+	ladder := m.tagLadder(s)
+	if len(ladder) == 0 {
+		return ""
+	}
+	for _, c := range ladder {
+		if clause == "" && lipgloss.Width(c) <= w {
+			return c
+		}
+		if clause != "" && w-lipgloss.Width(c)-2 >= floor {
+			return c
+		}
+	}
+	return ladder[len(ladder)-1]
 }
 
 // joinTag is the tool tag and the pane tag on one row, either alone

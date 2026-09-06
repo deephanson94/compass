@@ -318,6 +318,7 @@ type readerCache struct {
 	ver   int    // and the fold generation
 	cwd   string // and the directory its paths were shortened against
 	lane  string // and the lane, when the reader is on an agent's conversation
+	lanes string // and what the lanes' own files said, which moves the stubs
 }
 
 // New returns a deck bound to a fleet Manager.
@@ -857,6 +858,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// The archive is a list; it opens as one, whatever the depth.
 			m.level = levelTrail
 			m.cursor, m.anchor = -1, -1
+		case !m.archiveView && m.boardFits() && len(m.viewOrder()) == 1:
+			// A fleet of one: back to the session view it opened on, with
+			// the recent band (#47) — not a board of one column over
+			// blank rows, which is the screen ⇧tab itself refuses.
+			m.level = levelWaypoints
+			m.cursor, m.anchor = -1, -1
+			m.cursorMove(0)
 		case !m.archiveView && m.boardFits():
 			// And leaving it goes back to the board, which is where `A`
 			// was pressed: the fleet list beside one trail is not a
@@ -2034,12 +2042,6 @@ func (m *Model) toggleArchive() {
 		m.pointQuiet(key)
 	}
 	m.clampSelection()
-	if !m.archiveView && m.level == levelBoard && m.boardFits() && len(m.viewOrder()) == 1 {
-		// Back to a fleet of one: the session view it opened on, with
-		// the recent band, not a board of one column over blank rows.
-		m.level = levelWaypoints
-		m.cursorMove(0)
-	}
 }
 
 // point moves the selection. Trail and mirror belong to the session that was
@@ -2671,6 +2673,10 @@ func (m *Model) headerLine(w int) string {
 		board = " · board"
 	}
 	digit, name, tag := m.headerName()
+	tool := ""
+	if s, ok := m.selected(); ok {
+		tool = m.toolTag(s) // "opencode · sonnet-4-5" where the fleet runs two tools (#50)
+	}
 	query := ""
 	if m.fleetQuery != "" {
 		// The search in force, and how much of the fleet answers it.
@@ -2693,6 +2699,9 @@ func (m *Model) headerLine(w int) string {
 				who = digit + " " + name
 			}
 			left += dimStyle.Render(" · ") + who
+			if tool != "" {
+				left += dimStyle.Render(" · " + tool)
+			}
 			if tag != "" {
 				left += dimStyle.Render(" · " + tag)
 			}
@@ -2702,6 +2711,7 @@ func (m *Model) headerLine(w int) string {
 	left := compose(board, tag, query, name)
 	for _, try := range []func() string{
 		func() string { board = ""; return compose(board, tag, query, name) },
+		func() string { tool = ""; return compose(board, tag, query, name) },
 		func() string { tag = ""; return compose(board, tag, query, name) },
 		func() string { query = ""; return compose(board, tag, query, name) },
 	} {
@@ -2968,6 +2978,11 @@ func (m *Model) keymap() string {
 			keys = strings.Replace(keys, " · r reply", "", 1)
 		}
 	}
+	if m.readerLane != "" && m.level >= levelReader {
+		// The agent's own conversation: `r` and `a` are the lead's, and
+		// a footer offering them here read as steering the agent (#49).
+		keys = strings.Replace(strings.Replace(keys, " · r reply", "", 1), " · a ask", "", 1)
+	}
 	return keys
 }
 
@@ -3191,9 +3206,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 	if m.showMirror {
 		mirror = " · m conversation" // the toggle's other label, the same rank
 	}
-	// The page key goes first: it is a shortcut for a distance `j` covers,
-	// and the help teaches it (#42).
-	order := []string{" · ctrl+d/u half page", attachHint, mirror, " · h/l session"}
+	// The attach aside goes first, then the page key — a shortcut for a
+	// distance `j` covers, which the help teaches (#42, #51).
+	order := []string{attachHint, " · ctrl+d/u half page", mirror, " · h/l session"}
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
 	// this level — so they stand with the level's own keys below, ranked
@@ -3212,7 +3227,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// archive's own keys; on the live list it is the trail's.
 		own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · x unhide"}
 		if m.archiveView {
-			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · a ask", " · x unhide"}
+			// "enter · no pane" is a refusal, and a refusal goes before
+			// the way in: the archive's `tab deeper` outlasts it (#52).
+			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · enter · no pane", " · tab deeper", " · enter attach", " · a ask", " · x unhide"}
 		}
 	}
 	order = append(order, own...)
