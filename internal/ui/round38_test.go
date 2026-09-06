@@ -152,16 +152,24 @@ func TestTheOverlayPaintsNothingPastThePanel(t *testing.T) {
 // goes when what survives its cut is the name already on the row (#64).
 func TestTheReaderTitleNeverRepeatsItsName(t *testing.T) {
 	forceASCII(t)
+	sc := sceneSecondDay()
 	for _, w := range []int{80, 120} {
-		m := sceneModel(sceneSecondDay(), w, 34)
-		pressTab(m)
-		press(m, "2")
-		pressTab(m)
-		pressTab(m)
+		m := sceneModel(sc, w, 34)
+		// The walkthrough's own path, polled after every key: the api
+		// session's events land, and the title has an anchored row to
+		// shed (#64, #65).
+		for _, k := range []string{"tab", "2", "tab", "j", "tab"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
 		title := ansi.Strip(m.readerTitle(w - 2))
-		name := "fix the 401 on token refresh"
-		if strings.Count(title, name) != 1 {
-			t.Errorf("at %d the reader's title = %q", w, title)
+		if m.anchor < 0 || !strings.Contains(title, "15:31") {
+			t.Fatalf("at %d the reader has no anchored row to shed: %q", w, title)
+		}
+		// The clause whole, with its bracket, earns its cells (220, and
+		// 120 here); a cut copy of the name does not.
+		if strings.Contains(title, "fix the 401 on token refresh…") {
+			t.Errorf("at %d the reader's title says its name twice: %q", w, title)
 		}
 	}
 }
@@ -240,5 +248,29 @@ func TestTheStripStandsDownWhileTheNoteTeachesTheKey(t *testing.T) {
 	m.note = ""
 	if view := ansi.Strip(m.View()); strings.Count(view, "A, then x") != 1 {
 		t.Errorf("with the note gone the strip carries the key:\n%s", view)
+	}
+}
+
+// A failed result never leads with a line that reads as a pass: `go test`'s
+// "ok <package>" goes behind the fold and the verdict leads (#65).
+func TestAFailedResultNeverLeadsWithAPass(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 100, 30)
+	for _, k := range []string{"tab", "2", "tab", "j", "tab"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "✗ ok") || !strings.Contains(view, "✗ 12 passed · 1 failed") {
+		t.Errorf("the archive reader's failed run:\n%s", view)
+	}
+	for _, s := range []string{"ok  \tgithub.com/example/cli\t4.21s", "PASS", "ok "} {
+		if !passLine(s) {
+			t.Errorf("%q should read as a pass", s)
+		}
+	}
+	if passLine("12 passed · 1 failed") || passLine("okay, the fix") {
+		t.Error("a verdict or a sentence is not a pass line")
 	}
 }

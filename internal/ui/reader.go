@@ -618,7 +618,15 @@ func (d *docBuilder) result(event int, at time.Time, use transcript.ToolUse, res
 	case res.IsError:
 		// The first line that says something: a failed pytest opens with
 		// its row of dots, and "✗ ......" said nothing about what failed.
+		// And never a line that reads as a pass: a failed `go test` opens
+		// with the package that passed, and "✗ ok" contradicted itself
+		// on the one row about the run (#65).
 		_, said := previewLine(lines)
+		if passLine(said) {
+			if _, next := previewLine(lines[1:]); next != "" {
+				said = next
+			}
+		}
 		kind, head = readerFoldErr, glyphErrRes+" "+d.shorten(said, cwd)
 	case open, countsOnly(use.Name):
 	default:
@@ -732,6 +740,13 @@ func previewLine(lines []string) (int, string) {
 		return 0, ""
 	}
 	return first, strings.TrimSpace(lines[first])
+}
+
+// passLine says whether a result line reads as a pass — `go test`'s
+// per-package "ok", "PASS" — which a failed result never leads with (#65).
+func passLine(s string) bool {
+	t := strings.TrimSpace(s)
+	return t == "ok" || strings.HasPrefix(t, "ok ") || strings.HasPrefix(t, "ok\t") || t == "PASS" || strings.HasPrefix(t, "PASS ")
 }
 
 // letters counts the letters in s.
