@@ -1563,7 +1563,7 @@ func (m *Model) toggleHidden() {
 		m.note = name + " stays · it hangs"
 		return
 	case m.isCircling(s):
-		m.note = name + " stays · it is circling"
+		m.note = name + " stays · it is looping"
 		return
 	}
 	// Where the selection goes: the neighbour as drawn — the next column,

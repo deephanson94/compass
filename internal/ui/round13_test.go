@@ -165,7 +165,7 @@ func TestHeaderChipsPartitionTheBoard(t *testing.T) {
 		t.Errorf("the chips count %d sessions, the board has %d: %q", counted, total, chips)
 	}
 	// The loop's row wears its age, and says whether a turn is in flight.
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "circling · idle") {
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "looping · idle") {
 		t.Errorf("an idle loop says so:\n%s", view)
 	}
 	// Unread is owed: no "all calm" beside it.

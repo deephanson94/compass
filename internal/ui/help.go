@@ -401,7 +401,7 @@ func helpLegendRaw() []string {
 		"compass observes; enter hands you the session.",
 		"",
 		focusMark + " marks the panel your keys are in — tab moves it",
-		"fleet:  ● working  ▲\u00a0needs\u00a0you  ◍ stuck  ↻ circling  ⊘\u00a0dead\u00a0on\u00a0the\u00a0API  ○ idle",
+		"fleet:  ● working  ▲\u00a0needs\u00a0you  ◍ stuck  ↻ looping  ⊘\u00a0dead\u00a0on\u00a0the\u00a0API  ○ idle",
 		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",

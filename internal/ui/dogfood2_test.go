@@ -1206,7 +1206,7 @@ func TestCirclingHasARow(t *testing.T) {
 		}
 	}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "↻ api") || !strings.Contains(view, "circling") {
+	if !strings.Contains(view, "↻ api") || !strings.Contains(view, "looping") {
 		t.Errorf("the circling session should wear ↻ and the word:\n%s", view)
 	}
 	lines := strings.Split(view, "\n")

@@ -664,22 +664,26 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		}
 	}
 	if m.isCircling(s) && !m.archiveView {
-		head = "circling"
+		// "looping", not "circling": the person reading it asked what
+		// circling meant, and a loop is the word a developer has for an
+		// agent going round the same failure (#48). The verdict row says
+		// which failure and how many times.
+		head = "looping"
 		// The loop, and whether a turn is in flight — §2.4 asks the row
 		// for both. The floor is the name's own width, not the column's:
 		// a column wide enough for a long name dropped the clause for a
-		// short one, and "circling 3h" beside "circling 20h" says nothing
+		// short one, and "looping 3h" beside "looping 20h" says nothing
 		// about which is a wait and which is a loop.
 		if word := circlingState(st); word != "" {
-			full := "circling · " + word
+			full := "looping · " + word
 			if w-5-1-ageWidth-lipgloss.Width(full)-1 >= 6 { // the name's own floor, below
 				head = full
 			}
 		}
 		// The age beside the word is the state's own, here as everywhere:
 		// hoisting the loop's age where "· idle" would not fit put
-		// "circling  18h" on a card whose every other view said
-		// "circling · idle  3h", and the loop's age is the chip's and
+		// "looping  18h" on a card whose every other view said
+		// "looping · idle  3h", and the loop's age is the chip's and
 		// the verdict's to give ("↻1 18h", "4th failure").
 	}
 

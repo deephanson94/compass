@@ -132,7 +132,7 @@ func TestTheGroupEchoIsTheWorstRow(t *testing.T) {
 // The fold counts sessions: a second line that opens with a state glyph is
 // not an entry, and a loop's or a dead session's row is.
 func TestTheFoldCountsSessions(t *testing.T) {
-	lines := []string{"▸1 ▲ infra   needs you  7m", "    ◍ build  Bash: py… silent 4m", " 7 ↻ api   circling  1h", " 3 ⊘ billing  quota 18m", " ⌁ work   ▲", "    ● fix  tokens.py"}
+	lines := []string{"▸1 ▲ infra   needs you  7m", "    ◍ build  Bash: py… silent 4m", " 7 ↻ api   looping  1h", " 3 ⊘ billing  quota 18m", " ⌁ work   ▲", "    ● fix  tokens.py"}
 	if n := countEntries(lines); n != 3 {
 		t.Errorf("counted %d entries, want 3", n)
 	}
