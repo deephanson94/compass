@@ -750,7 +750,25 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	// column lives never moves and is never evicted by what is new. The
 	// tool and its model stand with the tag where the digest leaves room
 	// (#50), and go first when it does not.
-	tag := m.tagFor(s, w, 12, m.boardDelta(key, s, w))
+	// The tag takes the longest rung that costs the digest no clause;
+	// where none does, the last rung (#59): a 120 column dropped
+	// "· 0s ago" to draw a pane the header and footer already named,
+	// while the 152 column beside it kept the clock.
+	tag := ""
+	if ladder := m.tagLadder(s); len(ladder) > 0 {
+		full := m.boardDelta(key, s, w)
+		tag = ladder[len(ladder)-1]
+		for _, c := range ladder {
+			if full == "" && lipgloss.Width(c) <= w {
+				tag = c
+				break
+			}
+			if m.boardDelta(key, s, w-lipgloss.Width(c)-2) == full {
+				tag = c
+				break
+			}
+		}
+	}
 	room := w
 	if tag != "" {
 		room = w - lipgloss.Width(tag) - 2
