@@ -184,26 +184,13 @@ func clip(s string, w int) string {
 			kept--
 		}
 	}
-	out := strings.TrimRight(string(runes[:kept]), " ·(") // the separator, a bracket, and the space they stood on
-	for {
-		// "go test ./...…", "go test ./…": a mark after a dot or a slash
-		// reads as more of the token it cut, whichever rune the cut fell
-		// on. The token goes whole instead, and so does whatever the
-		// trim then leaves the row ending on (#58, #59).
-		t := []rune(out)
-		if len(t) == 0 || (t[len(t)-1] != '.' && t[len(t)-1] != '/') {
-			break
-		}
-		i := len(t)
-		for i > 0 && t[i-1] != ' ' {
-			i--
-		}
-		if i == 0 {
-			break
-		}
-		out = strings.TrimRight(string(t[:i]), " ·(")
-	}
-	return out + "…"
+	// "go test ./...…", "go test ./…": a mark after a dot or a slash reads
+	// as more of the token it cut, whichever rune the cut fell on. The
+	// trailing run of dots and slashes goes — "backfill." is "backfill…",
+	// "go test ./..." is "go test…" — never the token, which cost a
+	// wider column the name of the hung run (#58, #59, #61). The
+	// separator, a bracket and the spaces they stood on go with it.
+	return strings.TrimRight(string(runes[:kept]), " ·(./") + "…"
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }

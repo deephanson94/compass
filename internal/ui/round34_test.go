@@ -143,8 +143,18 @@ func TestTheNarrowHelpKeepsGAndTheLegendBindsItsSeparators(t *testing.T) {
 	if got := clip("Please run /login · API Error: 403 quota is exhausted", 35); !strings.Contains(got, "403") {
 		t.Errorf("clip walked a whole status off the row: %q", got)
 	}
-	if got := clip("took 4.03s to run the suite", 8); strings.HasSuffix(got, ".…") {
-		t.Errorf("the number guard handed back a trailing dot: %q", got)
+	for _, w := range []int{8, 9} {
+		if got := clip("took 4.03s to run the suite", w); strings.HasSuffix(got, ".…") {
+			t.Errorf("the number guard handed back a trailing dot at %d: %q", w, got)
+		}
+	}
+	// The dotted rule strips the dots, never the token: a wider column
+	// never says strictly less (#61).
+	if got := clip("Bash: python backfill.py --all", 22); !strings.Contains(got, "backfill") {
+		t.Errorf("the dotted rule dropped the token: %q", got)
+	}
+	if got := clip("ok  github.com/example/cli  4.03s", 28); !strings.Contains(got, "github.com/example") {
+		t.Errorf("the dotted rule dropped the path: %q", got)
 	}
 	_ = state.Working
 	_ = time.Second
@@ -159,18 +169,21 @@ func TestALaneRowAtTheFoldStays(t *testing.T) {
 	tr := m.trail
 	seen := false
 	for h := 3; h < 60; h++ {
-		rows := trailRows(tr, m.trailOpts(43, h))
-		if len(rows) < 2 {
+		o := m.trailOpts(43, h)
+		doc, _ := trailDoc(tr, o)
+		top := trailTop(len(doc), o)
+		if top <= 0 || top >= len(doc) || !isDetailRow(doc[top]) || !strings.Contains(ansi.Strip(doc[top]), "same root cause") {
 			continue
 		}
-		if strings.Contains(ansi.Strip(rows[1]), "3 defects found") {
-			seen = true
-			if first := ansi.Strip(rows[0]); !strings.Contains(first, "├─◈ Score encoder") {
-				t.Errorf("at height %d the finding stands under %q, not its lane", h, first)
-			}
+		// The viewport opens on the finding's second row: the row drawn
+		// over it must be the lane that brought it (#57, #58).
+		seen = true
+		rows := trailRows(tr, o)
+		if first := ansi.Strip(rows[0]); !strings.Contains(first, "Score encoder") {
+			t.Errorf("at height %d the finding's parent row is %q, not its lane", h, first)
 		}
 	}
 	if !seen {
-		t.Fatalf("no height put the finding second")
+		t.Fatalf("no height opened the viewport on the finding's second row")
 	}
 }
