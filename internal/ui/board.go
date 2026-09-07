@@ -754,7 +754,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 			fixed = append(fixed, m.hiddenClause(n))
 		}
 		if n := m.archivedCount(); n > 0 {
-			fixed = append(fixed, fmt.Sprintf("%d archived · A browses", n))
+			fixed = append(fixed, fmt.Sprintf("%s archived · A browses", m.archiveDoorCount(n)))
 		}
 	} else {
 		fixed = append(fixed, "A live fleet")

@@ -1619,3 +1619,118 @@ func TestTheArchiveDoorCountsWhatTheSearchLeft(t *testing.T) {
 		t.Errorf("the archive's door counts the whole archive under a search it did not answer:\n%s", view)
 	}
 }
+
+// ---- round 69, fleet-hygiene ----
+// A note whose quote the row clipped still leaves the quote to the row.
+// The compare was made against the whole note, whose destination clause no
+// row of the frame ever carries, so a clipped copy of the quote defeated it
+// and the longer note took the eighty-column footer's way in and way deeper
+// (#131's own doc: the row keeps the quote "whole or clipped").
+func TestTheClippedRowStillTakesTheNotesQuote(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sc   scene
+		w, h int
+	}{
+		{"many-idle", sceneManyIdle(), 80, 24},
+		{"very-long", sceneVeryLong(), 80, 24},
+		{"many-idle", sceneManyIdle(), 152, 40},
+	} {
+		m := sceneModel(tc.sc, tc.w, tc.h)
+		pressKey(m, "r")
+		pressKey(m, "1")
+		view := ansi.Strip(m.View())
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "↪ sent") {
+			t.Fatalf("%s at %dx%d: no send note on the footer: %q", tc.name, tc.w, tc.h, strings.TrimSpace(foot))
+		}
+		if strings.Contains(foot, `"please continue"`) {
+			t.Errorf("%s at %dx%d: the note says the quote a row of this frame draws: %q",
+				tc.name, tc.w, tc.h, strings.TrimSpace(foot))
+		}
+		want := []string{"enter attach", "tab deeper"}
+		if tc.w > 110 {
+			want = []string{"enter attach (prefix d returns)", "tab session"}
+		}
+		for _, key := range want {
+			if !strings.Contains(foot, key) {
+				t.Errorf("%s at %dx%d: the note cost the footer %q: %q",
+					tc.name, tc.w, tc.h, key, strings.TrimSpace(foot))
+			}
+		}
+	}
+}
+
+// ---- round 69, fleet-hygiene ----
+// No row of the band wears a bare mark beside a row that wears a word.
+// The mark cannot say "shipped" — ✓ is the tick a merely green row wears —
+// so the one row with that news stood wordless between two reading
+// "✓ green" (#161, on the band; #57's device, band-wide).
+func TestTheBandsShippedRowKeepsItsWord(t *testing.T) {
+	row := regexp.MustCompile(`^\s*[1-9] ○ [a-z0-9-]+ · .*?\s\s+(\S.*?)\s\d+[smhd]$`)
+	m := sceneModel(sceneFleetHygiene(), 152, 40)
+	pressKey(m, "j")
+	pressKey(m, "r") // the reply box; the band is composed at the width it leaves
+	var bare, worded []string
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		for _, seg := range strings.Split(l, "│") {
+			g := row.FindStringSubmatch(strings.TrimRight(seg, " "))
+			if g == nil {
+				continue
+			}
+			if v := g[1]; v == "✓" || v == "✗" || v == "⚑" {
+				bare = append(bare, strings.TrimSpace(seg))
+			} else if strings.ContainsAny(v[:3], "✓✗⚑") && len(strings.Fields(v)) > 1 {
+				worded = append(worded, strings.TrimSpace(seg))
+			}
+		}
+	}
+	if len(worded) == 0 {
+		t.Fatalf("no worded band row on the frame:\n%s", ansi.Strip(m.View()))
+	}
+	for _, b := range bare {
+		t.Errorf("the band draws a bare mark beside %d worded rows: %q (worded: %q)", len(worded), b, worded[0])
+	}
+}
+
+// ---- round 69, fleet-hygiene ----
+// The archive door counts what the search left wherever it is drawn.
+// #168 gave the list's last line the count; the board's strip and a fleet
+// of one's own door kept the whole archive, so at eighty the same fleet
+// under the same search read "0 of 300 archived · A browses" and twenty
+// columns wider "300 archived · A browses".
+func TestTheArchiveDoorCountsTheSearchAtEveryWidth(t *testing.T) {
+	door := regexp.MustCompile(`(\d+(?: of \d+)?) archived · A`)
+	for _, tc := range []struct {
+		name string
+		sc   scene
+		w, h int
+	}{
+		{"many-idle", sceneManyIdle(), 120, 34},
+		{"many-idle", sceneManyIdle(), 152, 40},
+		{"many-idle", sceneManyIdle(), 220, 48},
+		{"second-day", sceneSecondDay(), 120, 34},
+		{"few-ongoing", sceneFewOngoing(), 220, 48},
+	} {
+		m := sceneModel(tc.sc, tc.w, tc.h)
+		pressKey(m, "/")
+		for _, r := range "pytest" {
+			pressKey(m, string(r))
+		}
+		pressKey(m, "enter")
+		view := ansi.Strip(m.View())
+		g := door.FindStringSubmatch(view)
+		if g == nil {
+			t.Fatalf("%s at %dx%d: no archive door on the frame:\n%s", tc.name, tc.w, tc.h, view)
+		}
+		if !strings.Contains(g[1], " of ") {
+			t.Errorf("%s at %dx%d: the door counts the whole archive under a search: %q",
+				tc.name, tc.w, tc.h, g[0])
+		}
+	}
+}

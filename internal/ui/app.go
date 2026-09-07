@@ -3954,7 +3954,10 @@ func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
 				// never trimmed into one that seems to (#131).
 				t = t[:j]
 			}
-			if saysSame(t, note) {
+			// The note's destination clause is never on the row — the
+			// row's own pane clause was just taken off — so the row is
+			// compared to the note's sentence, not to the whole note.
+			if saysSame(t, note[:i]) || saysSame(t, note) {
 				return short, true
 			}
 		}

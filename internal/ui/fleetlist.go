@@ -89,6 +89,26 @@ func (m *Model) hiddenClause(n int) string {
 // fleetLines renders the fleet: grouped the way the user thinks of it, scrolled
 // so the selection is always whole on screen, and — in the live view — closed
 // by the dim line that says how much history is one keypress away.
+// archiveDoorCount is the door's count: the whole archive, or what the
+// search left of it in the header's own form (`0 of 300`). The door is
+// one sentence drawn from three places — the list's last line, the
+// board's strip and a fleet of one's own door — and at eighty the list
+// said `0 of 300 archived · A browses` while the board twenty columns
+// wider said `300 archived · A browses` over the same fleet and the same
+// search (#164, #168).
+func (m *Model) archiveDoorCount(n int) string {
+	if m.fleetQuery == "" {
+		return strconv.Itoa(n)
+	}
+	matched := 0
+	for _, s := range m.sessions {
+		if !s.Live && archiveHeadline(s) != "" && m.matchesQuery(s) {
+			matched++
+		}
+	}
+	return strconv.Itoa(matched) + " of " + strconv.Itoa(n)
+}
+
 func (m *Model) fleetLines(w, h int) []string {
 	// The archive count is not part of the list: it is the column's last word,
 	// so it survives any amount of scrolling — and it is how the archive is
@@ -96,19 +116,7 @@ func (m *Model) fleetLines(w, h int) []string {
 	var tail []string
 	if !m.archiveView {
 		archived, hidden := m.archivedCount(), m.hiddenCount()
-		count := strconv.Itoa(archived)
-		if m.fleetQuery != "" {
-			// Under a search the door counts what the search left, as the
-			// band's header does (#164): `12 archived` under a query the
-			// archive did not answer named a key that lands on `0 of 12` (#168).
-			matched := 0
-			for _, s := range m.sessions {
-				if !s.Live && archiveHeadline(s) != "" && m.matchesQuery(s) {
-					matched++
-				}
-			}
-			count = strconv.Itoa(matched) + " of " + count
-		}
+		count := m.archiveDoorCount(archived)
 		last := ""
 		switch {
 		case archived > 0 && hidden > 0:

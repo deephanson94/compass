@@ -138,10 +138,16 @@ func (m *Model) bandRows(rows []recentRow, w int) []string {
 			short = true
 		}
 	}
+	worded := false
+	for _, r := range rows {
+		if _, said, _ := m.recentKeep(r, w, short); len(strings.Fields(said)) > 1 {
+			worded = true
+		}
+	}
 	tool := m.bandSaysTool(rows, w, short)
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, m.recentLineWith(r, w, short, tool))
+		out = append(out, m.recentLineWith(r, w, short, tool, worded))
 	}
 	return out
 }
@@ -208,6 +214,15 @@ func (m *Model) recentRowKeepsTool(r recentRow, w int, short bool, word string) 
 // verdict form the row takes — the whole verdict, its first two words, or
 // its mark — and that form (#57, #67).
 func (m *Model) recentKeep(r recentRow, w int, short bool) (keep int, said string, room int) {
+	return m.recentKeepWorded(r, w, short, false)
+}
+
+// recentKeepWorded is recentKeep with the band's own answer to whether any
+// row of it keeps a verdict word. Where one does, the row whose word the
+// mark cannot say — "shipped", not "red" or "green" — keeps it rather than
+// standing as the band's one wordless tick beside two reading "✓ green"
+// (#161, on the band; #57's device, band-wide).
+func (m *Model) recentKeepWorded(r recentRow, w int, short, worded bool) (keep int, said string, room int) {
 	s := m.sessions[r.sess]
 	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
 	room = w - lipgloss.Width(lead) - lipgloss.Width(m.age(s.Info.LastEventAt)) - 1
@@ -220,8 +235,13 @@ func (m *Model) recentKeep(r recentRow, w int, short bool) (keep int, said strin
 		mark = string(rs[0])
 	}
 	keep = room
-	for _, v := range []string{verdict, firstWords(verdict, 2), mark} {
-		if k := room - lipgloss.Width(v) - 2; v != "" && k >= recentNameFloor {
+	rungs, floors := []string{verdict, firstWords(verdict, 2), mark}, []int{recentNameFloor, recentNameFloor, recentNameFloor}
+	if two := firstWords(verdict, 2); worded && mark != "" && strings.HasSuffix(two, " shipped") {
+		rungs[2] = two
+		floors[2] = recentNameFloor - lipgloss.Width(two) + lipgloss.Width(mark)
+	}
+	for i, v := range rungs {
+		if k := room - lipgloss.Width(v) - 2; v != "" && k >= floors[i] {
 			return k, v, room
 		}
 	}
@@ -263,12 +283,12 @@ func (m *Model) verdictClause(s fleet.Session) string {
 // than a name: it answers whether to reopen this one. Narrow, it goes
 // first; the identity and the clock stay.
 func (m *Model) recentLine(r recentRow, w int) string {
-	return m.recentLineWith(r, w, false, false)
+	return m.recentLineWith(r, w, false, false, false)
 }
 
 // recentLineWith is recentLine with the band's verdict form decided:
 // short keeps the verdict's first two words for every row.
-func (m *Model) recentLineWith(r recentRow, w int, short, tool bool) string {
+func (m *Model) recentLineWith(r recentRow, w int, short, tool, worded bool) string {
 	s := m.sessions[r.sess]
 	age := m.age(s.Info.LastEventAt)
 	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
@@ -281,7 +301,7 @@ func (m *Model) recentLineWith(r recentRow, w int, short, tool bool) string {
 	// one keeps its tick; last, the mark alone (#57, #67). The first
 	// clause alone, and without its clock: "✓ shipped 2h ago" beside
 	// "2h" said the hour twice.
-	keep, said, room := m.recentKeep(r, w, short)
+	keep, said, room := m.recentKeepWorded(r, w, short, worded)
 	// Which tool ran it: the row rule (#50), on the band — where the row
 	// keeps its prompt's first cells beside the word, and shed where it
 	// would not: a tool word over a three-letter prompt named the tool
