@@ -853,3 +853,36 @@ func (f *fakeSource) Poll() ([]transcript.Event, error) {
 	f.served = true
 	return f.events, nil
 }
+
+// A /rename lands as a "custom-title" line, and the fleet takes the name
+// from the tail at scan time and from the live tail as it happens (#79).
+func TestARenameNamesTheSession(t *testing.T) {
+	root := t.TempDir()
+	const slug = "-home-user-alpha"
+	id := "ee000009-0000-4000-8000-000000000009"
+	newTranscript(t, id, "/home/user/alpha", "main").
+		prompt(ago(30*time.Second), "run the auth tests").
+		tool(ago(10*time.Second), "toolu_ee", "Bash", map[string]any{"command": "pytest -x"}).
+		write(root, slug)
+	mgr := liveManager(root)
+	first, err := mgr.Refresh(fleetNow)
+	if err != nil || len(first) != 1 || first[0].Info.Name != "" {
+		t.Fatalf("before the rename: %v, %d sessions, name %q", err, len(first), first[0].Info.Name)
+	}
+	path := filepath.Join(root, "projects", slug, id+".jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"type":"custom-title","customTitle":"alpha-auth-fix","sessionId":"` + id + `"}` + "\n")
+	f.Close()
+	second, err := mgr.Refresh(fleetNow.Add(time.Second))
+	if err != nil || len(second) != 1 || second[0].Info.Name != "alpha-auth-fix" {
+		t.Fatalf("after the rename: %v, %d sessions, name %q", err, len(second), second[0].Info.Name)
+	}
+	// A fresh scan reads it from the tail.
+	fresh, err := liveManager(root).Refresh(fleetNow.Add(2 * time.Second))
+	if err != nil || len(fresh) != 1 || fresh[0].Info.Name != "alpha-auth-fix" {
+		t.Fatalf("a fresh scan: %v, %d sessions, name %q", err, len(fresh), fresh[0].Info.Name)
+	}
+}

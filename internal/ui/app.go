@@ -2859,6 +2859,9 @@ func (m *Model) headerName() (digit, name, tag string) {
 	name = sessionName(s.Info)
 	if m.archiveView && !s.Live {
 		name = archiveHeadline(s) // the archive's rows are titled by what they asked for (#56, #59)
+		if s.Info.Name != "" {
+			name = sessionName(s.Info) + ` · "` + archiveHeadline(s) + `"` // a renamed session keeps its name first (#79)
+		}
 	}
 	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
 		digit = strconv.Itoa(r.num)

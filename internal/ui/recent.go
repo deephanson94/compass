@@ -93,7 +93,13 @@ func (m *Model) recentLines(w, avail int) []string {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := []string{dimStyle.Render(clip(m.recentHeader(), w))}
+	return append([]string{dimStyle.Render(clip(m.recentHeader(), w))}, m.bandRows(rows, w)...)
+}
+
+// bandRows draws the band's rows with its forms decided once for all of
+// them — the verdict's (#57) and the tool word's (#79) — whichever column
+// the band stands in.
+func (m *Model) bandRows(rows []recentRow, w int) []string {
 	// One verdict form for the band: the counts go for every row when
 	// any row would have to buy them out of its prompt, so two rows do
 	// not keep "212✓" while two beside them drop it (#57).
@@ -103,11 +109,49 @@ func (m *Model) recentLines(w, avail int) []string {
 			short = true
 		}
 	}
+	tool := m.bandSaysTool(rows, w, short)
+	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, m.recentLineWith(r, w, short))
+		out = append(out, m.recentLineWith(r, w, short, tool))
 	}
 	return out
 }
+
+// bandTool is the word a band row wears for its tool: "opencode" on an
+// OpenCode row always, and on every row where the fleet — live and
+// archived alike — runs two tools, the row rule (#50) applied to the
+// band. A fleet of claudes needs no word.
+func (m *Model) bandTool(s fleet.Session) string {
+	if s.Info.ToolName() != "claude" || m.toolsAnywhere() > 1 {
+		return s.Info.ToolName()
+	}
+	return ""
+}
+
+// toolsAnywhere counts the CLIs every session, live or archived, runs under.
+func (m *Model) toolsAnywhere() int {
+	seen := map[string]bool{}
+	for _, s := range m.sessions {
+		seen[s.Info.ToolName()] = true
+	}
+	return len(seen)
+}
+
+// bandSaysTool says whether the band has a tool word to draw at all: a
+// row draws its own where it keeps its prompt's first words beside it
+// (recentRowKeepsPrompt), and sheds it where it would not — a tool word
+// over a two-letter prompt named the tool and not the session. The word
+// is the row's identity, like the pane tag, so a long name on one row
+// does not strip the others (#79).
+func (m *Model) bandSaysTool(rows []recentRow, w int, short bool) bool {
+	for _, r := range rows {
+		if m.bandTool(m.sessions[r.sess]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 
 // recentVerdict is the row's verdict clause and whether its full form
 // fits beside the prompt's floor.
@@ -133,19 +177,17 @@ func (m *Model) recentVerdict(r recentRow, w int) (verdict string, full bool) {
 // than a name: it answers whether to reopen this one. Narrow, it goes
 // first; the identity and the clock stay.
 func (m *Model) recentLine(r recentRow, w int) string {
-	return m.recentLineWith(r, w, false)
+	return m.recentLineWith(r, w, false, false)
 }
 
 // recentLineWith is recentLine with the band's verdict form decided:
 // short keeps the verdict's first two words for every row.
-func (m *Model) recentLineWith(r recentRow, w int, short bool) string {
+func (m *Model) recentLineWith(r recentRow, w int, short, tool bool) string {
 	s := m.sessions[r.sess]
 	age := m.age(s.Info.LastEventAt)
 	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
 	name := sessionName(s.Info)
-	if t := strings.TrimSpace(s.Info.Title); t != "" {
-		name += ` · "` + t + `"`
-	}
+	prompt := strings.TrimSpace(archiveHeadline(s))
 	// The first clause alone, and without its clock: "✓ shipped 2h ago"
 	// beside "2h" said the hour twice.
 	verdict, _ := m.recentVerdict(r, w)
@@ -153,7 +195,6 @@ func (m *Model) recentLineWith(r recentRow, w int, short bool) string {
 		verdict = firstWords(verdict, 2)
 	}
 	room := w - lipgloss.Width(lead) - lipgloss.Width(age) - 1
-	body := clip(name, room)
 	// The verdict outranks the prompt's tail: "webapp · "the checkout
 	// suite …  ✗ red 18✓ 2✗" answers whether to reopen, and the whole
 	// prompt does not. It goes only when the prompt's own floor would —
@@ -168,11 +209,29 @@ func (m *Model) recentLineWith(r recentRow, w int, short bool) string {
 	if rs := []rune(verdict); len(rs) > 0 && strings.ContainsRune("✓✗⚑", rs[0]) {
 		mark = string(rs[0])
 	}
+	keep, said := room, ""
 	for _, v := range []string{verdict, firstWords(verdict, 2), mark} {
-		if keep := room - lipgloss.Width(v) - 2; v != "" && keep >= recentNameFloor {
-			body = pad(clip(name, keep), keep) + "  " + v
+		if k := room - lipgloss.Width(v) - 2; v != "" && k >= recentNameFloor {
+			keep, said = k, v
 			break
 		}
+	}
+	// Which tool ran it: the row rule (#50), on the band — where the row
+	// keeps its prompt's first words beside the word, and shed where it
+	// would not: a tool word over a three-letter prompt named the tool
+	// and not the session (#79). The word is the row's own, like the
+	// pane tag, so a long name on one row does not strip the others.
+	if word := m.bandTool(s); tool && word != "" {
+		if head := name + " · " + word + ` · "`; prompt == "" || keep-lipgloss.Width(head) >= recentPromptWords {
+			name += " · " + word
+		}
+	}
+	if prompt != "" {
+		name += ` · "` + prompt + `"`
+	}
+	body := clip(name, room)
+	if said != "" {
+		body = pad(clip(name, keep), keep) + "  " + said
 	}
 	body = pad(body, room)
 	return dimStyle.Render(lead) + body + " " + dimStyle.Render(age)
@@ -195,6 +254,7 @@ func firstWords(s string, n int) string {
 const (
 	recentNameFloor   = 18
 	recentPromptFloor = 26
+	recentPromptWords = 8 // the prompt's first words a tool word must leave (#79)
 )
 
 // openRecent answers a digit the live fleet does not use: the band's row

@@ -132,7 +132,7 @@ func TestAFleetOfOneKeepsItsRecentPast(t *testing.T) {
 		t.Fatalf("a fleet of one at 120 should open on the session view")
 	}
 	col := strings.Join(m.trailColumn(55, 28), "\n")
-	for _, want := range []string{"recent · 12 archived · A browses", ` 2 ○ api · "fix the 401 on token`, `  ✗ red 12✓ 1✗ 2h`, ` 9 ○ migrate`} {
+	for _, want := range []string{"recent · 12 archived · A browses", ` 2 ○ api · claude · "fix the 401`, `  ✗ red 12✓ 1✗ 2h`, ` 9 ○ migrate`} {
 		if !strings.Contains(col, want) {
 			t.Errorf("the session view's band lacks %q:\n%s", want, col)
 		}

@@ -788,6 +788,16 @@ func sceneSecondDay() scene {
 	}
 	for _, p := range past {
 		g := gone(p.id, p.name, p.title, n.Add(-p.ago))
+		switch p.id {
+		case "p-billing":
+			// Two of yesterday's sessions ran under OpenCode: the band
+			// and the archive say which tool ran what (#79).
+			g.Info.Tool, g.Info.Model = "opencode", "anthropic/claude-sonnet-4-5"
+		case "p-perf":
+			g.Info.Tool, g.Info.Model = "opencode", "openai/gpt-5"
+		case "p-webapp":
+			g.Info.Name = "checkout-flake-hunt" // renamed by its person (#79)
+		}
 		ss = append(ss, g)
 		tr[g.Info.Key()] = pastTrail(g)
 	}

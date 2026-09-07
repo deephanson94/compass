@@ -1716,9 +1716,7 @@ func (m *Model) trailColumn(w, h int) []string {
 			head += " " + strings.Repeat("─", n) // a rule to the gutter, the read-line's own form
 		}
 		rows = append(rows, "", dimStyle.Render(clip(head, w)))
-		for _, r := range band {
-			rows = append(rows, m.recentLine(r, w))
-		}
+		rows = append(rows, m.bandRows(band, w)...) // the band's own forms, here as in the list (#79)
 	}
 	return rows
 }
@@ -2073,7 +2071,7 @@ func (m *Model) trailTitle(w int) string {
 			// group, not the row. A hidden live session's row keeps its
 			// name before its prompt, and so does its title (#59).
 			name = archiveHeadline(s)
-			if s.Live {
+			if s.Live || s.Info.Name != "" {
 				name = sessionName(s.Info) + ` · "` + archiveHeadline(s) + `"`
 			}
 		}

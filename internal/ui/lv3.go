@@ -677,6 +677,25 @@ func (m *Model) toggleFold() {
 		m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
 		m.docVer++
 		m.docCache.valid = false
+		// Which one: the reader has no cursor, so Space takes the first
+		// folded result on screen, and the note names the call it opened
+		// — a person pressing it did not know which row it had acted on (#79).
+		verb := "unfolded"
+		if !m.unfolded[doc[i].event] {
+			verb = "folded"
+		}
+		call := ""
+		for j := i - 1; j >= 0 && j > i-4; j-- {
+			if doc[j].kind == readerCall {
+				call = strings.TrimSpace(doc[j].text)
+				break
+			}
+		}
+		if call != "" {
+			m.note = verb + " " + call
+		} else {
+			m.note = verb + " the first result on screen"
+		}
 		return
 	}
 	m.note = "nothing to unfold on screen"

@@ -412,6 +412,9 @@ func (e *entry) absorb(ev transcript.Event) {
 	if !ev.IsSidechain && ev.Model != "" {
 		e.info.Model = ev.Model // the model that last answered
 	}
+	if ev.Name != "" {
+		e.info.Name = ev.Name // /rename, as it happens (#79)
+	}
 	if !ev.Timestamp.IsZero() {
 		if e.info.StartedAt.IsZero() || ev.Timestamp.Before(e.info.StartedAt) {
 			e.info.StartedAt = ev.Timestamp

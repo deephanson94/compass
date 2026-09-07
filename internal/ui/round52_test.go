@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/transcript"
@@ -110,5 +111,69 @@ func TestTheBandSkipsASessionWithNothingToGoBackTo(t *testing.T) {
 		if r.sess == first {
 			t.Errorf("a session with nothing to go back to is on the band")
 		}
+	}
+}
+
+// The band says which tool ran a session where the fleet runs two, on every
+// row or on none, and never over the prompt's first words (#79).
+func TestTheBandSaysTheToolWhereTheFleetRunsTwo(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "billing · opencode · \"reconcile") || !strings.Contains(view, "api · claude · \"fix the 401") {
+		t.Errorf("at 120 the band should name the tool on its rows:\n%s", view)
+	}
+	if strings.Contains(view, "checkout-flake-hunt · claude") {
+		t.Errorf("a long name sheds its own word rather than its prompt:\n%s", view)
+	}
+	narrow := sceneModel(sceneSecondDay(), 80, 24)
+	if v := ansi.Strip(narrow.View()); strings.Contains(v, "· opencode ·") || strings.Contains(v, "· claude ·") {
+		t.Errorf("at 80 a tool word would leave no prompt; none is drawn:\n%s", v)
+	}
+	ones := sceneModel(sceneFleetHygiene(), 220, 48)
+	if v := ansi.Strip(ones.View()); strings.Contains(v, "· claude ·") {
+		t.Errorf("a fleet of claudes needs no word on its band:\n%s", v)
+	}
+}
+
+// The deck names a session by the name its person gave it (/rename), over
+// the directory's, everywhere the name is drawn (#79).
+func TestASessionWearsTheNameItsPersonGaveIt(t *testing.T) {
+	forceASCII(t)
+	info := fleet.SessionInfo{ID: "x", CWD: "/home/user/webapp", Name: "checkout-flake-hunt"}
+	if got := sessionName(info); got != "checkout-flake-hunt" {
+		t.Errorf("sessionName = %q", got)
+	}
+	info.Name = ""
+	if got := sessionName(info); got != "webapp" {
+		t.Errorf("without a name the directory names it: %q", got)
+	}
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "checkout-flake-hunt · \"the che") {
+		t.Errorf("the band should carry the renamed session's name:\n%s", view)
+	}
+	pressTab(m)
+	press(m, "3")
+	if head := ansi.Strip(m.headerLine(118)); !strings.Contains(head, `checkout-flake-hunt · "the checkout suite flakes on CI"`) {
+		t.Errorf("the header should carry the name: %q", head)
+	}
+}
+
+// Space names the call whose result it unfolded: the reader has no
+// cursor, and the first folded result on screen is the one it takes (#79).
+func TestSpaceNamesWhatItUnfolded(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	m := sceneModel(sc, 120, 34)
+	for _, k := range []string{"3", "tab", "tab", " "} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if !strings.HasPrefix(m.note, "unfolded ") || !strings.Contains(m.note, "(") {
+		t.Errorf("space should name the call it opened: %q", m.note)
+	}
+	pressKey(m, " ")
+	if !strings.HasPrefix(m.note, "folded ") {
+		t.Errorf("space again should name what it folded: %q", m.note)
 	}
 }

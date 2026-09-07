@@ -1261,6 +1261,9 @@ func (m *Model) paneCoords(i int) (window, pane int) {
 // sessionName calls a session by the last segment of its working directory —
 // the way its human thinks of it.
 func sessionName(info fleet.SessionInfo) string {
+	if n := strings.TrimSpace(info.Name); n != "" {
+		return n // the name the person gave it (/rename) over the directory's (#79)
+	}
 	if info.CWD != "" {
 		if base := filepath.Base(info.CWD); base != "." && base != string(filepath.Separator) {
 			return base

@@ -51,14 +51,17 @@ const resultTextCap = 2048
 
 // Event is one parsed transcript line.
 type Event struct {
-	Type        EventType
-	UUID        string
-	ParentUUID  string
-	Timestamp   time.Time // zero if absent/unparseable
-	SessionID   string
-	CWD         string
-	GitBranch   string
-	Version     string
+	Type       EventType
+	UUID       string
+	ParentUUID string
+	Timestamp  time.Time // zero if absent/unparseable
+	SessionID  string
+	CWD        string
+	GitBranch  string
+	Version    string
+	// Name is the name the person gave the session (/rename), from a
+	// "custom-title" or "agent-name" line; "" on every other line (#79).
+	Name        string
 	IsSidechain bool
 	Text        string // assistant: all text blocks joined "\n"; user: string content (empty if content is a block array)
 
@@ -127,6 +130,8 @@ type rawLine struct {
 	Timestamp   string          `json:"timestamp"`
 	SessionID   string          `json:"sessionId"`
 	CWD         string          `json:"cwd"`
+	CustomTitle string          `json:"customTitle"` // a "custom-title" line: the name /rename gave the session
+	AgentName   string          `json:"agentName"`   // an "agent-name" line: the same name, as the harness files it
 	GitBranch   string          `json:"gitBranch"`
 	Version     string          `json:"version"`
 	IsSidechain bool            `json:"isSidechain"`
@@ -190,6 +195,7 @@ func ParseLine(line []byte) (Event, error) {
 		CWD:         raw.CWD,
 		GitBranch:   raw.GitBranch,
 		Version:     raw.Version,
+		Name:        firstNonEmpty(raw.CustomTitle, raw.AgentName),
 		IsSidechain: raw.IsSidechain,
 		IsMeta:      raw.IsMeta,
 	}

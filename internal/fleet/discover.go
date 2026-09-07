@@ -34,6 +34,7 @@ type SessionInfo struct {
 	OriginCWD   string
 	GitBranch   string
 	Title       string    // first user prompt: first line, max 80 runes, "…" if cut
+	Name        string    // the name the person gave the session (/rename), "" until they do (#79)
 	StartedAt   time.Time // first event timestamp
 	LastEventAt time.Time // last event timestamp (file mtime as fallback)
 
@@ -213,6 +214,9 @@ func peek(info *SessionInfo, size int64) {
 	if tail.cwd != "" {
 		info.CWD, info.GitBranch = tail.cwd, tail.branch
 	}
+	if tail.name != "" {
+		info.Name = tail.name // the newest rename wins
+	}
 }
 
 // tailState is what the last few kilobytes of a transcript say about a session
@@ -222,6 +226,7 @@ type tailState struct {
 	cwd     string
 	branch  string
 	located bool // a line of this session's own named a cwd
+	name    string
 }
 
 func peekHead(f *os.File, info *SessionInfo) {
@@ -241,6 +246,9 @@ func peekHead(f *os.File, info *SessionInfo) {
 		}
 		if info.StartedAt.IsZero() && !ev.Timestamp.IsZero() {
 			info.StartedAt = ev.Timestamp
+		}
+		if ev.Name != "" {
+			info.Name = ev.Name
 		}
 		if titleRank < titleProse && ev.Type == transcript.EventUser {
 			if title, rank := promptTitle(ev); rank > titleRank {
@@ -335,6 +343,9 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 		}
 		if !out.located && !ev.IsSidechain && ev.CWD != "" {
 			out.cwd, out.branch, out.located = ev.CWD, ev.GitBranch, true
+		}
+		if out.name == "" && ev.Name != "" {
+			out.name = ev.Name // walking backwards: the newest rename
 		}
 		if !out.at.IsZero() && out.located {
 			return
