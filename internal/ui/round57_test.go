@@ -111,3 +111,31 @@ func TestTheHelpsLegendSpendsTheRowsTheBoardLineLeft(t *testing.T) {
 		t.Errorf("the legend sheds a definition while its own column ends blank:\n%s", view)
 	}
 }
+
+// A fleet of one: no fleet row ends in the bare tool word the header says,
+// whether or not the word costs the trace anything — on the reply route,
+// `↪ sent "go on" · 0s ago      claude` was #80's shape still (#96, #93).
+func TestAFleetOfOneNeverEndsARowInTheBareToolWord(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 100, 30)
+	for _, k := range []string{"r", "t", "go on", "enter"} { // reply with a typed line
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	if !strings.Contains(lines[0], " · claude") {
+		t.Fatalf("the header does not name the tool:\n%s", view)
+	}
+	if !strings.Contains(view, "↪ sent") {
+		t.Fatalf("the route draws no sent trace:\n%s", view)
+	}
+	for _, l := range lines[1:] {
+		fleet := strings.TrimRight(strings.SplitN(l, "│", 2)[0], " ")
+		if strings.HasSuffix(fleet, " claude") {
+			t.Errorf("a fleet of one wears the bare tool word: %q\n%s", l, view)
+			break
+		}
+	}
+}

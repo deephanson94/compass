@@ -822,13 +822,14 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 			}
 			return m.boardDelta(s.Info.Key(), s, room)
 		})
-		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && (m.boardDelta(s.Info.Key(), s, w-4-lipgloss.Width(tag)-2) != m.boardDelta(s.Info.Key(), s, w-4) || m.boardDelta(s.Info.Key(), s, w-4) == "") {
-			// A fleet of one: the header names the tool on every frame,
-			// so a bare tool word that costs the trace its clock says a
-			// thing the frame already says and loses one it does not (#90).
-			// And with no trace to cost, the word alone was a whole row
-			// spent on the default tool while the OpenCode rows of the
-			// band under it drew none — #80's shape on the live entry (#93).
+		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && strings.Contains(m.headerLine(m.width), " · "+s.Info.ToolName()) {
+			// A fleet of one: the header names the tool on this very
+			// frame, so a bare tool word on the row says a thing the frame
+			// already says — where it cost the trace its clock (#90), where
+			// there was no trace and the word was a whole row (#93), and
+			// where it cost nothing: the reason was never the cost, and a
+			// row that ended in `claude` over two OpenCode rows that drew
+			// no word was #80's shape still (#96).
 			tag = ""
 		}
 		room := w - 4
