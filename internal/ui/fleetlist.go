@@ -839,12 +839,21 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 				ladder, seen[c] = append(ladder, c), true
 			}
 		}
-		tag = tagBesideDigest(ladder, w-4, func(room int) string {
+		delta := func(room int) string {
 			if room < digestFloor {
 				return ""
 			}
-			return m.boardDelta(s.Info.Key(), s, room)
-		})
+			d := m.boardDelta(s.Info.Key(), s, room)
+			if m.countBeside(s, d) {
+				// The trail beside this row draws the divider the count
+				// counts from (#117, #129 on the board): the row is the
+				// board's column here, so the digest yields its cells to
+				// the ladder — the model, which is nowhere else on the row.
+				return ""
+			}
+			return d
+		}
+		tag = tagBesideDigest(ladder, w-4, delta)
 		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && strings.Contains(m.headerLine(m.width), " · "+s.Info.ToolName()) {
 			// A fleet of one: the header names the tool on this very
 			// frame, so a bare tool word on the row says a thing the frame
@@ -859,10 +868,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		if tag != "" {
 			room -= lipgloss.Width(tag) + 2
 		}
-		third := ""
-		if room >= digestFloor {
-			third = m.boardDelta(s.Info.Key(), s, room)
-		}
+		third := delta(room)
 		if tag != "" {
 			third = pad(third, w-4-lipgloss.Width(tag)) + dimStyle.Render(tag)
 		}
@@ -871,6 +877,33 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		}
 	}
 	return lines
+}
+
+// countBeside says whether the trail drawn beside this row already draws
+// the divider its digest counts from: the fleet list is the board's column
+// below the board's width, and #117's reason — the count is the divider's
+// own words — is the same one panel over. The match is strict (#135) and
+// the look clause the divider carries comes off first (#136). Not under
+// the reply box, which covers the trail's rows (#108).
+func (m *Model) countBeside(s fleet.Session, digest string) bool {
+	if m.replyBox.on || m.archiveView || s.Info.Key() != m.selectedKey {
+		return false
+	}
+	divider := ""
+	for _, r := range m.trailRows {
+		if p := oneSpace(ansi.Strip(r)); strings.Contains(p, "you were here") {
+			divider = p
+			break
+		}
+	}
+	if divider == "" {
+		return false
+	}
+	d := strings.TrimSpace(ansi.Strip(digest))
+	if lk := lookRe.FindStringSubmatch(d); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
+		d = strings.TrimSuffix(d, lk[0])
+	}
+	return newLegsOnly.MatchString(d)
 }
 
 // verdictRe is the newest verdict a row rides beside the present (#125).
@@ -888,9 +921,10 @@ const digestFloor = 11
 // trail's is the survivor and the trace beneath moves up. Not under the
 // reply box, which covers the trail's row (#108's rule).
 func (m *Model) presentBeside(s fleet.Session, line string) bool {
-	if !(!m.boardFits() && !m.archiveView && s.Live &&
-		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck ||
-		wantsAttention(s.Snap.State) || s.Snap.APIError)) {
+	// Any state, not only the working ones: an idle row whose verdict is
+	// empty falls back to its last leg's label, and that is the trail's
+	// own row beside it. The compare decides, not the state (#111, #114).
+	if !(!m.boardFits() && !m.archiveView && s.Live && s.Info.Key() == m.selectedKey) {
 		return false
 	}
 	sentence := oneSpace(strings.TrimRight(ansi.Strip(line), " "))

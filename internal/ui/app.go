@@ -2483,7 +2483,7 @@ func overlay(rows, panel []string, left, top int) {
 					rest = strings.Repeat(" ", lipgloss.Width(rest))
 				}
 			}
-			if peek := strings.TrimSpace(ansi.Strip(rest)); peek != "" && !(strings.IndexByte(peek, ' ') < 0 && strings.IndexAny(peek, "0123456789") < 0) {
+			if peek := strings.TrimSpace(ansi.Strip(rest)); peek != "" && strings.IndexByte(peek, ' ') >= 0 {
 				// A mark for a peek with something in it: when the rule
 				// above blanked the whole peek, the left mark already says
 				// the row was cut (#64). And a lone word with no digit —

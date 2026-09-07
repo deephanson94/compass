@@ -840,3 +840,168 @@ func TestTheFoldedListsSlackGoesToTheBand(t *testing.T) {
 		t.Errorf("%d blank fleet rows over %q, with sessions behind A", air, strings.TrimSpace(strings.SplitN(rows[last], "│", 2)[0]))
 	}
 }
+
+// The trail's title leaves the span to its own first row: "· 3h" stood over
+// "◉ … 3h ago" two rows under it, and the repeat pushed the day into glyphs
+// where the words fit (#138).
+func TestTheTrailTitleLeavesTheSpanToItsFirstRow(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 120, 34)
+	pressKey(m, "2")
+	poll(m, sc)
+	view := ansi.Strip(m.View())
+	title := ""
+	for _, l := range strings.Split(view, "\n") {
+		for _, seg := range strings.Split(l, "│") {
+			if strings.Contains(seg, "TRAIL · api") {
+				title = strings.TrimSpace(seg)
+			}
+		}
+	}
+	if title == "" || !strings.Contains(view, "3h ago") {
+		t.Fatalf("not the archive's api trail with its first row drawn:\n%s", view)
+	}
+	if strings.Contains(title, "· 3h") {
+		t.Errorf("the title repeats the span its first row draws: %q", title)
+	}
+	if !strings.Contains(title, "1 ship · 1 red") {
+		t.Errorf("the title says the day in glyphs where the words fit: %q", title)
+	}
+}
+
+// Past the reply box no lone clock stands with nothing left to time (#139, #56).
+func TestTheBoxLeavesNoLoneClockBesideIt(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 152, 40)
+	pressKey(m, "r")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "reply to 1") {
+		t.Fatalf("the reply box is not up:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		if i := strings.LastIndex(l, "┐"); i >= 0 {
+			tail := strings.TrimSpace(strings.ReplaceAll(l[i+len("┐"):], "…", " "))
+			if tail != "" && !strings.Contains(tail, " ") && strings.ContainsAny(tail, "0123456789") {
+				t.Errorf("the box leaves a lone clock with nothing to time: %q past the box", tail)
+			}
+		}
+	}
+}
+
+// The selected row leaves what the trail beside it draws to the trail —
+// whatever its state: an idle session with no verdict fell back to its last
+// leg's label, which is the trail's own row (#140, #111, #114).
+func TestTheIdleSelectedRowLeavesItsLegToTheTrail(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 80, 24)
+	pressKey(m, "j")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "▸3 ○ notebooks") || !strings.Contains(view, "◆ docs   eda.ipynb") {
+		t.Fatalf("not the idle notebooks row beside its trail:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "▸3 ○ notebooks") && i+1 < len(lines) {
+			if strings.Contains(strings.SplitN(lines[i+1], "│", 2)[0], "eda.ipynb") {
+				t.Errorf("the idle row repeats the leg the trail draws beside it: %q", lines[i+1])
+			}
+		}
+	}
+}
+
+// The selected row's count yields to the trail beside it, and the ladder
+// takes the cells: the model is on the row (#141, #117, #129).
+func TestTheRowsCountYieldsToTheTrailBesideIt(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{100, 30}, {80, 24}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"/", "pytest", "enter"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "▸3 ● api") || !strings.Contains(view, "you were here") {
+			t.Fatalf("at %dx%d not the api row beside its divider:\n%s", size[0], size[1], view)
+		}
+		lines := strings.Split(view, "\n")
+		for i, l := range lines {
+			if !strings.Contains(l, "▸3 ● api") {
+				continue
+			}
+			said := ""
+			for k := i + 1; k < len(lines) && k <= i+2; k++ {
+				said += strings.SplitN(lines[k], "│", 2)[0] + "\n"
+			}
+			if strings.Contains(said, "new leg") {
+				t.Errorf("at %dx%d the row spends its cells on the count its divider draws: %q", size[0], size[1], said)
+			}
+			if !strings.Contains(said, "opus-4-1") {
+				t.Errorf("at %dx%d the row of the two called api does not name its model: %q", size[0], size[1], said)
+			}
+		}
+	}
+}
+
+// The look clause is the divider's own words whether or not what is left of
+// the digest is the count alone (#142, #136, #85).
+func TestTheDigestDropsTheLookItsDividerDrawsAnyway(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneManyIdle(), 220, 48)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "you were here · 1h ago") {
+		t.Fatalf("no divider on the board:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "· looked 1h ago") {
+			t.Errorf("the digest says the look its own divider draws: %q", strings.TrimSpace(l))
+			break
+		}
+	}
+	if !strings.Contains(view, "↳ 1 new leg · 1 red") || !strings.Contains(view, "↳ 2 new legs · 1 ship") {
+		t.Errorf("a clause the divider does not draw left the row:\n%s", view)
+	}
+}
+
+// The count yields before the rungs are hoisted, so both columns called api
+// name tool, model and pane on one row (#143, #132, #112).
+func TestTheHoistLeavesTheIdentityOnOneRow(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "you were here") {
+			t.Fatalf("at %dx%d the board draws no divider:\n%s", size[0], size[1], view)
+		}
+		together := false
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "opencode · sonnet-4-5 · ⌁ dev:2.0") && strings.Contains(l, "claude · opus-4-1 · ⌁ dev:1.0") {
+				together = true
+			}
+		}
+		if !together {
+			t.Errorf("at %dx%d the two api columns do not name tool, model and pane on one row:\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+// The session card's third row goes where it is only the count its own
+// trail's read-line draws below it (#144, #129, #136).
+func TestTheCardsCountYieldsToItsOwnTrail(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"3", "tab"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "[session]") || !strings.Contains(view, "you were here · 25m ago") {
+			t.Fatalf("at %dx%d not the session card over its divider:\n%s", size[0], size[1], view)
+		}
+		for _, l := range strings.Split(view, "\n") {
+			left := strings.SplitN(l, "│", 2)[0]
+			if strings.TrimSpace(left) == "↳ 1 new leg · looked 25m ago" || strings.TrimSpace(left) == "↳ 1 new leg" {
+				t.Errorf("at %dx%d the card spends a row on the count its own divider draws: %q", size[0], size[1], l)
+			}
+		}
+	}
+}

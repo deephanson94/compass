@@ -293,13 +293,18 @@ func (m *Model) boardLines(w, h int) []string {
 					}
 					if saysSame(second, oneSpace(strings.Replace(ansi.Strip(c.rows[k]), "\u25b8", " ", 1))) || saysSame(second, wrappedLabel(c.rows, k, bh)) {
 						c.rows[1] = ""
-						m.hoistTag(c.rows, colKeys[ci], c.width)
 						blanked = true
 						break
 					}
 				}
-				_ = blanked
+				// The count yields before the rungs are hoisted: where the
+				// tag row can afford the whole word, model and pane once
+				// the digest has gone, the identity stands on one row —
+				// the shape the column beside it draws (#112, #132).
 				m.yieldNewLegs(c.rows, colKeys[ci], c.width, bh)
+				if blanked {
+					m.hoistTag(c.rows, colKeys[ci], c.width)
+				}
 			}
 			x += c.width + 3
 		}
@@ -806,6 +811,13 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 	// leg", is not yielded: the divider draws neither of its clauses (#135).
 	if lk := lookRe.FindStringSubmatch(digest); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
 		digest = strings.TrimSuffix(digest, lk[0])
+		if !newLegsOnly.MatchString(digest) {
+			// The count is not alone, so the row keeps its other
+			// clauses — less the age, which its own divider draws below
+			// it word for word (#85, #136).
+			rows[2] = pad(dimStyle.Render(digest), w-lipgloss.Width(current)) + dimStyle.Render(current)
+			return
+		}
 	}
 	if !newLegsOnly.MatchString(digest) {
 		return

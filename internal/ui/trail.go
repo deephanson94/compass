@@ -1739,7 +1739,16 @@ func (m *Model) trailColumn(w, h int) []string {
 		rows = m.sessionCard(w)
 	}
 	if h > len(rows) {
-		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-len(rows)))...)
+		body := trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+		if m.sessionView() && len(rows) > 2 && countBeside(rows[2], body) {
+			// The card's digest is the count and the look the trail's own
+			// read-line draws a few rows below, in this same column: the
+			// row said nothing else, so it goes and the trail takes it
+			// (#117, #129, #136 — the card over its own trail).
+			rows = rows[:2]
+			body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+		}
+		rows = append(rows, body...)
 	}
 	if len(rows) > 1 && m.sessionView() {
 		// The card's fallback sentence is the board column's present
@@ -2031,6 +2040,41 @@ func legsHiddenAbove(tr journey.Trail, level int, sel []int, top int) int {
 	return n
 }
 
+// trailDayHere is the day the title draws beside its own rows: the span
+// goes where the trail's first row draws it — "· 3h" over "◉ \"fix the 401
+// on token refresh\"  3h ago" two rows under it — since saying it twice
+// taught the eye to skip the clause (#22), and the totals stay (#138).
+func (m *Model) trailDayHere(compact bool) string {
+	d := trailDay(m.trail, m.now, compact)
+	if d == "" || len(m.trail.Prompts) == 0 || m.replyBox.on {
+		return d // the box covers the trail's rows (#108): no row draws the span
+	}
+	w, h := m.trailBox()
+	o := m.trailOpts(w, h)
+	doc, _ := trailDoc(m.trail, o)
+	if trailTop(len(doc), o) > 0 {
+		return d // scrolled past its first row, which is where the span was drawn
+	}
+	span := strings.TrimPrefix(d, " · ")
+	if i := strings.Index(span, " "); i > 0 {
+		span = span[:i]
+	}
+	if i := strings.Index(span, " · "); i > 0 {
+		span = span[:i]
+	}
+	if relAge(m.now, m.trail.Prompts[0].At) != span {
+		return d
+	}
+	rest := strings.TrimPrefix(d, " · "+span)
+	if strings.HasPrefix(rest, " · ") {
+		return rest
+	}
+	if rest == "" {
+		return ""
+	}
+	return " ·" + rest
+}
+
 // trailDay is a long trail's sum: its span, its ships and its red runs.
 // "" for a trail under two hours, which has nothing to add up yet.
 func trailDay(tr journey.Trail, now time.Time, compact bool) string {
@@ -2217,12 +2261,13 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 	// 8 red" — at every level and while scrolled, where the board's fold
 	// row is not.
 	room := body - lipgloss.Width(right) - 1
-	title := "TRAIL · " + name + trailDay(m.trail, m.now, false)
+	day := func(compact bool) string { return m.trailDayHere(compact) }
+	title := "TRAIL · " + name + day(false)
 	if len([]rune(title)) > room {
-		title = "TRAIL · " + name + trailDay(m.trail, m.now, true) // "· 22h · 16⚑ 10✗"
+		title = "TRAIL · " + name + day(true) // "· 22h · 16⚑ 10✗"
 	}
 	if len([]rune(title)) > room {
-		title = "TRAIL · " + name + trailDay(m.trail, m.now, true)
+		title = "TRAIL · " + name + day(true)
 		for len([]rune(title)) > room && len([]rune(title)) > len([]rune("TRAIL · "+name)) {
 			title = title[:strings.LastIndex(title, " · ")] // the day's clauses go whole, its tail first — never the name (#56)
 		}
@@ -2247,4 +2292,25 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 		gap = 1
 	}
 	return mark + left + strings.Repeat(" ", gap) + dimStyle.Render(right)
+}
+
+// countBeside says whether a digest row is only the count — and the look
+// clause the divider carries (#136) — that a "you were here" rule among
+// the rows below draws itself. The match is strict (#135).
+func countBeside(row string, below []string) bool {
+	divider := ""
+	for _, r := range below {
+		if p := oneSpace(ansi.Strip(r)); strings.Contains(p, "you were here") {
+			divider = p
+			break
+		}
+	}
+	if divider == "" {
+		return false
+	}
+	d := strings.TrimSpace(ansi.Strip(row))
+	if lk := lookRe.FindStringSubmatch(d); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
+		d = strings.TrimSuffix(d, lk[0])
+	}
+	return newLegsOnly.MatchString(d)
 }
