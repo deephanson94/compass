@@ -818,6 +818,12 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 			}
 			return m.boardDelta(s.Info.Key(), s, room)
 		})
+		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(s.Info.Key(), s, w-4-lipgloss.Width(tag)-2) != m.boardDelta(s.Info.Key(), s, w-4) {
+			// A fleet of one: the header names the tool on every frame,
+			// so a bare tool word that costs the trace its clock says a
+			// thing the frame already says and loses one it does not (#90).
+			tag = ""
+		}
 		room := w - 4
 		if tag != "" {
 			room -= lipgloss.Width(tag) + 2

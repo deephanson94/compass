@@ -326,6 +326,24 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	// The selected column is always drawn: the owed keys put it among the
 	// first shown, and the bands were packed over this very order.
 	keys = all[:min(shown, len(all))]
+	if len(keys) > 0 && m.selectedKey != "" {
+		present, inAll := false, false
+		for _, k := range keys {
+			if k == m.selectedKey {
+				present = true
+			}
+		}
+		for _, k := range all {
+			if k == m.selectedKey {
+				inAll = true
+			}
+		}
+		if !present && inAll {
+			// The selected column is always drawn (#16): the pack trimmed
+			// it off the end, so it takes the last drawn slot (#90).
+			keys = append(append([]string(nil), keys[:len(keys)-1]...), m.selectedKey)
+		}
+	}
 	// A band is as tall as its tallest trail, one band or three: the
 	// strip follows it, rather than thirty rows of bare rail.
 	return keys, heights
@@ -790,6 +808,13 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	// "· 0s ago" to draw a pane the header and footer already named,
 	// while the 152 column beside it kept the clock.
 	tag := tagBesideDigest(m.tagLadder(s), w, func(room int) string { return m.boardDelta(key, s, room) })
+	if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(key, s, w-lipgloss.Width(tag)-2) != m.boardDelta(key, s, w) {
+		// A fleet of one: the header names the tool on every frame, so a
+		// bare tool word that costs the trace its clock says a thing the
+		// frame already says and loses one it does not (#90). The pane
+		// is nowhere else and stays (#85).
+		tag = ""
+	}
 	room := w
 	if tag != "" {
 		room = w - lipgloss.Width(tag) - 2

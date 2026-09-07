@@ -469,3 +469,53 @@ func TestATracesClockGoesWholeOrNotAtAll(t *testing.T) {
 		t.Skip("the walkthrough never drew the answered trace at 80")
 	}
 }
+
+// The board always draws the selected session (#16, #90): esc out of the
+// archive onto a session the pack would trim lands it in the last column.
+func TestTheBoardAlwaysDrawsTheSelectedSession(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	press(m, "A")
+	for i := 0; i < 6; i++ {
+		press(m, "j")
+	}
+	press(m, "esc")
+	if m.level != levelBoard {
+		t.Fatalf("esc should land on the archive's board, level %d", m.level)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "▸") {
+		t.Errorf("the board marks no row for the selected session:\n%s", view)
+	}
+}
+
+// A ship leg's label never ends inside a bracket it opened (#90).
+func TestALegLabelNeverEndsInsideAnOpenBracket(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	pressTab(m)
+	press(m, "6") // cli, whose ship leg is "add --json to every command (commit)"
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(l, "◆ ship") && strings.Contains(l, "(c…") {
+			t.Errorf("a ship label cut inside its bracket: %q", l)
+		}
+	}
+}
+
+// A fleet of one: the card's bare tool word yields to the trace's clock,
+// since the header names the tool on every frame (#90).
+func TestTheCardsBareToolWordYieldsToTheTrace(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 100, 30)
+	for _, k := range []string{"r", "1"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "↪ sent") {
+		t.Skip("no trace drawn on this route")
+	}
+	if strings.Contains(view, "↪ sent \"please continue\"     claude") || (strings.Contains(view, "↪ sent") && !strings.Contains(view, "0s ago")) {
+		t.Errorf("the trace lost its clock to a word the header says:\n%s", view)
+	}
+}

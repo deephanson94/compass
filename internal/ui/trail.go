@@ -1070,7 +1070,13 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 	// the failing test, the bug, the files — beside the label, where a
 	// keypress used to be the only way to it. Only at Lv1: at Lv2 the
 	// details hang beneath the leg already.
-	labelText := textStyle.Render(pad(clip(label, labelWidth), labelWidth))
+	shown := clip(label, labelWidth)
+	if i := strings.LastIndex(shown, "("); i >= 0 && !strings.Contains(shown[i:], ")") && strings.HasSuffix(shown, "…") {
+		// The bracket goes with what it opened: "…(c…" promises a clause
+		// the row never draws (#87's rule, at this call site, #90).
+		shown = clip(strings.TrimRight(label[:strings.LastIndex(label[:len(label)], "(")], " ")+"…", labelWidth)
+	}
+	labelText := textStyle.Render(pad(shown, labelWidth))
 	if inlineFits(l, label, labelWidth, o) {
 		detail := legInline(l)
 		used := len([]rune(label))
