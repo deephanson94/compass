@@ -978,7 +978,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "k", "up":
 			if m.cursor == 0 {
-				m.note = "at the start of the trail"
+				m.note = "at the start"
 				if len(TrailRows(m.trail, m.level)) <= 1 {
 					m.note = "no leg to move to"
 				}
@@ -999,7 +999,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			was := m.cursor
 			m.cursorMove(-m.trailHalfPage())
 			if m.cursor == was {
-				m.note = "at the start of the trail"
+				m.note = "at the start"
 				if len(TrailRows(m.trail, m.level)) <= 1 {
 					m.note = "no leg to move to"
 				}
@@ -3224,6 +3224,7 @@ func (m *Model) footerWith(keys string, w int) string {
 	if short, ok := m.noteLeavesTheQuoteToTheRow(note); ok {
 		note = short
 	}
+	note = m.noteLeavesTheWayBackToTheRow(note)
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
 	// shed is the keys with their optional fragments gone, in order, until
@@ -3913,6 +3914,26 @@ func (m *Model) panelHides(x, w, y int) bool {
 // main:0.0` — to its destination where a row of this very frame already
 // draws the bytes. The row is the fuller copy: it keeps the quote whole
 // or clipped and its own clock, so the note's copy is never the only one.
+// noteLeavesTheWayBackToTheRow is the hide note's form of the same rule:
+// where a drawn row carries `A, then x` — the strip's hidden count — the
+// note says only what happened. The clause cost the eighty-column footer
+// `tab deeper` and `x hide` beside a strip row with 24 cells free; where
+// no drawn row carries the count the note keeps the way back (#173, #64).
+func (m *Model) noteLeavesTheWayBackToTheRow(note string) string {
+	const wayBack = " · A, then x"
+	if !strings.Contains(note, " is hidden"+wayBack) {
+		return note
+	}
+	for _, row := range m.bodyRows {
+		if strings.Contains(ansi.Strip(row), "hidden"+wayBack) {
+			// The namesake's pane clause, where the note carries one
+			// (#31), stays: only the way back moves to the row.
+			return strings.Replace(note, wayBack, "", 1)
+		}
+	}
+	return note
+}
+
 func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
 	if !strings.HasPrefix(note, "↪ ") || !strings.Contains(note, `"`) {
 		return note, false

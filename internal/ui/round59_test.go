@@ -1764,3 +1764,69 @@ func TestTheArchiveRowThatShippedKeepsItsWordAt120(t *testing.T) {
 		t.Errorf("the archive row that shipped wears a bare tick beside a worded neighbour: %q", strings.TrimSpace(g))
 	}
 }
+
+// ---- round 70, two-tools ----
+// The way back is taught on the row that has room for it: where the
+// strip's hidden count is drawn, the footer's hide note leaves
+// `A, then x` to that row and keeps its keys (#64 the other way round,
+// #57's measurement).
+func TestTheWayBackIsTaughtOnTheRowWithRoom(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"j", "x"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "is hidden") {
+			t.Fatalf("%dx%d: not the hide frame:\n%s", size[0], size[1], view)
+		}
+		lines := strings.Split(view, "\n")
+		foot, strip := "", ""
+		for _, l := range lines {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			} else if strings.Contains(l, " hidden") && !strings.Contains(l, "is hidden") {
+				strip = l
+			}
+		}
+		if strip == "" {
+			continue // no drawn row carries the count: the note keeps the way back
+		}
+		if strings.Contains(foot, "A, then x") {
+			t.Errorf("%dx%d: the footer teaches the way back while %q has room for it:\n  %q",
+				size[0], size[1], strings.TrimSpace(strip), strings.TrimSpace(foot))
+		}
+		if strings.Count(view, "A, then x") != 1 {
+			t.Errorf("%dx%d: the way back is taught %d times", size[0], size[1], strings.Count(view, "A, then x"))
+		}
+	}
+}
+
+// The trail's top refusal costs the footer no key its neighbours keep:
+// `at the start` is the floor a note is measured against, so the frame
+// after ctrl+u names every key the frame before it named, less the one
+// the note's own cells buy (#166, #159, #156's shape).
+func TestTheTopOfTrailRefusalKeepsTheChapterKeys(t *testing.T) {
+	forceASCII(t)
+	want := map[int]string{80: "[ ] chapters", 100: "r reply", 120: "a ask", 152: "m live pane"}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"tab", "ctrl+u", "ctrl+u"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "at the start") {
+			t.Fatalf("%dx%d: not the top-of-trail refusal: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+		if k := want[size[0]]; !strings.Contains(foot, k) {
+			t.Errorf("%dx%d: the top-of-trail refusal sheds %q: %q", size[0], size[1], k, strings.TrimSpace(foot))
+		}
+	}
+}

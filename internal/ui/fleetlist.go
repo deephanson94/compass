@@ -77,12 +77,10 @@ func (m *Model) fleetColumn(w, h int) []string {
 }
 
 // hiddenClause is the strip's word for its hidden sessions, with the way
-// to them — except on the frame whose note just said the same words: two
-// rows two apart taught one key pair (#64).
+// to them. On the frame whose note just said the same words the note is
+// the one that stands down (#64 the other way round): the strip has the
+// cells and the footer has none (#173).
 func (m *Model) hiddenClause(n int) string {
-	if strings.Contains(m.note, "hidden · A, then x") {
-		return fmt.Sprintf("%d hidden", n)
-	}
 	return fmt.Sprintf("%d hidden · A, then x", n)
 }
 
