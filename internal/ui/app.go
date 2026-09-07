@@ -970,7 +970,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 {
 				m.note = "at the present · k goes back"
 				if n <= 1 {
-					m.note = "the trail is one row" // no key goes anywhere
+					m.note = "no leg to move to" // no key goes anywhere
 				}
 				return m, nil
 			}
@@ -980,7 +980,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.cursor == 0 {
 				m.note = "at the start of the trail"
 				if len(TrailRows(m.trail, m.level)) <= 1 {
-					m.note = "the trail is one row"
+					m.note = "no leg to move to"
 				}
 				return m, nil
 			}
@@ -1001,7 +1001,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.cursor == was {
 				m.note = "at the start of the trail"
 				if len(TrailRows(m.trail, m.level)) <= 1 {
-					m.note = "the trail is one row"
+					m.note = "no leg to move to"
 				}
 			}
 			return m, nil
@@ -1012,7 +1012,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 && m.trailPinned {
 				m.note = "at the present"
 				if n <= 1 {
-					m.note = "the trail is one row"
+					m.note = "no leg to move to"
 				}
 				return m, nil
 			}
@@ -1216,7 +1216,7 @@ func (m *Model) chapter(key string) {
 		if target < 0 {
 			m.note = "no later prompt · G is the present"
 			if len(TrailRows(m.trail, m.level)) <= 1 {
-				m.note = "the trail is one row"
+				m.note = "no leg to move to"
 			}
 			return
 		}
@@ -1230,7 +1230,7 @@ func (m *Model) chapter(key string) {
 		if target < 0 {
 			m.note = "no earlier prompt"
 			if len(TrailRows(m.trail, m.level)) <= 1 {
-				m.note = "the trail is one row"
+				m.note = "no leg to move to"
 			}
 			return
 		}
@@ -1478,7 +1478,7 @@ func (m *Model) zoomOut() {
 		m.anchorReader()
 	case m.level > levelTrail:
 		if m.boardFits() && !m.archiveView && m.liveCount() == 1 {
-			m.note = "the only session · nothing to zoom out to"
+			m.note = "the only live one · nothing to zoom out to"
 			if s, ok := m.selected(); ok && m.fleetQuery != "" && !m.matchesQuery(s) {
 				m.clearQuery() // no board to go out to: the query the session fails goes here instead
 			}
@@ -1500,7 +1500,7 @@ func (m *Model) zoomOut() {
 		m.level = levelBoard
 		m.commitLook(m.selectedKey)
 	case m.level == levelTrail && m.liveCount() == 1 && !m.archiveView:
-		m.note = "the only session · nothing to zoom out to" // no board at any width (#31)
+		m.note = "the only live one · nothing to zoom out to" // no board at any width (#31)
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	case m.level == levelBoard:
@@ -1802,7 +1802,12 @@ const hookCoolOff = 10 * time.Minute
 // session, or the selection is at its end.
 func (m *Model) onlyOrLast(delta int) string {
 	if len(m.viewOrder()) <= 1 {
-		return "the only session"
+		if m.archiveView {
+			return "the only session"
+		}
+		// Live and archive are two words (#10, #146): the band two rows
+		// above numbers twelve more, so the scoped word is the true one.
+		return "the only live one"
 	}
 	if delta > 0 {
 		return "the last session"

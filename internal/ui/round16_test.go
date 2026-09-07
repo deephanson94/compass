@@ -35,7 +35,7 @@ func TestTheOnlySessionClearsAFailingQuery(t *testing.T) {
 	}
 	// G on a one-row trail says so.
 	press(m, "G")
-	if m.note != "the trail is one row" {
+	if m.note != "no leg to move to" {
 		t.Errorf("G on a one-row trail: %q", m.note)
 	}
 }

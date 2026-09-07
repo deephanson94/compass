@@ -1162,3 +1162,41 @@ func TestTheBoardsCountGoesWithOtherClauses(t *testing.T) {
 		t.Errorf("a clause the divider does not draw left the row:\n%s", view)
 	}
 }
+
+// Every refusal that names the fleet of one counts only the live: the band
+// two rows under the note numbers twelve more (#152, #146, #10).
+func TestEveryRefusalCountsOnlyTheLive(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	pressKey(m, "shift+tab")
+	if !strings.Contains(m.note, "the only live one") || strings.Contains(m.note, "the only session") {
+		t.Errorf("the zoom-out refusal calls it the only session: %q", m.note)
+	}
+	m = sceneModel(sceneSecondDay(), 80, 24)
+	pressKey(m, "j")
+	if strings.Contains(m.note, "the only session") {
+		t.Errorf("the move refusal calls it the only session over a band naming twelve: %q", m.note)
+	}
+	m = sceneModel(sceneSecondDay(), 80, 24)
+	pressKey(m, "A")
+	pressKey(m, "shift+tab")
+	if strings.Contains(m.note, "the only live one") {
+		t.Errorf("in the archive the refusal scoped a word it need not: %q", m.note)
+	}
+}
+
+// A trail of one prompt and no leg draws two glyph rows — the prompt and
+// HEAD — so the refusal says what is true of it: no leg to move to (#153).
+func TestTheOneRowTrailsRefusalNamesTheLeg(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	pressTab(m)
+	pressKey(m, "ctrl+u")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "◉▸\"add a --version flag\"") || !strings.Contains(view, "● scout  thinking…") {
+		t.Fatalf("not the two-row trail with the cursor on its prompt:\n%s", view)
+	}
+	if m.note == "the trail is one row" || !strings.Contains(m.note, "no leg") {
+		t.Errorf("the refusal counts a row the panel does not draw as one: %q", m.note)
+	}
+}
