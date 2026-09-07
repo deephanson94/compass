@@ -20,11 +20,11 @@
 
  scouting will appear here
 
- 5 archived · A browses
-
-
-
-
+ recent · 5 archived · A browses
+  6 ○ docs · "update the readme"                                                                                                                     1h
+  7 ○ infra · "move dns to route53"                                                                                                                  2h
+  8 ○ api · "add rate limiting"                                                                                                                      3h
+  9 ○ api · "port the client to httpx"                                                                                                               1d
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  h/l columns · enter attach (prefix d returns) · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit

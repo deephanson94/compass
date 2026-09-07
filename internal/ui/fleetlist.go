@@ -293,6 +293,12 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 			}
 			next--
 		}
+		// The escape above walks forward out of a cut entry and stops on
+		// the air that ends it: the same rule as the guard above, applied
+		// after it, so a scrolled column never opens on a blank row.
+		if next > 0 && next < len(lines) && lines[next] == "" && (selEnd < 0 || next+1 <= selStart) {
+			next++
+		}
 		if next == off {
 			break
 		}

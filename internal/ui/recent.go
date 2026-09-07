@@ -32,7 +32,7 @@ type recentRow struct {
 // rows that match: a search names what it found, and the band going dark
 // on the one it had drawn a keystroke earlier was the opposite (#98).
 func (m *Model) recentRows(n int) []recentRow {
-	if m.archiveView || n <= 0 || (m.level == levelBoard && m.boardShown()) {
+	if m.archiveView || n <= 0 || (m.level == levelBoard && m.boardShown() && !m.onBoardBand) {
 		return nil // the board's blank rows are more columns' (#43), and its strip is the door
 	}
 	used := 0
@@ -328,4 +328,12 @@ func (m *Model) openRecent(num int) bool {
 		}
 	}
 	return false
+}
+
+// strandedBand is the band drawn under the board's strip, where the board's
+// own rows have run out and no column can take them.
+func (m *Model) strandedBand(w, avail int) []string {
+	m.onBoardBand = true
+	defer func() { m.onBoardBand = false }()
+	return m.recentLines(w, avail)
 }

@@ -313,6 +313,16 @@ func (m *Model) boardLines(w, h int) []string {
 	// The strip sits under the last band, not on the screen's floor: a
 	// calm board is a short board, and the strip is where the eye is.
 	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
+	// The rows the board leaves blank belong to sessions, not to air
+	// (#43, #47): where every live session already has a column, no
+	// further column can ever fill them, and the same band the list
+	// draws at a hundred columns takes them, its header folding the
+	// strip's archive line as it folds the list's.
+	if free := h - len(lines); free >= 2 && !m.archiveView && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == fmt.Sprintf("%d archived · A browses", m.archivedCount()) {
+		if band := m.strandedBand(w, free+1); len(band) > 1 {
+			lines = append(lines[:len(lines)-1], band...)
+		}
+	}
 	return fit(lines, h)
 }
 

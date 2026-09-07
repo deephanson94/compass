@@ -250,6 +250,7 @@ type Model struct {
 	restSelKey  string // the other view's selection, also a Key()
 	restLevel   int    // the level the archive was opened from, for the way back (#53)
 	fleetScroll int
+	onBoardBand bool
 
 	showHelp    bool
 	searching   bool

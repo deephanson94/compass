@@ -1042,3 +1042,47 @@ func TestTheHideRefusalCountsOnlyTheLive(t *testing.T) {
 		t.Errorf("the refusal does not scope its word to the live: %q", m.note)
 	}
 }
+
+// The rows the board leaves blank belong to sessions, not to air (#43, #47):
+// where every live session already has a column no further column can fill
+// them, and the same band the list draws below the board's width takes
+// them (#147).
+func TestTheBoardsStrandedRowsTakeTheBand(t *testing.T) {
+	forceASCII(t)
+	list := ansi.Strip(sceneModel(sceneFleetHygiene(), 100, 30).View())
+	if !strings.Contains(list, "5 ○ api") || !strings.Contains(list, "9 ○ notebooks") {
+		t.Fatalf("the list at a hundred does not draw the band:\n%s", list)
+	}
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		view := ansi.Strip(sceneModel(sceneFleetHygiene(), size[0], size[1]).View())
+		if !strings.Contains(view, "archived · A browses") {
+			t.Fatalf("at %dx%d not the board over its archive strip:\n%s", size[0], size[1], view)
+		}
+		if !strings.Contains(view, "5 ○ api") {
+			t.Errorf("at %dx%d the board spends its blank rows on air and names none of the finished sessions the list names at a hundred:\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+// A scrolled fleet column never opens on a row of air: the escape out of a
+// cut entry is checked by the same guard that forbids it (#148).
+func TestAScrolledColumnNeverOpensOnAir(t *testing.T) {
+	forceASCII(t)
+	sc := sceneFleetHygiene()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range canonicalKeys[:25] { // the walkthrough to its scrolled list
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, l := range lines {
+		col := strings.SplitN(l, "│", 2)[0]
+		if strings.Contains(col, "more above") && i+1 < len(lines) {
+			if strings.TrimSpace(strings.SplitN(lines[i+1], "│", 2)[0]) == "" {
+				t.Errorf("the scrolled column opens on air under %q", strings.TrimSpace(col))
+			}
+			return
+		}
+	}
+	t.Fatalf("the list is not scrolled:\n%s", strings.Join(lines, "\n"))
+}
