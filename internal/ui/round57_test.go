@@ -69,3 +69,29 @@ func TestTheLiveEntryNeverSpendsARowOnTheBareToolWord(t *testing.T) {
 		}
 	}
 }
+
+// The band takes the rows the hide freed on the route the walkthrough
+// walks: a replied-to fleet at eighty leaves one free row and two in the
+// tail, and the gate is measured with the rows the band is budgeted with —
+// a gate on the reduced body refused them, and the one-`x` pin above walks
+// a route the header shed alone covers (#92, #47).
+func TestTheBandTakesItsRowsOnTheHidesOwnRoute(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 80, 24)
+	for _, k := range []string{"r", "1", "j", "x"} { // reply, then hide notebooks
+		pressKey(m, k)
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	head := -1
+	for i, l := range lines {
+		if strings.Contains(l, "archived · 1 hidden") {
+			head = i
+		}
+	}
+	if head < 0 {
+		t.Fatalf("no archive line after the hide:\n%s", strings.Join(lines, "\n"))
+	}
+	if head+1 >= len(lines) || !strings.Contains(lines[head+1], " ○ ") {
+		t.Errorf("the archive's line stands over blank rows the band had the budget for:\n%s", strings.Join(lines, "\n"))
+	}
+}
