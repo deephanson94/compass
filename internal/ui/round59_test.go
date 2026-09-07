@@ -94,3 +94,35 @@ func TestTheCardLeavesThePresentToTheTrail(t *testing.T) {
 		t.Errorf("the card lost its tag with the sentence:\n%s", view)
 	}
 }
+
+// In the session view the search's note says whose miss it is where the
+// band beneath holds what the search found, as the list's note does (#102).
+func TestTheSessionViewMissNoteSaysTheLiveOneMissed(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 152, 40)
+	for _, k := range []string{"/", "billing"} {
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "billing · opencode") && !strings.Contains(view, " ○ billing") {
+		t.Fatalf("the band draws no billing row under the search:\n%s", view)
+	}
+	if !strings.Contains(view, "no live session matches /billing") {
+		t.Errorf("the card says no session matches over the band's match:\n%s", view)
+	}
+}
+
+// The archive says a row's verdict: the second row ends on the band's own
+// clause where the column has room (#103, #47).
+func TestTheArchiveRowSaysItsVerdict(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 152, 40)
+	press(m, "2")
+	view := ansi.Strip(m.View())
+	if !m.archiveView {
+		t.Fatalf("2 did not open the archive:\n%s", view)
+	}
+	if !strings.Contains(view, "claude · fix/api-timeouts · ✗ red") {
+		t.Errorf("the archive row says nothing of whether the day went red:\n%s", view)
+	}
+}

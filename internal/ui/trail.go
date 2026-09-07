@@ -1754,8 +1754,15 @@ func (m *Model) sessionCard(w int) []string {
 	if !ok {
 		if s, has := m.selected(); has && m.fleetQuery != "" && !m.matchesQuery(s) {
 			// The one session fails the search: the card says so, where a
-			// blank card and a blank band said nothing (#52).
-			return []string{m.trailTitle(w), dimStyle.Render(clip("no session matches /"+m.fleetQuery+" · esc clears it", w))}
+			// blank card and a blank band said nothing (#52). Where the
+			// band beneath holds what the search found (#98), the miss
+			// is the live one's, and the card says so as the list's note
+			// does (#102).
+			miss := "no session matches /"
+			if len(m.recentRows(9)) > 0 {
+				miss = "no live session matches /"
+			}
+			return []string{m.trailTitle(w), dimStyle.Render(clip(miss+m.fleetQuery+" · esc clears it", w))}
 		}
 		return []string{m.trailTitle(w), ""}
 	}

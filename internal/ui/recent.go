@@ -219,18 +219,29 @@ func (m *Model) recentKeep(r recentRow, w int, short bool) (keep int, said strin
 // fits beside the prompt's floor.
 func (m *Model) recentVerdict(r recentRow, w int) (verdict string, full bool) {
 	s := m.sessions[r.sess]
-	if tr, ok := m.trails[s.Info.Key()]; ok && len(tr.Legs) > 0 {
-		verdict = strings.SplitN(boardVerdict(s, tr, m.now), " · ", 2)[0]
-		if f := strings.Fields(verdict); len(f) > 2 && f[len(f)-1] == "ago" {
-			verdict = strings.Join(f[:len(f)-2], " ")
-		}
-	}
+	verdict = m.verdictClause(s)
 	if verdict == "" {
 		return "", true
 	}
 	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
 	room := w - lipgloss.Width(lead) - lipgloss.Width(m.age(s.Info.LastEventAt)) - 1
 	return verdict, room-lipgloss.Width(verdict)-2 >= recentPromptFloor
+}
+
+// verdictClause is the first clause of a session's verdict without its
+// clock — "✓ shipped", "✗ red 18✓ 2✗" — the clause that answers whether
+// to reopen it (#47), for the band and the archive row (#103). Empty for a
+// session with no legs.
+func (m *Model) verdictClause(s fleet.Session) string {
+	tr, ok := m.trails[s.Info.Key()]
+	if !ok || len(tr.Legs) == 0 {
+		return ""
+	}
+	verdict := strings.SplitN(boardVerdict(s, tr, m.now), " · ", 2)[0]
+	if f := strings.Fields(verdict); len(f) > 2 && f[len(f)-1] == "ago" {
+		verdict = strings.Join(f[:len(f)-2], " ")
+	}
+	return verdict
 }
 
 // recentLine is one band row, in shed order: digit · ○ · name · "the

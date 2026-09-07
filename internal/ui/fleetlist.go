@@ -891,8 +891,18 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 			return dimStyle.Render(clip(strings.TrimPrefix(word+" · no pane", " · ")+" · "+branchOf(s.Info), w))
 		}
 		// An archived row: the tool where the archive holds two, then the
-		// branch — "opencode · spike/billing" (#80).
-		return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+branchOf(s.Info), " · "), w))
+		// branch — "opencode · spike/billing" (#80) — and the verdict the
+		// band draws, which is what answers "do I want this one back"
+		// (#47): eleven of twelve archived rows said nothing about
+		// whether the day went green or red (#103). It goes last, so a
+		// narrow archive sheds it first.
+		line := strings.TrimPrefix(word+" · "+branchOf(s.Info), " · ")
+		if v := m.verdictClause(s); v != "" {
+			if cand := line + " · " + v; lipgloss.Width(cand) <= w {
+				line = cand
+			}
+		}
+		return dimStyle.Render(clip(line, w))
 	}
 	// Result before process. "1216✓ 2✗" answers whether the session is going
 	// well; "Bash: pytest tests/auth -x" only answers whether it is busy, which
