@@ -2352,7 +2352,7 @@ func (m *Model) View() string {
 		// A fleet of one at any width has no board (#31): the help that
 		// taught "board → trail" beside a ⇧tab that refuses it was
 		// keyed on the terminal's width, not on what the deck draws (#53).
-		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, reader: m.level >= levelReader, refused: m.refusedKeys(), keymap: m.keymapAt(inner), recent: m.archivedCount() > 0})
+		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, reader: m.level >= levelReader, refused: m.refusedKeys(), keymap: m.keymapAt(inner), recent: m.archivedCount() > 0, tools: m.toolsAnywhere() > 1})
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:

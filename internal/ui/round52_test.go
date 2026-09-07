@@ -432,3 +432,40 @@ func TestTheCompactHelpNamesTheReaderOnceTheKeysAreInIt(t *testing.T) {
 		t.Errorf("the help at Lv3 names the trail as the page keys' object:\n%s", view)
 	}
 }
+
+// The help glosses the tool word only where a row wears it, and at 100 the
+// two-tools help glosses it before the compaction mark (#89).
+func TestTheHelpGlossesTheToolWordWhereRowsWearIt(t *testing.T) {
+	two := sceneModel(sceneTwoTools(), 100, 30)
+	press(two, "?")
+	if view := ansi.Strip(two.View()); !strings.Contains(view, "which CLI runs the session") {
+		t.Errorf("the 100 help of a two-tool fleet never says what the word is:\n%s", view)
+	}
+	one := sceneModel(sceneFirstSession(), 152, 40)
+	press(one, "?")
+	if view := ansi.Strip(one.View()); strings.Contains(view, "which CLI") || strings.Contains(view, "opencode") {
+		t.Errorf("a one-tool fleet's help glosses a word no row wears:\n%s", view)
+	}
+}
+
+// A trace's clock goes whole or not at all (#89).
+func TestATracesClockGoesWholeOrNotAtAll(t *testing.T) {
+	forceASCII(t)
+	sc := sceneTwoTools()
+	m := sceneModel(sc, 80, 24)
+	seen := false
+	for _, k := range append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...) {
+		pressKey(m, k)
+		poll(m, sc)
+		view := ansi.Strip(m.View())
+		if strings.Contains(view, "↳ answered 1 · 0s a…") || strings.Contains(view, "· 0s ag…") {
+			t.Fatalf("after %q a clock is cut inside its word:\n%s", k, view)
+		}
+		if strings.Contains(view, "↳ answered 1 · 0s") {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Skip("the walkthrough never drew the answered trace at 80")
+	}
+}

@@ -59,6 +59,7 @@ type helpOpts struct {
 	reader  bool // the keys are in the reader: the page keys page it, not the trail (#83, #87)
 	refused []string
 	keymap  string
+	tools   bool // the fleet runs two CLIs, so its rows wear the word (#85)
 }
 
 func helpLinesFor(w, h int, board bool, refused ...string) []string {
@@ -103,6 +104,9 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		}
 		right := w - left - gutterWidth
 		legend := helpLegendWrapped(right, true, h) // definitions wrap into the rows that are free
+		if !o.tools {
+			legend = dropToolGloss(legend)
+		}
 		if !board {
 			// A fleet of one on a wide terminal has no board either (#53).
 			kept := legend[:0]
@@ -118,6 +122,9 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 	}
 	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, refused...), o.recent)
 	legend := helpLegendLines(w, false)
+	if !o.tools {
+		legend = dropToolGloss(legend)
+	}
 	if !board {
 		// No board on this terminal: its legend line would describe a
 		// brightness the person never sees.
@@ -461,7 +468,7 @@ func helpLegendRaw() []string {
 		// that defined it (#62).
 		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
 		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
-		"        claude · opencode — which CLI runs the session, where the fleet runs two",
+		toolGloss,
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent  ◍ silent agent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
@@ -475,6 +482,30 @@ func helpLegendRaw() []string {
 		"",
 		"every leg is one of seven classes, named on its row:",
 	}
+}
+
+// toolGloss defines the word a row wears where the fleet runs two CLIs (#85, #89).
+const toolGloss = "        claude · opencode — which CLI runs the session, where the fleet runs two"
+
+// dropToolGloss takes the tool word's line out: one CLI everywhere and no row
+// wears the word, so no line defines it — the same test the row uses.
+func dropToolGloss(lines []string) []string {
+	var out []string
+	skipping := false
+	for _, l := range lines {
+		plain := ansi.Strip(l)
+		indent := len(plain) - len(strings.TrimLeft(plain, " "))
+		switch {
+		case strings.Contains(plain, "— which CLI runs the session"):
+			skipping = true
+			continue
+		case skipping && strings.TrimSpace(plain) != "" && indent > 8:
+			continue // the wrapped tail of the line above (#55)
+		}
+		skipping = false
+		out = append(out, l)
+	}
+	return out
 }
 
 func helpLegendLines(w int, roomy bool) []string {
@@ -587,7 +618,7 @@ func helpLegendFill(core, full []string, rows int) []string {
 	// The trace before the compaction: `↪` is drawn on the fleet rows of
 	// every scene that replied, where `⟲` rides the trails that compacted
 	// — the mark on the panel the person is looking at comes back first (#63).
-	for _, want := range []string{"you\u00a0were\u00a0here", "⌁ dev", "↪ sent", "⟲ context compacted", "2nd\u00a0failure", "on\u00a0you", "board:", "▌", "compass observes"} {
+	for _, want := range []string{"you\u00a0were\u00a0here", "⌁ dev", "↪ sent", "which CLI", "⟲ context compacted", "2nd\u00a0failure", "on\u00a0you", "board:", "▌", "compass observes"} {
 		for _, l := range full {
 			if strings.Contains(l, want) && !kept[l] {
 				order = append(order, l)

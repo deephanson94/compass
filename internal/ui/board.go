@@ -1280,7 +1280,13 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		case sent.answer == 0 && fitQuoteMin(verb+quote, w, 3) != "":
 			trace = fitQuoteMin(verb+quote, w, 3) // a stub of the bytes beats no bytes
 		default:
-			trace = clip(strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")+age, w)
+			head := strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")
+			// The clock goes whole or not at all: "0s a…" is not a time,
+			// and every other clock in the column is bare ("4m", "for 12m") (#89).
+			if bare := " · " + relAge(m.now, sent.at); len([]rune(head+age)) > w && len([]rune(head+bare)) <= w {
+				age = bare
+			}
+			trace = clip(head+age, w)
 		}
 		// What is new rides after it when the row has room: the trace was
 		// evicting the digest for as long as it stood.
