@@ -46,7 +46,9 @@ func (m *Model) recentRows(n int) []recentRow {
 	}
 	var idx []int
 	for i, s := range m.sessions {
-		if !s.Live {
+		if !s.Live && archiveHeadline(s) != "" {
+			// A session with no title and no prompt has nothing to go
+			// back to: a bare name on the band was a slot spent (#78).
 			idx = append(idx, i)
 		}
 	}

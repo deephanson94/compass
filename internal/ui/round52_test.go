@@ -91,3 +91,24 @@ func TestTheBandRanksWorkedSessionsFirst(t *testing.T) {
 		t.Errorf("an empty session leads the band over worked ones: %v", key)
 	}
 }
+
+// A session with no title and no prompt is off the band (#78).
+func TestTheBandSkipsASessionWithNothingToGoBackTo(t *testing.T) {
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	rows := m.recentRows(8)
+	first := rows[0].sess
+	s := m.sessions[first]
+	s.Info.Title = ""
+	m.sessions[first] = s
+	tr := m.trails[s.Info.Key()]
+	tr.Prompts = nil
+	m.trails[s.Info.Key()] = tr
+	if archiveHeadline(m.sessions[first]) != "" {
+		t.Skip("the fixture names the session another way")
+	}
+	for _, r := range m.recentRows(8) {
+		if r.sess == first {
+			t.Errorf("a session with nothing to go back to is on the band")
+		}
+	}
+}
