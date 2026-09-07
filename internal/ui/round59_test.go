@@ -365,3 +365,117 @@ func TestTheSelectedRowLeavesThePresentToTheTrailInAnyFleet(t *testing.T) {
 		t.Errorf("the present is said %d times, want once:\n%s", n, view)
 	}
 }
+
+// The card's compare sees the question the trail wrapped across its rows:
+// the card leaves it to the trail, and the freed row takes the model (#116).
+func TestTheCardLeavesAWrappedQuestionToTheTrail(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	if !strings.Contains(view, "design Open port 22 to") || !strings.Contains(view, "├ the office CIDR?") {
+		t.Fatalf("the trail does not wrap the question:\n%s", view)
+	}
+	for i, l := range lines {
+		if strings.Contains(l, "▸1 ▲ infra") && i+1 < len(lines) {
+			if strings.Contains(strings.SplitN(lines[i+1], "│", 2)[0], "Open port 22") {
+				t.Errorf("the card repeats a question the trail spells over its wrap: %q", lines[i+1])
+			}
+		}
+	}
+}
+
+// The `↳ N new legs` digest yields to the model where the column's own
+// divider draws the count (#117).
+func TestTheNewLegsDigestYieldsToTheModel(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "you were here") {
+		t.Fatalf("no divider on the board:\n%s", view)
+	}
+	if !strings.Contains(view, "opus-4-1") {
+		t.Errorf("the model stands on no row of the frame:\n%s", view)
+	}
+}
+
+// At eighty the api row keeps its pane where the rung fits the row exactly:
+// the digest's floor is its shortest clause (#118).
+func TestTheRowKeepsThePaneThatFitsExactly(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 80, 24)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "claude · ⌁ :1.0") {
+		t.Errorf("the pane is on no row for 3 api:\n%s", view)
+	}
+}
+
+// A live session selected while the archive list is on screen keeps its
+// present on the trail: the empty state is for a trail with nothing, not
+// for a view (#119).
+func TestTheArchiveViewKeepsALiveSessionsPresent(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	for _, k := range []string{"/", "pytest", "enter", "A"} {
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !m.archiveView {
+		t.Fatalf("not the archive:\n%s", view)
+	}
+	if strings.Contains(view, "will appear here") {
+		t.Errorf("the live session's trail draws the empty state in the archive view:\n%s", view)
+	}
+	if !strings.Contains(view, "thinking…") {
+		t.Errorf("the live session's present is on no row:\n%s", view)
+	}
+}
+
+// In the archive at eighty the reader's title names the session alone
+// where the turn row draws the ask (#120).
+func TestTheArchiveReaderTitleLeavesTheAskToTheTurnRow(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"2", "tab", "tab", "["} { // the archive's reader, back to its one turn
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	if !m.archiveView || !strings.Contains(view, "READER · ") {
+		t.Fatalf("not the archive's reader:\n%s", view)
+	}
+	turn := ""
+	for _, l := range strings.Split(view, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(l, " "), "❯ ") {
+			turn = l
+			break
+		}
+	}
+	if turn == "" {
+		t.Fatalf("no turn row on the page:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "READER · ") && strings.Contains(l, "fix the 401") {
+			t.Errorf("the title repeats the ask its turn row draws: %q over %q", l, turn)
+		}
+	}
+}
+
+// The header leaves two cells before its chips, their own separator's
+// width, so the identity's last clause never abuts them (#121).
+func TestTheHeaderLeavesTwoCellsBeforeTheChips(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	keys := []string{"A"}
+	for i := 0; i < 11; i++ {
+		keys = append(keys, "j")
+	}
+	for _, k := range keys {
+		pressKey(m, k)
+	}
+	head := strings.Split(ansi.Strip(m.View()), "\n")[0]
+	if strings.Contains(head, "claude ●") || strings.Contains(head, "… ●") {
+		t.Errorf("the identity ends one cell from the chips: %q", head)
+	}
+}

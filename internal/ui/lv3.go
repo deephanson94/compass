@@ -274,6 +274,20 @@ func (m *Model) readerColumn(w, h int) []string {
 			if turns == 1 && saysSame(oneSpace(m.anchorText), said) {
 				rows[0] = m.readerTitleWith(w, false)
 			}
+			if s, ok := m.selected(); ok && m.archiveView && !s.Live {
+				// The archive's title names the session alone where the
+				// turn row draws the ask, as the trail's does (#105) — at
+				// eighty and a hundred, where the reader has the screen
+				// and no trail title stands to be repeated (#120).
+				if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 {
+					for _, l := range page {
+						if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") && saysSame(oneSpace(archiveHeadline(s)), oneSpace(strings.TrimRight(r, " "))) {
+							rows[0] = m.readerTitleBare(w)
+							break
+						}
+					}
+				}
+			}
 		}
 	}
 	if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 && len(m.trail.Legs) == 0 && m.readerLane == "" {
@@ -390,11 +404,24 @@ func (m *Model) readerTitle(w int) string { return m.readerTitleWith(w, true) }
 // from, the clause is a second copy of a line two rows under it and the
 // title keeps its clock alone (#65's record, the shape of #100 and #105).
 func (m *Model) readerTitleWith(w int, anchorClause bool) string {
+	return m.readerTitleAs(w, anchorClause, false)
+}
+
+// readerTitleBare names an archived session as the trail's title does —
+// the session and the day it added up — where the page below draws the ask
+// on its turn row (#120, #59 narrowed as #105 narrowed it).
+func (m *Model) readerTitleBare(w int) string {
+	return m.readerTitleAs(w, false, true)
+}
+
+func (m *Model) readerTitleAs(w int, anchorClause, bare bool) string {
 	name := "—"
 	if s, ok := m.selected(); ok {
 		name = sessionName(s.Info)
-		if m.archiveView && !s.Live {
+		if m.archiveView && !s.Live && !bare {
 			name = archiveHeadline(s) // as the trail beside it and the header above name it (#59)
+		} else if m.archiveView && !s.Live {
+			name += trailDay(m.trail, m.now, true)
 		}
 	}
 	right := ""

@@ -344,7 +344,7 @@ func TestTheTagKeepsThePaneOverTheLookClause(t *testing.T) {
 	view := ansi.Strip(m.View())
 	// The pane stays on the tag row; the word and model ride the row the
 	// card gave up where it did (#112), so the pane is asked for by itself.
-	for _, want := range []string{"⌁ dev:2.0", "claude · ⌁ dev:1.0", "opencode"} {
+	for _, want := range []string{"⌁ dev:2.0", "⌁ dev:1.0", "opencode", "claude"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the 120 board should draw %q on its api column:\n%s", want, view)
 		}

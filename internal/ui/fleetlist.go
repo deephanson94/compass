@@ -827,7 +827,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 			}
 		}
 		tag = tagBesideDigest(ladder, w-4, func(room int) string {
-			if room < 12 {
+			if room < digestFloor {
 				return ""
 			}
 			return m.boardDelta(s.Info.Key(), s, room)
@@ -847,7 +847,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 			room -= lipgloss.Width(tag) + 2
 		}
 		third := ""
-		if room >= 12 {
+		if room >= digestFloor {
 			third = m.boardDelta(s.Info.Key(), s, room)
 		}
 		if tag != "" {
@@ -859,6 +859,11 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	}
 	return lines
 }
+
+// digestFloor is the least room the row's digest takes beside a tag: the
+// width of its shortest clause, `↳ 1 new leg`. A floor of twelve refused
+// the pane rung to a row where it fit in exactly the row's cells (#118).
+const digestFloor = 11
 
 // presentBeside says whether the row's present line is the trail's own HEAD
 // row drawn beside it: a fleet of one at eighty and a hundred stands the

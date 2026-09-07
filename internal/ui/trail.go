@@ -1725,7 +1725,10 @@ func saysSame(sentence, row string) bool {
 	if !cut || len(strings.Fields(pre)) < 2 {
 		return false
 	}
-	return strings.HasPrefix(row, pre) && strings.HasSuffix(row, strings.TrimSpace(post))
+	// The clipped copy stands in the row behind a glyph and a class —
+	// "▲ design Open port 22 to the office CIDR?" — so what stands before
+	// the mark is looked for anywhere in the row (#116).
+	return strings.Contains(row, strings.TrimSpace(pre)) && strings.HasSuffix(row, strings.TrimSpace(post))
 }
 
 // trailColumn is the deck's right-hand panel: the title, one line of air, and
@@ -1963,7 +1966,12 @@ func withoutPrefix(parts []string, prefix string) []string {
 func (m *Model) trailOpts(w, h int) TrailOpts {
 	head, headState, since := "", state.Working, time.Time{}
 	var allowed time.Duration
-	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
+	// A live session selected while the archive list is on screen — the
+	// archive's rows all filtered out, so the cursor never left it — is
+	// still working: `s.Live` tells a finished row from it, and the view
+	// it is listed in does not. Gated on the view, the trail said
+	// "scouting will appear here" over its own prompt row, 50s old (#119).
+	if s, ok := m.selected(); ok && s.Live {
 		head, headState, since = m.headFor(s), s.Snap.State, headSince(s)
 		allowed = s.Snap.Allowed
 	}
@@ -1972,7 +1980,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		headClass = s.Class.String()
 	}
 	dead, activity := false, ""
-	if s, ok := m.selected(); ok && s.Live && !m.archiveView {
+	if s, ok := m.selected(); ok && s.Live {
 		dead, activity = s.Snap.APIError, s.Snap.Activity
 	}
 	return TrailOpts{

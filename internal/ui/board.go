@@ -271,15 +271,20 @@ func (m *Model) boardLines(w, h int) []string {
 		for ci, c := range cols {
 			if len(c.rows) > 3 {
 				second := oneSpace(strings.TrimRight(ansi.Strip(c.rows[1]), " "))
+				blanked := false
 				for k := 3; k < len(c.rows) && k < bh; k++ {
 					if m.panelHides(x, c.width, y+k) {
 						continue
 					}
-					if saysSame(second, oneSpace(strings.Replace(ansi.Strip(c.rows[k]), "\u25b8", " ", 1))) {
+					if saysSame(second, oneSpace(strings.Replace(ansi.Strip(c.rows[k]), "\u25b8", " ", 1))) || saysSame(second, wrappedLabel(c.rows, k, bh)) {
 						c.rows[1] = ""
 						m.hoistTag(c.rows, colKeys[ci], c.width)
+						blanked = true
 						break
 					}
+				}
+				if !blanked {
+					m.yieldNewLegs(c.rows, colKeys[ci], c.width, bh)
 				}
 			}
 			x += c.width + 3
@@ -724,6 +729,77 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		return dimStyle.Render(clip(fmt.Sprintf("+%d more", len(rest))+"   "+tail, w))
 	}
 	return dimStyle.Render(clip(tail, w))
+}
+
+// wrappedLabel is the sentence a leg row spells with its continuation rows
+// — `▲ design Open port 22 to` then `│  ├ the office CIDR?` — joined, so
+// the card's compare sees the question the trail wrapped, whole; the
+// options row, with its bracket, is not part of it (#116).
+func wrappedLabel(rows []string, k, h int) string {
+	head := strings.TrimRight(strings.Replace(ansi.Strip(rows[k]), "▸", " ", 1), " ")
+	if i := strings.LastIndex(head, "  "); i > 0 {
+		head = head[:i] // the span on the right — "waiting 4m" — is not the label's
+	} else if f := strings.Fields(head); len(f) > 2 && f[len(f)-1] != "" && f[len(f)-1][0] >= '0' && f[len(f)-1][0] <= '9' {
+		// A full row leaves the span one space from the label: the
+		// clock, and the word before it — "waiting 4m", "for 6m".
+		f = f[:len(f)-1]
+		if w := f[len(f)-1]; w == "waiting" || w == "for" || w == "silent" {
+			f = f[:len(f)-1]
+		}
+		head = strings.Join(f, " ")
+	}
+	text := oneSpace(head)
+	for j := k + 1; j < len(rows) && j < h; j++ {
+		plain := strings.TrimSpace(ansi.Strip(rows[j]))
+		if !(strings.HasPrefix(plain, "│  ├ ") || strings.HasPrefix(plain, "│  └ ")) || strings.Contains(plain, "[") {
+			break
+		}
+		text += " " + oneSpace(plain[len("│  ├ "):])
+	}
+	return oneSpace(text)
+}
+
+// yieldNewLegs gives the tag row's cells back to the ladder where the
+// digest is only `↳ N new legs` and the column's own divider draws that
+// count five rows down — #85's reason for the look clause, applied to the
+// count: the digest yields to the highest rung that fits, so the model is
+// on a row of the frame (#117). Not where #112 already hoisted the rungs.
+func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
+	if len(rows) < 3 || strings.TrimSpace(ansi.Strip(rows[1])) == "" {
+		return
+	}
+	plain := strings.TrimRight(ansi.Strip(rows[2]), " ")
+	i := strings.LastIndex(plain, "  ")
+	if i < 0 {
+		return
+	}
+	digest, current := strings.TrimSpace(plain[:i]), strings.TrimSpace(plain[i:])
+	if !strings.HasPrefix(digest, "↳ ") || !strings.HasSuffix(strings.TrimSuffix(digest, "s"), "new leg") {
+		return
+	}
+	divider := false
+	for k := 3; k < len(rows) && k < h; k++ {
+		if strings.Contains(ansi.Strip(rows[k]), "you were here") {
+			divider = true
+			break
+		}
+	}
+	if !divider {
+		return
+	}
+	s, ok := m.sessionByKey(key)
+	if !ok {
+		return
+	}
+	for _, rung := range m.tagLadder(s) {
+		if rung == current {
+			return // the tag row already says the most it can
+		}
+		if lipgloss.Width(rung) <= w {
+			rows[2] = pad("", w-lipgloss.Width(rung)) + dimStyle.Render(rung)
+			return
+		}
+	}
 }
 
 // hoistTag moves the rungs the tag row could not afford — the tool word and

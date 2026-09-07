@@ -2804,7 +2804,7 @@ func (m *Model) headerLine(w int) string {
 		}
 		query = fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total)
 	}
-	room := w - lipgloss.Width(right) - 1 // a cell of air before the chips
+	room := w - lipgloss.Width(right) - 2 // two cells of air before the chips: their own separator's width, so `· claude ●1` never reads as one clause (#121)
 	compose := func(board, tag, query string, name string) string {
 		// The identity first, in the same cells at every level: the board
 		// word after it, so a Tab out of the board moves nothing.
