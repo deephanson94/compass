@@ -400,3 +400,31 @@ func TestTheArchiveStripHeadlinesByPrompt(t *testing.T) {
 		t.Errorf("the strip names forty sessions with four words:\n%s", view)
 	}
 }
+
+// The wide help never ends a definition inside a parenthesis it opened (#87).
+func TestTheHelpNeverClipsInsideAnOpenParenthesis(t *testing.T) {
+	for _, w := range []int{152, 220} {
+		m := sceneModel(sceneSecondDay(), w, 40)
+		press(m, "?")
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if i := strings.LastIndex(l, "("); i >= 0 && !strings.Contains(l[i:], ")") && strings.HasSuffix(strings.TrimRight(l, " │"), "…") {
+				t.Errorf("at %d the help clips inside an open parenthesis: %q", w, l)
+			}
+		}
+	}
+}
+
+// The compact help names the reader as the page keys' object once the keys
+// are in it (#87).
+func TestTheCompactHelpNamesTheReaderOnceTheKeysAreInIt(t *testing.T) {
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	pressTab(m)
+	pressTab(m)
+	if m.level < levelReader {
+		t.Fatalf("expected the reader, level %d", m.level)
+	}
+	press(m, "?")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "pages the reader") {
+		t.Errorf("the help at Lv3 names the trail as the page keys' object:\n%s", view)
+	}
+}

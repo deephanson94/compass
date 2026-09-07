@@ -56,6 +56,7 @@ func helpLines(w, h int) []string {
 type helpOpts struct {
 	recent  bool // an archive exists: the digit row may name the band
 	board   bool
+	reader  bool // the keys are in the reader: the page keys page it, not the trail (#83, #87)
 	refused []string
 	keymap  string
 }
@@ -86,7 +87,7 @@ func helpOffered(key, keymap string) bool {
 
 func helpLinesWith(w, h int, o helpOpts) []string {
 	board, refused := o.board, o.refused
-	keys := helpKeyLinesFor(w, board, refused...)
+	keys := helpKeyLinesIn(w, board, o.reader, refused...)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
 	// Two columns at a width that holds them whole, or at any width past
@@ -111,11 +112,11 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			legend = kept
 		}
 		return joinColumns(h, []column{
-			{left, withoutRecent(helpKeyLinesFor(left, board, refused...), o.recent)},
+			{left, withoutRecent(helpKeyLinesIn(left, board, o.reader, refused...), o.recent)},
 			{right, legend},
 		})
 	}
-	lines := withoutRecent(helpKeyLinesFor(w, board, refused...), o.recent)
+	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, refused...), o.recent)
 	legend := helpLegendLines(w, false)
 	if !board {
 		// No board on this terminal: its legend line would describe a
@@ -379,6 +380,10 @@ func refuses(refused []string, key string) bool {
 // on one too narrow for it, "zoom in: board → trail" describes a level the
 // person cannot reach.
 func helpKeyLinesFor(w int, board bool, refused ...string) []string {
+	return helpKeyLinesIn(w, board, false, refused...)
+}
+
+func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
 		key, what := k[0], k[1]
@@ -403,9 +408,13 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 				// the person cannot learn.
 				// The page keys name their object: on the list's own row
 				// they read as paging the list, and they page the trail (#83).
-				what = "move down / up (↓ ↑ too) · ctrl+d/u pages the trail · G newest"
+				object := "the trail"
+				if reader {
+					object = "the reader"
+				}
+				what = "move down / up (↓ ↑ too) · ctrl+d/u pages " + object + " · G newest"
 				if w >= 90 {
-					what = "move down / up (↓ ↑ too) · ctrl+d/u or PgDn/PgUp page the trail · G newest"
+					what = "move down / up (↓ ↑ too) · ctrl+d/u or PgDn/PgUp page " + object + " · G newest"
 				}
 			case "ctrl+d/u":
 				what = ""
@@ -507,7 +516,14 @@ func helpLegendWrapped(w int, roomy bool, h int) []string {
 		}
 		rows := wrapPrefix(text, first, strings.Repeat(" ", indent+2), w)
 		if extra := len(rows) - 1; extra > budget {
-			lines = append(lines, dimStyle.Render(shedClauses(strings.ReplaceAll(l, "\u00a0", " "), w))) // no rows left: clauses go whole
+			// No rows left: clauses go whole — and an aside the clip
+			// would leave open goes with its clause, so the legend
+			// never ends inside a parenthesis ("(3h+…") (#87).
+			shed := shedClauses(strings.ReplaceAll(l, "\u00a0", " "), w)
+			for i := strings.LastIndex(shed, "("); i >= 0 && !strings.Contains(shed[i:], ")"); i = strings.LastIndex(shed, "(") {
+				shed = shedClauses(strings.TrimRight(shed[:i], " ·")+"…", w)
+			}
+			lines = append(lines, dimStyle.Render(shed))
 			continue
 		} else {
 			budget -= extra
