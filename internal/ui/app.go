@@ -1478,7 +1478,7 @@ func (m *Model) zoomOut() {
 		m.anchorReader()
 	case m.level > levelTrail:
 		if m.boardFits() && !m.archiveView && m.liveCount() == 1 {
-			m.note = "the only live one · nothing to zoom out to"
+			m.note = "nothing to zoom out to"
 			if s, ok := m.selected(); ok && m.fleetQuery != "" && !m.matchesQuery(s) {
 				m.clearQuery() // no board to go out to: the query the session fails goes here instead
 			}
@@ -1500,7 +1500,7 @@ func (m *Model) zoomOut() {
 		m.level = levelBoard
 		m.commitLook(m.selectedKey)
 	case m.level == levelTrail && m.liveCount() == 1 && !m.archiveView:
-		m.note = "the only live one · nothing to zoom out to" // no board at any width (#31)
+		m.note = "nothing to zoom out to" // no board at any width (#31)
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	case m.level == levelBoard:

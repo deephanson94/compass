@@ -1181,7 +1181,7 @@ func TestEveryRefusalCountsOnlyTheLive(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneSecondDay(), 80, 24)
 	pressKey(m, "shift+tab")
-	if !strings.Contains(m.note, "the only live one") || strings.Contains(m.note, "the only session") {
+	if strings.Contains(m.note, "the only session") || !strings.Contains(m.note, "nothing to zoom out to") {
 		t.Errorf("the zoom-out refusal calls it the only session: %q", m.note)
 	}
 	m = sceneModel(sceneSecondDay(), 80, 24)
@@ -1331,6 +1331,35 @@ func TestACoveredColumnsSliverIsNotALoneClock(t *testing.T) {
 			if g := lone.FindStringSubmatch(l); g != nil {
 				t.Errorf("at %dx%d row %d: the covered column's sliver says %q and nothing it belongs to: %q", size[0], size[1], i+1, g[1], strings.TrimSpace(l))
 			}
+		}
+	}
+}
+
+// The zoom-out refusal keeps the way in: `nothing to zoom out to` leaves
+// the eighty-column footer `enter attach` and `tab deeper` (#159, #152, #156).
+func TestTheZoomOutRefusalKeepsTheWayIn(t *testing.T) {
+	forceASCII(t)
+	for _, sc := range []struct {
+		name string
+		m    func() *Model
+	}{
+		{"second-day", func() *Model { return sceneModel(sceneSecondDay(), 80, 24) }},
+		{"first-session", func() *Model { return sceneModel(sceneFirstSession(), 80, 24) }},
+	} {
+		m := sc.m()
+		pressKey(m, "shift+tab")
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "nothing to zoom out to") {
+			t.Fatalf("%s: not the refusal frame:\n%s", sc.name, view)
+		}
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "enter attach") || !strings.Contains(foot, "tab deeper") {
+			t.Errorf("%s: the refusal cost the footer the way in: %q", sc.name, strings.TrimSpace(foot))
 		}
 	}
 }
