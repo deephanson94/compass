@@ -297,9 +297,8 @@ func (m *Model) boardLines(w, h int) []string {
 						break
 					}
 				}
-				if !blanked {
-					m.yieldNewLegs(c.rows, colKeys[ci], c.width, bh)
-				}
+				_ = blanked
+				m.yieldNewLegs(c.rows, colKeys[ci], c.width, bh)
 			}
 			x += c.width + 3
 		}
@@ -780,7 +779,7 @@ func wrappedLabel(rows []string, k, h int) string {
 // on a row of the frame (#117), and to the pane alone where no rung stands
 // above it (#129). Not where #112 already hoisted the rungs.
 func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
-	if len(rows) < 3 || strings.TrimSpace(ansi.Strip(rows[1])) == "" {
+	if len(rows) < 3 {
 		return
 	}
 	plain := strings.TrimRight(ansi.Strip(rows[2]), " ")
@@ -804,6 +803,12 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 	}
 	s, ok := m.sessionByKey(key)
 	if !ok {
+		return
+	}
+	if hoisted := strings.TrimSpace(ansi.Strip(rows[1])); hoisted != "" && hoisted == m.toolTag(s) {
+		// The rungs are already on the row above (#112): the count still
+		// says what the divider draws, so the tag row keeps the pane.
+		rows[2] = pad("", w-lipgloss.Width(current)) + dimStyle.Render(current)
 		return
 	}
 	for _, rung := range m.tagLadder(s) {

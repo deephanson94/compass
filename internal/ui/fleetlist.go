@@ -876,7 +876,7 @@ const digestFloor = 11
 // trail's is the survivor and the trace beneath moves up. Not under the
 // reply box, which covers the trail's row (#108's rule).
 func (m *Model) presentBeside(s fleet.Session, line string) bool {
-	if !(!m.boardFits() && !m.archiveView && !m.replyBox.on && s.Live &&
+	if !(!m.boardFits() && !m.archiveView && s.Live &&
 		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck ||
 		wantsAttention(s.Snap.State) || s.Snap.APIError)) {
 		return false
@@ -886,6 +886,16 @@ func (m *Model) presentBeside(s fleet.Session, line string) bool {
 	// tokens.py 18✓ 2✗ · for 22m" — is on the trail's own test row; the
 	// compare runs on the sentence without it too (#125).
 	bare := verdictRe.ReplaceAllString(sentence, " ")
+	if m.replyBox.on {
+		// The box covers the trail's row (#108), but it says the sentence
+		// itself under its own head: the row leaves it to the box.
+		var said []string
+		for _, r := range m.replyRows {
+			said = append(said, oneSpace(strings.Trim(ansi.Strip(r), "│┌┐└┘─ ")))
+		}
+		box := strings.Join(said, " ")
+		return saysSame(sentence, box) || saysSame(bare, box)
+	}
 	for i, r := range m.trailRows {
 		// The trail's cursor stands between the glyph and the class on
 		// HEAD's own row at Lv2 — "●▸test" — and the mark is not part of

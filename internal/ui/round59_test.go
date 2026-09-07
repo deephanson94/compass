@@ -720,3 +720,61 @@ func TestTheTraceNoteLeavesTheQuoteToTheRow(t *testing.T) {
 		t.Errorf("the keys the second copy cost are still shed: %q", strings.TrimSpace(foot))
 	}
 }
+
+// Both columns called api draw the divider with one leg under it, so both
+// leave the count to it: the column #112 hoisted no less than the other (#132).
+func TestTheHoistedColumnAlsoYieldsTheCount(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "you were here") {
+			t.Fatalf("at %dx%d the board draws no divider:\n%s", size[0], size[1], view)
+		}
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "↳ 1 new leg") {
+				t.Errorf("at %dx%d the tag row draws the count its divider draws: %q", size[0], size[1], l)
+			}
+		}
+	}
+}
+
+// On the reply frame the needs-you row leaves its question to the box,
+// which says it under its own head one row up (#133).
+func TestTheNeedsYouRowLeavesTheQuestionToTheReplyBox(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{100, 30}, {80, 24}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		pressKey(m, "r")
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "reply to 1") || strings.Count(view, "Open port 22") < 1 {
+			t.Fatalf("at %dx%d not the reply frame on infra:\n%s", size[0], size[1], view)
+		}
+		lines := strings.Split(view, "\n")
+		for i, l := range lines {
+			if strings.Contains(l, "▸1 ▲ infra") && i+1 < len(lines) {
+				if strings.Contains(strings.SplitN(lines[i+1], "│", 2)[0], "Open port 22") {
+					t.Errorf("at %dx%d the row repeats the question the box says: %q", size[0], size[1], lines[i+1])
+				}
+			}
+		}
+	}
+}
+
+// A chapter note whose quote does not fit the room is the count alone: the
+// turn it landed on is drawn four rows up, so a cut quote said less (#134).
+func TestTheChapterNoteIsTheCountWhereTheQuoteWouldBeCut(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneAlarmStorm(), 80, 24) // infra's ask is too long for the footer's room
+	for _, k := range []string{"tab", "tab", "["} {
+		pressKey(m, k)
+	}
+	foot := strings.Split(strings.TrimRight(ansi.Strip(m.View()), "\n"), "\n")
+	last := foot[len(foot)-1]
+	if !strings.Contains(last, "❯ 1/1") {
+		t.Fatalf("the footer does not count the turn: %q", last)
+	}
+	if strings.Contains(last, `"`) {
+		t.Errorf("the footer spends the row on a quote of the turn drawn above: %q", last)
+	}
+}

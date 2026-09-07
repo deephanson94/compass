@@ -187,6 +187,7 @@ type Model struct {
 	feeds     *feedStore
 	runner    tmuxop.Runner
 	replyBox  box      // where the reply panel will land, set in View before the body (#108)
+	replyRows []string // what that panel says, so a covered row can leave its sentence to it (#133)
 	bodyRows  []string // the body as drawn, settled before the footer
 	trailRows []string // the trail column's drawn rows, settled before the fleet column
 	proc      tmuxop.Proc
@@ -2361,6 +2362,7 @@ func (m *Model) View() string {
 
 	var body []string
 	m.replyBox = box{}
+	m.replyRows = nil
 	if m.replying {
 		panel := m.replyPanel(inner)
 		left, top, cap := m.panelPlace(inner, panelWidth(panel), len(panel), false)
@@ -2369,6 +2371,7 @@ func (m *Model) View() string {
 			left, top, _ = m.panelPlace(inner, panelWidth(panel), len(panel), true)
 		}
 		m.replyBox = box{on: true, left: left, top: top, w: panelWidth(panel), h: len(panel)}
+		m.replyRows = panel
 	}
 	switch {
 	case m.showHelp:
@@ -3300,6 +3303,11 @@ func (m *Model) footerWith(keys string, w int) string {
 		if lipgloss.Width(f) <= room {
 			shown = dimStyle.Render(f)
 			break
+		}
+		if m.chapterNote() && (strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphBranch)) {
+			// The turn the note landed on is drawn with it (#128), so a
+			// quote cut to the room says less than the count alone (#134).
+			continue
 		}
 		if q := fitQuote(f, room); q != "" {
 			// The quote clipped to the room rather than dropped whole:
