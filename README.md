@@ -201,3 +201,4 @@ run and nothing else.
 - [`docs/SPEC.md`](docs/SPEC.md) — product spec: UX model, keymap, states, visual language, decision log
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical design: data sources, engine, stack, milestones
 - [`docs/dev/`](docs/dev/) — the per-milestone API contracts the code and tests were built against
+- [`docs/PROCESS.md`](docs/PROCESS.md) — how it is built: scenes, the rendered corpus, the operator panel, the fold-and-pin loop, and the decision log

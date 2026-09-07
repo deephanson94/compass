@@ -9,6 +9,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
@@ -558,6 +560,10 @@ func (d *docBuilder) argument(use transcript.ToolUse, cwd string) string {
 	switch use.Name {
 	case "Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep":
 		return relPath(summary, cwd)
+	case "Bash":
+		if rest, ok := state.StripCD(summary, cwd); ok {
+			return rest // the call's own "cd" into the session's directory is not the news (#78)
+		}
 	}
 	return summary
 }
@@ -698,7 +704,7 @@ func resultBody(text string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	for i, l := range lines {
-		lines[i] = strings.TrimRight(strings.ReplaceAll(l, "\t", "    "), " ")
+		lines[i] = journey.Untag(strings.TrimRight(strings.ReplaceAll(l, "\t", "    "), " "))
 	}
 	return lines
 }

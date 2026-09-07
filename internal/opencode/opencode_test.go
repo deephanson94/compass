@@ -209,3 +209,17 @@ func TestTheSchemeTailsTheStore(t *testing.T) {
 		t.Errorf("SchemeOf misreads a path")
 	}
 }
+
+// OpenCode's default title is no title: the fleet headlines the session by
+// its first prompt instead (#78).
+func TestTheDefaultTitleIsNoTitle(t *testing.T) {
+	for in, want := range map[string]string{
+		"New session - 2026-09-06T10:01:26.175Z": "",
+		"  New session - x ":                     "",
+		"OpenCode Muse Spark model connection":   "OpenCode Muse Spark model connection",
+	} {
+		if got := titleOf(in); got != want {
+			t.Errorf("titleOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -1516,6 +1516,17 @@ func (m *Model) clearQuery() {
 }
 
 // liveCount is how many sessions are on the board, query or no query.
+// anyNeedsYou says whether a live session on the board is waiting on you
+// and not dead on the API — the one `g` would grab.
+func (m *Model) anyNeedsYou() bool {
+	for _, s := range m.sessions {
+		if m.onBoard(s) && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) liveCount() int {
 	n := 0
 	for _, s := range m.sessions {
@@ -3076,6 +3087,12 @@ func (m *Model) keymap() string {
 	}
 	if m.liveCount() == 1 && m.archiveView {
 		keys = strings.Replace(keys, " · ⇧tab board", "", 1) // no board to go back to: A is the way (#53)
+	}
+	if !m.anyNeedsYou() {
+		// Nothing amber: the grab answers no question, and its refusal
+		// ("nothing is waiting on you") was the only thing it could say.
+		// The help still teaches it (#78).
+		keys = strings.Replace(keys, " · g grab", "", 1)
 	}
 	if m.archiveView && m.level >= levelWaypoints && !strings.Contains(keys, "A fleet") {
 		// Below the list the archive's footer still names the way home (#55).

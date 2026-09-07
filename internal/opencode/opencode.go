@@ -143,7 +143,7 @@ func (s *Store) Infos() ([]fleet.SessionInfo, error) {
 	for _, in := range sessions {
 		out = append(out, fleet.SessionInfo{
 			ID: in.ID, TranscriptPath: in.Key(), ProjectSlug: Scheme,
-			CWD: in.Directory, OriginCWD: in.Directory, Title: in.Title,
+			CWD: in.Directory, OriginCWD: in.Directory, Title: titleOf(in.Title),
 			StartedAt: in.Created, LastEventAt: in.Updated,
 			Tool: Tool, Model: in.Model,
 		})
@@ -472,4 +472,16 @@ func clamp(s string) string {
 		return s
 	}
 	return s[:resultCap/2] + "\n…\n" + s[len(s)-resultCap/2:]
+}
+
+// titleOf is a session's title as the fleet may headline it: OpenCode names
+// a fresh session "New session - <timestamp>" until it titles it, and that
+// default is no title — the band showed four of them where the first
+// prompt was the one thing worth reading (#78).
+func titleOf(title string) string {
+	t := strings.TrimSpace(title)
+	if strings.HasPrefix(t, "New session - ") || strings.HasPrefix(t, "New session – ") {
+		return ""
+	}
+	return t
 }

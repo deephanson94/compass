@@ -50,7 +50,17 @@ func (m *Model) recentRows(n int) []recentRow {
 			idx = append(idx, i)
 		}
 	}
+	// A session with legs before one without: the eight slots are for
+	// sessions worth going back to, and four "Test message" sessions took
+	// them from yesterday's work (#78). Within each, newest first.
+	worked := func(i int) bool {
+		tr, ok := m.trails[m.sessions[i].Info.Key()]
+		return ok && len(tr.Legs) > 0
+	}
 	sort.SliceStable(idx, func(a, b int) bool {
+		if wa, wb := worked(idx[a]), worked(idx[b]); wa != wb {
+			return wa
+		}
 		return m.sessions[idx[a]].Info.LastEventAt.After(m.sessions[idx[b]].Info.LastEventAt)
 	})
 	if len(idx) > free {

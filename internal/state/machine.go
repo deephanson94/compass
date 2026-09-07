@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +97,7 @@ type Machine struct {
 
 	lastUse    transcript.ToolUse // most recent tool_use seen, pending or not
 	hasLastUse bool
+	cwd        string // the session's directory, from its events: a command's own "cd" into it is not the news (#78)
 
 	// awaitingModel is true between a tool_result landing and the model's next
 	// assistant event: no tool is pending, but the turn is not over either.
@@ -110,6 +112,9 @@ func NewMachine() *Machine {
 
 // Observe feeds one event to the machine. Events must arrive in file order.
 func (m *Machine) Observe(ev transcript.Event) {
+	if ev.CWD != "" {
+		m.cwd = ev.CWD
+	}
 	// Lines without a timestamp (mode, latch, bookkeeping) still arrive but must
 	// not drag lastEventAt backwards to the zero time.
 	if !ev.Timestamp.IsZero() && ev.Timestamp.After(m.lastEventAt) {
@@ -181,9 +186,9 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 	// 3. Some other tool call is still in flight.
 	if oldest, ok := m.oldestPending(); ok {
 		quiet := now.Sub(m.lastEventAt)
-		act := activityFor(oldest.use)
+		act := activityFor(WithoutCD(oldest.use, m.cwd))
 		if m.hasLastUse {
-			act = activityFor(m.lastUse)
+			act = activityFor(WithoutCD(m.lastUse, m.cwd))
 		}
 		// A shell command is allowed its own budget before its silence means
 		// anything: the harness gives Bash a timeout (two minutes unless the
@@ -451,6 +456,46 @@ func askedQuestion(input json.RawMessage) string {
 		text += " [" + strings.Join(labels, " / ") + "]"
 	}
 	return text
+}
+
+// WithoutCD is a Bash call with a leading "cd <cwd>;" or "cd <cwd> &&"
+// taken off its command when the directory is the session's own: the row
+// "Bash: cd /home/user/api; git diff …" spent its cells entering the room
+// the session was already in (#78). A bare "cd <cwd>" stays: there is
+// nothing else to show.
+func WithoutCD(use transcript.ToolUse, cwd string) transcript.ToolUse {
+	if use.Name != "Bash" || cwd == "" {
+		return use
+	}
+	cmd := rawField(use.Input, "command")
+	rest, ok := StripCD(cmd, cwd)
+	if !ok {
+		return use
+	}
+	out := use
+	out.Input = json.RawMessage(fmt.Sprintf(`{"command":%s}`, strconv.Quote(rest)))
+	return out
+}
+
+// StripCD is the command after its leading "cd <cwd>;" / "cd <cwd> &&",
+// and whether there was one to take.
+func StripCD(cmd, cwd string) (string, bool) {
+	cwd = strings.TrimRight(cwd, "/")
+	if cwd == "" {
+		return cmd, false
+	}
+	t := strings.TrimSpace(cmd)
+	for _, dir := range []string{cwd, cwd + "/", strconv.Quote(cwd), "'" + cwd + "'"} {
+		for _, sep := range []string{";", "&&"} {
+			if rest, ok := strings.CutPrefix(t, "cd "+dir+" "+sep+" "); ok && strings.TrimSpace(rest) != "" {
+				return strings.TrimSpace(rest), true
+			}
+			if rest, ok := strings.CutPrefix(t, "cd "+dir+sep+" "); ok && strings.TrimSpace(rest) != "" {
+				return strings.TrimSpace(rest), true
+			}
+		}
+	}
+	return cmd, false
 }
 
 func activityFor(use transcript.ToolUse) string {
