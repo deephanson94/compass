@@ -283,8 +283,8 @@ func TestTheReaderTitleLeavesTheTurnToThePage(t *testing.T) {
 	if strings.Contains(title, "add a --version flag") {
 		t.Errorf("the title says the turn the page draws two rows under it: %q over %q", title, turn)
 	}
-	if !strings.Contains(title, "17:59") {
-		t.Errorf("the title lost its clock with the clause: %q", title)
+	if strings.Contains(title, "17:59") {
+		t.Errorf("the title keeps a third copy of the turn's clock (#115): %q", title)
 	}
 }
 
@@ -344,5 +344,24 @@ func TestTheQuestionWrapsAgainstTheSpanItDraws(t *testing.T) {
 	}
 	if strings.Contains(view, "└ CIDR? [") {
 		t.Errorf("the question's tail rides the options row:\n%s", view)
+	}
+}
+
+// #111 for any fleet: the selected row leaves the present to the trail
+// beside it wherever the trail's drawn rows say the sentence — a fleet of
+// four at a hundred repeated it byte for byte, a fleet of one did not (#114).
+func TestTheSelectedRowLeavesThePresentToTheTrailInAnyFleet(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 100, 30)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "▸1 ● porter") {
+		t.Fatalf("porter is not the selected row:\n%s", view)
+	}
+	n := 0
+	for _, l := range strings.Split(view, "\n") {
+		n += strings.Count(oneSpace(l), "● test pytest tests/gates for 6m")
+	}
+	if n != 1 {
+		t.Errorf("the present is said %d times, want once:\n%s", n, view)
 	}
 }

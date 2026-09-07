@@ -784,7 +784,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		body + " " + dimStyle.Render(age)
 
 	lines := []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
-	if m.presentBeside(s) {
+	if strings.TrimSpace(ansi.Strip(lines[1])) == "" && m.presentBesideRow(s, w-4) {
 		lines = lines[:1] // the trail beside says the present; the trace moves up (#111)
 	}
 	if !m.boardShown() && !m.archiveView && s.Live {
@@ -866,10 +866,24 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 // one physical row, once each side of the rule (#111, #60's shape). The
 // trail's is the survivor and the trace beneath moves up. Not under the
 // reply box, which covers the trail's row (#108's rule).
-func (m *Model) presentBeside(s fleet.Session) bool {
-	return m.liveCount() == 1 && !m.boardFits() && !m.archiveView && !m.replyBox.on && s.Live &&
-		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck) &&
-		m.journeyLine(s, 200) != ""
+func (m *Model) presentBeside(s fleet.Session, line string) bool {
+	if !(!m.boardFits() && !m.archiveView && !m.replyBox.on && s.Live &&
+		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck)) {
+		return false
+	}
+	sentence := oneSpace(strings.TrimRight(ansi.Strip(line), " "))
+	for _, r := range m.trailRows {
+		if saysSame(sentence, oneSpace(strings.TrimRight(ansi.Strip(r), " "))) {
+			return true
+		}
+	}
+	return false
+}
+
+// presentBesideRow answers the same question for entryLines, which has the
+// row's width but not the line.
+func (m *Model) presentBesideRow(s fleet.Session, w int) bool {
+	return m.presentBeside(s, m.journeyLine(s, w))
 }
 
 // secondLine is what the session is actually doing, in the trail's own words:
@@ -933,7 +947,7 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	// there, "wiring the filter · for 1h" below) were the first thing the
 	// second review read.
 	if line := m.journeyLine(s, w); line != "" {
-		if m.presentBeside(s) {
+		if m.presentBeside(s, line) {
 			return ""
 		}
 		return line

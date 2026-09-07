@@ -183,12 +183,13 @@ func (m *Model) hadAPIError(s fleet.Session) bool {
 // screen: the fleet Manager owns the truth, the feeds own the trails, and tmux
 // owns the panes.
 type Model struct {
-	mgr      *fleet.Manager
-	feeds    *feedStore
-	runner   tmuxop.Runner
-	replyBox box // where the reply panel will land, set in View before the body (#108)
-	proc     tmuxop.Proc
-	narrator Narrator
+	mgr       *fleet.Manager
+	feeds     *feedStore
+	runner    tmuxop.Runner
+	replyBox  box      // where the reply panel will land, set in View before the body (#108)
+	trailRows []string // the trail column's drawn rows, settled before the fleet column
+	proc      tmuxop.Proc
+	narrator  Narrator
 
 	sessions []fleet.Session
 	panes    map[string]tmuxop.Pane // keyed by SessionInfo.Key(), like everything else
@@ -3713,10 +3714,13 @@ func (m *Model) deckLines(w, h int) []string {
 		if m.level >= levelWaypoints && !(m.sessionView() && m.showMirror) {
 			middle = m.readerColumn
 		}
+		trail := m.trailColumn(tw, h)
+		m.trailRows = trail
+		defer func() { m.trailRows = nil }()
 		return joinColumns(h, []column{
 			{fw, m.fleetColumn(fw, h)},
 			{mw, middle(mw, h)},
-			{tw, m.trailColumn(tw, h)},
+			{tw, trail},
 		})
 	}
 	// Two columns. At Lv3 on a terminal too narrow for three, the conversation
@@ -3725,9 +3729,14 @@ func (m *Model) deckLines(w, h int) []string {
 	if m.level >= levelReader {
 		second = m.readerColumn
 	}
+	right := second(tw, h)
+	if m.level < levelReader {
+		m.trailRows = right
+		defer func() { m.trailRows = nil }()
+	}
 	return joinColumns(h, []column{
 		{fw, m.fleetColumn(fw, h)},
-		{tw, second(tw, h)},
+		{tw, right},
 	})
 }
 

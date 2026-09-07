@@ -432,9 +432,16 @@ func (m *Model) readerTitleWith(w int, anchorClause bool) string {
 	case m.anchor >= 0 && !m.anchorAt.IsZero():
 		// Where the reader is: the row it was anchored to and its moment,
 		// so a reader scrolled to an hour can tell it is the hour. The row
-		// gets whatever the name leaves, not half the panel.
+		// gets whatever the name leaves, not half the panel. Where the
+		// page draws the anchored turn beneath (#110) the clock goes with
+		// the clause: the turn's row carries its own, and the note a
+		// third — the title is the panel and the name, as the trail's is
+		// over its subject (#115).
+		if !anchorClause {
+			break
+		}
 		right = m.anchorAt.Local().Format("15:04")
-		if m.anchorText != "" && anchorClause {
+		if m.anchorText != "" {
 			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
 			if note := clipQuestion(m.anchorText, room); room >= 8 && !strings.HasPrefix(name, strings.TrimSuffix(note, "…")) && !nameAndBracket(name, note) {
 				// The bracket clause whole or gone; clip marks the cut
