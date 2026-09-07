@@ -1216,7 +1216,10 @@ func (m *Model) chapter(key string) {
 		if target < 0 {
 			m.note = "no later prompt · G is the present"
 			if len(TrailRows(m.trail, m.level)) <= 1 {
-				m.note = "no leg to move to"
+				// G refuses here too, so the clause would point at a key
+				// that does not move; and the chapter key's own question
+				// is prompts, not legs (#161, #153).
+				m.note = "no later prompt"
 			}
 			return
 		}
@@ -1228,10 +1231,7 @@ func (m *Model) chapter(key string) {
 			}
 		}
 		if target < 0 {
-			m.note = "no earlier prompt"
-			if len(TrailRows(m.trail, m.level)) <= 1 {
-				m.note = "no leg to move to"
-			}
+			m.note = "no earlier prompt" // the chapter key's own question is prompts, not legs (#161)
 			return
 		}
 	}
@@ -3751,6 +3751,18 @@ func (m *Model) deckLines(w, h int) []string {
 		trail := m.trailColumn(tw, h)
 		m.trailRows = trail
 		defer func() { m.trailRows = nil }()
+		if m.level >= levelWaypoints && !(m.sessionView() && m.showMirror) {
+			// The middle is the reader: a navigator stands to the left of
+			// what it navigates (#19), and the mirror's reason for the
+			// right-hand trail — the middle is a rendering of something
+			// else — is the mirror's alone. Fleet, trail, reader; and the
+			// `tab` that drops the fleet then moves nothing (#46, #160).
+			return joinColumns(h, []column{
+				{fw, m.fleetColumn(fw, h)},
+				{tw, trail},
+				{mw, middle(mw, h)},
+			})
+		}
 		return joinColumns(h, []column{
 			{fw, m.fleetColumn(fw, h)},
 			{mw, middle(mw, h)},

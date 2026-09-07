@@ -1363,3 +1363,75 @@ func TestTheZoomOutRefusalKeepsTheWayIn(t *testing.T) {
 		}
 	}
 }
+
+// A navigator stands to the left of what it navigates (#19): where the
+// middle of the three-column deck is the reader, the trail stands between
+// the fleet and it, and the tab to Lv3 keeps the trail on the reader's
+// left (#160, #46).
+func TestTheTrailStandsLeftOfTheReaderItNavigates(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 120, 34)
+	for _, k := range []string{"2", "tab"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	head := strings.Split(ansi.Strip(m.View()), "\n")[3]
+	if !strings.Contains(head, "READER") || !strings.Contains(head, "TRAIL") {
+		t.Fatalf("not the three-column deck with the reader in it: %q", head)
+	}
+	if strings.Index(head, "TRAIL") > strings.Index(head, "READER") {
+		t.Errorf("the trail stands right of the reader it navigates: %q", head)
+	}
+	pressKey(m, "tab")
+	poll(m, sc)
+	head = strings.Split(ansi.Strip(m.View()), "\n")[3]
+	if strings.Index(head, "TRAIL") > strings.Index(head, "READER") {
+		t.Errorf("at Lv3 the trail crossed to the reader's right: %q", head)
+	}
+}
+
+// An archived row says whether it shipped: the branch yields its tail for
+// a word the mark cannot say, since inside the archive the band is off the
+// screen and the row is the verdict's only place (#161, #145, #47).
+func TestTheArchiveRowSaysWhetherItShipped(t *testing.T) {
+	forceASCII(t)
+	for _, w := range []int{80, 100} {
+		m := sceneModel(sceneSecondDay(), w, 30)
+		pressKey(m, "A")
+		view := ansi.Strip(m.View())
+		var row string
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "opencode · spi") {
+				row = strings.TrimSpace(l)
+			}
+		}
+		if row == "" {
+			t.Fatalf("%d: no billing row in the archive:\n%s", w, view)
+		}
+		if !strings.Contains(row, "shipped") {
+			t.Errorf("%d: the archived row says a tick where the band says it shipped: %q", w, row)
+		}
+	}
+}
+
+// The chapter keys' refusal names the prompt they move by, not a leg
+// (#162, #153).
+func TestTheChapterKeysRefusalNamesThePrompt(t *testing.T) {
+	forceASCII(t)
+	for _, tc := range []struct {
+		key  string
+		want string
+	}{{"[", "no earlier prompt"}, {"]", "no later prompt"}} {
+		m := sceneModel(sceneSecondDay(), 80, 24)
+		pressTab(m)
+		pressKey(m, tc.key)
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "[ ] chapters") {
+			t.Fatalf("%s: not the Lv2 footer that glosses the chapter keys:\n%s", tc.key, view)
+		}
+		if m.note != tc.want {
+			t.Errorf("%s: the chapter key's refusal names a leg it never moves by: %q, want %q", tc.key, m.note, tc.want)
+		}
+	}
+}

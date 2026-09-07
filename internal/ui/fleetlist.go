@@ -1042,7 +1042,7 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 				mark = string(rs[0])
 			}
 			fitted := false
-			for _, form := range []string{v, firstWords(v, 2), mark} {
+			for _, form := range []string{v, firstWords(v, 2)} {
 				if form == "" {
 					continue
 				}
@@ -1050,6 +1050,26 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 					line = cand
 					fitted = true
 					break
+				}
+			}
+			// A word the mark does not already say comes before the
+			// branch's tail: "✗ red" and "✓ green" are the mark in
+			// letters, but "✓" alone does not say the day shipped, and
+			// the band a keypress up says "✓ shipped" of that very
+			// session at that very width. The branch yields the cells as
+			// it yields them for the mark (#145, #47).
+			two := firstWords(v, 2)
+			if !fitted && mark != "" && two != mark && two != mark+" red" && two != mark+" green" {
+				keep := w - lipgloss.Width(" · "+two)
+				if floor := lipgloss.Width(line) - lipgloss.Width(branchOf(s.Info)) + 4; keep >= floor {
+					line = clip(line, keep) + " · " + two
+					fitted = true
+				}
+			}
+			if !fitted && mark != "" {
+				if cand := line + " · " + mark; lipgloss.Width(cand) <= w {
+					line = cand
+					fitted = true
 				}
 			}
 			// And where not even the mark fits behind the whole branch,
