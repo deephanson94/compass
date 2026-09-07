@@ -178,6 +178,18 @@ func (m *Model) fleetLines(w, h int) []string {
 		}
 	}
 	win := m.scrollFleet(lines, selStart, selEnd, body)
+	if slack := body - len(win); len(lines) > body && slack > 0 &&
+		!m.archiveView && m.archivedCount() > 0 && len(m.overlaps()) == 0 {
+		// The rows an entry-whole window could not use are still the
+		// fleet's, not air (#47, #137): the band takes them, with the archive's
+		// line folded into its header as it is when the list fits.
+		if band := m.recentLines(w, slack+len(tail)-1); len(band) > 1 {
+			win = append(win, "")
+			win = append(win, band...)
+			tail = nil
+			body = h
+		}
+	}
 	if len(lines) > body && len(win) < body {
 		// A folded list short of its body — the rows an entry-whole
 		// window could not use: the air goes between the fold and the

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -788,17 +789,25 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 		return
 	}
 	digest, current := strings.TrimSpace(plain[:i]), strings.TrimSpace(plain[i:])
-	if !strings.HasPrefix(digest, "↳ ") || !strings.HasSuffix(strings.TrimSuffix(digest, "s"), "new leg") {
-		return
-	}
-	divider := false
+	divider := ""
 	for k := 3; k < len(rows) && k < h; k++ {
-		if strings.Contains(ansi.Strip(rows[k]), "you were here") {
-			divider = true
+		if r := ansi.Strip(rows[k]); strings.Contains(r, "you were here") {
+			divider = oneSpace(r)
 			break
 		}
 	}
-	if !divider {
+	if divider == "" {
+		return
+	}
+	// The trailing look clause is the divider's own words (#85): where the
+	// divider carries that same age the clause is taken off before the
+	// match (#136). The match is strict — the count and nothing else — so
+	// a digest whose count comes last, "↳ 3 sent since, none back · 1 new
+	// leg", is not yielded: the divider draws neither of its clauses (#135).
+	if lk := lookRe.FindStringSubmatch(digest); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
+		digest = strings.TrimSuffix(digest, lk[0])
+	}
+	if !newLegsOnly.MatchString(digest) {
 		return
 	}
 	s, ok := m.sessionByKey(key)
@@ -825,6 +834,13 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 		}
 	}
 }
+
+// newLegsOnly is a digest that is the count and nothing else (#129, #135);
+// lookRe is the look clause the digest may end on (#136).
+var (
+	newLegsOnly = regexp.MustCompile(`^↳ [0-9]+ new legs?$`)
+	lookRe      = regexp.MustCompile(` · looked ([0-9]+[a-z0-9]*) ago$`)
+)
 
 // hoistTag moves the rungs the tag row could not afford — the tool word and
 // its model — onto the second row the card gave up (#107), right-aligned,

@@ -778,3 +778,65 @@ func TestTheChapterNoteIsTheCountWhereTheQuoteWouldBeCut(t *testing.T) {
 		t.Errorf("the footer spends the row on a quote of the turn drawn above: %q", last)
 	}
 }
+
+// #129 yields only a digest that is the count. A digest whose count comes
+// last — "↳ 3 sent since, none back · 1 new leg", the form at 152 where the
+// look clause is shed — is not that digest: the divider draws neither of
+// its clauses (#135, #38 at 220).
+func TestTheDigestKeepsTheLanesItCountsAtOneFiftyTwo(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSubagents(), 152, 40)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "you were here · 2h ago") {
+		t.Fatalf("no divider on the board:\n%s", view)
+	}
+	if !strings.Contains(view, "↳ 3 sent since, none back") {
+		t.Errorf("the digest lost the lanes that never came back:\n%s", view)
+	}
+	if !strings.Contains(view, "↳ 1 back since, empty") {
+		t.Errorf("the digest lost the lane that came back empty:\n%s", view)
+	}
+}
+
+// The trailing look clause is the divider's own words (#85), so a digest of
+// the count and the look age says nothing the divider does not (#136, #129).
+func TestTheNewLegsDigestYieldsWithItsLookClause(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneManyIdle(), 220, 48)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "you were here · 1h ago") {
+		t.Fatalf("no divider on the board:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		for _, col := range strings.Split(l, "│") {
+			if strings.Contains(col, "new legs · looked") && strings.Contains(col, "⌁ ") {
+				t.Errorf("the digest says the count and the look the divider draws, over the pane: %q", strings.TrimSpace(col))
+			}
+		}
+	}
+}
+
+// A folded list's slack — the rows an entry-whole window could not use —
+// goes to the band, not to air over the archive's line (#137, #47, #92).
+func TestTheFoldedListsSlackGoesToTheBand(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 80, 24)
+	pressKey(m, "r")
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	last := -1
+	for i, l := range rows {
+		if strings.Contains(strings.SplitN(l, "│", 2)[0], "41 archived") {
+			last = i
+		}
+	}
+	if last < 2 {
+		t.Fatalf("no archive line on the fleet column:\n%s", strings.Join(rows, "\n"))
+	}
+	air := 0
+	for i := last - 1; i >= 0 && strings.TrimSpace(strings.SplitN(rows[i], "│", 2)[0]) == ""; i-- {
+		air++
+	}
+	if air >= 2 {
+		t.Errorf("%d blank fleet rows over %q, with sessions behind A", air, strings.TrimSpace(strings.SplitN(rows[last], "│", 2)[0]))
+	}
+}

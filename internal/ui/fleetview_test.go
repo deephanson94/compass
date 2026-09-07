@@ -322,7 +322,20 @@ func TestT60FleetScrolling(t *testing.T) {
 				if !m.archiveView && m.archivedCount() > 0 {
 					tail = 2
 					if !strings.Contains(lines[len(lines)-1], "archived · A browses") {
-						t.Fatalf("step %d: the archive row was scrolled away: %q", step, lines[len(lines)-1])
+						// The band takes the rows the fold could not use
+						// and folds the archive's line into its header
+						// (#47): the count and the key are still said,
+						// and the band is the column's last word.
+						head := -1
+						for i, l := range lines {
+							if strings.Contains(l, "archived · A") {
+								head = i
+							}
+						}
+						if head < 0 {
+							t.Fatalf("step %d: the archive row was scrolled away: %q", step, lines[len(lines)-1])
+						}
+						tail = len(lines) - head + 1
 					}
 				}
 				visible := len(lines) - tail
