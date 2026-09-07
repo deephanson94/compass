@@ -155,7 +155,10 @@ func (m *Model) fleetLines(w, h int) []string {
 		// The rows the live list leaves belong to the sessions that
 		// ended last (#47): the band takes the archive's line as its
 		// header, so the key is said once, and the rows below it.
-		if band := m.recentLines(w, free); len(band) > 1 {
+		// The two rows the archive's line gave up are the band's too: it
+		// folds that line into its own header, and a band sized against
+		// the reduced body left two ranked sessions off for air (#81).
+		if band := m.recentLines(w, free+len(tail)); len(band) > 1 {
 			tail = nil
 			lines = append(lines, "")
 			lines = append(lines, band...)

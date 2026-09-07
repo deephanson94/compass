@@ -130,8 +130,9 @@ func TestTheBandSaysTheToolWhereTheFleetRunsTwo(t *testing.T) {
 	if v := ansi.Strip(narrow.View()); strings.Contains(v, "· opencode ·") || strings.Contains(v, "· claude ·") {
 		t.Errorf("at 80 a tool word would leave no prompt; none is drawn:\n%s", v)
 	}
-	ones := sceneModel(sceneFleetHygiene(), 220, 48)
-	if v := ansi.Strip(ones.View()); strings.Contains(v, "· claude ·") {
+	// A frame that draws the band: the 100-column list opens on it (#81).
+	ones := sceneModel(sceneFleetHygiene(), 100, 30)
+	if v := ansi.Strip(ones.View()); !strings.Contains(v, "recent ·") || strings.Contains(v, "· claude ·") {
 		t.Errorf("a fleet of claudes needs no word on its band:\n%s", v)
 	}
 }
@@ -228,5 +229,40 @@ func TestAClipNeverEndsOnAnOpeningQuote(t *testing.T) {
 	m := sceneModel(sceneSecondDay(), 100, 30)
 	if view := ansi.Strip(m.View()); strings.Contains(view, `· "…`) {
 		t.Errorf("the band spends cells on an empty prompt clause:\n%s", view)
+	}
+}
+
+// The band takes every row the column has: the two the archive's line gave
+// up are the band's (#81).
+func TestTheBandFillsTheRowsTheArchiveLineGaveUp(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 100, 30)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	last := ""
+	for _, l := range lines {
+		if strings.Contains(l, " ○ ") && strings.Contains(l, " · ") {
+			last = l
+		}
+	}
+	if !strings.Contains(last, "9 ○") {
+		t.Errorf("the band should reach its ninth row at 100x30, last band row %q:\n%s", last, strings.Join(lines, "\n"))
+	}
+}
+
+// A session waiting on you but dead on the API is not one g would grab: the
+// key is not offered for it (#81).
+func TestGrabIsNotOfferedForADeadQuestion(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFewOngoing(), 120, 34)
+	for i := range m.sessions {
+		if m.sessions[i].Snap.State == state.NeedsYou {
+			m.sessions[i].Snap.APIError = true
+		}
+	}
+	if m.anyNeedsYou() {
+		t.Fatal("a dead question should not count as waiting")
+	}
+	if foot := ansi.Strip(m.footerLine(118)); strings.Contains(foot, "g grab") {
+		t.Errorf("g is offered for a question dead on the API: %q", foot)
 	}
 }

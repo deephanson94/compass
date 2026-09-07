@@ -886,3 +886,44 @@ func TestARenameNamesTheSession(t *testing.T) {
 		t.Fatalf("a fresh scan: %v, %d sessions, name %q", err, len(fresh), fresh[0].Info.Name)
 	}
 }
+
+// The scan alone finds a rename, in the head and in the tail of a transcript
+// no live tail has read (#81): the archive is where the name is promised.
+func TestTheScanFindsARenameInTheHeadAndTheTail(t *testing.T) {
+	root := t.TempDir()
+	const slug = "-home-user-alpha"
+	head := "ee000010-0000-4000-8000-000000000010"
+	// Big enough that the tail's window never reaches the head: the head
+	// scan alone must find the name there.
+	hb := newTranscript(t, head, "/home/user/alpha", "main").prompt(ago(30*time.Second), "run the auth tests")
+	for i := 0; i < 300; i++ {
+		hb = hb.tool(ago(20*time.Second), fmt.Sprintf("toolh_%03d", i), "Read", map[string]any{"file_path": "/home/user/alpha/" + strings.Repeat("y", 400) + ".go"})
+	}
+	hb.write(root, slug)
+	headPath := filepath.Join(root, "projects", slug, head+".jsonl")
+	body, _ := os.ReadFile(headPath)
+	os.WriteFile(headPath, append([]byte(`{"type":"custom-title","customTitle":"alpha-head","sessionId":"`+head+`"}`+"\n"), body...), 0o644)
+
+	tail := "ee000011-0000-4000-8000-000000000011"
+	b := newTranscript(t, tail, "/home/user/alpha", "main").prompt(ago(30*time.Second), "run the auth tests")
+	for i := 0; i < 200; i++ {
+		b = b.tool(ago(20*time.Second), fmt.Sprintf("toolu_%03d", i), "Read", map[string]any{"file_path": "/home/user/alpha/" + strings.Repeat("x", 400) + ".go"})
+	}
+	b.write(root, slug)
+	tailPath := filepath.Join(root, "projects", slug, tail+".jsonl")
+	f, _ := os.OpenFile(tailPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"custom-title","customTitle":"alpha-tail","sessionId":"` + tail + `"}` + "\n")
+	f.Close()
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, in := range infos {
+		got[in.ID] = in.Name
+	}
+	if got[head] != "alpha-head" || got[tail] != "alpha-tail" {
+		t.Errorf("Discover names = %v, want alpha-head and alpha-tail", got)
+	}
+}
