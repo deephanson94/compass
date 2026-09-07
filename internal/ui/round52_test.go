@@ -266,3 +266,21 @@ func TestGrabIsNotOfferedForADeadQuestion(t *testing.T) {
 		t.Errorf("g is offered for a question dead on the API: %q", foot)
 	}
 }
+
+// The one live session says its tool where the fleet compass holds — live
+// and archived — runs two (#82).
+func TestTheLiveRowSaysItsToolWhereTheArchiveRunsAnother(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	if head := ansi.Strip(m.headerLine(118)); !strings.Contains(head, "1 hello · claude") {
+		t.Errorf("the header should name the live session's tool: %q", head)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "claude · ⌁ main") {
+		t.Errorf("the card should name the tool beside the pane:\n%s", view)
+	}
+	one := sceneModel(sceneFirstSession(), 120, 34)
+	if head := ansi.Strip(one.headerLine(118)); strings.Contains(head, "claude") {
+		t.Errorf("a fleet of one claude needs no word: %q", head)
+	}
+}
+

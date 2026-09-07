@@ -1650,11 +1650,10 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 // says which is which (#50). "" for an archived row, which is not running.
 func (m *Model) toolTag(s fleet.Session) string {
 	var parts []string
-	tools := m.toolsInFleet()
-	if !s.Live {
-		tools = m.toolsAnywhere() // the archive is judged by everything it holds (#79, #80)
-	}
-	if s.Info.ToolName() != "claude" || tools > 1 {
+	// One fleet, one rule: a row — live or archived — wears the word where
+	// everything compass holds runs two tools, so the one live session
+	// does not stand wordless over a band that names two (#79, #80, #82).
+	if s.Info.ToolName() != "claude" || m.toolsAnywhere() > 1 {
 		// A fleet of claudes needs no word; a fleet of two tools needs
 		// the word on every row, and another tool's row always.
 		parts = append(parts, s.Info.ToolName())
