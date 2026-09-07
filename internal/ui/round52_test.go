@@ -357,3 +357,46 @@ func TestTheWideHelpGlossesTheToolWord(t *testing.T) {
 		t.Errorf("the 220 help never says what the tool word is:\n%s", view)
 	}
 }
+
+// Walking the archive, the cursor is on the window at every step (#86).
+func TestTheArchiveWalkNeverLosesTheCursor(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 120, 34)
+	press(m, "A")
+	if !m.archiveView {
+		t.Fatal("A should open the archive")
+	}
+	for i := 0; i < 30; i++ {
+		press(m, "j")
+		lines := strings.Split(ansi.Strip(m.View()), "\n")
+		seen := false
+		for _, l := range lines {
+			if strings.Contains(l, "▸") {
+				seen = true
+			}
+		}
+		if !seen {
+			t.Fatalf("after %d j the cursor is drawn nowhere:\n%s", i+1, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// At a hundred columns the band's header keeps the hidden count (#86).
+func TestTheBandsHeaderKeepsTheHiddenCount(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 100, 30)
+	press(m, "x")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "1 hidden") {
+		t.Errorf("a hide left no trace on the screen:\n%s", view)
+	}
+}
+
+// The archive's strip headlines its sessions by what was asked (#86).
+func TestTheArchiveStripHeadlinesByPrompt(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 120, 34)
+	press(m, "A")
+	if view := ansi.Strip(m.View()); strings.Contains(view, "○ api 7d · ○ api") || strings.Contains(view, "○ harness 7d · ○ harness") {
+		t.Errorf("the strip names forty sessions with four words:\n%s", view)
+	}
+}

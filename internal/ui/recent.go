@@ -82,6 +82,11 @@ func (m *Model) recentRows(n int) []recentRow {
 // archive holds, and the key that browses it — the fleet's own last line
 // folded into the band, so nothing is said twice.
 func (m *Model) recentHeader() string {
+	if n := m.hiddenCount(); n > 0 {
+		// The line the band folds in carried the hidden count: at a
+		// hundred columns a hide left no trace on the screen (#86).
+		return fmt.Sprintf("recent · %d archived · %d hidden · A browses", m.archivedCount(), n)
+	}
 	return fmt.Sprintf("recent · %d archived · A browses", m.archivedCount())
 }
 
@@ -93,7 +98,11 @@ func (m *Model) recentLines(w, avail int) []string {
 	if len(rows) == 0 {
 		return nil
 	}
-	return append([]string{dimStyle.Render(clip(m.recentHeader(), w))}, m.bandRows(rows, w)...)
+	head := m.recentHeader()
+	if lipgloss.Width(head) > w {
+		head = strings.Replace(head, " · A browses", " · A", 1) // the key survives whole
+	}
+	return append([]string{dimStyle.Render(clip(head, w))}, m.bandRows(rows, w)...)
 }
 
 // bandRows draws the band's rows with its forms decided once for all of

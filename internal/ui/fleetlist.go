@@ -274,17 +274,44 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 		}
 		off = next
 	}
+	end := 0
+	for pass := 0; pass < 8; pass++ {
+		top, bottom = 0, 0
+		if off > 0 {
+			top = 1
+		}
+		if off+h-top < len(lines) {
+			bottom = 1
+		}
+		body = h - top - bottom
+		if body < 1 {
+			body = 1
+		}
+		end = off + body
+		if end > len(lines) {
+			end = len(lines)
+		}
+		// A window never ends on a header: "ops" over nothing but the notice
+		// beneath it named a group with no rows.
+		for end > off+1 && end < len(lines) && (isHeaderLine(lines[end-1]) || (lines[end-1] == "" && end > off+2 && isHeaderLine(lines[end-2])) || isEntryFirstLine(lines[end-1]) ||
+			(lines[end] != "" && !isHeaderLine(lines[end]) && !isEntryFirstLine(lines[end]))) {
+			end-- // never inside an entry either: its third line is not dropped without a mark
+		}
+		if selEnd < 0 || selEnd < end || off >= len(lines)-1 {
+			break
+		}
+		// The trim above dropped the selected entry off the bottom: the
+		// cursor was nowhere and "j" looked like it did nothing (#86).
+		// Open the window on the next entry and settle again.
+		off++
+		for off < len(lines) && (lines[off] == "" || (!isHeaderLine(lines[off]) && !isEntryFirstLine(lines[off]))) {
+			off++
+		}
+		if off > len(lines)-1 {
+			off = len(lines) - 1
+		}
+	}
 	m.fleetScroll = off
-	end := off + body
-	if end > len(lines) {
-		end = len(lines)
-	}
-	// A window never ends on a header: "ops" over nothing but the notice
-	// beneath it named a group with no rows.
-	for end > off+1 && end < len(lines) && (isHeaderLine(lines[end-1]) || (lines[end-1] == "" && end > off+2 && isHeaderLine(lines[end-2])) || isEntryFirstLine(lines[end-1]) ||
-		(lines[end] != "" && !isHeaderLine(lines[end]) && !isEntryFirstLine(lines[end]))) {
-		end-- // never inside an entry either: its third line is not dropped without a mark
-	}
 	var out []string
 	if top > 0 {
 		// The fold names the group it cut into: under "▴ 1 more above"

@@ -636,7 +636,11 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		if m.archiveView && !s.Live {
 			glyph = fleet.Glyph(state.Idle)
 		}
-		name := glyph + " " + sessionName(s.Info) + " " + m.age(s.Info.LastEventAt)
+		who := sessionName(s.Info)
+		if m.archiveView && !s.Live {
+			who = archiveHeadline(s) // the archive's rows headline by what was asked; four names cannot tell forty apart (#86)
+		}
+		name := glyph + " " + who + " " + m.age(s.Info.LastEventAt)
 		if r, ok := rowOf[key]; ok && r.num > 0 {
 			name = fmt.Sprintf("%d %s", r.num, name)
 		}
