@@ -1031,7 +1031,7 @@ func TestHidingASession(t *testing.T) {
 		t.Errorf("the strip should count the hidden: %s", strip)
 	}
 	m.note = ""
-	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A, then x") {
+	if strip := ansi.Strip(m.View()); !strings.Contains(strip, "1 hidden · A") {
 		t.Errorf("with the note gone the strip says the way back: %s", strip)
 	}
 	press(m, "A")

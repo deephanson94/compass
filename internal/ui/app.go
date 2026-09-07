@@ -1648,7 +1648,7 @@ func (m *Model) toggleHidden() {
 		return
 	}
 	if m.liveCount() <= 1 && !m.archiveView {
-		m.note = "the only live one stays"
+		m.note = "the live one stays"
 		return
 	}
 	// What owes you an alarm stays, and says so: a note that reported a
@@ -2487,6 +2487,17 @@ func overlay(rows, panel []string, left, top int) {
 					rest = strings.Repeat(" ", cut) + ansi.TruncateLeft(rest, cut, "")
 				} else {
 					rest = strings.Repeat(" ", lipgloss.Width(rest))
+				}
+			}
+			// A peek that runs on into the next column whole kept the
+			// sliver of the column the box covered — a lone "6m" for a
+			// leg whose class and label are under the box. The sliver is
+			// its own column: it goes blank unless it holds a space (#139).
+			if plain := ansi.Strip(rest); strings.ContainsRune(plain, '│') {
+				head := plain[:strings.IndexRune(plain, '│')]
+				if t := strings.TrimSpace(head); t != "" && strings.IndexByte(t, ' ') < 0 {
+					cut := ansi.StringWidth(head)
+					rest = strings.Repeat(" ", cut) + ansi.TruncateLeft(rest, cut, "")
 				}
 			}
 			if peek := strings.TrimSpace(ansi.Strip(rest)); peek != "" && strings.IndexByte(peek, ' ') >= 0 {

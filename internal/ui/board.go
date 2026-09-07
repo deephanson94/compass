@@ -318,9 +318,22 @@ func (m *Model) boardLines(w, h int) []string {
 	// further column can ever fill them, and the same band the list
 	// draws at a hundred columns takes them, its header folding the
 	// strip's archive line as it folds the list's.
-	if free := h - len(lines); free >= 2 && !m.archiveView && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == fmt.Sprintf("%d archived · A browses", m.archivedCount()) {
-		if band := m.strandedBand(w, free+1); len(band) > 1 {
-			lines = append(lines[:len(lines)-1], band...)
+	// The hidden count is the band's own header's clause too (#86): a strip
+	// that carries it is still the archive's line and no session's name.
+	strip := strings.TrimSpace(ansi.Strip(lines[len(lines)-1]))
+	if free := h - len(lines); free >= 2 && !m.archiveView && len(m.overlaps()) == 0 &&
+		!strings.HasPrefix(strip, "+") && strings.HasSuffix(strip, fmt.Sprintf("%d archived · A browses", m.archivedCount())) {
+		bw, top := w, len(lines)-1
+		// The band is a column too: where the reply box begins inside it,
+		// it is composed at the width the box leaves, as a board column
+		// is (#126).
+		if bx := m.replyBox; bx.on && top < bx.top+bx.h && top+free+1 > bx.top && bx.left < w {
+			bw = bx.left - 1
+		}
+		if bw >= fleetWidth {
+			if band := m.strandedBand(bw, free+1); len(band) > 1 {
+				lines = append(lines[:len(lines)-1], band...)
+			}
 		}
 	}
 	return fit(lines, h)

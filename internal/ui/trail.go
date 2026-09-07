@@ -1694,6 +1694,48 @@ func (b *trailBuilder) branches(tr journey.Trail, after int, o TrailOpts) int {
 	return drawn
 }
 
+// cardKeepsOnlyItsTag is #100 and #104, lifted out so the card's second row
+// is settled before the trail's height is fixed.
+func cardKeepsOnlyItsTag(rows []string) {
+	plain := strings.TrimRight(ansi.Strip(rows[1]), " ")
+	second := oneSpace(plain)
+	sentence, keep := second, ""
+	if i := strings.LastIndex(plain, "  "); i > 0 {
+		sentence, keep = oneSpace(plain[:i]), strings.TrimSpace(plain[i:])
+	}
+	for _, r := range rows[2:] {
+		t := oneSpace(strings.Replace(ansi.Strip(r), "▸", " ", 1))
+		if saysSame(sentence, t) || strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
+			if strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
+				keep = strings.TrimSpace(strings.TrimPrefix(second, t))
+			}
+			if keep != "" {
+				rows[1] = pad("", lipgloss.Width(rows[1])-lipgloss.Width(keep)) + dimStyle.Render(keep)
+			} else {
+				rows[1] = ""
+			}
+			return
+		}
+	}
+}
+
+// headerSaysTag reports whether what is left of the card's second row is
+// nothing but the tag — the tool, the model, the pane — every clause of it
+// standing in the header two rows above (#131, #144's shape).
+func (m *Model) headerSaysTag(row string) bool {
+	plain := strings.TrimSpace(ansi.Strip(row))
+	if plain == "" || strings.Contains(plain, "  ") {
+		return false
+	}
+	head := ansi.Strip(m.headerLine(m.width))
+	for _, c := range strings.Split(plain, " · ") {
+		if !strings.Contains(head, c) {
+			return false
+		}
+	}
+	return true
+}
+
 // branchName never renders empty: an unnamed subagent is still "agent".
 func branchName(label string) string {
 	if strings.TrimSpace(label) == "" {
@@ -1738,6 +1780,7 @@ func (m *Model) trailColumn(w, h int) []string {
 	if m.sessionView() {
 		rows = m.sessionCard(w)
 	}
+	droppedTag := false
 	if h > len(rows) {
 		body := trailRows(m.trail, m.trailOpts(w, h-len(rows)))
 		if m.sessionView() && len(rows) > 2 {
@@ -1755,37 +1798,23 @@ func (m *Model) trailColumn(w, h int) []string {
 				}
 			}
 		}
-		rows = append(rows, body...)
-	}
-	if len(rows) > 1 && m.sessionView() {
-		// The card's fallback sentence is the board column's present
-		// (#56); in the session view the trail draws HEAD three rows
-		// below in the same column, and §4 asks a line once. Where the
-		// two say the same thing the card keeps only its tag (#100).
-		// The sentence is what stands left of the tag, and the compare
-		// is on it: a leg row draws it behind its class and before its
-		// clock, and the cursor's mark is not part of any row's sentence
-		// — comparing whole rows missed both shapes (#104).
-		plain := strings.TrimRight(ansi.Strip(rows[1]), " ")
-		second := oneSpace(plain)
-		sentence, keep := second, ""
-		if i := strings.LastIndex(plain, "  "); i > 0 {
-			sentence, keep = oneSpace(plain[:i]), strings.TrimSpace(plain[i:])
-		}
-		for _, r := range rows[2:] {
-			t := oneSpace(strings.Replace(ansi.Strip(r), "▸", " ", 1))
-			if saysSame(sentence, t) || strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
-				if strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
-					keep = strings.TrimSpace(strings.TrimPrefix(second, t))
-				}
-				if keep != "" {
-					rows[1] = pad("", lipgloss.Width(rows[1])-lipgloss.Width(keep)) + dimStyle.Render(keep)
-				} else {
-					rows[1] = ""
-				}
-				break
+		if m.sessionView() && len(rows) > 1 {
+			// The card's tag row says which tool, which model, which
+			// pane — the header's own words two rows up: where the
+			// header draws every clause of it the row goes and the
+			// trail takes it.
+			probe := append(append([]string{}, rows...), body...)
+			cardKeepsOnlyItsTag(probe)
+			if m.headerSaysTag(probe[1]) {
+				rows = append(rows[:1:1], rows[2:]...)
+				body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+				droppedTag = true
 			}
 		}
+		rows = append(rows, body...)
+	}
+	if len(rows) > 1 && m.sessionView() && !droppedTag {
+		cardKeepsOnlyItsTag(rows)
 	}
 	if m.archiveView && !m.sessionView() && len(rows) > 2 {
 		// The archive's title carries the ask (#59) so a row is named,

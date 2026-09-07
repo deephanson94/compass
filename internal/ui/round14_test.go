@@ -104,7 +104,7 @@ func TestAFleetOfOneOpensOnTheSession(t *testing.T) {
 		}
 	}
 	press(m, "x")
-	if m.note != "the only live one stays" {
+	if m.note != "the live one stays" {
 		t.Errorf("note = %q", m.note)
 	}
 }

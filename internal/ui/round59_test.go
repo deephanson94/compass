@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/deephanson94/compass/internal/transcript"
@@ -960,6 +961,13 @@ func TestTheDigestDropsTheLookItsDividerDrawsAnyway(t *testing.T) {
 	if !strings.Contains(view, "↳ 1 red") || !strings.Contains(view, "↳ 1 ship") {
 		t.Errorf("a clause the divider does not draw left the row:\n%s", view)
 	}
+	// And the selected list row at a hundred, the fold's other half (#151).
+	n := sceneModel(sceneManyIdle(), 100, 30)
+	pressKey(n, "j")
+	list := ansi.Strip(n.View())
+	if strings.Contains(list, "new leg · 1 red") {
+		t.Errorf("the selected row says the count its divider draws beside its other clause:\n%s", list)
+	}
 }
 
 // The count yields before the rungs are hoisted, so both columns called api
@@ -1038,7 +1046,7 @@ func TestTheHideRefusalCountsOnlyTheLive(t *testing.T) {
 	if strings.Contains(view, "the only session stays") {
 		t.Errorf("the refusal calls it the only session over a band that names twelve: %q", m.note)
 	}
-	if !strings.Contains(view, "the only live one stays") {
+	if !strings.Contains(view, "the live one stays") {
 		t.Errorf("the refusal does not scope its word to the live: %q", m.note)
 	}
 }
@@ -1092,8 +1100,12 @@ func TestAScrolledColumnNeverOpensOnAir(t *testing.T) {
 // may carry two trailing clauses — the compare takes both off (#149, #131).
 func TestTheNoteLeavesTheBytesToARowThatSaysMore(t *testing.T) {
 	forceASCII(t)
-	for _, size := range [][2]int{{80, 24}, {220, 48}} {
-		m := sceneModel(sceneTwoTools(), size[0], size[1])
+	for _, run := range []struct {
+		sc   scene
+		w, h int
+	}{{sceneTwoTools(), 80, 24}, {sceneTwoTools(), 220, 48}, {sceneVeryLong(), 220, 48}} { // very-long's row carries two trailing clauses (#149)
+		size := [2]int{run.w, run.h}
+		m := sceneModel(run.sc, run.w, run.h)
 		for _, k := range []string{"j", "r", "t", "go on", "enter"} { // api, a typed reply, sent
 			pressKey(m, k)
 		}
@@ -1198,5 +1210,127 @@ func TestTheOneRowTrailsRefusalNamesTheLeg(t *testing.T) {
 	}
 	if m.note == "the trail is one row" || !strings.Contains(m.note, "no leg") {
 		t.Errorf("the refusal counts a row the panel does not draw as one: %q", m.note)
+	}
+}
+
+// The board's band is a column too: where the reply box begins inside it,
+// it is composed at the width the box leaves, so no row is split by the box
+// and no verdict stands past it with no session (#154, #126, #147).
+func TestTheBoardsBandIsComposedAtTheWidthTheBoxLeaves(t *testing.T) {
+	forceASCII(t)
+	peek := regexp.MustCompile(`[│└][^│└]*[│┘]\s+…\s+(?:[✓✗]|build)`)
+	band := regexp.MustCompile(`^\s+[1-9] ○ [a-z-]+ · "`)
+	clock := regexp.MustCompile(`\d+[smhd]\s*$`)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+		for _, k := range []string{"j", "r"} { // the second harness, its reply box
+			pressKey(m, k)
+		}
+		for i, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if peek.MatchString(l) {
+				t.Errorf("at %dx%d row %d says a verdict past the reply box and no session: %q", size[0], size[1], i+1, strings.TrimSpace(l))
+			}
+			left := strings.SplitN(strings.SplitN(l, "│", 2)[0], "└", 2)[0]
+			if band.MatchString(left) && !clock.MatchString(strings.TrimRight(left, " ")) {
+				t.Errorf("at %dx%d the band row beside the box keeps neither verdict nor clock: %q", size[0], size[1], strings.TrimRight(left, " "))
+			}
+		}
+	}
+}
+
+// The session card's tag row goes where every clause of it stands in the
+// header two rows up; the trail and the reader each take a cell (#155, #100).
+func TestTheCardsTagLeavesItsWordsToTheHeader(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"j", "tab"} { // api, then its card
+			pressKey(m, k)
+		}
+		lines := strings.Split(ansi.Strip(m.View()), "\n")
+		if len(lines) < 8 || !strings.Contains(lines[0], "opencode") {
+			t.Fatalf("at %dx%d not the api card:\n%s", size[0], size[1], strings.Join(lines, "\n"))
+		}
+		head := lines[0]
+		for _, l := range lines[3:8] {
+			row := strings.TrimSpace(strings.SplitN(l, "│", 2)[0])
+			if row == "" || strings.Contains(row, "  ") || !strings.Contains(row, mirrorMark) {
+				continue
+			}
+			said := true
+			for _, c := range strings.Split(row, " · ") {
+				if !strings.Contains(head, c) {
+					said = false
+					break
+				}
+			}
+			if said {
+				t.Errorf("at %dx%d the card's tag row says only what the header says: %q", size[0], size[1], row)
+			}
+		}
+	}
+}
+
+// The hide refusal keeps the way in: `the live one stays` leaves the
+// eighty-column footer its `tab deeper` (#156, #146).
+func TestTheHideRefusalKeepsTheWayIn(t *testing.T) {
+	forceASCII(t)
+	for _, sc := range []struct {
+		name string
+		m    func() *Model
+	}{
+		{"second-day", func() *Model { return sceneModel(sceneSecondDay(), 80, 24) }},
+		{"first-session", func() *Model { return sceneModel(sceneFirstSession(), 80, 24) }},
+	} {
+		m := sc.m()
+		pressKey(m, "x")
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "live") || !strings.Contains(view, "stays") {
+			t.Fatalf("%s: not the refusal frame:\n%s", sc.name, view)
+		}
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("%s: the refusal note cost the footer the way in: %q", sc.name, strings.TrimSpace(foot))
+		}
+	}
+}
+
+// A hidden session does not cost the board its band: the hidden count is
+// the band's own header's clause (#157, #147, #86).
+func TestAHiddenSessionDoesNotCostTheBoardItsBand(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+		pressKey(m, "x")
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "hidden") {
+			t.Fatalf("at %dx%d nothing was hidden:\n%s", size[0], size[1], view)
+		}
+		for _, want := range []string{"5 ○ api", "9 ○ notebooks"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("at %dx%d a hide sent the board's rows back to air: %q is on no row:\n%s", size[0], size[1], want, view)
+			}
+		}
+	}
+}
+
+// The sliver a covering reply box leaves of a board column is not a lone
+// clock: the peek's first segment is tested on its own (#158, #139).
+func TestACoveredColumnsSliverIsNotALoneClock(t *testing.T) {
+	forceASCII(t)
+	lone := regexp.MustCompile(`[│┘└]\s*…\s*(\d+[smhd]|[a-z]{2,5})\s*│`)
+	for _, size := range [][2]int{{120, 34}, {220, 48}} {
+		m := sceneModel(sceneManyIdle(), size[0], size[1])
+		pressKey(m, "r")
+		for i, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if g := lone.FindStringSubmatch(l); g != nil {
+				t.Errorf("at %dx%d row %d: the covered column's sliver says %q and nothing it belongs to: %q", size[0], size[1], i+1, g[1], strings.TrimSpace(l))
+			}
+		}
 	}
 }
