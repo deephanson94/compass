@@ -176,6 +176,17 @@ func TestSpaceNamesWhatItUnfolded(t *testing.T) {
 	if !strings.HasPrefix(m.note, "folded ") {
 		t.Errorf("space again should name what it folded: %q", m.note)
 	}
+	// A route whose first folded result stands under a call row: the note
+	// names the call without the reader's glyph (#80).
+	sdc := sceneSecondDay()
+	sd := sceneModel(sdc, 120, 34)
+	for _, k := range []string{"2", "tab", "tab", " "} {
+		pressKey(sd, k)
+		poll(sd, sdc)
+	}
+	if sd.note != "unfolded Read(sched.go)" {
+		t.Errorf("the note names the call without its glyph: %q", sd.note)
+	}
 }
 
 // A default-tool row sheds its band word before an OpenCode row: where an
