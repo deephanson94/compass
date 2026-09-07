@@ -102,6 +102,12 @@ func (m *Model) recentLines(w, avail int) []string {
 	if lipgloss.Width(head) > w {
 		head = strings.Replace(head, " · A browses", " · A", 1) // the key survives whole
 	}
+	if lipgloss.Width(head) > w {
+		// The band's name goes before its counts: at eighty the header is
+		// the archive's own line, "41 archived · 1 hidden · A", the shed
+		// that line makes for itself two rows up (#92).
+		head = strings.TrimPrefix(head, "recent · ")
+	}
 	return append([]string{dimStyle.Render(clip(head, w))}, m.bandRows(rows, w)...)
 }
 

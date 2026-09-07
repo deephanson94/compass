@@ -126,7 +126,7 @@ func TestTheNarrowHelpKeepsGAndTheLegendBindsItsSeparators(t *testing.T) {
 	if strings.Contains(help, "needs 110 columns") {
 		t.Errorf("the 80x24 help spends a row on the refused m over g:\n%s", help)
 	}
-	for _, l := range helpLegendWrapped(58, true, 40) {
+	for _, l := range helpLegendWrapped(58, true, 40, true) {
 		if s := strings.TrimRight(ansi.Strip(l), " "); strings.HasSuffix(s, "·") {
 			t.Errorf("a legend row ends on a hanging separator: %q", s)
 		}

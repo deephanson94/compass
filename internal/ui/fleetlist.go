@@ -151,13 +151,17 @@ func (m *Model) fleetLines(w, h int) []string {
 		body = 1
 	}
 	lines, selStart, selEnd := m.fleetBlock(rows, w)
-	if free := body - len(lines) - 1; free >= 2 && !m.archiveView && m.archivedCount() > 0 && len(m.overlaps()) == 0 {
+	if free := body - len(lines) - 1; free+len(tail) >= 2 && !m.archiveView && m.archivedCount() > 0 && len(m.overlaps()) == 0 {
 		// The rows the live list leaves belong to the sessions that
 		// ended last (#47): the band takes the archive's line as its
 		// header, so the key is said once, and the rows below it.
 		// The two rows the archive's line gave up are the band's too: it
 		// folds that line into its own header, and a band sized against
 		// the reduced body left two ranked sessions off for air (#81).
+		// The gate measures the same rows the band is budgeted with: at
+		// eighty a gate on the reduced body refused the band two rows it
+		// had, and the column ended on the archive's line over two blank
+		// rows (#92).
 		if band := m.recentLines(w, free+len(tail)); len(band) > 1 {
 			tail = nil
 			lines = append(lines, "")
@@ -818,10 +822,13 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 			}
 			return m.boardDelta(s.Info.Key(), s, room)
 		})
-		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(s.Info.Key(), s, w-4-lipgloss.Width(tag)-2) != m.boardDelta(s.Info.Key(), s, w-4) {
+		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && (m.boardDelta(s.Info.Key(), s, w-4-lipgloss.Width(tag)-2) != m.boardDelta(s.Info.Key(), s, w-4) || m.boardDelta(s.Info.Key(), s, w-4) == "") {
 			// A fleet of one: the header names the tool on every frame,
 			// so a bare tool word that costs the trace its clock says a
 			// thing the frame already says and loses one it does not (#90).
+			// And with no trace to cost, the word alone was a whole row
+			// spent on the default tool while the OpenCode rows of the
+			// band under it drew none — #80's shape on the live entry (#93).
 			tag = ""
 		}
 		room := w - 4

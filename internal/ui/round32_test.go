@@ -52,7 +52,7 @@ func TestAClipKeepsNumbersWholeAndNoBareSeparator(t *testing.T) {
 	if got := ansi.Strip(truncateWhole("↪ answered 1 · 50s ago", 16)); got != "↪ answered 1" {
 		t.Errorf("truncateWhole(16) = %q, want the clause before the number", got)
 	}
-	if legend := strings.Join(helpLegendLines(200, true), "\n"); !strings.Contains(legend, "of 10m") {
+	if legend := strings.Join(helpLegendLines(200, true, true), "\n"); !strings.Contains(legend, "of 10m") {
 		t.Errorf("the legend does not gloss the budget's clock")
 	}
 }

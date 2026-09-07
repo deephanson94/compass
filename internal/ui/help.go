@@ -103,7 +103,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			left = w*3/5 - gutterWidth
 		}
 		right := w - left - gutterWidth
-		legend := helpLegendWrapped(right, true, h) // definitions wrap into the rows that are free
+		legend := helpLegendWrapped(right, true, h, o.tools) // definitions wrap into the rows that are free
 		if !o.tools {
 			legend = dropToolGloss(legend)
 		}
@@ -121,7 +121,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		})
 	}
 	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, refused...), o.recent)
-	legend := helpLegendLines(w, false)
+	legend := helpLegendLines(w, false, o.tools)
 	if !o.tools {
 		legend = dropToolGloss(legend)
 	}
@@ -487,6 +487,25 @@ func helpLegendRaw() []string {
 // toolGloss defines the word a row wears where the fleet runs two CLIs (#85, #89).
 const toolGloss = "        claude · opencode — which CLI runs the session, where the fleet runs two"
 
+// helpLegendFor is the legend's text for a fleet that runs two CLIs, or one:
+// a one-CLI fleet's legend is built without the tool gloss, not budgeted
+// with it and stripped after — the gloss and its wrapped tail cost a
+// 152-column legend the two rows it then left blank while a definition
+// above them was shed (#92).
+func helpLegendFor(tools bool) []string {
+	raw := helpLegendRaw()
+	if tools {
+		return raw
+	}
+	kept := raw[:0]
+	for _, l := range raw {
+		if l != toolGloss {
+			kept = append(kept, l)
+		}
+	}
+	return kept
+}
+
 // dropToolGloss takes the tool word's line out: one CLI everywhere and no row
 // wears the word, so no line defines it — the same test the row uses.
 func dropToolGloss(lines []string) []string {
@@ -508,9 +527,9 @@ func dropToolGloss(lines []string) []string {
 	return out
 }
 
-func helpLegendLines(w int, roomy bool) []string {
+func helpLegendLines(w int, roomy, tools bool) []string {
 	var lines []string
-	for _, l := range helpLegendRaw() {
+	for _, l := range helpLegendFor(tools) {
 		if l == "" {
 			lines = append(lines, "")
 			continue
@@ -522,8 +541,8 @@ func helpLegendLines(w int, roomy bool) []string {
 
 // helpLegendWrapped is the legend with every line that would clip re-flowed
 // onto continuation rows, hung under its glyph.
-func helpLegendWrapped(w int, roomy bool, h int) []string {
-	raw := helpLegendRaw()
+func helpLegendWrapped(w int, roomy bool, h int, tools bool) []string {
+	raw := helpLegendFor(tools)
 	budget := h - len(raw) - len(legClasses) // the rows free for continuations
 	var lines []string
 	for _, l := range raw {
