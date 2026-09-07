@@ -1649,11 +1649,12 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 // directory are told apart by more than a name, and a fleet of two tools
 // says which is which (#50). "" for an archived row, which is not running.
 func (m *Model) toolTag(s fleet.Session) string {
-	if !s.Live {
-		return ""
-	}
 	var parts []string
-	if s.Info.ToolName() != "claude" || m.toolsInFleet() > 1 {
+	tools := m.toolsInFleet()
+	if !s.Live {
+		tools = m.toolsAnywhere() // the archive is judged by everything it holds (#79, #80)
+	}
+	if s.Info.ToolName() != "claude" || tools > 1 {
 		// A fleet of claudes needs no word; a fleet of two tools needs
 		// the word on every row, and another tool's row always.
 		parts = append(parts, s.Info.ToolName())

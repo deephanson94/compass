@@ -144,12 +144,59 @@ func (m *Model) toolsAnywhere() int {
 // is the row's identity, like the pane tag, so a long name on one row
 // does not strip the others (#79).
 func (m *Model) bandSaysTool(rows []recentRow, w int, short bool) bool {
+	any := false
 	for _, r := range rows {
-		if m.bandTool(m.sessions[r.sess]) != "" {
-			return true
+		s := m.sessions[r.sess]
+		word := m.bandTool(s)
+		if word == "" {
+			continue
+		}
+		any = true
+		// A row of the default tool sheds its word before a row of the
+		// other tool: where an OpenCode row cannot keep "opencode", no
+		// row draws a word — a band whose only word was "claude", on the
+		// one row that did not need it, named the wrong thing (#80).
+		if s.Info.ToolName() != "claude" && !m.recentRowKeepsTool(r, w, short, word) {
+			return false
 		}
 	}
-	return false
+	return any
+}
+
+// recentRowKeepsTool says whether the row, wearing its tool word beside
+// the band's verdict form, still shows its prompt's first cells.
+func (m *Model) recentRowKeepsTool(r recentRow, w int, short bool, word string) bool {
+	s := m.sessions[r.sess]
+	prompt := strings.TrimSpace(archiveHeadline(s))
+	if prompt == "" {
+		return true
+	}
+	keep, _, _ := m.recentKeep(r, w, short)
+	return keep-lipgloss.Width(sessionName(s.Info)+" · "+word+` · "`) >= recentPromptWords
+}
+
+// recentKeep is the cells a band row's name and prompt keep beside the
+// verdict form the row takes — the whole verdict, its first two words, or
+// its mark — and that form (#57, #67).
+func (m *Model) recentKeep(r recentRow, w int, short bool) (keep int, said string, room int) {
+	s := m.sessions[r.sess]
+	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
+	room = w - lipgloss.Width(lead) - lipgloss.Width(m.age(s.Info.LastEventAt)) - 1
+	verdict, _ := m.recentVerdict(r, w)
+	if short {
+		verdict = firstWords(verdict, 2)
+	}
+	mark := ""
+	if rs := []rune(verdict); len(rs) > 0 && strings.ContainsRune("✓✗⚑", rs[0]) {
+		mark = string(rs[0])
+	}
+	keep = room
+	for _, v := range []string{verdict, firstWords(verdict, 2), mark} {
+		if k := room - lipgloss.Width(v) - 2; v != "" && k >= recentNameFloor {
+			return k, v, room
+		}
+	}
+	return keep, "", room
 }
 
 
@@ -188,43 +235,21 @@ func (m *Model) recentLineWith(r recentRow, w int, short, tool bool) string {
 	lead := " " + strconv.Itoa(r.num) + " " + fleet.Glyph(s.Snap.State) + " "
 	name := sessionName(s.Info)
 	prompt := strings.TrimSpace(archiveHeadline(s))
-	// The first clause alone, and without its clock: "✓ shipped 2h ago"
-	// beside "2h" said the hour twice.
-	verdict, _ := m.recentVerdict(r, w)
-	if short {
-		verdict = firstWords(verdict, 2)
-	}
-	room := w - lipgloss.Width(lead) - lipgloss.Width(age) - 1
 	// The verdict outranks the prompt's tail: "webapp · "the checkout
 	// suite …  ✗ red 18✓ 2✗" answers whether to reopen, and the whole
 	// prompt does not. It goes only when the prompt's own floor would —
 	// and its counts go first, so a red row keeps "✗ red" where a green
-	// one keeps its tick.
-	// Last rung: the verdict's own mark. A row that cannot buy "✗ red"
-	// can buy "✗", and the mark is what the band's colour is for — at
-	// eighty columns "✗ red" was a cell short and every row answered
-	// "when" and none "how it went" (#67). Glyph-guarded: a verdict
-	// that opens with a word (`build 10h`) has no mark to keep.
-	mark := ""
-	if rs := []rune(verdict); len(rs) > 0 && strings.ContainsRune("✓✗⚑", rs[0]) {
-		mark = string(rs[0])
-	}
-	keep, said := room, ""
-	for _, v := range []string{verdict, firstWords(verdict, 2), mark} {
-		if k := room - lipgloss.Width(v) - 2; v != "" && k >= recentNameFloor {
-			keep, said = k, v
-			break
-		}
-	}
+	// one keeps its tick; last, the mark alone (#57, #67). The first
+	// clause alone, and without its clock: "✓ shipped 2h ago" beside
+	// "2h" said the hour twice.
+	keep, said, room := m.recentKeep(r, w, short)
 	// Which tool ran it: the row rule (#50), on the band — where the row
-	// keeps its prompt's first words beside the word, and shed where it
+	// keeps its prompt's first cells beside the word, and shed where it
 	// would not: a tool word over a three-letter prompt named the tool
 	// and not the session (#79). The word is the row's own, like the
 	// pane tag, so a long name on one row does not strip the others.
-	if word := m.bandTool(s); tool && word != "" {
-		if head := name + " · " + word + ` · "`; prompt == "" || keep-lipgloss.Width(head) >= recentPromptWords {
-			name += " · " + word
-		}
+	if word := m.bandTool(s); tool && word != "" && m.recentRowKeepsTool(r, w, short, word) {
+		name += " · " + word
 	}
 	if prompt != "" {
 		name += ` · "` + prompt + `"`

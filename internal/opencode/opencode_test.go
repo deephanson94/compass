@@ -92,6 +92,11 @@ func TestSessionsAreTheRootsWithTheirModel(t *testing.T) {
 	if in.Key() != "opencode://"+sess || SessionID(in.Key()) != sess {
 		t.Errorf("Key = %q", in.Key())
 	}
+	// The fleet's view of it: the default title is no title (#78).
+	fl, err := st.Infos()
+	if err != nil || len(fl) != 1 || fl[0].Title != "" {
+		t.Errorf("Infos()[0].Title = %q (err %v), want the default title dropped", fl[0].Title, err)
+	}
 	if !in.Updated.Equal(time.UnixMilli(1788688892888).UTC()) {
 		t.Errorf("Updated = %v", in.Updated)
 	}

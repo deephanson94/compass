@@ -830,7 +830,9 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 		if s.Live {
 			return dimStyle.Render(clip(strings.TrimPrefix(word+" · no pane", " · ")+" · "+branchOf(s.Info), w))
 		}
-		return dimStyle.Render(clip(branchOf(s.Info), w))
+		// An archived row: the tool where the archive holds two, then the
+		// branch — "opencode · spike/billing" (#80).
+		return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+branchOf(s.Info), " · "), w))
 	}
 	// Result before process. "1216✓ 2✗" answers whether the session is going
 	// well; "Bash: pytest tests/auth -x" only answers whether it is busy, which

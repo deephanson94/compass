@@ -177,3 +177,30 @@ func TestSpaceNamesWhatItUnfolded(t *testing.T) {
 		t.Errorf("space again should name what it folded: %q", m.note)
 	}
 }
+
+// A default-tool row sheds its band word before an OpenCode row: where an
+// OpenCode row cannot keep "opencode", no row says "claude" (#80).
+func TestTheBandNeverSaysOnlyTheDefaultTool(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 100, 30)
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "· claude ·") && !strings.Contains(view, "· opencode ·") {
+		t.Errorf("at 100 the band's only tool word is claude:\n%s", view)
+	}
+}
+
+// An archived row says its tool where the archive holds two, and so does
+// its header (#80).
+func TestAnArchivedRowSaysItsTool(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	pressTab(m)
+	press(m, "4") // billing, the OpenCode one
+	if !m.archiveView {
+		t.Fatal("4 should open the archive on billing")
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "opencode · ") || !strings.Contains(ansi.Strip(m.headerLine(118)), "opencode") {
+		t.Errorf("the archive should say the tool on billing's row and header:\n%s\n%s", ansi.Strip(m.headerLine(118)), view)
+	}
+}
