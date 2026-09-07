@@ -1734,3 +1734,33 @@ func TestTheArchiveDoorCountsTheSearchAtEveryWidth(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 70, second-day ----
+// The archive row that shipped keeps its word beside a worded neighbour.
+// On the three-column archive deck at 120 the fleet column is 26 cells of
+// content — the narrowest anywhere — and #161's four-cell branch floor is
+// two cells out of reach for a row whose tool word is `opencode`. So
+// `opencode · spike/bill… · ✓` stood two rows under
+// `claude · chor… · ✓ shipped`, wearing the same bare tick the green etl
+// rows wear, on the one frame where the band that says `✓ shipped` is off
+// the screen (#161, #171).
+func TestTheArchiveRowThatShippedKeepsItsWordAt120(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	for _, k := range []string{"A", "tab"} {
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "FLEET · archive") {
+		t.Fatalf("not the archive frame:\n%s", view)
+	}
+	row := regexp.MustCompile(`(?m)^\s*opencode · \S+ · [^\n│]*`)
+	g := row.FindString(view)
+	if g == "" {
+		t.Fatalf("no opencode archive row on the frame:\n%s", view)
+	}
+	worded := strings.Contains(view, "· ✓ shipped")
+	if worded && !strings.Contains(g, "shipped") {
+		t.Errorf("the archive row that shipped wears a bare tick beside a worded neighbour: %q", strings.TrimSpace(g))
+	}
+}

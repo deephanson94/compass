@@ -1078,11 +1078,15 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 			// letters, but "✓" alone does not say the day shipped, and
 			// the band a keypress up says "✓ shipped" of that very
 			// session at that very width. The branch yields the cells as
-			// it yields them for the mark (#145, #47).
+			// it yields them for the mark (#145, #47). Three cells of
+			// branch stand, not four: on the 26-cell archive column at
+			// 120 the fourth was the two cells `opencode` costs over
+			// `claude`, and the row that shipped wore the bare tick its
+			// green neighbours wear (#172).
 			two := firstWords(v, 2)
 			if !fitted && mark != "" && two != mark && two != mark+" red" && two != mark+" green" {
 				keep := w - lipgloss.Width(" · "+two)
-				if floor := lipgloss.Width(line) - lipgloss.Width(branchOf(s.Info)) + 4; keep >= floor {
+				if floor := lipgloss.Width(line) - lipgloss.Width(branchOf(s.Info)) + 3; keep >= floor {
 					line = clip(line, keep) + " · " + two
 					fitted = true
 				}
