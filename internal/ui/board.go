@@ -250,9 +250,23 @@ func (m *Model) boardLines(w, h int) []string {
 		var cols []column
 		var colKeys []string
 		bw := bandWidth(w, min(len(keys)-b*n, n), cw)
+		bandTop := len(lines)
+		if b > 0 {
+			bandTop++
+		}
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
-				cols = append(cols, column{bw, m.boardColumn(keys[i], r, bw, bh)})
+				cw := bw
+				x := (i % n) * (bw + gutterWidth)
+				if bx := m.replyBox; bx.on && bandTop < bx.top+bx.h && bandTop+bh > bx.top && x < bx.left && bx.left < x+bw && bx.left-x-1 >= trailWidth {
+					// The reply box begins inside this column: the column
+					// is composed at the width the box leaves, one right
+					// edge for its rows, instead of the band's width cut
+					// where the box begins — a cut that took only the
+					// right-aligned age and left a mark over blanks (#126).
+					cw = bx.left - x - 1
+				}
+				cols = append(cols, column{cw, m.boardColumn(keys[i], r, cw, bh)})
 				colKeys = append(colKeys, keys[i])
 			}
 		}

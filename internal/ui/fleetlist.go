@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"math"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -784,7 +785,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		body + " " + dimStyle.Render(age)
 
 	lines := []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
-	if strings.TrimSpace(ansi.Strip(lines[1])) == "" && m.presentBesideRow(s, w-4) {
+	if strings.TrimSpace(ansi.Strip(lines[1])) == "" {
 		lines = lines[:1] // the trail beside says the present; the trace moves up (#111)
 	}
 	if !m.boardShown() && !m.archiveView && s.Live {
@@ -860,6 +861,9 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	return lines
 }
 
+// verdictRe is the newest verdict a row rides beside the present (#125).
+var verdictRe = regexp.MustCompile(` [0-9]+✓( [0-9]+✗)? · `)
+
 // digestFloor is the least room the row's digest takes beside a tag: the
 // width of its shortest clause, `↳ 1 new leg`. A floor of twelve refused
 // the pane rung to a row where it fit in exactly the row's cells (#118).
@@ -873,12 +877,19 @@ const digestFloor = 11
 // reply box, which covers the trail's row (#108's rule).
 func (m *Model) presentBeside(s fleet.Session, line string) bool {
 	if !(!m.boardFits() && !m.archiveView && !m.replyBox.on && s.Live &&
-		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck)) {
+		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck ||
+		wantsAttention(s.Snap.State) || s.Snap.APIError)) {
 		return false
 	}
 	sentence := oneSpace(strings.TrimRight(ansi.Strip(line), " "))
-	for _, r := range m.trailRows {
-		if saysSame(sentence, oneSpace(strings.TrimRight(ansi.Strip(r), " "))) {
+	// The newest verdict the row splices in front of the present — "● fix
+	// tokens.py 18✓ 2✗ · for 22m" — is on the trail's own test row; the
+	// compare runs on the sentence without it too (#125).
+	bare := verdictRe.ReplaceAllString(sentence, " ")
+	for i, r := range m.trailRows {
+		row := oneSpace(strings.TrimRight(ansi.Strip(r), " "))
+		if saysSame(sentence, row) || saysSame(bare, row) ||
+			saysSame(sentence, wrappedLabel(m.trailRows, i, len(m.trailRows))) {
 			return true
 		}
 	}
@@ -998,6 +1009,9 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 		// call, the error. It gets the width; the class is in the trail.
 		if i := strings.Index(act, " ["); i > 0 && lipgloss.Width(act) > w {
 			act = act[:i] // the options go whole: "[office CIDR / keep basti…" named no option
+		}
+		if line := clip(act, w); m.presentBeside(s, line) {
+			return ""
 		}
 		return dimStyle.Render(clip(act, w))
 	}

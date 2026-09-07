@@ -279,13 +279,21 @@ func (m *Model) readerColumn(w, h int) []string {
 				// turn row draws the ask, as the trail's does (#105) — at
 				// eighty and a hundred, where the reader has the screen
 				// and no trail title stands to be repeated (#120).
-				if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 {
-					for _, l := range page {
-						if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") && saysSame(oneSpace(archiveHeadline(s)), oneSpace(strings.TrimRight(r, " "))) {
-							rows[0] = m.readerTitleBare(w)
-							break
-						}
+				drawn := false
+				for _, l := range page {
+					if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") && saysSame(oneSpace(archiveHeadline(s)), oneSpace(strings.TrimRight(r, " "))) {
+						drawn = true
+						break
 					}
+				}
+				if fw, mw, _ := m.layout(m.width); drawn && fw == 0 && mw == 0 {
+					rows[0] = m.readerTitleBare(w)
+				} else if drawn {
+					// Wider the title keeps the ask, but its clock is the
+					// cursor's moment, not the ask's: "15:31" over a turn
+					// row that times those same words "15:00". The clock
+					// goes with the clause it does not time (#122, #115).
+					rows[0] = m.readerTitleWith(w, false)
 				}
 			}
 		}
@@ -421,7 +429,15 @@ func (m *Model) readerTitleAs(w int, anchorClause, bare bool) string {
 		if m.archiveView && !s.Live && !bare {
 			name = archiveHeadline(s) // as the trail beside it and the header above name it (#59)
 		} else if m.archiveView && !s.Live {
-			name += trailDay(m.trail, m.now, true)
+			day := trailDay(m.trail, m.now, false)
+			reserve := 0
+			if m.level >= levelReader && (m.sessionView() || m.boardFits()) {
+				reserve = lipgloss.Width("[reader]") + 2
+			}
+			if lipgloss.Width("READER · "+name+day) > w-1-reserve {
+				day = trailDay(m.trail, m.now, true)
+			}
+			name += day
 		}
 	}
 	right := ""

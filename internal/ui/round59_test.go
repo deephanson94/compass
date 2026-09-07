@@ -479,3 +479,123 @@ func TestTheHeaderLeavesTwoCellsBeforeTheChips(t *testing.T) {
 		t.Errorf("the identity ends one cell from the chips: %q", head)
 	}
 }
+
+// Wider than a hundred the archive reader's title keeps the ask but not
+// the cursor's clock where the turn row draws the ask with its own (#122).
+func TestTheArchiveReaderTitleDropsTheCursorsClock(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 152, 40)
+	for _, k := range []string{"2", "tab", "tab", "["} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	title, turn := "", ""
+	for _, l := range strings.Split(view, "\n") {
+		for _, seg := range strings.Split(l, "│") {
+			if strings.Contains(seg, "READER · ") {
+				title = seg
+			}
+			if strings.Contains(seg, "❯ fix the 401") {
+				turn = seg
+			}
+		}
+	}
+	if title == "" || turn == "" {
+		t.Fatalf("not the archive's reader on its turn:\n%s", view)
+	}
+	if strings.Contains(title, ":") {
+		t.Errorf("the title times the ask with the cursor's clock: %q over %q", title, turn)
+	}
+}
+
+// The bare archive title runs the trail's own ladder: the day's long form
+// where it fits, so fifty-five free cells do not hold a glyph the narrow
+// legend never names (#123).
+func TestTheBareArchiveTitleSaysTheDayInWords(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"2", "tab", "tab", "["} { // api: three hours, one ship, one red
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "READER · ") {
+			if strings.Contains(l, "⚑") || strings.Contains(l, "✗") {
+				t.Errorf("the bare title says the day in glyphs with room to spare: %q", l)
+			}
+			if !strings.Contains(l, "1 ship · 1 red") {
+				t.Errorf("the bare title does not say the day in words: %q\n%s", l, view)
+			}
+		}
+	}
+}
+
+// The needs-you row leaves its question to the trail beside it: whole at a
+// hundred, wrapped at eighty (#124, #111, #116).
+func TestTheNeedsYouRowLeavesTheQuestionToTheTrail(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{100, 30}, {80, 24}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "design Open port 22 to") {
+			t.Fatalf("at %dx%d the trail does not draw the question:\n%s", size[0], size[1], view)
+		}
+		lines := strings.Split(view, "\n")
+		for i, l := range lines {
+			if strings.Contains(l, "▸1 ▲ infra") && i+1 < len(lines) {
+				if strings.Contains(strings.SplitN(lines[i+1], "│", 2)[0], "Open port 22") {
+					t.Errorf("at %dx%d the row repeats the question the trail draws: %q", size[0], size[1], lines[i+1])
+				}
+			}
+		}
+	}
+}
+
+// The compare sees the row's sentence without the verdict it spliced in:
+// at a hundred `● fix tokens.py 18✓ 2✗ · for 22m` is the trail's test row
+// and its HEAD row, both on the frame (#125).
+func TestTheRowLeavesTheVerdictSplicedPresentToTheTrail(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 100, 30)
+	for _, k := range []string{"/", "pytest", "enter"} {
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "▸3 ● api") || !strings.Contains(view, "● fix    tokens.py") {
+		t.Fatalf("not the search's api row beside its trail:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "▸3 ● api") && i+1 < len(lines) {
+			if strings.Contains(strings.SplitN(lines[i+1], "│", 2)[0], "tokens.py") {
+				t.Errorf("the row says the present the trail draws, verdict spliced in: %q", lines[i+1])
+			}
+		}
+	}
+}
+
+// A column the reply box begins inside is composed at the width the box
+// leaves: its rows keep their clocks, and no mark stands over blanks (#126).
+func TestTheCoveredColumnKeepsItsClocks(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	for _, k := range []string{"j", "r"} {
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "reply to 2") {
+		t.Fatalf("the reply box is not up on api:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "rewrite the install page") {
+			left := strings.SplitN(l, "┌", 2)[0]
+			if strings.Contains(left, "…") || !strings.Contains(left, "55m ago") {
+				t.Errorf("the covered row lost its clock to a mark over blanks: %q", l)
+			}
+		}
+	}
+}
