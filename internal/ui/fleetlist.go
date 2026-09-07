@@ -1010,13 +1010,25 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 			if rs := []rune(v); len(rs) > 0 && strings.ContainsRune("✓✗⚑", rs[0]) {
 				mark = string(rs[0])
 			}
+			fitted := false
 			for _, form := range []string{v, firstWords(v, 2), mark} {
 				if form == "" {
 					continue
 				}
 				if cand := line + " · " + form; lipgloss.Width(cand) <= w {
 					line = cand
+					fitted = true
 					break
+				}
+			}
+			// And where not even the mark fits behind the whole branch,
+			// the branch yields the cells: a clipped branch still names
+			// where the day happened, a missing mark names nothing, and
+			// green-or-red is the clause the archive row exists for
+			// (#47). The band at the same width already says it.
+			if !fitted && mark != "" {
+				if room := w - lipgloss.Width(" · "+mark); room > 0 {
+					line = clip(line, room) + " · " + mark
 				}
 			}
 		}

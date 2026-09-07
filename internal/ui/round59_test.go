@@ -1005,3 +1005,40 @@ func TestTheCardsCountYieldsToItsOwnTrail(t *testing.T) {
 		}
 	}
 }
+
+// Every archive row says green or red: where not even the mark fits behind
+// the whole branch, the branch yields the cells — the band at the same
+// width already says it (#145, #130, #47).
+func TestEveryArchiveRowSaysGreenOrRed(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	pressKey(m, "A")
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, l := range rows {
+		col := strings.SplitN(l, "│", 2)[0]
+		if !strings.HasPrefix(col, "     claude · ") && !strings.HasPrefix(col, "     opencode · ") {
+			continue
+		}
+		if !strings.ContainsAny(col, "✓✗⚑") {
+			t.Errorf("row %d of the archive says nothing about green or red: %q", i, strings.TrimRight(col, " "))
+		}
+	}
+}
+
+// The hide refusal counts only the live: "the only session stays" stood
+// over a band naming twelve more (#146, #10).
+func TestTheHideRefusalCountsOnlyTheLive(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	pressKey(m, "x")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "12 archived") {
+		t.Fatalf("not the deck with its band up:\n%s", view)
+	}
+	if strings.Contains(view, "the only session stays") {
+		t.Errorf("the refusal calls it the only session over a band that names twelve: %q", m.note)
+	}
+	if !strings.Contains(view, "the only live one stays") {
+		t.Errorf("the refusal does not scope its word to the live: %q", m.note)
+	}
+}

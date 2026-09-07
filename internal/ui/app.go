@@ -1647,7 +1647,7 @@ func (m *Model) toggleHidden() {
 		return
 	}
 	if m.liveCount() <= 1 && !m.archiveView {
-		m.note = "the only session stays"
+		m.note = "the only live one stays"
 		return
 	}
 	// What owes you an alarm stays, and says so: a note that reported a
