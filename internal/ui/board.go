@@ -1741,10 +1741,31 @@ func tagBesideDigest(ladder []string, w int, digest func(room int) string) strin
 		}
 		return ladder[len(ladder)-1]
 	}
-	for _, c := range ladder {
+	best := -1
+	for i, c := range ladder {
 		if digest(w-lipgloss.Width(c)-2) == full {
-			return c
+			best = i
+			break
 		}
+	}
+	// The look is the digest's last and least clause, and the column's own
+	// "you were here" divider draws it again five rows down; the pane is
+	// what attaches and is nowhere else on the board. A rung the ladder
+	// ranks higher, carrying the word and the pane, takes that clause's
+	// cells (#85).
+	if i := strings.LastIndex(full, " · looked "); i > 0 {
+		short := full[:i]
+		for j, c := range ladder {
+			if best >= 0 && j >= best {
+				break
+			}
+			if strings.Contains(c, " · ⌁ ") && digest(w-lipgloss.Width(c)-2) == short {
+				return c
+			}
+		}
+	}
+	if best >= 0 {
+		return ladder[best]
 	}
 	last := ladder[len(ladder)-1]
 	least := digest(w - lipgloss.Width(last) - 2)

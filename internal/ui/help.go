@@ -452,6 +452,7 @@ func helpLegendRaw() []string {
 		// that defined it (#62).
 		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
 		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
+		"        claude · opencode — which CLI runs the session, where the fleet runs two",
 		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent  ◍ silent agent",
 		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
 		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",

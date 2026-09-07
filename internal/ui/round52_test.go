@@ -334,3 +334,26 @@ func TestTheCardDrawsNoEmptyRowForATagLine(t *testing.T) {
 		}
 	}
 }
+
+// Two same-directory rows make the same trade at 120: the pane, which is
+// nowhere else on the board, outranks the digest's look clause, which the
+// column's own divider draws again (#85).
+func TestTheTagKeepsThePaneOverTheLookClause(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"opencode · ⌁ dev:2.0", "claude · ⌁ dev:1.0"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the 120 board should draw %q on its api column:\n%s", want, view)
+		}
+	}
+}
+
+// The wide help glosses the tool word (#85).
+func TestTheWideHelpGlossesTheToolWord(t *testing.T) {
+	m := sceneModel(sceneTwoTools(), 220, 48)
+	press(m, "?")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "claude · opencode — which CLI") {
+		t.Errorf("the 220 help never says what the tool word is:\n%s", view)
+	}
+}
