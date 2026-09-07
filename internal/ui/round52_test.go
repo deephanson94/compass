@@ -458,10 +458,10 @@ func TestATracesClockGoesWholeOrNotAtAll(t *testing.T) {
 		pressKey(m, k)
 		poll(m, sc)
 		view := ansi.Strip(m.View())
-		if strings.Contains(view, "↳ answered 1 · 0s a…") || strings.Contains(view, "· 0s ag…") {
+		if strings.Contains(view, "answered 1 · 0s a…") || strings.Contains(view, "· 0s ag…") {
 			t.Fatalf("after %q a clock is cut inside its word:\n%s", k, view)
 		}
-		if strings.Contains(view, "↳ answered 1 · 0s") {
+		if strings.Contains(view, "answered 1 · 0s") {
 			seen = true
 		}
 	}
