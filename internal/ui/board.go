@@ -243,8 +243,17 @@ func (m *Model) boardLines(w, h int) []string {
 	defer func() { m.noLaneHeads = false }()
 	if len(keys) == 0 && m.fleetQuery != "" {
 		// A search nothing answers keeps the board and says so, rather
-		// than silently turning into the deck.
-		return fit([]string{"", dimStyle.Render(clip("no session matches /"+m.fleetQuery+" · esc clears it", w))}, h)
+		// than silently turning into the deck. Under the note, the band
+		// holds what the search found among the finished (#98, #147):
+		// the miss is the live board's, and says so.
+		miss := []string{"", dimStyle.Render(clip("no session matches /"+m.fleetQuery+" · esc clears it", w))}
+		if w >= fleetWidth {
+			if band := m.strandedBand(w, h-len(miss)-1); len(band) > 1 {
+				miss[1] = dimStyle.Render(clip("no live session matches /"+m.fleetQuery+" · esc clears it", w))
+				return fit(append(append(miss, ""), band...), h)
+			}
+		}
+		return fit(miss, h)
 	}
 	var lines []string
 	for b, bh := range heights {

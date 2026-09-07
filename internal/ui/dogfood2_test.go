@@ -261,7 +261,7 @@ func TestQuickRepliesGoToTheSessionsPane(t *testing.T) {
 	m, rec = build()
 	m.SetPanes(nil)
 	press(m, "r")
-	if m.replying || !strings.Contains(m.note, "no pane") {
+	if m.replying || !strings.Contains(m.note, "needs a pane") {
 		t.Errorf("a paneless session offered the replies: %q", m.note)
 	}
 	_ = rec

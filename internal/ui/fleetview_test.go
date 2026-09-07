@@ -744,7 +744,7 @@ func TestT67EnterAttaches(t *testing.T) {
 		if *got != nil {
 			t.Fatalf("a session with no pane must build no command: %v", (*got).cmd.Args)
 		}
-		if m.note != "no pane · nothing to attach to" {
+		if m.note != "attach needs a pane" {
 			t.Errorf("note = %q, want the no-pane note", m.note)
 		}
 	})

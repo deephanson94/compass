@@ -1825,7 +1825,7 @@ func (m *Model) offerReplies() {
 		return
 	}
 	if _, ok := m.selectedPane(); !ok {
-		m.note = "no pane · nothing to type into"
+		m.note = "reply needs a pane"
 		return
 	}
 	m.replying, m.replyTyping, m.replyDraft = true, false, ""
@@ -1933,7 +1933,7 @@ func (m *Model) replyKey(msg tea.KeyMsg) tea.Cmd {
 func (m *Model) send(c replyChoice) tea.Cmd {
 	pane, ok := m.selectedPane()
 	if !ok {
-		m.note = "no pane · nothing to type into"
+		m.note = "reply needs a pane"
 		return nil
 	}
 	runner, target, key := m.runner, pane.Target, m.selectedKey
@@ -1969,7 +1969,7 @@ func (m *Model) attach() tea.Cmd {
 	}
 	pane, ok := m.selectedPane()
 	if !ok {
-		m.note = "no pane · nothing to attach to"
+		m.note = "attach needs a pane"
 		return nil
 	}
 	m.markSeen(m.selectedKey)

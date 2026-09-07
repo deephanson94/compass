@@ -1435,3 +1435,70 @@ func TestTheChapterKeysRefusalNamesThePrompt(t *testing.T) {
 		}
 	}
 }
+
+// A search the live fleet does not answer keeps the board's band: the
+// finished sessions that answer it are named under a note that says the
+// miss is the live board's (#163, #98, #147).
+func TestTheBoardsMissKeepsTheBand(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+		for _, k := range []string{"/", "reconcile"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "/reconcile") {
+			t.Fatalf("at %dx%d not the search frame:\n%s", size[0], size[1], view)
+		}
+		if !strings.Contains(view, "no live session matches /reconcile") {
+			t.Errorf("at %dx%d the miss is the live board's and does not say so:\n%s", size[0], size[1], view)
+		}
+		if !strings.Contains(view, `"reconcile the state file"`) {
+			t.Errorf("at %dx%d the board blanks on a search eight finished sessions answer:\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+// The band narrowed by a search counts what the search left, in the
+// header's own form (#164, #98).
+func TestTheBandsHeaderCountsWhatTheSearchLeft(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+		for _, k := range []string{"/", "pytest", "enter"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "1 of 41 archived") {
+			t.Errorf("at %dx%d the band's header counts the whole archive under a search:\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+// The no-pane refusal names the key and keeps the way in: `reply needs a
+// pane` leaves the eighty-column footer its `tab deeper`, and does not say
+// `no pane` twice on one row (#165, #156, #159).
+func TestTheNoPaneRefusalKeepsTheWayIn(t *testing.T) {
+	forceASCII(t)
+	for _, key := range []string{"r", "enter"} {
+		m := sceneModel(sceneFleetHygiene(), 80, 24)
+		pressKey(m, "3") // notebooks, the session with no pane
+		pressKey(m, key)
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "needs a pane") {
+			t.Fatalf("%s: not the no-pane refusal:\n%s", key, view)
+		}
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("%s: the refusal cost the footer the way in: %q", key, strings.TrimSpace(foot))
+		}
+		if strings.Count(foot, "no pane") > 1 {
+			t.Errorf("%s: the footer says no pane twice: %q", key, strings.TrimSpace(foot))
+		}
+	}
+}

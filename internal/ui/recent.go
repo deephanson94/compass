@@ -83,12 +83,25 @@ func (m *Model) recentRows(n int) []recentRow {
 // archive holds, and the key that browses it — the fleet's own last line
 // folded into the band, so nothing is said twice.
 func (m *Model) recentHeader() string {
+	// Under a search the band holds the rows that match (#98): the count
+	// is of what matched, in the header's own form (`2 of 4`), or the
+	// line said forty-one over the one row the query left.
+	archived := strconv.Itoa(m.archivedCount())
+	if m.fleetQuery != "" {
+		matched := 0
+		for _, s := range m.sessions {
+			if !s.Live && archiveHeadline(s) != "" && m.matchesQuery(s) {
+				matched++
+			}
+		}
+		archived = strconv.Itoa(matched) + " of " + archived
+	}
 	if n := m.hiddenCount(); n > 0 {
 		// The line the band folds in carried the hidden count: at a
 		// hundred columns a hide left no trace on the screen (#86).
-		return fmt.Sprintf("recent · %d archived · %d hidden · A browses", m.archivedCount(), n)
+		return fmt.Sprintf("recent · %s archived · %d hidden · A browses", archived, n)
 	}
-	return fmt.Sprintf("recent · %d archived · A browses", m.archivedCount())
+	return fmt.Sprintf("recent · %s archived · A browses", archived)
 }
 
 // recentLines is the band drawn into avail rows of a column w wide: the
