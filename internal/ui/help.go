@@ -401,9 +401,11 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 				// Paired rows below the board's width: eighteen keys do
 				// not fit fourteen rows, and a key with no row is a key
 				// the person cannot learn.
-				what = "move down / up (↓ ↑ too) · ctrl+d/u half a page · G newest"
+				// The page keys name their object: on the list's own row
+				// they read as paging the list, and they page the trail (#83).
+				what = "move down / up (↓ ↑ too) · ctrl+d/u pages the trail · G newest"
 				if w >= 90 {
-					what = "move down / up (↓ ↑ too) · ctrl+d/u or PgDn/PgUp half a page · G newest"
+					what = "move down / up (↓ ↑ too) · ctrl+d/u or PgDn/PgUp page the trail · G newest"
 				}
 			case "ctrl+d/u":
 				what = ""

@@ -199,7 +199,6 @@ func (m *Model) recentKeep(r recentRow, w int, short bool) (keep int, said strin
 	return keep, "", room
 }
 
-
 // recentVerdict is the row's verdict clause and whether its full form
 // fits beside the prompt's floor.
 func (m *Model) recentVerdict(r recentRow, w int) (verdict string, full bool) {

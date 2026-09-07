@@ -284,3 +284,34 @@ func TestTheLiveRowSaysItsToolWhereTheArchiveRunsAnother(t *testing.T) {
 	}
 }
 
+// At Lv1 the page keys are offered only where the trail beside the list
+// is long enough to page (#83).
+func TestThePageKeysAreOfferedOnlyWhereTheTrailPages(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 152, 40)
+	pressTab(m)
+	press(m, "A")
+	if m.level != levelTrail || !m.archiveView {
+		t.Fatalf("expected the archive's list, level %d archive %v", m.level, m.archiveView)
+	}
+	if total, h, _ := m.trailView(); total > h {
+		t.Skip("the archive's trail pages here; nothing to pin")
+	}
+	if foot := ansi.Strip(m.footerLine(150)); strings.Contains(foot, "ctrl+d/u") {
+		t.Errorf("the page keys are offered where the trail fits: %q", foot)
+	}
+	// The non-board Lv1 keymap never offered the keys; the board deck's
+	// archive list is the one place they were offered inert.
+
+}
+
+// The compact help names what the page keys page (#83).
+func TestTheCompactHelpNamesWhatThePageKeysPage(t *testing.T) {
+	for _, w := range []int{80, 100} {
+		m := sceneModel(sceneFleetHygiene(), w, 30)
+		press(m, "?")
+		if view := ansi.Strip(m.View()); !strings.Contains(view, "page the trail") && !strings.Contains(view, "pages the trail") {
+			t.Errorf("at %d the help's page keys name no object:\n%s", w, view)
+		}
+	}
+}

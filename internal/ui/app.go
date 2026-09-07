@@ -3066,6 +3066,14 @@ func (m *Model) keymap() string {
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
 	}
+	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
+		// At Lv1 the page keys drive the trail beside the list (§3); on a
+		// frame whose trail fits, they do nothing, and a footer naming
+		// them beside "j/k move" read as though they paged the list (#83).
+		if total, h, _ := m.trailView(); total <= h {
+			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
+		}
+	}
 	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && m.width < deckWideCols {
 		// Below the board's width the reader takes the whole screen and
 		// no band or fleet row names the archive: the footer does (#62).
