@@ -599,3 +599,65 @@ func TestTheCoveredColumnKeepsItsClocks(t *testing.T) {
 		}
 	}
 }
+
+// At Lv2 the trail's cursor lands on HEAD and draws its mark between the
+// glyph and the class — "●▸test". The mark is not part of the row's
+// sentence, so #114's compare is not fooled by it (#127, #104).
+func TestTheSelectedRowLeavesThePresentToTheTrailUnderTheCursor(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 100, 30)
+	pressTab(m)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "●▸test") {
+		t.Fatalf("the trail's cursor is not on HEAD:\n%s", view)
+	}
+	n := 0
+	for _, l := range strings.Split(view, "\n") {
+		n += strings.Count(oneSpace(strings.Replace(l, "▸", " ", 1)), "● test pytest tests/gates for 6m")
+	}
+	if n != 1 {
+		t.Errorf("the present is said %d times, want once:\n%s", n, view)
+	}
+}
+
+// The `[ ]` note counts and quotes the turn it landed on and leaves the
+// clock to the row, which is always drawn with it (#128, #20).
+func TestTheTurnNoteLeavesTheClockToTheRow(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 80, 24)
+	for _, k := range []string{"tab", "tab", "["} {
+		pressKey(m, k)
+	}
+	turn := ""
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.HasPrefix(strings.TrimLeft(l, " "), "❯ relayed") {
+			turn = strings.TrimRight(l, " ")
+		}
+	}
+	if !strings.HasSuffix(turn, "17:48") {
+		t.Fatalf("the turn the note landed on is not drawn with its clock: %q", turn)
+	}
+	if !strings.HasPrefix(m.note, "❯ 1/1") {
+		t.Fatalf("the note does not count the turn: %q", m.note)
+	}
+	if strings.Contains(m.note, "17:48") {
+		t.Errorf("the note keeps a second copy of the row's clock: %q over %q", m.note, turn)
+	}
+}
+
+// Where no rung stands above the pane, the `↳ N new legs` digest still
+// yields to it: the divider below draws the count either way (#129, #117).
+func TestTheNewLegsDigestYieldsToThePaneAlone(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneManyIdle(), 120, 34)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "you were here") {
+		t.Fatalf("no divider on the board:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		first := strings.SplitN(l, "│", 2)[0]
+		if strings.Contains(first, "new legs") && strings.Contains(first, "⌁ work:0.0") {
+			t.Errorf("the digest says the count the divider draws, over the pane: %q", first)
+		}
+	}
+}

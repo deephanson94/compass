@@ -887,7 +887,10 @@ func (m *Model) presentBeside(s fleet.Session, line string) bool {
 	// compare runs on the sentence without it too (#125).
 	bare := verdictRe.ReplaceAllString(sentence, " ")
 	for i, r := range m.trailRows {
-		row := oneSpace(strings.TrimRight(ansi.Strip(r), " "))
+		// The trail's cursor stands between the glyph and the class on
+		// HEAD's own row at Lv2 — "●▸test" — and the mark is not part of
+		// the row's sentence (#104, #127).
+		row := oneSpace(strings.Replace(strings.TrimRight(ansi.Strip(r), " "), "▸", " ", 1))
 		if saysSame(sentence, row) || saysSame(bare, row) ||
 			saysSame(sentence, wrappedLabel(m.trailRows, i, len(m.trailRows))) {
 			return true

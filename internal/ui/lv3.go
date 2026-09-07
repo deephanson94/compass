@@ -722,7 +722,11 @@ func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
 	if m.readerLane != "" && i == 0 {
 		glyph = glyphBranch // the assignment, not a turn of yours (#56)
 	}
-	m.note = fmt.Sprintf("%s %d/%d · %s · %s", glyph, i+1, len(turns), `"`+m.anchorText+`"`, doc[t].at.Local().Format("15:04")) // the footer clips the quote to its room
+	// The count and the quote (#20), without the clock: the note stands
+	// only while the turn it landed on is drawn, and that row carries its
+	// clock at every width — the note's copy was never the only one, and
+	// at 220 it was the clipped one over the whole (#128).
+	m.note = fmt.Sprintf("%s %d/%d · %s", glyph, i+1, len(turns), `"`+m.anchorText+`"`) // the footer clips the quote to its room
 }
 
 // readerHeight is the rows the document gets: the deck body minus the

@@ -777,7 +777,8 @@ func wrappedLabel(rows []string, k, h int) string {
 // digest is only `↳ N new legs` and the column's own divider draws that
 // count five rows down — #85's reason for the look clause, applied to the
 // count: the digest yields to the highest rung that fits, so the model is
-// on a row of the frame (#117). Not where #112 already hoisted the rungs.
+// on a row of the frame (#117), and to the pane alone where no rung stands
+// above it (#129). Not where #112 already hoisted the rungs.
 func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 	if len(rows) < 3 || strings.TrimSpace(ansi.Strip(rows[1])) == "" {
 		return
@@ -807,7 +808,11 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 	}
 	for _, rung := range m.tagLadder(s) {
 		if rung == current {
-			return // the tag row already says the most it can
+			// No rung stands above: the count still says what the
+			// divider draws, so the row keeps the pane alone — where a
+			// column lives, and nowhere else (#85, #129).
+			rows[2] = pad("", w-lipgloss.Width(current)) + dimStyle.Render(current)
+			return
 		}
 		if lipgloss.Width(rung) <= w {
 			rows[2] = pad("", w-lipgloss.Width(rung)) + dimStyle.Render(rung)
