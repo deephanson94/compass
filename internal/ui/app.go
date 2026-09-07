@@ -1214,13 +1214,9 @@ func (m *Model) chapter(key string) {
 			}
 		}
 		if target < 0 {
-			m.note = "no later prompt · G is the present"
-			if len(TrailRows(m.trail, m.level)) <= 1 {
-				// G refuses here too, so the clause would point at a key
-				// that does not move; and the chapter key's own question
-				// is prompts, not legs (#161, #153).
-				m.note = "no later prompt"
-			}
+			// The help names G at every width, and the clause cost the
+			// footer a key the `[` refusal beside it kept (#166, #162).
+			m.note = "no later prompt"
 			return
 		}
 	} else {

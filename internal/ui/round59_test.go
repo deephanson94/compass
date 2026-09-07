@@ -1502,3 +1502,120 @@ func TestTheNoPaneRefusalKeepsTheWayIn(t *testing.T) {
 		}
 	}
 }
+
+// The `]` refusal keeps the keys the `[` refusal beside it keeps: the help
+// names G at every width, and the 34-cell clause cost a key (#166, #162).
+func TestTheLaterChapterRefusalKeepsTheKeys(t *testing.T) {
+	forceASCII(t)
+	foot := func(view string) string {
+		out := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				out = l
+			}
+		}
+		return out
+	}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"tab", "ctrl+u", "ctrl+u", "["} {
+			pressKey(m, k)
+		}
+		before := foot(ansi.Strip(m.View()))
+		if !strings.Contains(before, "no earlier prompt") {
+			t.Fatalf("%dx%d: not the earlier refusal:\n%s", size[0], size[1], ansi.Strip(m.View()))
+		}
+		pressKey(m, "]")
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "no later prompt") {
+			t.Fatalf("%dx%d: not the refusal frame:\n%s", size[0], size[1], view)
+		}
+		after := foot(view)
+		for _, k := range []string{"j/k", "r reply", "a ask", "enter attach", "m live pane", "tab "} {
+			if strings.Contains(before, k) && !strings.Contains(after, k) {
+				t.Errorf("%dx%d: the ] refusal sheds %q where the [ refusal beside it keeps it:\n  before %q\n  after  %q", size[0], size[1], k, strings.TrimSpace(before), strings.TrimSpace(after))
+			}
+		}
+	}
+}
+
+// #159 on the wide deck too: the zoom-out refusal from a board that fits
+// keeps `enter attach` and `a ask` (#159).
+func TestTheZoomOutRefusalKeepsTheWayInOnTheWideDeck(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneSecondDay(), size[0], size[1])
+		for _, k := range []string{"tab", "tab", "shift+tab", "shift+tab", "shift+tab"} {
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "nothing to zoom out to") {
+			t.Fatalf("%dx%d: not the refusal frame:\n%s", size[0], size[1], view)
+		}
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		for _, k := range []string{"enter attach", "a ask"} {
+			if !strings.Contains(foot, k) {
+				t.Errorf("%dx%d: the refusal cost the footer %q: %q", size[0], size[1], k, strings.TrimSpace(foot))
+			}
+		}
+	}
+}
+
+// The card's tag goes even beside another clause: a row that carries a
+// trace and the tag the header says keeps the trace alone (#167, #155).
+func TestTheCardsTagGoesEvenBesideAnotherClause(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"3", "tab"} {
+			pressKey(m, k)
+		}
+		lines := strings.Split(ansi.Strip(m.View()), "\n")
+		head := lines[0]
+		for i, l := range lines {
+			if !strings.Contains(l, "[session]") || i+1 >= len(lines) {
+				continue
+			}
+			left := strings.TrimRight(strings.Split(lines[i+1], "│")[0], " ")
+			j := strings.LastIndex(left, "  ")
+			if j <= 0 {
+				continue
+			}
+			tag := strings.TrimSpace(left[j:])
+			if tag == "" || !strings.Contains(tag, " · ") {
+				continue
+			}
+			all := true
+			for _, c := range strings.Split(tag, " · ") {
+				if c == "" || !strings.Contains(head, c) {
+					all = false
+				}
+			}
+			if all {
+				t.Errorf("%dx%d: the card's tag %q repeats the header %q", size[0], size[1], tag, strings.TrimSpace(head))
+			}
+		}
+	}
+}
+
+// Under a search that leaves no finished session the archive's door counts
+// what the search left, as the band's header does (#168, #164).
+func TestTheArchiveDoorCountsWhatTheSearchLeft(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	for _, k := range []string{"/", "pytest", "enter"} {
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "/pytest") {
+		t.Fatalf("not the search frame:\n%s", view)
+	}
+	if !strings.Contains(view, "0 of 12 archived") {
+		t.Errorf("the archive's door counts the whole archive under a search it did not answer:\n%s", view)
+	}
+}

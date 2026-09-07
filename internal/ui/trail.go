@@ -1723,17 +1723,32 @@ func cardKeepsOnlyItsTag(rows []string) {
 // nothing but the tag — the tool, the model, the pane — every clause of it
 // standing in the header two rows above (#131, #144's shape).
 func (m *Model) headerSaysTag(row string) bool {
+	left, said := m.tagTheHeaderSays(row)
+	return said && left == ""
+}
+
+// tagTheHeaderSays splits the card's second row into what stands left of
+// its tag and the tag, and says whether the header draws every clause of
+// the tag; a row that is nothing but a tag has an empty left (#155, #167).
+func (m *Model) tagTheHeaderSays(row string) (left string, said bool) {
 	plain := strings.TrimSpace(ansi.Strip(row))
-	if plain == "" || strings.Contains(plain, "  ") {
-		return false
+	if plain == "" {
+		return "", false
+	}
+	tag := plain
+	if i := strings.LastIndex(plain, "  "); i > 0 {
+		left, tag = strings.TrimSpace(plain[:i]), strings.TrimSpace(plain[i:])
+	}
+	if !strings.Contains(tag, " · ") && !strings.Contains(tag, mirrorMark) && tag != "claude" && tag != "opencode" {
+		return "", false // a sentence, not a tag
 	}
 	head := ansi.Strip(m.headerLine(m.width))
-	for _, c := range strings.Split(plain, " · ") {
+	for _, c := range strings.Split(tag, " · ") {
 		if !strings.Contains(head, c) {
-			return false
+			return "", false
 		}
 	}
-	return true
+	return left, true
 }
 
 // branchName never renders empty: an unnamed subagent is still "agent".
@@ -1805,9 +1820,15 @@ func (m *Model) trailColumn(w, h int) []string {
 			// trail takes it.
 			probe := append(append([]string{}, rows...), body...)
 			cardKeepsOnlyItsTag(probe)
-			if m.headerSaysTag(probe[1]) {
+			if left, said := m.tagTheHeaderSays(probe[1]); said && left == "" {
 				rows = append(rows[:1:1], rows[2:]...)
 				body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+				droppedTag = true
+			} else if said {
+				// The row keeps its trace and sheds the tag beside it: the
+				// header says the tag, and a row with a double space is
+				// not a row with nothing but a tag (#167).
+				rows[1] = "    " + dimStyle.Render(left)
 				droppedTag = true
 			}
 		}

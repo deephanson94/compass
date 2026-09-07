@@ -96,12 +96,25 @@ func (m *Model) fleetLines(w, h int) []string {
 	var tail []string
 	if !m.archiveView {
 		archived, hidden := m.archivedCount(), m.hiddenCount()
+		count := strconv.Itoa(archived)
+		if m.fleetQuery != "" {
+			// Under a search the door counts what the search left, as the
+			// band's header does (#164): `12 archived` under a query the
+			// archive did not answer named a key that lands on `0 of 12` (#168).
+			matched := 0
+			for _, s := range m.sessions {
+				if !s.Live && archiveHeadline(s) != "" && m.matchesQuery(s) {
+					matched++
+				}
+			}
+			count = strconv.Itoa(matched) + " of " + count
+		}
 		last := ""
 		switch {
 		case archived > 0 && hidden > 0:
-			last = fmt.Sprintf("%d archived · %d hidden · A browses", archived, hidden)
+			last = fmt.Sprintf("%s archived · %d hidden · A browses", count, hidden)
 		case archived > 0:
-			last = fmt.Sprintf("%d archived · A browses", archived)
+			last = fmt.Sprintf("%s archived · A browses", count)
 		case hidden > 0:
 			// Below the board's width there is no strip: the list's last
 			// line is where a hide stays said.
