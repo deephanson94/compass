@@ -396,6 +396,10 @@ func TestTheArchiveStripHeadlinesByPrompt(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneFleetHygiene(), 120, 34)
 	press(m, "A")
+	press(m, "esc") // the archive's board, where the strip is drawn (#88)
+	if m.level != levelBoard || !m.archiveView {
+		t.Fatalf("expected the archive's board, level %d archive %v", m.level, m.archiveView)
+	}
 	if view := ansi.Strip(m.View()); strings.Contains(view, "○ api 7d · ○ api") || strings.Contains(view, "○ harness 7d · ○ harness") {
 		t.Errorf("the strip names forty sessions with four words:\n%s", view)
 	}
