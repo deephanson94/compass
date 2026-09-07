@@ -181,8 +181,10 @@ func TestTheRecentBandStaysOffTheBoard(t *testing.T) {
 	}
 	n := sceneModel(sceneSecondDay(), 80, 24)
 	n.fleetQuery = "api"
-	if rows := n.recentRows(9); len(rows) != 0 {
-		t.Errorf("a search draws a band of %d rows", len(rows))
+	for _, r := range n.recentRows(9) {
+		if !n.matchesQuery(n.sessions[r.sess]) {
+			t.Errorf("a search draws a band row it did not find: %s", sessionName(n.sessions[r.sess].Info)) // the band holds what matched (#98)
+		}
 	}
 }
 

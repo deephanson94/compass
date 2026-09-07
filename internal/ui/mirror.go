@@ -110,7 +110,7 @@ func (m *Model) transcriptFacts(w int) []string {
 	s, _ := m.selected()
 	var rows []string
 	if s.Info.Title != "" {
-		rows = append(rows, dimStyle.Render(clip(`"`+s.Info.Title+`"`, w)), "")
+		rows = append(rows, dimStyle.Render(clip(askQuote(s.Info.Title, s.Info.Relayed), w)), "")
 	}
 	rows = append(rows, dimStyle.Render(clip(verdict(s), w)))
 	if s.Snap.Activity != "" {

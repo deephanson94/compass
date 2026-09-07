@@ -34,6 +34,7 @@ type SessionInfo struct {
 	OriginCWD   string
 	GitBranch   string
 	Title       string    // first user prompt: first line, max 80 runes, "…" if cut
+	Relayed     bool      // the title is another session's message, relayed (#97)
 	Name        string    // the name the person gave the session (/rename), "" until they do (#79)
 	StartedAt   time.Time // first event timestamp
 	LastEventAt time.Time // last event timestamp (file mtime as fallback)
@@ -253,6 +254,7 @@ func peekHead(f *os.File, info *SessionInfo) {
 		if titleRank < titleProse && ev.Type == transcript.EventUser {
 			if title, rank := promptTitle(ev); rank > titleRank {
 				info.Title, titleRank = title, rank
+				info.Relayed = rank == titleRelay
 			}
 		}
 		if info.CWD != "" && info.GitBranch != "" && titleRank == titleProse && !info.StartedAt.IsZero() {
@@ -359,6 +361,7 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 const (
 	titleNone  = iota
 	titleSlash // a bare slash command: "/model", "/compact"
+	titleRelay // another session's message, relayed: the ask a worker gets (#97)
 	titleArgs  // a slash command with arguments: "/kickoff probe the prefix tree"
 	titleProse // words a person wrote
 )
@@ -369,6 +372,12 @@ const (
 // asked for, and the harness's own turns are not an answer to that.
 func promptTitle(ev transcript.Event) (string, int) {
 	if ev.Machinery() {
+		return "", titleNone
+	}
+	if ev.Relayed() {
+		if title := clipTitle(ev.RelayBody()); title != "" {
+			return title, titleRelay
+		}
 		return "", titleNone
 	}
 	if cmd, ok := transcript.SlashCommand(ev.Text); ok {

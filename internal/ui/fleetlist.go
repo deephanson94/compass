@@ -131,8 +131,15 @@ func (m *Model) fleetLines(w, h int) []string {
 			note = "no archived sessions"
 		}
 		if m.fleetQuery != "" {
-			// Two rows, so the way out is never the clipped half.
-			return append([]string{dimStyle.Render(clip("no session matches /"+m.fleetQuery, w)), dimStyle.Render("esc clears it")}, tail...)
+			// Two rows, so the way out is never the clipped half. Under
+			// them, the band holds what the search found among the
+			// finished (#98): the miss is the live list's, and says so.
+			miss := []string{dimStyle.Render(clip("no session matches /"+m.fleetQuery, w)), dimStyle.Render("esc clears it")}
+			if band := m.recentLines(w, h-len(miss)-1); len(band) > 1 && !m.archiveView {
+				miss[0] = dimStyle.Render(clip("no live session matches /"+m.fleetQuery, w))
+				return append(append(miss, ""), band...)
+			}
+			return append(miss, tail...)
 		}
 		return append([]string{dimStyle.Render(clip(note, w))}, tail...)
 	}
@@ -712,7 +719,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 			// and its name — the header over it says it is hidden, and
 			// "hidden · add watch driver tests" lost the one word the
 			// person went looking for.
-			head = sessionName(s.Info) + ` · "` + head + `"`
+			head = sessionName(s.Info) + " · " + askQuote(head, askRelayed(s))
 		}
 	}
 	if m.isCircling(s) && !m.archiveView {
@@ -927,6 +934,9 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	}
 	if strings.TrimSpace(act) == "" || act == "idle" {
 		act = s.Info.Title
+		if s.Info.Relayed && act != "" {
+			act = "relayed " + act // another session's ask, worn as such (#97)
+		}
 	}
 	// The reason is worth a line when the state is one you must not miss —
 	// "waiting on your answer", "api error 403". For working and idle it is

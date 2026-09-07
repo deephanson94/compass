@@ -12,8 +12,9 @@ import (
 // Prompt is one human turn — the moments the journey changed direction because
 // somebody asked it to.
 type Prompt struct {
-	Text string // first line, max 60 runes, "…" if cut
-	At   time.Time
+	Text    string // first line, max 60 runes, "…" if cut
+	At      time.Time
+	Relayed bool // another session's message, relayed by the harness (#97)
 }
 
 // Leg is a contiguous span of one class of work: the unit the trail draws.
@@ -184,7 +185,7 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
 	// that never reached three stays with the leg it interrupted.
 	if substantivePrompt(ev) {
-		s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp})
+		s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()})
 		s.flushPress()
 		s.closeLeg()
 	}
@@ -431,6 +432,9 @@ func launchAck(text string) bool {
 func promptText(ev transcript.Event) string {
 	if cmd, ok := transcript.SlashCommand(ev.Text); ok {
 		return cmd
+	}
+	if ev.Relayed() {
+		return firstLine(ev.RelayBody()) // the message, not its envelope (#97)
 	}
 	return firstLine(ev.Text)
 }

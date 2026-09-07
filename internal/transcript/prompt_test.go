@@ -122,19 +122,22 @@ func TestATaskNotificationIsReadByItsFields(t *testing.T) {
 
 // Two more of the harness's voices, seen on a dogfooded trail quoted as if the
 // person had said them. Neither carries isMeta, so the opening words are all
-// there is to go on.
+// there is to go on. A background agent's echo is machinery; another
+// session's message is an ask of a kind — relayed, and worn as such (#97).
 func TestRelayedMessagesAreNotPrompts(t *testing.T) {
-	for _, text := range []string{
-		"Another Claude session sent a message:\n\nhey, the quota is back",
-		`Background agent "You are measuring, not summarizing. Every…" finished`,
-	} {
-		ev := transcript.Event{Type: transcript.EventUser, Text: text}
-		if !ev.Machinery() {
-			t.Errorf("Machinery() = false for %q", text)
-		}
+	ev := transcript.Event{Type: transcript.EventUser, Text: `Background agent "You are measuring, not summarizing. Every…" finished`}
+	if !ev.Machinery() || ev.Relayed() {
+		t.Errorf("a background agent's echo is not machinery: Machinery() = %v, Relayed() = %v", ev.Machinery(), ev.Relayed())
+	}
+	relay := transcript.Event{Type: transcript.EventUser, Text: "Another Claude session sent a message:\n\nhey, the quota is back"}
+	if relay.Machinery() || !relay.Relayed() {
+		t.Errorf("another session's message is an ask: Machinery() = %v, Relayed() = %v", relay.Machinery(), relay.Relayed())
+	}
+	if got := relay.RelayBody(); got != "hey, the quota is back" {
+		t.Errorf("RelayBody() = %q", got)
 	}
 	// And the same words later in a prompt are still a prompt.
-	ev := transcript.Event{Type: transcript.EventUser, Text: "why does Another Claude session sent a message show up?"}
+	ev = transcript.Event{Type: transcript.EventUser, Text: "why does Another Claude session sent a message show up?"}
 	if ev.Machinery() {
 		t.Error("a prompt that mentions the phrase mid-sentence was called machinery")
 	}

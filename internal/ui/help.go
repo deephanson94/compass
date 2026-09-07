@@ -398,6 +398,15 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 		// it refuses in words ("nothing archived yet", "the only session
 		// stays"), and those words name a thing the help is the only
 		// place to look up. It is the first row cut when there is not.
+		switch key {
+		case "?":
+			// One row at every width: the deck's own footer offers
+			// `? help · q quit` on one, and at 120 the row the split
+			// spent was the tool gloss's (#99).
+			key, what = "? / q", "this help · quit"
+		case "q":
+			what = ""
+		}
 		if !board {
 			switch key {
 			case "tab":
@@ -430,10 +439,6 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 			case "x":
 				key, what = "x / A", "hide a session · A browses the archive, x there brings it back"
 			case "A":
-				what = ""
-			case "?":
-				key, what = "? / q", "this help · quit"
-			case "q":
 				what = ""
 			case "m":
 				// The deck answers `m` here with a refusal, and the word

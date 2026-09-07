@@ -27,11 +27,12 @@ type recentRow struct {
 
 // recentRows is the band as the deck would draw it with room for at most
 // n rows: the archived sessions that ended most recently, newest first,
-// numbered on from the live fleet's last digit. Nothing on the board, in
-// the archive, or under a search — the band is the live list's, and a
-// search names what it found.
+// numbered on from the live fleet's last digit. Nothing on the board or in
+// the archive — the band is the live list's. Under a search it holds the
+// rows that match: a search names what it found, and the band going dark
+// on the one it had drawn a keystroke earlier was the opposite (#98).
 func (m *Model) recentRows(n int) []recentRow {
-	if m.archiveView || m.fleetQuery != "" || n <= 0 || (m.level == levelBoard && m.boardShown()) {
+	if m.archiveView || n <= 0 || (m.level == levelBoard && m.boardShown()) {
 		return nil // the board's blank rows are more columns' (#43), and its strip is the door
 	}
 	used := 0
@@ -46,7 +47,7 @@ func (m *Model) recentRows(n int) []recentRow {
 	}
 	var idx []int
 	for i, s := range m.sessions {
-		if !s.Live && archiveHeadline(s) != "" {
+		if !s.Live && archiveHeadline(s) != "" && m.matchesQuery(s) {
 			// A session with no title and no prompt has nothing to go
 			// back to: a bare name on the band was a slot spent (#78).
 			idx = append(idx, i)
@@ -266,7 +267,7 @@ func (m *Model) recentLineWith(r recentRow, w int, short, tool bool) string {
 		name += " · " + word
 	}
 	if prompt != "" {
-		name += ` · "` + prompt + `"`
+		name += " · " + askQuote(prompt, askRelayed(s))
 	}
 	body := clip(name, room)
 	if said != "" {

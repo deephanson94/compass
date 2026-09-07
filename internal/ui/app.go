@@ -1684,7 +1684,7 @@ func (m *Model) toggleHidden() {
 	if d := m.digits[key]; d > 0 {
 		name = strconv.Itoa(d) + " " + name
 	}
-	m.note = name + " hidden · A, then x" // the strip's own form: it fits eighty columns beside the keys
+	m.note = name + " is hidden · A, then x" // the strip's own form: it fits eighty columns beside the keys
 	if m.sharesTmux(s) {
 		if pane, ok := m.panes[key]; ok {
 			m.note += " · " + mirrorMark + " " + pane.Target // the last clause, the first shed
@@ -2860,7 +2860,7 @@ func (m *Model) headerName() (digit, name, tag string) {
 	if m.archiveView && !s.Live {
 		name = archiveHeadline(s) // the archive's rows are titled by what they asked for (#56, #59)
 		if s.Info.Name != "" {
-			name = sessionName(s.Info) + ` · "` + archiveHeadline(s) + `"` // a renamed session keeps its name first (#79)
+			name = sessionName(s.Info) + " · " + askQuote(archiveHeadline(s), askRelayed(s)) // a renamed session keeps its name first (#79)
 		}
 	}
 	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {

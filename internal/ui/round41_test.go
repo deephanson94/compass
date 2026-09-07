@@ -31,8 +31,8 @@ func TestTheReaderAloneSaysTheSessionIsAlive(t *testing.T) {
 	m := sceneModel(sceneSecondDay(), 120, 34)
 	pressTab(m)
 	pressTab(m)
-	if view := ansi.Strip(m.View()); strings.Count(view, "thinking…") != 2 {
-		t.Errorf("at 120 the card and the trail already carry the present, the reader does not:\n%s", view)
+	if view := ansi.Strip(m.View()); strings.Count(view, "thinking…") != 1 {
+		t.Errorf("at 120 the trail already carries the present, the card and the reader do not (#100):\n%s", view)
 	}
 }
 

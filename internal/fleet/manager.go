@@ -427,6 +427,7 @@ func (e *entry) absorb(ev transcript.Event) {
 	if e.titleRank < titleProse && ev.Type == transcript.EventUser {
 		if title, rank := promptTitle(ev); rank > e.titleRank {
 			e.info.Title, e.titleRank = title, rank
+			e.info.Relayed = rank == titleRelay
 		}
 	}
 }

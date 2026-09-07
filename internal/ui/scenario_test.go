@@ -871,10 +871,14 @@ func sceneFleetHygiene() scene {
 	ss = append(ss, sess("harness-b", "harness", "/home/user/harness", "spike/resume", "/resume", state.Idle, n.Add(-2*time.Hour), journey.Scout, "", "turn complete", "idle"))
 	tr[sessionKey("harness-b")] = trailOf(n.Add(-2*time.Hour-10*time.Minute), "/resume", false,
 		legSpec{journey.Scout, "the resume skill", 8 * time.Minute, []string{"SKILL.md"}, "", nil})
-	ss = append(ss, sess("relay", "porter", "/home/user/porter", "main", "Another Claude session sent a message: the encoder is in, run the gates", state.Working, n.Add(-90*time.Second), journey.Test, "", "tool call in flight", "Bash: pytest tests/gates -q"))
-	tr[sessionKey("relay")] = trailOf(n.Add(-12*time.Minute), "Another Claude session sent a message: the encoder is in, run the gates", true,
+	relay := sess("relay", "porter", "/home/user/porter", "main", "the encoder is in, run the gates", state.Working, n.Add(-90*time.Second), journey.Test, "", "tool call in flight", "Bash: pytest tests/gates -q")
+	relay.Info.Relayed = true // the lead's message, as the product titles it (#97)
+	ss = append(ss, relay)
+	relayTrail := trailOf(n.Add(-12*time.Minute), "the encoder is in, run the gates", true,
 		legSpec{journey.Scout, "the gates", 4 * time.Minute, []string{"gates.md"}, "", nil},
 		legSpec{journey.Test, "pytest tests/gates", 5 * time.Minute, nil, "", nil})
+	relayTrail.Prompts[0].Relayed = true
+	tr[sessionKey("relay")] = relayTrail
 	ss = append(ss, sess("nopane", "notebooks", "/home/user/notebooks", "main", "clean the eda notebook", state.Idle, n.Add(-3*time.Minute), journey.Docs, "", "turn complete", "idle"))
 	tr[sessionKey("nopane")] = trailOf(n.Add(-25*time.Minute), "clean the eda notebook", false,
 		legSpec{journey.Docs, "eda.ipynb", 18 * time.Minute, []string{"eda.ipynb"}, "", nil})

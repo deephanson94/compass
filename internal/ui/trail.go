@@ -1354,7 +1354,7 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited ti
 	if textWidth < trailMinLabel {
 		return dimStyle.Render(lead) + padLeft(dimStyle.Render(age), width-len([]rune(lead)))
 	}
-	text := textStyle.Render(pad(clip(`"`+p.Text+`"`, textWidth), textWidth))
+	text := textStyle.Render(pad(clip(askQuote(p.Text, p.Relayed), textWidth), textWidth))
 	return dimStyle.Render(lead) + " " + text + " " + dimStyle.Render(age)
 }
 
@@ -1708,12 +1708,31 @@ func (m *Model) trailColumn(w, h int) []string {
 	if h > len(rows) {
 		rows = append(rows, trailRows(m.trail, m.trailOpts(w, h-len(rows)))...)
 	}
-	if m.sessionView() && m.fleetQuery != "" && m.archivedCount() > 0 && h-len(rows) >= 2 {
-		// Under a search the band is off (#47), but the archive's door
-		// stays: the fleet of one has no list to say it on (#56).
+	if len(rows) > 1 && m.sessionView() {
+		// The card's fallback sentence is the board column's present
+		// (#56); in the session view the trail draws HEAD three rows
+		// below in the same column, and §4 asks a line once. Where the
+		// two say the same thing the card keeps only its tag (#100).
+		second := oneSpace(ansi.Strip(rows[1]))
+		for _, r := range rows[2:] {
+			if t := oneSpace(ansi.Strip(r)); len(strings.Fields(t)) > 1 && strings.HasPrefix(second, t) {
+				if keep := strings.TrimSpace(strings.TrimPrefix(second, t)); keep != "" {
+					rows[1] = pad("", lipgloss.Width(rows[1])-lipgloss.Width(keep)) + dimStyle.Render(keep)
+				} else {
+					rows[1] = ""
+				}
+				break
+			}
+		}
+	}
+	band := m.recentRows(h - len(rows) - 2)
+	if m.sessionView() && m.fleetQuery != "" && m.archivedCount() > 0 && h-len(rows) >= 2 && len(band) == 0 {
+		// Under a search the band holds what matched (#98); where nothing
+		// did, the archive's door stays: the fleet of one has no list to
+		// say it on (#56).
 		rows = append(rows, "", dimStyle.Render(clip(fmt.Sprintf("%d archived · A browses", m.archivedCount()), w)))
 	}
-	if band := m.recentRows(h - len(rows) - 2); m.sessionView() && len(band) > 0 {
+	if m.sessionView() && len(band) > 0 {
 		// The rows a short trail leaves are the recent band's (#47): a
 		// rule where the trail ends, then the sessions that ended last.
 		// The band is drawn into what is left over, never over a leg.
@@ -2082,7 +2101,7 @@ func (m *Model) trailTitle(w int) string {
 			// name before its prompt, and so does its title (#59).
 			name = archiveHeadline(s)
 			if s.Live || s.Info.Name != "" {
-				name = sessionName(s.Info) + ` · "` + archiveHeadline(s) + `"`
+				name = sessionName(s.Info) + " · " + askQuote(archiveHeadline(s), askRelayed(s))
 			}
 		}
 	}

@@ -231,7 +231,7 @@ func TestTheNarrowListTagsNamesakes(t *testing.T) {
 	}
 	m.point(sessionKey("s-webapp"))
 	press(m, "x")
-	if !strings.Contains(m.note, "3 webapp hidden") || !strings.HasSuffix(m.note, "⌁ dev:2.1") {
+	if !strings.Contains(m.note, "3 webapp is hidden") || !strings.HasSuffix(m.note, "⌁ dev:2.1") {
 		t.Errorf("the hide note should name the digit, and the pane last: %q", m.note)
 	}
 	press(m, "A")

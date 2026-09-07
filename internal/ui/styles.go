@@ -2,6 +2,7 @@ package ui
 
 import (
 	"github.com/charmbracelet/x/ansi"
+	"github.com/deephanson94/compass/internal/fleet"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -231,4 +232,20 @@ func truncateWhole(line string, n int) string {
 		return t
 	}
 	return ""
+}
+
+// askQuote is an ask the way a row quotes it: `"the prompt"`, or `relayed
+// "the prompt"` when the ask was another session's message — a word, not a
+// glyph, and outside the quotes so the quote is still the ask (#97).
+func askQuote(text string, relayed bool) string {
+	if relayed {
+		return `relayed "` + text + `"`
+	}
+	return `"` + text + `"`
+}
+
+// askRelayed says whether an archived headline is the session's relayed
+// title, rather than a state word the headline fell back to.
+func askRelayed(s fleet.Session) bool {
+	return s.Info.Relayed && s.Info.Title != "" && archiveHeadline(s) == s.Info.Title
 }

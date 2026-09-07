@@ -150,7 +150,7 @@ func TestRoundSixteenWords(t *testing.T) {
 	press(m, "A")
 	m.point(sessionKey("s-webapp"))
 	press(m, "x")
-	if !strings.HasPrefix(m.note, "3 webapp hidden · A, then x") {
+	if !strings.HasPrefix(m.note, "3 webapp is hidden · A, then x") {
 		t.Errorf("the hide note is the strip's form: %q", m.note)
 	}
 	help := strings.Join(helpKeyLinesFor(76, false), "\n")

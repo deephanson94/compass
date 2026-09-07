@@ -29,8 +29,30 @@ import "strings"
 // Matched at the start of the text only: a prompt that mentions one of these
 // is still a prompt.
 var relayPrefixes = []string{
-	"Another Claude session sent a message",
+	relayPrefix,
 	`Background agent "`,
+}
+
+// relayPrefix opens the turn that carries another session's message: the
+// one relay that is an ask — a lead telling a worker what to do next — and
+// so a prompt of a kind, worn with the word "relayed" (#97).
+const relayPrefix = "Another Claude session sent a message"
+
+// Relayed reports whether a user turn is another session's message, relayed
+// by the harness: not a person's words, but the ask the session is working
+// on, and the only ask a worker session driven by a lead ever gets.
+func (e Event) Relayed() bool {
+	return e.Type == EventUser && strings.HasPrefix(strings.TrimSpace(e.Text), relayPrefix)
+}
+
+// RelayBody is the message inside a relayed turn's envelope: what the other
+// session said, without the harness's opening words.
+func (e Event) RelayBody() string {
+	t := strings.TrimSpace(e.Text)
+	if !strings.HasPrefix(t, relayPrefix) {
+		return t
+	}
+	return strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(t, relayPrefix), ":"))
 }
 
 // compactionPreamble opens the turn that carries a summary of a conversation
@@ -47,13 +69,18 @@ func (e Event) Compaction() bool {
 }
 
 // Machinery reports whether a user turn is the harness talking to Claude
-// rather than a person talking to either.
+// rather than a person talking to either. A relayed message is neither: it
+// is another session talking, and the ask it carries opens a chapter and
+// titles the session like a person's would (#97).
 func (e Event) Machinery() bool {
 	if e.Type != EventUser {
 		return false
 	}
 	if e.IsMeta {
 		return true
+	}
+	if e.Relayed() {
+		return false
 	}
 	return EnvelopeText(e.Text)
 }
