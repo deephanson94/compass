@@ -1674,7 +1674,7 @@ func TestEmptyReturnIsNotATick(t *testing.T) {
 	if got := renderLv(tr, fixtureBase.Add(40*time.Minute), 1, 60, 24); !strings.Contains(got, "✓ 19m ago") {
 		t.Errorf("a return with a finding lost its tick:\n%s", got)
 	}
-	if help := strings.Join(helpLegendLines(90, true, true), "\n"); !strings.Contains(help, "⌀ back, empty") || !strings.Contains(help, "→3") {
+	if help := strings.Join(helpLegendLines(90, true, true, true), "\n"); !strings.Contains(help, "⌀ back, empty") || !strings.Contains(help, "→3") {
 		t.Errorf("the legend does not explain ⌀ or →N:\n%s", help)
 	}
 }
@@ -2148,7 +2148,7 @@ func TestIdleSessionsLanesAreLost(t *testing.T) {
 // The legend explains the chapter counter.
 func TestLegendExplainsChapters(t *testing.T) {
 	forceASCII(t)
-	if got := strings.Join(helpLegendLines(90, true, true), "\n"); !strings.Contains(got, "◉ 3/12") {
+	if got := strings.Join(helpLegendLines(90, true, true, true), "\n"); !strings.Contains(got, "◉ 3/12") {
 		t.Errorf("the legend does not explain the chapter counter:\n%s", got)
 	}
 }

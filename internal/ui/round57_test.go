@@ -95,3 +95,19 @@ func TestTheBandTakesItsRowsOnTheHidesOwnRoute(t *testing.T) {
 		t.Errorf("the archive's line stands over blank rows the band had the budget for:\n%s", strings.Join(lines, "\n"))
 	}
 }
+
+// A fleet of one has no board, and its legend is budgeted without the
+// board's line: at 152 the help draws `⚠ two sessions, one thing` whole
+// instead of shedding it over a blank row of its own column (#95, #92).
+func TestTheHelpsLegendSpendsTheRowsTheBoardLineLeft(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 152, 40)
+	press(m, "?")
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "board:") {
+		t.Fatalf("a fleet of one's help describes a board it has not:\n%s", view)
+	}
+	if !strings.Contains(view, "⚠ two sessions, one thing") {
+		t.Errorf("the legend sheds a definition while its own column ends blank:\n%s", view)
+	}
+}

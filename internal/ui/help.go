@@ -103,7 +103,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			left = w*3/5 - gutterWidth
 		}
 		right := w - left - gutterWidth
-		legend := helpLegendWrapped(right, true, h, o.tools) // definitions wrap into the rows that are free
+		legend := helpLegendWrapped(right, true, h, o.tools, board) // definitions wrap into the rows that are free
 		if !o.tools {
 			legend = dropToolGloss(legend)
 		}
@@ -121,7 +121,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		})
 	}
 	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, refused...), o.recent)
-	legend := helpLegendLines(w, false, o.tools)
+	legend := helpLegendLines(w, false, o.tools, board)
 	if !o.tools {
 		legend = dropToolGloss(legend)
 	}
@@ -487,21 +487,21 @@ func helpLegendRaw() []string {
 // toolGloss defines the word a row wears where the fleet runs two CLIs (#85, #89).
 const toolGloss = "        claude · opencode — which CLI runs the session, where the fleet runs two"
 
-// helpLegendFor is the legend's text for a fleet that runs two CLIs, or one:
-// a one-CLI fleet's legend is built without the tool gloss, not budgeted
-// with it and stripped after — the gloss and its wrapped tail cost a
-// 152-column legend the two rows it then left blank while a definition
-// above them was shed (#92).
-func helpLegendFor(tools bool) []string {
+// helpLegendFor is the legend's text for the fleet the help describes: a
+// one-CLI fleet's legend is built without the tool gloss, and a fleet with
+// no board without the board's line — not budgeted with them and stripped
+// after. The gloss and its wrapped tail cost a 152-column legend the two
+// rows it then left blank while a definition above them was shed (#92);
+// the board's line cost a fleet of one's the row `⚠ two sessions, one
+// thing` needed (#95). dropToolGloss and dropBoardLegend stay as the belt.
+func helpLegendFor(tools, board bool) []string {
 	raw := helpLegendRaw()
-	if tools {
-		return raw
-	}
 	kept := raw[:0]
 	for _, l := range raw {
-		if l != toolGloss {
-			kept = append(kept, l)
+		if (!tools && l == toolGloss) || (!board && strings.HasPrefix(l, "board:")) {
+			continue
 		}
+		kept = append(kept, l)
 	}
 	return kept
 }
@@ -527,9 +527,9 @@ func dropToolGloss(lines []string) []string {
 	return out
 }
 
-func helpLegendLines(w int, roomy, tools bool) []string {
+func helpLegendLines(w int, roomy, tools, board bool) []string {
 	var lines []string
-	for _, l := range helpLegendFor(tools) {
+	for _, l := range helpLegendFor(tools, board) {
 		if l == "" {
 			lines = append(lines, "")
 			continue
@@ -541,8 +541,8 @@ func helpLegendLines(w int, roomy, tools bool) []string {
 
 // helpLegendWrapped is the legend with every line that would clip re-flowed
 // onto continuation rows, hung under its glyph.
-func helpLegendWrapped(w int, roomy bool, h int, tools bool) []string {
-	raw := helpLegendFor(tools)
+func helpLegendWrapped(w int, roomy bool, h int, tools, board bool) []string {
+	raw := helpLegendFor(tools, board)
 	budget := h - len(raw) - len(legClasses) // the rows free for continuations
 	var lines []string
 	for _, l := range raw {
