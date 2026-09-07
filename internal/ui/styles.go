@@ -200,6 +200,13 @@ func clip(s string, w int) string {
 	for strings.HasSuffix(head, " -") || strings.HasSuffix(head, " --") {
 		head = strings.TrimRight(strings.TrimRight(head, "-"), " ·(./—–,;")
 	}
+	// An opening quote with nothing after it promises the words it was
+	// about to hold: `checkout-flake-hunt · "…` spent four cells on no
+	// prompt at all. The quote goes with the separator that led it, and
+	// only while it is unclosed (#80).
+	for strings.HasSuffix(head, `"`) && strings.Count(head, `"`)%2 == 1 {
+		head = strings.TrimRight(strings.TrimSuffix(head, `"`), " ·(./—–,;")
+	}
 	return head + "…"
 }
 

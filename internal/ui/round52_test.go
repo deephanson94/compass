@@ -169,7 +169,7 @@ func TestSpaceNamesWhatItUnfolded(t *testing.T) {
 		pressKey(m, k)
 		poll(m, sc)
 	}
-	if !strings.HasPrefix(m.note, "unfolded ") || !strings.Contains(m.note, "(") {
+	if !strings.HasPrefix(m.note, "unfolded ") || !strings.Contains(m.note, "(") || strings.Contains(m.note, glyphCall) {
 		t.Errorf("space should name the call it opened: %q", m.note)
 	}
 	pressKey(m, " ")
@@ -202,5 +202,20 @@ func TestAnArchivedRowSaysItsTool(t *testing.T) {
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "opencode · ") || !strings.Contains(ansi.Strip(m.headerLine(118)), "opencode") {
 		t.Errorf("the archive should say the tool on billing's row and header:\n%s\n%s", ansi.Strip(m.headerLine(118)), view)
+	}
+}
+
+// An opening quote with nothing after it goes with the mark: a band row of
+// a long name never spends cells on `· "…` (#80).
+func TestAClipNeverEndsOnAnOpeningQuote(t *testing.T) {
+	if got := clip(`checkout-flake-hunt · "the checkout suite`, 24); got != "checkout-flake-hunt…" {
+		t.Errorf("clip at 24 = %q", got)
+	}
+	if got := clip(`say "hi" · then`, 12); got != `say "hi"…` {
+		t.Errorf("a closed quote stays: %q", got)
+	}
+	m := sceneModel(sceneSecondDay(), 100, 30)
+	if view := ansi.Strip(m.View()); strings.Contains(view, `· "…`) {
+		t.Errorf("the band spends cells on an empty prompt clause:\n%s", view)
 	}
 }

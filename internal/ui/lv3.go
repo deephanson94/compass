@@ -687,7 +687,7 @@ func (m *Model) toggleFold() {
 		call := ""
 		for j := i - 1; j >= 0 && j > i-4; j-- {
 			if doc[j].kind == readerCall {
-				call = strings.TrimSpace(doc[j].text)
+				call = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(doc[j].text), glyphCall)) // the call, not its glyph (#80)
 				break
 			}
 		}
