@@ -342,10 +342,15 @@ func TestTheTagKeepsThePaneOverTheLookClause(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneTwoTools(), 120, 34)
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"opencode · ⌁ dev:2.0", "claude · ⌁ dev:1.0"} {
+	// The pane stays on the tag row; the word and model ride the row the
+	// card gave up where it did (#112), so the pane is asked for by itself.
+	for _, want := range []string{"⌁ dev:2.0", "claude · ⌁ dev:1.0", "opencode"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the 120 board should draw %q on its api column:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "· looked") && !strings.Contains(view, "⌁ dev:2.0") {
+		t.Errorf("the look clause outranked the pane:\n%s", view)
 	}
 }
 

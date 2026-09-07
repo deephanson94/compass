@@ -784,6 +784,9 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 		body + " " + dimStyle.Render(age)
 
 	lines := []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
+	if m.presentBeside(s) {
+		lines = lines[:1] // the trail beside says the present; the trace moves up (#111)
+	}
 	if !m.boardShown() && !m.archiveView && s.Live {
 		// Below the board's width the row is the column: the digest and
 		// the sent-trace ride under it, or a reply at eighty columns left
@@ -857,6 +860,18 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	return lines
 }
 
+// presentBeside says whether the row's present line is the trail's own HEAD
+// row drawn beside it: a fleet of one at eighty and a hundred stands the
+// trail beside the list, and the row's present said the sentence twice on
+// one physical row, once each side of the rule (#111, #60's shape). The
+// trail's is the survivor and the trace beneath moves up. Not under the
+// reply box, which covers the trail's row (#108's rule).
+func (m *Model) presentBeside(s fleet.Session) bool {
+	return m.liveCount() == 1 && !m.boardFits() && !m.archiveView && !m.replyBox.on && s.Live &&
+		s.Info.Key() == m.selectedKey && (s.Snap.State == state.Working || s.Snap.State == state.Stuck) &&
+		m.journeyLine(s, 200) != ""
+}
+
 // secondLine is what the session is actually doing, in the trail's own words:
 // the class of work and the tool call it is in. The two panels then describe a
 // session the same way, and the class is the same one Lv1 would draw.
@@ -918,6 +933,9 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 	// there, "wiring the filter · for 1h" below) were the first thing the
 	// second review read.
 	if line := m.journeyLine(s, w); line != "" {
+		if m.presentBeside(s) {
+			return ""
+		}
 		return line
 	}
 	// Unless the session is one you must not miss. Then the sentence that

@@ -931,8 +931,8 @@ func TestWorkingColumnHeaderSaysWhatHeadCannot(t *testing.T) {
 	tr.Legs[2].Waypoints = nil
 	tr.Branches = nil
 	m.trails[api] = tr
-	if col := m.boardColumn(api, rowFor(t, m, api), 40, 20); strings.Count(oneSpace(strings.ReplaceAll(strings.Join(col, "\n"), "▸", " ")), "● fix tokens.py") != 1 {
-		t.Errorf("a working column with no verdict says its HEAD line once, on the trail (#107):\n%s", strings.Join(col, "\n"))
+	if col := m.boardColumn(api, rowFor(t, m, api), 40, 20); !strings.Contains(col[1], "● fix    tokens.py") {
+		t.Errorf("a working column with no verdict lost its HEAD line (the board says it once, #107/#108, where the frame draws the trail):\n%s", strings.Join(col, "\n"))
 	}
 }
 

@@ -963,11 +963,11 @@ func tickRow(l journey.Leg, stroke string, width int) string {
 func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 	if l.Current {
 		if o.Head != "" {
-			if o.HeadState == state.NeedsYou && len([]rune(o.Head)) > headLabelMax(o.Width) {
+			if limit := headLabelRoom(o); o.HeadState == state.NeedsYou && len([]rune(o.Head)) > limit {
 				// Too long for the row: the row carries what fits at a word,
 				// never inside the options' brackets, and the rows beneath
 				// carry the rest.
-				return wrapQuestion(o.Head, headLabelMax(o.Width), 100)[0], false
+				return wrapQuestion(o.Head, limit, 100)[0], false
 			}
 			return o.Head, false
 		}
@@ -1004,6 +1004,18 @@ func legLabel(l journey.Leg, o TrailOpts) (string, bool) {
 // headLabelMax is the longest label HEAD's row can carry whole at a width.
 func headLabelMax(width int) int {
 	return width - trailPrefixWidth - 1 - len("waiting 10m")
+}
+
+// headLabelRoom is headLabelMax against the span the row draws — "waiting
+// 4m" — rather than the constant's: at 220 a question one cell over the
+// constant's budget wrapped inside itself and jammed its tail against the
+// options while the row had a cell to spare (#113). The constant stands
+// where the span is unknown.
+func headLabelRoom(o TrailOpts) int {
+	if o.HeadSince.IsZero() {
+		return headLabelMax(o.Width)
+	}
+	return o.Width - trailPrefixWidth - 1 - len([]rune("waiting "+relAge(o.Now, o.HeadSince)))
 }
 
 // legRow: glyph, class verb, label, and the age held at the right margin. HEAD

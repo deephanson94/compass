@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
@@ -256,7 +257,24 @@ func (m *Model) readerColumn(w, h int) []string {
 			Lane:        m.readerLane != "",
 			LaneSilence: m.laneSilenceWord(),
 		})
-		rows = append(rows, strings.Split(frame, "\n")...)
+		page := strings.Split(frame, "\n")
+		rows = append(rows, page...)
+		if len(rows) > 0 && m.anchorText != "" {
+			// The title's copy of the anchored row goes where the page
+			// draws that row and holds no other turn to tell it from:
+			// "READER · hello    add a --version flag · 17:59" stood two
+			// rows over "❯ add a --version flag    17:59" (#65).
+			turns, said := 0, ""
+			for _, l := range page {
+				if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") {
+					turns++
+					said = oneSpace(strings.TrimRight(r, " "))
+				}
+			}
+			if turns == 1 && saysSame(oneSpace(m.anchorText), said) {
+				rows[0] = m.readerTitleWith(w, false)
+			}
+		}
 	}
 	if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 && len(m.trail.Legs) == 0 && m.readerLane == "" {
 		// The reader owns the screen: no trail panel and no fleet row is
@@ -365,7 +383,13 @@ func (m *Model) readerAbove(w int) string {
 
 // readerTitle mirrors the trail's: READER · <name>, with the search state —
 // the query being typed, or the one in force — on the right.
-func (m *Model) readerTitle(w int) string {
+func (m *Model) readerTitle(w int) string { return m.readerTitleWith(w, true) }
+
+// readerTitleWith draws the title with or without the anchored row's own
+// words: where the page below draws that row and no other turn to tell it
+// from, the clause is a second copy of a line two rows under it and the
+// title keeps its clock alone (#65's record, the shape of #100 and #105).
+func (m *Model) readerTitleWith(w int, anchorClause bool) string {
 	name := "—"
 	if s, ok := m.selected(); ok {
 		name = sessionName(s.Info)
@@ -410,7 +434,7 @@ func (m *Model) readerTitle(w int) string {
 		// so a reader scrolled to an hour can tell it is the hour. The row
 		// gets whatever the name leaves, not half the panel.
 		right = m.anchorAt.Local().Format("15:04")
-		if m.anchorText != "" {
+		if m.anchorText != "" && anchorClause {
 			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
 			if note := clipQuestion(m.anchorText, room); room >= 8 && !strings.HasPrefix(name, strings.TrimSuffix(note, "…")) && !nameAndBracket(name, note) {
 				// The bracket clause whole or gone; clip marks the cut
@@ -640,6 +664,7 @@ func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
 		text = string([]rune(text)[:doc[t].dim]) // without the clock
 	}
 	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid), glyphBranch))
+	m.anchorText = strings.TrimSpace(strings.TrimPrefix(m.anchorText, strings.TrimSpace(relayMark))) // the mark is the row's, not the turn's (#109)
 	if t+1 < len(doc) && doc[t+1].kind == readerSaid && doc[t+1].event == doc[t].event {
 		m.anchorText += "…" // the first row of a wrapped turn: the cut is marked (#57)
 	}

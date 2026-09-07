@@ -186,6 +186,7 @@ type Model struct {
 	mgr      *fleet.Manager
 	feeds    *feedStore
 	runner   tmuxop.Runner
+	replyBox box // where the reply panel will land, set in View before the body (#108)
 	proc     tmuxop.Proc
 	narrator Narrator
 
@@ -2010,6 +2011,16 @@ func (m *Model) selected() (fleet.Session, bool) {
 	return m.sessions[m.selectedIndex()], true
 }
 
+// sessionByKey finds a session on the deck by its key.
+func (m *Model) sessionByKey(key string) (fleet.Session, bool) {
+	for _, s := range m.sessions {
+		if s.Info.Key() == key {
+			return s, true
+		}
+	}
+	return fleet.Session{}, false
+}
+
 // selectedPane is the tmux pane the selected session lives in, if any.
 func (m *Model) selectedPane() (tmuxop.Pane, bool) {
 	s, ok := m.selected()
@@ -2347,6 +2358,16 @@ func (m *Model) View() string {
 	}
 
 	var body []string
+	m.replyBox = box{}
+	if m.replying {
+		panel := m.replyPanel(inner)
+		left, top, cap := m.panelPlace(inner, panelWidth(panel), len(panel), false)
+		if len(panel) > cap {
+			panel = m.replyPanelN(inner, cap)
+			left, top, _ = m.panelPlace(inner, panelWidth(panel), len(panel), true)
+		}
+		m.replyBox = box{on: true, left: left, top: top, w: panelWidth(panel), h: len(panel)}
+	}
 	switch {
 	case m.showHelp:
 		// A fleet of one at any width has no board (#31): the help that
@@ -3815,4 +3836,24 @@ func fit(lines []string, h int) []string {
 // age renders the time since t, relative to the model's clock.
 func (m *Model) age(t time.Time) string {
 	return relAge(m.now, t)
+}
+
+// box is the reply panel's place on the body, remembered before the body is
+// drawn so a column can tell whether a row of its own will be covered.
+type box struct {
+	on              bool
+	left, top, w, h int
+}
+
+// panelHides says whether the reply box covers the cell at body row y in a
+// column that begins at x and is w wide.
+func (m *Model) panelHides(x, w, y int) bool {
+	b := m.replyBox
+	if !b.on {
+		return false
+	}
+	// Horizontally the row is hidden only where the box begins inside
+	// the trail's prefix — glyph and class — since a row the box starts
+	// past still draws its sentence to the left of it (#108).
+	return y >= b.top && y < b.top+b.h && x < b.left+b.w && b.left <= x+trailPrefixWidth
 }

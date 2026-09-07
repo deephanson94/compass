@@ -365,7 +365,7 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 		case transcript.EventUser:
 			text := strings.TrimSpace(ev.Text)
 			if ev.Relayed() {
-				text = ev.RelayBody() // the message, not its envelope, as the card and the trail say it (#106)
+				text = relayMark + ev.RelayBody() // the message, marked as the trail marks it (#106)
 			}
 			if text != "" {
 				d.said(i, ev.Timestamp, text)
@@ -433,6 +433,11 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 // said draws a human turn: the chevron leads it, the rest hangs under it.
 // The first row carries the turn's clock on the right, dim, so the turns
 // read as the chapters they are and `[ ]` lands on a moment with a name.
+// relayMark stands before a turn another session sent, the word the trail's
+// ◉ row wears — drawn on the row, not folded into what was said, so the
+// title and the [ ] note still quote the message.
+const relayMark = "relayed · "
+
 func (d *docBuilder) said(event int, at time.Time, text string) {
 	d.gap()
 	glyph := glyphSaid

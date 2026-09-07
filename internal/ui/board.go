@@ -248,10 +248,12 @@ func (m *Model) boardLines(w, h int) []string {
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
+		var colKeys []string
 		bw := bandWidth(w, min(len(keys)-b*n, n), cw)
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
 				cols = append(cols, column{bw, m.boardColumn(keys[i], r, bw, bh)})
+				colKeys = append(colKeys, keys[i])
 			}
 		}
 		if len(cols) == 0 {
@@ -259,6 +261,28 @@ func (m *Model) boardLines(w, h int) []string {
 		}
 		if b > 0 {
 			lines = append(lines, "")
+		}
+		// A working column shows its HEAD row anyway, so a card that fell
+		// back to the present says what a trail row below says (#107) —
+		// but only where the frame draws that row: a row the reply box
+		// covers says nothing to the person reading the board.
+		y := len(lines)
+		x := 0
+		for ci, c := range cols {
+			if len(c.rows) > 3 {
+				second := oneSpace(strings.TrimRight(ansi.Strip(c.rows[1]), " "))
+				for k := 3; k < len(c.rows) && k < bh; k++ {
+					if m.panelHides(x, c.width, y+k) {
+						continue
+					}
+					if saysSame(second, oneSpace(strings.Replace(ansi.Strip(c.rows[k]), "\u25b8", " ", 1))) {
+						c.rows[1] = ""
+						m.hoistTag(c.rows, colKeys[ci], c.width)
+						break
+					}
+				}
+			}
+			x += c.width + 3
 		}
 		lines = append(lines, joinColumns(bh, cols)...)
 	}
@@ -702,6 +726,39 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	return dimStyle.Render(clip(tail, w))
 }
 
+// hoistTag moves the rungs the tag row could not afford — the tool word and
+// its model — onto the second row the card gave up (#107), right-aligned,
+// the pane staying on the tag row so where a column lives never moves. A
+// blank row over a tag that shed the model, on a board whose question is
+// which model, answered nothing (#112).
+func (m *Model) hoistTag(rows []string, key string, w int) {
+	s, ok := m.sessionByKey(key)
+	if !ok || len(rows) < 3 || strings.TrimSpace(ansi.Strip(rows[1])) != "" {
+		return
+	}
+	tool, pane := m.toolTag(s), m.boardTag(s)
+	if tool == "" {
+		return
+	}
+	plain := strings.TrimRight(ansi.Strip(rows[2]), " ")
+	current := ""
+	if i := strings.LastIndex(plain, "  "); i >= 0 {
+		current = strings.TrimSpace(plain[i:])
+	} else {
+		current = strings.TrimSpace(plain)
+	}
+	if strings.Contains(current, tool) || lipgloss.Width(tool) > w {
+		return // the tag row already says the whole word and model
+	}
+	rows[1] = pad("", w-lipgloss.Width(tool)) + dimStyle.Render(tool)
+	if pane != "" {
+		left := strings.TrimRight(strings.TrimSuffix(plain, current), " ")
+		if lipgloss.Width(left)+2+lipgloss.Width(pane) <= w {
+			rows[2] = pad(left, w-lipgloss.Width(pane)) + dimStyle.Render(pane)
+		}
+	}
+}
+
 // boardColumn is one session's column: its two fleet rows as the header, a
 // line of air, and its trail pinned to the present. A muted session's trail
 // is drawn dim, glyphs and all: the shapes still carry the classes (SPEC §4),
@@ -777,19 +834,6 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	if m.boardMuted(s) {
 		for i, line := range lines {
 			lines[i] = dimStyle.Render(ansi.Strip(line))
-		}
-	}
-	if len(rows) == 3 {
-		// A working column shows its HEAD row anyway (columnHeader), so
-		// a card that fell back to the present said what HEAD says five
-		// rows down — at 120 and 152 the clipped copy over the whole one.
-		// #100's rule, on the board: the card says it once (#107).
-		second := oneSpace(strings.TrimRight(ansi.Strip(rows[1]), " "))
-		for _, l := range lines {
-			if saysSame(second, oneSpace(strings.Replace(ansi.Strip(l), "▸", " ", 1))) {
-				rows[1] = ""
-				break
-			}
 		}
 	}
 	return append(rows, lines...)
