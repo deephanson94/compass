@@ -779,8 +779,8 @@ func TestStuckHeadNamesTheHungCall(t *testing.T) {
 	}
 	m.point(api)
 	openTrail(m)
-	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "◍▸fix    Bash: python backfill.py --all") || !strings.Contains(oneSpace(got), "◍ fix Bash: python backfill.py --all") || !strings.Contains(got, "silent 4m") {
-		t.Errorf("the single trail's HEAD and its card are not the hung call:\n%s", got)
+	if got := strings.Join(m.trailColumn(70, 20), "\n"); !strings.Contains(got, "◍▸fix    Bash: python backfill.py --all") || strings.Count(oneSpace(strings.ReplaceAll(got, "▸", " ")), "◍ fix Bash: python backfill.py --all") != 1 || !strings.Contains(got, "silent 4m") {
+		t.Errorf("the single trail's HEAD is the hung call, said once (#100, #104):\n%s", got)
 	}
 }
 

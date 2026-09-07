@@ -1713,14 +1713,40 @@ func (m *Model) trailColumn(w, h int) []string {
 		// (#56); in the session view the trail draws HEAD three rows
 		// below in the same column, and §4 asks a line once. Where the
 		// two say the same thing the card keeps only its tag (#100).
-		second := oneSpace(ansi.Strip(rows[1]))
+		// The sentence is what stands left of the tag, and the compare
+		// is on it: a leg row draws it behind its class and before its
+		// clock, and the cursor's mark is not part of any row's sentence
+		// — comparing whole rows missed both shapes (#104).
+		plain := strings.TrimRight(ansi.Strip(rows[1]), " ")
+		second := oneSpace(plain)
+		sentence, keep := second, ""
+		if i := strings.LastIndex(plain, "  "); i > 0 {
+			sentence, keep = oneSpace(plain[:i]), strings.TrimSpace(plain[i:])
+		}
 		for _, r := range rows[2:] {
-			if t := oneSpace(ansi.Strip(r)); len(strings.Fields(t)) > 1 && strings.HasPrefix(second, t) {
-				if keep := strings.TrimSpace(strings.TrimPrefix(second, t)); keep != "" {
+			t := oneSpace(strings.Replace(ansi.Strip(r), "▸", " ", 1))
+			if len(strings.Fields(sentence)) > 1 && (strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 || strings.Contains(t, sentence)) {
+				if strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
+					keep = strings.TrimSpace(strings.TrimPrefix(second, t))
+				}
+				if keep != "" {
 					rows[1] = pad("", lipgloss.Width(rows[1])-lipgloss.Width(keep)) + dimStyle.Render(keep)
 				} else {
 					rows[1] = ""
 				}
+				break
+			}
+		}
+	}
+	if m.archiveView && !m.sessionView() && len(rows) > 2 {
+		// The archive's title carries the ask (#59) so a row is named,
+		// not its group; where the ◉ row draws that ask whole two rows
+		// below, in the same panel, the title's clipped copy named it
+		// twice, once with its quote left open. The title keeps the
+		// clause only where the viewport has scrolled off the row (#105).
+		for _, r := range rows[2:] {
+			if strings.Contains(ansi.Strip(r), glyphPrompt) {
+				rows[0] = m.trailTitleWith(w, true)
 				break
 			}
 		}
@@ -2097,10 +2123,16 @@ func relDuration(d time.Duration) string {
 
 // trailTitle: whose trail this is, and how deep we are in it.
 func (m *Model) trailTitle(w int) string {
+	return m.trailTitleWith(w, false)
+}
+
+// trailTitleWith is trailTitle with the archive's ask clause optionally
+// left off: bare names the session alone (#105).
+func (m *Model) trailTitleWith(w int, bare bool) string {
 	name := "—"
 	if s, ok := m.selected(); ok {
 		name = sessionName(s.Info)
-		if m.archiveView {
+		if m.archiveView && !bare {
 			// The archive's rows are titled by what they asked for; the
 			// project is the group header. "TRAIL · api" over a row that
 			// read "why does the nightly build take 40 minutes" named the

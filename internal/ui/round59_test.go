@@ -126,3 +126,58 @@ func TestTheArchiveRowSaysItsVerdict(t *testing.T) {
 		t.Errorf("the archive row says nothing of whether the day went red:\n%s", view)
 	}
 }
+
+// #100 on every shape of the repeat: the cursor's mark and the leg's own
+// class are not part of the sentence, so the card keeps only its tag where
+// the trail draws the sentence below it under either (#104).
+func TestTheCardLeavesThePresentToTheTrailUnderTheCursor(t *testing.T) {
+	forceASCII(t)
+	count := func(view, sentence string) int {
+		n := 0
+		for _, l := range strings.Split(view, "\n") {
+			left := strings.SplitN(l, "│", 2)[0]
+			if strings.Contains(oneSpace(strings.ReplaceAll(left, "▸", " ")), sentence) {
+				n++
+			}
+		}
+		return n
+	}
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	press(m, "2")
+	press(m, "tab")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "[session]") || !strings.Contains(view, "●▸test") {
+		t.Fatalf("not the session view with the cursor on HEAD:\n%s", view)
+	}
+	if n := count(view, "● test go test for 12m"); n != 1 {
+		t.Errorf("the column says the present %d times, want once:\n%s", n, view)
+	}
+	m = sceneModel(sceneTwoTools(), 120, 34)
+	press(m, "tab")
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "[session]") || !strings.Contains(view, "design Open port 22 to the office CIDR?") {
+		t.Fatalf("not the session view of the needs-you session:\n%s", view)
+	}
+	if n := count(view, "Open port 22 to the office CIDR?"); n != 1 {
+		t.Errorf("the column says the question %d times, want once:\n%s", n, view)
+	}
+}
+
+// The archive's title names the session alone where the ◉ row draws the
+// ask two rows below in the same panel (#105, #59).
+func TestTheArchiveTitleLeavesTheAskToThePromptRow(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 100, 30)
+	for _, k := range []string{"2", "tab", "x", "A"} { // the walkthrough's own route: api hidden, then the archive
+		pressKey(m, k)
+	}
+	view := ansi.Strip(m.View())
+	if !m.archiveView || !strings.Contains(view, "◉ \"add rate limiting") {
+		t.Fatalf("not the archive with the ◉ row drawn:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "TRAIL · ") && strings.Contains(l, "add rate limiting") {
+			t.Errorf("the title copies the ask the ◉ row draws: %q", l)
+		}
+	}
+}
