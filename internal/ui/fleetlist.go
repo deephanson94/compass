@@ -946,8 +946,22 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 		// narrow archive sheds it first.
 		line := strings.TrimPrefix(word+" · "+branchOf(s.Info), " · ")
 		if v := m.verdictClause(s); v != "" {
-			if cand := line + " · " + v; lipgloss.Width(cand) <= w {
-				line = cand
+			// The band's own ladder, not all or nothing: the counts go
+			// first, then the clause's two words, last the mark alone —
+			// so a narrow archive says green or red where it cannot say
+			// how green (#47's clause, #103's shed order, recentKeep).
+			mark := ""
+			if rs := []rune(v); len(rs) > 0 && strings.ContainsRune("✓✗⚑", rs[0]) {
+				mark = string(rs[0])
+			}
+			for _, form := range []string{v, firstWords(v, 2), mark} {
+				if form == "" {
+					continue
+				}
+				if cand := line + " · " + form; lipgloss.Width(cand) <= w {
+					line = cand
+					break
+				}
 			}
 		}
 		return dimStyle.Render(clip(line, w))

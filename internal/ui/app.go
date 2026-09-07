@@ -187,6 +187,7 @@ type Model struct {
 	feeds     *feedStore
 	runner    tmuxop.Runner
 	replyBox  box      // where the reply panel will land, set in View before the body (#108)
+	bodyRows  []string // the body as drawn, settled before the footer
 	trailRows []string // the trail column's drawn rows, settled before the fleet column
 	proc      tmuxop.Proc
 	narrator  Narrator
@@ -2389,6 +2390,7 @@ func (m *Model) View() string {
 	out = append(out, "")
 	out = append(out, body...)
 	out = append(out, rule(inner))
+	m.bodyRows = body // the footer is composed against the rows the frame drew
 	out = append(out, m.footerLine(inner))
 
 	if m.replying {
@@ -3199,6 +3201,13 @@ func (m *Model) footerWith(keys string, w int) string {
 		}
 	}
 	note := m.note
+	// The trace note's quote is the row's: where a drawn row carries the
+	// bytes that went, the footer says only where they went — the row
+	// answers "what", the note answers "where" — and the keys the note
+	// was shedding come back (#128's rule, the pane clause's own).
+	if short, ok := m.noteLeavesTheQuoteToTheRow(note); ok {
+		note = short
+	}
 	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
 	// shed is the keys with their optional fragments gone, in order, until
@@ -3865,4 +3874,43 @@ func (m *Model) panelHides(x, w, y int) bool {
 	// the trail's prefix — glyph and class — since a row the box starts
 	// past still draws its sentence to the left of it (#108).
 	return y >= b.top && y < b.top+b.h && x < b.left+b.w && b.left <= x+trailPrefixWidth
+}
+
+// noteLeavesTheQuoteToTheRow trims a trace note — `↪ sent "go on" · to ⌁
+// main:0.0` — to its destination where a row of this very frame already
+// draws the bytes. The row is the fuller copy: it keeps the quote whole
+// or clipped and its own clock, so the note's copy is never the only one.
+func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
+	if !strings.HasPrefix(note, "↪ ") || !strings.Contains(note, `"`) {
+		return note, false
+	}
+	i := strings.LastIndex(note, " · ")
+	if i <= 0 || !strings.HasPrefix(note[i+len(" · "):], "to "+mirrorMark) {
+		return note, false
+	}
+	dest := note[i+len(" · "):]
+	head := note[:strings.Index(note, `"`)]
+	head = strings.TrimSuffix(strings.TrimSpace(head), " ·")
+	short := head + " " + dest
+	if strings.HasPrefix(note, "↪ answered") {
+		short = head + " · " + dest
+	}
+	for _, row := range m.bodyRows {
+		for _, seg := range strings.Split(ansi.Strip(row), "│") {
+			t := strings.TrimSpace(seg)
+			if !strings.HasPrefix(t, "↪ ") {
+				continue
+			}
+			if k := strings.Index(t, mirrorMark); k > 0 {
+				t = strings.TrimSpace(t[:k]) // the row's right-aligned pane clause is its own
+			}
+			if j := strings.LastIndex(t, " · "); j > 0 && !strings.Contains(t[j:], `"`) {
+				t = t[:j] // the row's own clock is not the note's business
+			}
+			if saysSame(t, note) {
+				return short, true
+			}
+		}
+	}
+	return note, false
 }

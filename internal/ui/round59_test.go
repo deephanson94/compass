@@ -486,7 +486,7 @@ func TestTheArchiveReaderTitleDropsTheCursorsClock(t *testing.T) {
 	forceASCII(t)
 	sc := sceneSecondDay()
 	m := sceneModel(sc, 152, 40)
-	for _, k := range []string{"2", "tab", "tab", "["} {
+	for _, k := range []string{"2", "tab", "tab"} { // the corpus's own route: `[` parked the cursor where the clocks agree, and the pin passed on the revert
 		pressKey(m, k)
 		poll(m, sc)
 	}
@@ -659,5 +659,64 @@ func TestTheNewLegsDigestYieldsToThePaneAlone(t *testing.T) {
 		if strings.Contains(first, "new legs") && strings.Contains(first, "⌁ work:0.0") {
 			t.Errorf("the digest says the count the divider draws, over the pane: %q", first)
 		}
+	}
+}
+
+// The archive row's verdict is the band's ladder, not all or nothing: the
+// counts, the clause's two words, last the mark alone — so a narrow archive
+// says green or red where it cannot say how green (#130, #103, #47).
+func TestTheArchiveRowSaysGreenOrRed(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 100, 30)
+	pressKey(m, "A")
+	poll(m, sc)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, l := range lines {
+		col := strings.SplitN(l, "│", 2)[0]
+		if !strings.Contains(col, " ○ ") || i+1 >= len(lines) {
+			continue
+		}
+		tag := strings.SplitN(lines[i+1], "│", 2)[0]
+		if strings.TrimSpace(tag) == "" || !strings.Contains(tag, " · ") && !strings.Contains(tag, "/") {
+			continue
+		}
+		if !strings.ContainsAny(tag, "✓✗⚑") {
+			t.Errorf("the archive row says nothing about green or red: %q under %q", strings.TrimRight(tag, " "), strings.TrimRight(col, " "))
+		}
+	}
+}
+
+// The trace note leaves the quote to the row that draws it and keeps the
+// destination it alone carries; the keys the second copy cost come back (#131).
+func TestTheTraceNoteLeavesTheQuoteToTheRow(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"r", "1"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	foot := lines[len(lines)-1]
+	row := ""
+	for _, l := range lines[:len(lines)-1] {
+		for _, seg := range strings.Split(l, "│") {
+			if strings.Contains(seg, "↪ sent") {
+				row = strings.TrimSpace(seg)
+			}
+		}
+	}
+	if row == "" || !strings.Contains(foot, "↪ sent") {
+		t.Fatalf("not the frame the line landed on:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(foot, `"please continue"`) {
+		t.Errorf("the note repeats the quote the row draws: %q over %q", strings.TrimSpace(foot), row)
+	}
+	if !strings.Contains(foot, "to ⌁") {
+		t.Errorf("the note gave up the destination it alone carries: %q", strings.TrimSpace(foot))
+	}
+	if !strings.Contains(foot, "tab deeper") {
+		t.Errorf("the keys the second copy cost are still shed: %q", strings.TrimSpace(foot))
 	}
 }
