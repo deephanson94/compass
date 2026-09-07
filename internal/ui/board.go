@@ -1647,7 +1647,7 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 // toolTag is which CLI runs the session and which model last answered —
 // "claude · opus-4-1", "opencode · mock-1" — so two sessions in one
 // directory are told apart by more than a name, and a fleet of two tools
-// says which is which (#50). "" for an archived row, which is not running.
+// says which is which (#50) — live or archived, by everything compass holds (#82).
 func (m *Model) toolTag(s fleet.Session) string {
 	var parts []string
 	// One fleet, one rule: a row — live or archived — wears the word where

@@ -1767,8 +1767,12 @@ func (m *Model) sessionCard(w int) []string {
 	card := []string{first, m.cardSecond(w)}
 	if third := strings.TrimSpace(ansi.Strip(hdr[2])); third != "" && !strings.HasPrefix(third, mirrorMark) && third != "no pane" {
 		// What is new, or what was sent: the column's third row, since a
-		// fleet of one never draws the board that carries it.
-		card = append(card, "    "+m.boardDelta(m.selectedKey, m.sessions[r.sess], body-4))
+		// fleet of one never draws the board that carries it. The row is
+		// the delta's, so the delta decides it: a column whose third line
+		// is the tool tag drew an empty row here (#84).
+		if delta := m.boardDelta(m.selectedKey, m.sessions[r.sess], body-4); strings.TrimSpace(ansi.Strip(delta)) != "" {
+			card = append(card, "    "+delta)
+		}
 	}
 	return card
 }

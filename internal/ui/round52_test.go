@@ -315,3 +315,22 @@ func TestTheCompactHelpNamesWhatThePageKeysPage(t *testing.T) {
 		}
 	}
 }
+
+// The card's third row is the delta's: a column whose third line is the
+// tool tag draws no empty row under the card (#84).
+func TestTheCardDrawsNoEmptyRowForATagLine(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	card := m.sessionCard(52)
+	for i, row := range card {
+		if strings.TrimSpace(ansi.Strip(row)) == "" {
+			t.Errorf("card row %d is empty:\n%s", i, strings.Join(card, "\n"))
+		}
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i := 3; i < 12 && i < len(lines); i++ {
+		if strings.TrimSpace(strings.TrimRight(lines[i], "│ ")) == "" && strings.Contains(lines[i-1], "⌁ main") {
+			t.Errorf("an empty row under the card's tag line at %d:\n%s", i, strings.Join(lines[:14], "\n"))
+		}
+	}
+}
