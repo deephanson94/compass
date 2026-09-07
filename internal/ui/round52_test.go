@@ -491,10 +491,17 @@ func TestTheBoardAlwaysDrawsTheSelectedSession(t *testing.T) {
 // A ship leg's label never ends inside a bracket it opened (#90).
 func TestALegLabelNeverEndsInsideAnOpenBracket(t *testing.T) {
 	forceASCII(t)
-	m := sceneModel(sceneSecondDay(), 80, 24)
-	pressTab(m)
-	press(m, "6") // cli, whose ship leg is "add --json to every command (commit)"
-	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"A", "8"} { // the archive's cli, whose ship leg is "add --json to every command (commit)"
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "◆ ship") {
+		t.Fatalf("the route draws no ship row:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
 		if strings.Contains(l, "◆ ship") && strings.Contains(l, "(c…") {
 			t.Errorf("a ship label cut inside its bracket: %q", l)
 		}
@@ -517,5 +524,30 @@ func TestTheCardsBareToolWordYieldsToTheTrace(t *testing.T) {
 	}
 	if strings.Contains(view, "↪ sent \"please continue\"     claude") || (strings.Contains(view, "↪ sent") && !strings.Contains(view, "0s ago")) {
 		t.Errorf("the trace lost its clock to a word the header says:\n%s", view)
+	}
+}
+
+// A hidden live session's archive row draws the model where the frame's
+// header shed it: the fact is on no other row and behind no key (#91).
+func TestTheHiddenRowDrawsTheModelTheHeaderShed(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 80, 24)
+	press(m, "2")
+	press(m, "x")
+	press(m, "A")
+	view := ansi.Strip(m.View())
+	head := ansi.Strip(m.headerLine(78))
+	if strings.Contains(head, "sonnet-4-5") {
+		t.Skip("the header carries the model here; nothing to pin")
+	}
+	if !strings.Contains(view, "opencode · sonnet-4-5 · main") {
+		t.Errorf("the hidden row should draw the model the header shed:\n%s\n%s", head, view)
+	}
+	wide := sceneModel(sceneTwoTools(), 120, 34)
+	press(wide, "2")
+	press(wide, "x")
+	press(wide, "A")
+	if v := ansi.Strip(wide.View()); !strings.Contains(v, "opencode · ⌁ dev:2.0 · main") {
+		t.Errorf("where the header says the model the row keeps its pane:\n%s", v)
 	}
 }

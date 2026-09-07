@@ -861,7 +861,16 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 			word = " · " + strings.SplitN(tool, " · ", 2)[0]
 		}
 		if pane, ok := m.panes[s.Info.Key()]; ok && s.Live && pane.Target != "" {
-			return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+mirrorMark+" "+pane.Target, " · ")+" · "+branchOf(s.Info), w))
+			addr := mirrorMark + " " + pane.Target
+			if model := shortModel(s.Info.Model); model != "" && word != "" && s.Info.Key() == m.selectedKey && !strings.Contains(m.headerLine(m.width), model) {
+				// The header of this very frame carries the pane and has
+				// shed the model (#62): the row draws the fact the frame
+				// has nowhere else (#91).
+				if cand := strings.TrimPrefix(word+" · "+model, " · ") + " · " + branchOf(s.Info); lipgloss.Width(cand) <= w {
+					addr = model
+				}
+			}
+			return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+addr, " · ")+" · "+branchOf(s.Info), w))
 		}
 		if s.Live {
 			return dimStyle.Render(clip(strings.TrimPrefix(word+" · no pane", " · ")+" · "+branchOf(s.Info), w))
