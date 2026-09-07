@@ -167,7 +167,7 @@ func TestLanesBackAreCountedByTheirReturn(t *testing.T) {
 func TestTheDigestNamesItsScopeWhereItCostsNoClause(t *testing.T) {
 	forceASCII(t)
 	wide := sceneModel(sceneSubagents(), 220, 48)
-	if view := ansi.Strip(wide.View()); !strings.Contains(view, "↳ 1 back since, empty · 1 new leg") {
+	if view := ansi.Strip(wide.View()); !strings.Contains(view, "↳ 1 back since, empty") {
 		t.Errorf("at 220 the digest should name its scope:\n%s", view)
 	}
 	narrow := sceneModel(sceneSubagents(), 80, 24)

@@ -850,14 +850,13 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 				return ""
 			}
 			d := m.boardDelta(s.Info.Key(), s, room)
-			if m.countBeside(s, d) {
-				// The trail beside this row draws the divider the count
-				// counts from (#117, #129 on the board): the row is the
-				// board's column here, so the digest yields its cells to
-				// the ladder — the model, which is nowhere else on the row.
-				return ""
-			}
-			return d
+			// The trail beside this row draws the divider the count
+			// counts from (#117, #129 on the board): the row is the
+			// board's column here, so the count yields its cells to the
+			// ladder — the model, which is nowhere else on the row. The
+			// clause goes whether or not it is alone (#142's shape): the
+			// row keeps every clause the divider does not draw.
+			return m.countLessBeside(s, d)
 		}
 		tag = tagBesideDigest(ladder, w-4, delta)
 		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && strings.Contains(m.headerLine(m.width), " · "+s.Info.ToolName()) {
@@ -892,8 +891,15 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 // the look clause the divider carries comes off first (#136). Not under
 // the reply box, which covers the trail's rows (#108).
 func (m *Model) countBeside(s fleet.Session, digest string) bool {
+	return strings.TrimSpace(ansi.Strip(digest)) != "" && m.countLessBeside(s, digest) == ""
+}
+
+// countLessBeside is this row's digest less the clauses the trail beside it
+// draws with its own read-line — the look (#136) and the count (#129) —
+// and the digest whole where no such rule stands beside it.
+func (m *Model) countLessBeside(s fleet.Session, digest string) string {
 	if m.replyBox.on || m.archiveView || s.Info.Key() != m.selectedKey {
-		return false
+		return digest
 	}
 	divider := ""
 	for _, r := range m.trailRows {
@@ -903,13 +909,32 @@ func (m *Model) countBeside(s fleet.Session, digest string) bool {
 		}
 	}
 	if divider == "" {
-		return false
+		return digest
 	}
 	d := strings.TrimSpace(ansi.Strip(digest))
+	cut := false
 	if lk := lookRe.FindStringSubmatch(d); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
-		d = strings.TrimSuffix(d, lk[0])
+		d, cut = strings.TrimSuffix(d, lk[0]), true
 	}
-	return newLegsOnly.MatchString(d)
+	for i, c := range strings.Split(d, " · ") {
+		if !newLegsClause.MatchString(c) {
+			continue
+		}
+		parts := strings.Split(d, " · ")
+		rest := append(append([]string{}, parts[:i]...), parts[i+1:]...)
+		if strings.HasPrefix(c, "↳ ") && i < len(rest) && !strings.HasPrefix(rest[i], "↳ ") {
+			rest[i] = "↳ " + rest[i]
+		}
+		d, cut = strings.Join(rest, " · "), true
+		break
+	}
+	if !cut {
+		return digest
+	}
+	if d == "" {
+		return ""
+	}
+	return dimStyle.Render(d)
 }
 
 // verdictRe is the newest verdict a row rides beside the present (#125).

@@ -3913,8 +3913,22 @@ func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
 			if k := strings.Index(t, mirrorMark); k > 0 {
 				t = strings.TrimSpace(t[:k]) // the row's right-aligned pane clause is its own
 			}
-			if j := strings.LastIndex(t, " · "); j > 0 && !strings.Contains(t[j:], `"`) {
-				t = t[:j] // the row's own clock is not the note's business
+			if k := strings.LastIndex(t, "  "); k > 0 && strings.Contains(t[:k], `"`) {
+				// Where the fleet runs two tools the row's right-aligned
+				// clause is the tool word, not a pane (#50): it is the
+				// row's own either way, and the bytes are still drawn.
+				t = strings.TrimSpace(t[:k])
+			}
+			for {
+				j := strings.LastIndex(t, " · ")
+				if j <= 0 || strings.Contains(t[j:], `"`) {
+					break
+				}
+				// The row's own clock — and the count its divider draws
+				// beneath it (#129) — are not the note's business. The
+				// trim stops at the quote: a row that draws no bytes is
+				// never trimmed into one that seems to (#131).
+				t = t[:j]
 			}
 			if saysSame(t, note) {
 				return short, true

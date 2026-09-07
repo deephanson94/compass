@@ -1740,13 +1740,20 @@ func (m *Model) trailColumn(w, h int) []string {
 	}
 	if h > len(rows) {
 		body := trailRows(m.trail, m.trailOpts(w, h-len(rows)))
-		if m.sessionView() && len(rows) > 2 && countBeside(rows[2], body) {
-			// The card's digest is the count and the look the trail's own
-			// read-line draws a few rows below, in this same column: the
-			// row said nothing else, so it goes and the trail takes it
-			// (#117, #129, #136 — the card over its own trail).
-			rows = rows[:2]
-			body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+		if m.sessionView() && len(rows) > 2 {
+			// The count and the look are the trail's own read-line's, a
+			// few rows below in this same column: they go whether or not
+			// the row says anything else (#142's shape for the count).
+			// Where nothing is left the row goes and the trail takes it
+			// (#117, #129, #136, #144 — the card over its own trail).
+			if left, over := countLessBeside(rows[2], body); over {
+				if strings.TrimSpace(left) == "" {
+					rows = rows[:2]
+					body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+				} else if left != strings.TrimSpace(ansi.Strip(rows[2])) {
+					rows[2] = "    " + dimStyle.Render(left)
+				}
+			}
 		}
 		rows = append(rows, body...)
 	}
@@ -2298,6 +2305,17 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 // clause the divider carries (#136) — that a "you were here" rule among
 // the rows below draws itself. The match is strict (#135).
 func countBeside(row string, below []string) bool {
+	left, ok := countLessBeside(row, below)
+	return ok && strings.TrimSpace(left) == ""
+}
+
+// countLessBeside is the card's third row with the clauses the read-line
+// below it draws taken off — the count (#129) and the look (#136) — and
+// whether that row stood over such a rule at all. The clauses go whether
+// or not what is left of the row is empty, as #142 has it for the look:
+// where nothing is left the row goes and the trail takes it (#144), and
+// where the trace is left it keeps the row.
+func countLessBeside(row string, below []string) (string, bool) {
 	divider := ""
 	for _, r := range below {
 		if p := oneSpace(ansi.Strip(r)); strings.Contains(p, "you were here") {
@@ -2306,11 +2324,24 @@ func countBeside(row string, below []string) bool {
 		}
 	}
 	if divider == "" {
-		return false
+		return row, false
 	}
 	d := strings.TrimSpace(ansi.Strip(row))
 	if lk := lookRe.FindStringSubmatch(d); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
 		d = strings.TrimSuffix(d, lk[0])
 	}
-	return newLegsOnly.MatchString(d)
+	parts := strings.Split(d, " · ")
+	for i, c := range parts {
+		if !newLegsClause.MatchString(c) {
+			continue
+		}
+		rest := append(append([]string{}, parts[:i]...), parts[i+1:]...)
+		// The mark opens the digest's clauses: where the count carried it
+		// and another clause of the same group follows, the mark goes on.
+		if strings.HasPrefix(c, "↳ ") && i < len(rest) && !strings.HasPrefix(rest[i], "↳ ") {
+			rest[i] = "↳ " + rest[i]
+		}
+		return strings.Join(rest, " · "), true
+	}
+	return d, true
 }

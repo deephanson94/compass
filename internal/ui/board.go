@@ -821,16 +821,27 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 	// leg", is not yielded: the divider draws neither of its clauses (#135).
 	if lk := lookRe.FindStringSubmatch(digest); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
 		digest = strings.TrimSuffix(digest, lk[0])
-		if !newLegsOnly.MatchString(digest) {
-			// The count is not alone, so the row keeps its other
-			// clauses — less the age, which its own divider draws below
-			// it word for word (#85, #136).
-			rows[2] = pad(dimStyle.Render(digest), w-lipgloss.Width(current)) + dimStyle.Render(current)
-			return
-		}
 	}
 	if !newLegsOnly.MatchString(digest) {
-		return
+		// The count is not alone. It is still the divider's own words,
+		// so the clause goes and the row keeps the clauses the divider
+		// does not draw — the shape #142 gave the look (#129, #136).
+		parts := strings.Split(digest, " · ")
+		for i, c := range parts {
+			if !newLegsClause.MatchString(c) {
+				continue
+			}
+			rest := append(append([]string{}, parts[:i]...), parts[i+1:]...)
+			if strings.HasPrefix(c, "↳ ") && i < len(rest) && !strings.HasPrefix(rest[i], "↳ ") {
+				rest[i] = "↳ " + rest[i]
+			}
+			parts = rest
+			break
+		}
+		if kept := strings.Join(parts, " · "); kept != "" {
+			rows[2] = pad(dimStyle.Render(kept), w-lipgloss.Width(current)) + dimStyle.Render(current)
+			return
+		}
 	}
 	s, ok := m.sessionByKey(key)
 	if !ok {
@@ -861,7 +872,9 @@ func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
 // lookRe is the look clause the digest may end on (#136).
 var (
 	newLegsOnly = regexp.MustCompile(`^↳ [0-9]+ new legs?$`)
-	lookRe      = regexp.MustCompile(` · looked ([0-9]+[a-z0-9]*) ago$`)
+	// newLegsClause is that same count as one clause of a longer row (#142).
+	newLegsClause = regexp.MustCompile(`^(↳ )?[0-9]+ new legs?$`)
+	lookRe        = regexp.MustCompile(` · looked ([0-9]+[a-z0-9]*) ago$`)
 )
 
 // hoistTag moves the rungs the tag row could not afford — the tool word and

@@ -957,7 +957,7 @@ func TestTheDigestDropsTheLookItsDividerDrawsAnyway(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(view, "↳ 1 new leg · 1 red") || !strings.Contains(view, "↳ 2 new legs · 1 ship") {
+	if !strings.Contains(view, "↳ 1 red") || !strings.Contains(view, "↳ 1 ship") {
 		t.Errorf("a clause the divider does not draw left the row:\n%s", view)
 	}
 }
@@ -1085,4 +1085,80 @@ func TestAScrolledColumnNeverOpensOnAir(t *testing.T) {
 		}
 	}
 	t.Fatalf("the list is not scrolled:\n%s", strings.Join(lines, "\n"))
+}
+
+// The note leaves the bytes to a row that says more: the row's right-aligned
+// clause may be the tool word a two-tool fleet gives it, not a pane, and it
+// may carry two trailing clauses — the compare takes both off (#149, #131).
+func TestTheNoteLeavesTheBytesToARowThatSaysMore(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"j", "r", "t", "go on", "enter"} { // api, a typed reply, sent
+			pressKey(m, k)
+		}
+		lines := strings.Split(ansi.Strip(m.View()), "\n")
+		foot, body := "", false
+		for i, l := range lines {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+				continue
+			}
+			if i < len(lines)-3 && strings.Contains(l, `sent "go on"`) {
+				body = true
+			}
+		}
+		if !body {
+			t.Fatalf("at %dx%d no row draws the bytes:\n%s", size[0], size[1], strings.Join(lines, "\n"))
+		}
+		if strings.Contains(foot, `"go on"`) {
+			t.Errorf("at %dx%d the note says the bytes a row above draws: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+	}
+}
+
+// The card's third row keeps its trace and leaves the count and the look
+// to its own read-line six rows below (#150, #144, #142).
+func TestTheCardsCountGoesBesideItsTrace(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, k := range []string{"j", "r", "t", "go on", "enter", "tab"} { // api, a typed reply, sent, then its card
+			pressKey(m, k)
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "sent \"go on\"") || !strings.Contains(view, "you were here · 25m ago") {
+			t.Fatalf("at %dx%d not the sent card over its own divider:\n%s", size[0], size[1], view)
+		}
+		for _, l := range strings.Split(view, "\n") {
+			left := strings.SplitN(l, "│", 2)[0]
+			if !strings.Contains(left, "sent \"go on\"") {
+				continue
+			}
+			if strings.Contains(left, "new leg") {
+				t.Errorf("at %dx%d the card's trace row draws the count its own read-line draws: %q", size[0], size[1], strings.TrimSpace(left))
+			}
+			if strings.Contains(left, "looked 25m ago") {
+				t.Errorf("at %dx%d the card's trace row draws the look its own read-line draws: %q", size[0], size[1], strings.TrimSpace(left))
+			}
+		}
+	}
+}
+
+// On the board the count clause goes whether or not it stands alone — the
+// divider's own words (#151, #129, #142); the clauses the divider does not
+// draw stay, the `↳` moving on to them.
+func TestTheBoardsCountGoesWithOtherClauses(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneManyIdle(), 220, 48)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "you were here") {
+		t.Fatalf("no divider on the board:\n%s", view)
+	}
+	if strings.Contains(view, "new leg · 1 red") || strings.Contains(view, "new legs · 1 ship") {
+		t.Errorf("a column's tag row says the count its divider draws beside its other clauses:\n%s", view)
+	}
+	if !strings.Contains(view, "↳ 1 red") || !strings.Contains(view, "↳ 1 ship") {
+		t.Errorf("a clause the divider does not draw left the row:\n%s", view)
+	}
 }
