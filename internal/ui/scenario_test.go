@@ -171,7 +171,11 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 		evs = append(evs, ev)
 	}
 	for _, p := range tr.Prompts {
-		add(transcript.Event{Type: transcript.EventUser, Timestamp: p.At, Text: p.Text})
+		text := p.Text
+		if p.Relayed {
+			text = "Another Claude session sent a message: " + p.Text // the line the transcript holds (#106)
+		}
+		add(transcript.Event{Type: transcript.EventUser, Timestamp: p.At, Text: text})
 	}
 	for i, l := range tr.Legs {
 		id := fmt.Sprintf("toolu_%d", i)

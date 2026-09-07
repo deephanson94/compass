@@ -779,6 +779,19 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 			lines[i] = dimStyle.Render(ansi.Strip(line))
 		}
 	}
+	if len(rows) == 3 {
+		// A working column shows its HEAD row anyway (columnHeader), so
+		// a card that fell back to the present said what HEAD says five
+		// rows down — at 120 and 152 the clipped copy over the whole one.
+		// #100's rule, on the board: the card says it once (#107).
+		second := oneSpace(strings.TrimRight(ansi.Strip(rows[1]), " "))
+		for _, l := range lines {
+			if saysSame(second, oneSpace(strings.Replace(ansi.Strip(l), "▸", " ", 1))) {
+				rows[1] = ""
+				break
+			}
+		}
+	}
 	return append(rows, lines...)
 }
 

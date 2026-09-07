@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"time"
+
+	"github.com/deephanson94/compass/internal/transcript"
 	"strings"
 	"testing"
 
@@ -179,5 +182,43 @@ func TestTheArchiveTitleLeavesTheAskToThePromptRow(t *testing.T) {
 		if strings.Contains(l, "TRAIL · ") && strings.Contains(l, "add rate limiting") {
 			t.Errorf("the title copies the ask the ◉ row draws: %q", l)
 		}
+	}
+}
+
+// The reader draws a relayed ask the way the card and the trail do: the
+// message, not the harness's envelope (#106, #97).
+func TestTheReaderDrawsARelayedAskWithoutItsEnvelope(t *testing.T) {
+	at := time.Date(2026, 9, 7, 17, 48, 0, 0, time.UTC)
+	ev := []transcript.Event{{Type: transcript.EventUser, Timestamp: at,
+		Text: "Another Claude session sent a message: the encoder is in, run the gates"}}
+	var said string
+	for _, l := range readerDoc(ev, ReaderOpts{Width: 60}) {
+		if strings.HasPrefix(l.text, glyphSaid) {
+			said = l.text
+			break
+		}
+	}
+	if strings.Contains(said, "Another Claude session") || !strings.Contains(said, "the encoder is in") {
+		t.Errorf("the reader draws the envelope, not the ask: %q", said)
+	}
+}
+
+// On the board a column says its HEAD once: the card's fallback present is
+// the trail's HEAD row five rows down, and the card leaves it there (#107).
+func TestTheBoardCardSaysHeadOnce(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneFleetHygiene(), 152, 40)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "pytest tests/gates") {
+		t.Fatalf("porter's column draws no HEAD:\n%s", view)
+	}
+	n := 0
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(oneSpace(l), "test pytest tests/g") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("porter's column says HEAD %d times, want once:\n%s", n, view)
 	}
 }

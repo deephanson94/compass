@@ -14,7 +14,7 @@
                                        │ ● fix    tokens.py             for 3m │
 
   4 ○ tfstate                  unread  15m │  5 ○ scratch                  unread  22m
-     build state.tf                        │     ◆ scout  try the streaming api
+                                           │     ◆ scout  try the streaming api
                                  ⌁ ops:0.0 │                                   no pane
  ◉ "reconcile the state file"      37m ago │ ◉ "try the streaming api"         23m ago
  ╷                                         │

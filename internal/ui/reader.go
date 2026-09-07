@@ -363,7 +363,11 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 		}
 		switch ev.Type {
 		case transcript.EventUser:
-			if text := strings.TrimSpace(ev.Text); text != "" {
+			text := strings.TrimSpace(ev.Text)
+			if ev.Relayed() {
+				text = ev.RelayBody() // the message, not its envelope, as the card and the trail say it (#106)
+			}
+			if text != "" {
 				d.said(i, ev.Timestamp, text)
 				spoke = true
 			}

@@ -1698,6 +1698,24 @@ func relAge(now, t time.Time) string {
 	return state.ShortDuration(now.Sub(t))
 }
 
+// saysSame reports whether a trail row says the card's sentence: the
+// sentence stands in the row whole, or — the card's copy clipped where the
+// trail's is whole (#107) — the row begins with what stands before the
+// mark and ends with what stands after it.
+func saysSame(sentence, row string) bool {
+	if len(strings.Fields(sentence)) < 2 {
+		return false
+	}
+	if strings.Contains(row, sentence) {
+		return true
+	}
+	pre, post, cut := strings.Cut(sentence, "…")
+	if !cut || len(strings.Fields(pre)) < 2 {
+		return false
+	}
+	return strings.HasPrefix(row, pre) && strings.HasSuffix(row, strings.TrimSpace(post))
+}
+
 // trailColumn is the deck's right-hand panel: the title, one line of air, and
 // the graph.
 func (m *Model) trailColumn(w, h int) []string {
@@ -1725,7 +1743,7 @@ func (m *Model) trailColumn(w, h int) []string {
 		}
 		for _, r := range rows[2:] {
 			t := oneSpace(strings.Replace(ansi.Strip(r), "▸", " ", 1))
-			if len(strings.Fields(sentence)) > 1 && (strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 || strings.Contains(t, sentence)) {
+			if saysSame(sentence, t) || strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
 				if strings.HasPrefix(second, t) && len(strings.Fields(t)) > 1 {
 					keep = strings.TrimSpace(strings.TrimPrefix(second, t))
 				}
