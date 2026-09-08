@@ -1004,8 +1004,11 @@ const digestFloor = 11
 // row drawn beside it: a fleet of one at eighty and a hundred stands the
 // trail beside the list, and the row's present said the sentence twice on
 // one physical row, once each side of the rule (#111, #60's shape). The
-// trail's is the survivor and the trace beneath moves up. Not under the
-// reply box, which covers the trail's row (#108's rule).
+// trail's is the survivor and the trace beneath moves up. The compare is
+// against the rows the frame draws (#108, #207): the box says the sentence
+// under its own head, and past its bottom edge the trail's own rows still
+// stand — a box thirteen rows tall over a twenty-five-row body leaves the
+// HEAD row on the frame, and the row beside it then said it twice.
 func (m *Model) presentBeside(s fleet.Session, line string) bool {
 	// Any state, not only the working ones: an idle row whose verdict is
 	// empty falls back to its last leg's label, and that is the trail's
@@ -1026,9 +1029,16 @@ func (m *Model) presentBeside(s fleet.Session, line string) bool {
 			said = append(said, oneSpace(strings.Trim(ansi.Strip(r), "│┌┐└┘─ ")))
 		}
 		box := strings.Join(said, " ")
-		return saysSame(sentence, box) || saysSame(bare, box)
+		if saysSame(sentence, box) || saysSame(bare, box) {
+			return true
+		}
 	}
 	for i, r := range m.trailRows {
+		if m.boxCoversRow(i) {
+			// The box stands on this trail row: what it says is under
+			// the box and the row beside it is the only copy (#108).
+			continue
+		}
 		// The trail's cursor stands between the glyph and the class on
 		// HEAD's own row at Lv2 — "●▸test" — and the mark is not part of
 		// the row's sentence (#104, #127).
@@ -1039,6 +1049,14 @@ func (m *Model) presentBeside(s fleet.Session, line string) bool {
 		}
 	}
 	return false
+}
+
+// boxCoversRow says whether the reply box stands on the trail column's row
+// i. #111's compare is against the rows the frame draws (#108, #207): a
+// trail row the box leaves standing is on the frame, and the row beside it
+// saying the same sentence says it twice.
+func (m *Model) boxCoversRow(i int) bool {
+	return m.replyBox.on && i >= m.replyBox.top && i < m.replyBox.top+m.replyBox.h
 }
 
 // presentBesideRow answers the same question for entryLines, which has the

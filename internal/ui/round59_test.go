@@ -3398,3 +3398,86 @@ func TestTheCardYieldsThePaneTheHeaderDrawsToTheClock(t *testing.T) {
 		}
 	}
 }
+
+// Round 79, fleet hygiene. #111's compare is against the rows the frame
+// draws, box and all (#108, #207). `presentBeside` asked the box's own
+// rows and stopped there whenever the box was up — "the box covers the
+// trail's row" — but the box covers only the rows it stands on. On
+// `many-idle` at a hundred the box is thirteen rows of a twenty-five-row
+// body and the trail's HEAD row is two rows under its bottom edge, so the
+// deck drew the same present twice: whole in the trail
+// (`● build  Wiring the filter into the loader        for 1h`) and cut in
+// the list row beside it (`● build  Wiring the filter…  for 1h`), which is
+// the harm #111 folded. The trail row the box leaves standing is on the
+// frame; only the rows under the box are not.
+//
+// Both sides: where the box does stand on the trail's row — the same
+// scene at eighty, and `second-day` at a hundred, where the box covers the
+// trail whole — the row keeps its present, because there it is the only
+// copy.
+func TestTheRowLeavesThePresentToTheTrailTheBoxLeavesStanding(t *testing.T) {
+	forceASCII(t)
+	press := func(m *Model, sc scene, keys ...string) {
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+	}
+
+	// The trail row the box leaves standing: the row beside it must not
+	// say the same sentence a second time, cut.
+	sc := sceneManyIdle()
+	m := sceneModel(sc, 100, 30)
+	press(m, sc, "r")
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	whole, cut := 0, 0
+	for _, l := range rows {
+		for _, cell := range strings.Split(l, "│") {
+			c := oneSpace(strings.TrimSpace(cell))
+			if strings.HasPrefix(c, "● build Wiring the filter into the loader") {
+				whole++
+			}
+			if strings.HasPrefix(c, "● build Wiring the filter…") {
+				cut++
+			}
+		}
+	}
+	if whole != 1 {
+		t.Errorf("many-idle 100x30 under the box: the trail's present stands %d times, want once:\n%s",
+			whole, strings.Join(rows, "\n"))
+	}
+	if cut != 0 {
+		t.Errorf("many-idle 100x30 under the box: the row repeats, cut, the present the trail draws whole two rows under the box:\n%s",
+			strings.Join(rows, "\n"))
+	}
+
+	// The row the compare frees belongs to a session, not to air (#43,
+	// #111): the list draws one more of the twelve and its count falls.
+	view := oneSpace(ansi.Strip(m.View()))
+	if !strings.Contains(view, "5 ○ mobile") {
+		t.Errorf("the freed row was not given to a session:\n%s", ansi.Strip(m.View()))
+	}
+	if !strings.Contains(view, "▾ 7 more below · j") {
+		t.Errorf("the list's own count did not follow the row it gained:\n%s", ansi.Strip(m.View()))
+	}
+
+	// The other side: the box on the trail's own row, and the row's copy
+	// is the only one on the frame.
+	for _, tc := range []struct {
+		name     string
+		sc       scene
+		w, h     int
+		sentence string
+	}{
+		{"many-idle", sceneManyIdle(), 80, 24, "● build Wiring the…"},
+		{"second-day", sceneSecondDay(), 100, 30, "● scout thinking… for 40s"},
+	} {
+		mm := sceneModel(tc.sc, tc.w, tc.h)
+		press(mm, tc.sc, "r")
+		view := oneSpace(ansi.Strip(mm.View()))
+		if !strings.Contains(view, tc.sentence) {
+			t.Errorf("%s %dx%d: the row gave up the present the box stands on, so the frame says it nowhere:\n%s",
+				tc.name, tc.w, tc.h, ansi.Strip(mm.View()))
+		}
+	}
+}
