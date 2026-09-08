@@ -958,6 +958,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.note = fmt.Sprintf("no session %d", i+1)
+			shown, drawn := m.selected()
 			for _, s := range m.sessions {
 				if s.Live && m.hidden[s.Info.Key()] && m.digits[s.Info.Key()] == i+1 && !m.archiveView {
 					// The digit is a hidden session's: the refusal names
@@ -966,6 +967,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if pane, ok := m.panes[s.Info.Key()]; ok && m.sharesTmux(s) {
 						m.note += " · " + mirrorMark + " " + pane.Target // the hide note's own form (#62)
 					}
+				}
+				if s.Live && m.archiveView && drawn && s.Info.Key() == shown.Info.Key() && m.digits[s.Info.Key()] == i+1 {
+					// In the archive the digits are the archive's own
+					// (#32), so a live session's digit finds no row here
+					// — but "no session 1" denies a session this very
+					// frame has selected, is drawing the trail of, and
+					// offers `enter attach` for, and that the board one
+					// `esc` away calls `1 hello`. The refusal names it
+					// and says where it is, as the hidden twin one
+					// branch above does (#57); the footer's `A fleet` is
+					// the way, so the note does not buy the key twice.
+					m.note = fmt.Sprintf("%d %s is live", i+1, sessionName(s.Info))
 				}
 			}
 		}

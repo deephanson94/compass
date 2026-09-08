@@ -6695,3 +6695,121 @@ func r87fhPinAt(sc scene, w, h, n int) *Model {
 	}
 	return m
 }
+
+// r87sdFoot is the last row of a frame, ansi stripped.
+func r87sdFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// r87sdArchiveOnNothing puts the deck where a fleet query matches nothing
+// archived and the archive is then opened: the list draws no row, and the
+// selection the frame keeps drawing is the live session it was on.
+func r87sdArchiveOnNothing(sc scene, w, h int) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{"/", "pytest", "enter", "A"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheArchiveDoesNotDenyTheLiveRowItIsDrawing pins round eighty-seven's
+// second-day one thing.
+//
+// With a fleet query nothing archived matches, `A` opens an archive that
+// draws no row — and the deck keeps the live session selected: the header
+// names it, the trail beside it draws it, and the footer offers
+// `enter attach` for its pane. Pressing that session's own digit, the one
+// the fleet gives it for life (SPEC §4, #32, assignDigits), answered
+// `no session 1` about the very row on the frame, one `esc` from a board
+// that calls it `1 hello`.
+//
+// The refusal names it instead, as the hidden session's twin one branch
+// above already does (#57): `1 hello is live`.
+func TestTheArchiveDoesNotDenyTheLiveRowItIsDrawing(t *testing.T) {
+	forceASCII(t)
+	for _, sc := range []scene{sceneSecondDay(), sceneFewOngoing(), sceneManyIdle()} {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+				m := r87sdArchiveOnNothing(sc, wh[0], wh[1])
+				if !m.archiveView {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: `A` did not open the archive", sc.name, wh[0], wh[1])
+				}
+				s, ok := m.selected()
+				if !ok || !s.Live {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the empty archive is not drawing a live row", sc.name, wh[0], wh[1])
+				}
+				d := m.digits[s.Info.Key()]
+				if d < 1 || d > 9 {
+					lipgloss.SetColorProfile(old)
+					continue
+				}
+				// The frame is drawing this session: its name is in the
+				// header row, whatever the digit clause does.
+				head := ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+				if !strings.Contains(head, sessionName(s.Info)) {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the header does not name the row the archive is drawing: %q",
+						sc.name, wh[0], wh[1], head)
+				}
+				pressKey(m, fmt.Sprintf("%d", d))
+				poll(m, sc)
+				foot := r87sdFoot(m)
+				if strings.Contains(foot, fmt.Sprintf("no session %d", d)) {
+					t.Errorf("%s %dx%d (%v): `%d` denied the live row the frame is drawing: %q",
+						sc.name, wh[0], wh[1], prof, d, foot)
+				}
+				want := fmt.Sprintf("%d %s is live", d, sessionName(s.Info))
+				if !strings.Contains(foot, want) {
+					t.Errorf("%s %dx%d (%v): the refusal does not name %q: %q",
+						sc.name, wh[0], wh[1], prof, want, foot)
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	// The three other sides, at 120 where each is on a frame.
+	sc := sceneSecondDay()
+	// A digit no session of any kind wears keeps the bare refusal.
+	m := r87sdArchiveOnNothing(sc, 120, 34)
+	pressKey(m, "7")
+	poll(m, sc)
+	if !strings.Contains(r87sdFoot(m), "no session 7") {
+		t.Errorf("an unused digit lost its refusal: %q", r87sdFoot(m))
+	}
+	// Off the archive the live digit still selects rather than refuses.
+	m = sceneModel(sc, 120, 34)
+	pressKey(m, "1")
+	poll(m, sc)
+	if strings.Contains(r87sdFoot(m), "is live") {
+		t.Errorf("the board's own digit wore the archive's refusal: %q", r87sdFoot(m))
+	}
+	// And in an archive that draws rows the digits are still the
+	// archive's own (#32): `1` selects its first row, not the live one.
+	m = sceneModel(sc, 120, 34)
+	pressKey(m, "A")
+	poll(m, sc)
+	pressKey(m, "1")
+	poll(m, sc)
+	if s, ok := m.selected(); !ok || s.Live {
+		t.Errorf("`1` in a drawn archive left the archive's own numbering")
+	}
+	if strings.Contains(r87sdFoot(m), "is live") {
+		t.Errorf("a drawn archive row wore the refusal: %q", r87sdFoot(m))
+	}
+	// And the refutation this fold rests on: on the very frame that
+	// answered `no session 1`, the deck already names the digit — #57's
+	// hide note says `1 hello` one keypress away, in the same view, at
+	// the same width.
+	m = r87sdArchiveOnNothing(sc, 120, 34)
+	pressKey(m, "x")
+	poll(m, sc)
+	if !strings.Contains(r87sdFoot(m), "1 hello is hidden") {
+		t.Errorf("the hide note on the empty archive stopped naming the digit: %q", r87sdFoot(m))
+	}
+}
