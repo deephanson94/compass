@@ -2484,7 +2484,12 @@ func TestTheReserveIsWhatTheNoteDraws(t *testing.T) {
 		// the reader's own key is drawn, which is unmoved.
 		{80, 24, "space unfold"},
 		{100, 30, " · a ask"},
-		{120, 34, " · n/N"},
+		// At 120 the key the reserve had cost the row was `n/N`, which
+		// #223 then found refuses until a search stands; the reserve's
+		// twelve cells now come back to `h/l session`, which moves 21
+		// drawn rows from this stand. The reserve is what this pins, so
+		// it points at the key that acts (#229).
+		{120, 34, " · h/l session"},
 	} {
 		sc := sceneTwoTools()
 		m := sceneModel(sc, want.w, want.h)
@@ -5068,5 +5073,63 @@ func TestNoLv2MoveKeyIsSilentlyDead(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// ---- round 84, two-tools, the one thing ----
+// A stuck key goes from a row that has already shed a key that acts.
+// #210's gate — a stuck key yields only where a key that acts comes back
+// — was written so that "a wide footer still names what `[` and `]` are"
+// (#193). On a row that has already given a key that acts up for width
+// that reason is spent, and the gate was the only thing left holding a
+// key that cannot move: at eighty the reader stood at 79 of 80 on
+// ` space unfold · [ ] turns · esc back · ? help · q quit` under `all of
+// it is on screen`, where `[` answers `no earlier turn` and `]` answers
+// `no later turn` and neither moves a drawn cell, having shed `/ search`,
+// `n/N`, `r reply`, `a ask` and `enter attach` — none of which could come
+// back, `enter attach` being one cell too wide and `a ask` ranked under
+// it (#39). The cells are given up, not spent: nothing comes back, so
+// #39's rank is untouched.
+func TestAStuckKeyGoesFromARowAlreadyShed(t *testing.T) {
+	forceASCII(t)
+	walk := []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k"}
+	foot := func(t *testing.T, w, h int, keys []string) string {
+		t.Helper()
+		sc := sceneTwoTools()
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// The reader at eighty, on a page all on screen with one turn: the
+	// stuck chapter key goes and no key comes back.
+	if got := foot(t, 80, 24, walk); strings.Contains(got, "[ ] turns") {
+		t.Errorf("80x24 reader: the row keeps a turn key that refuses both halves: %q", strings.TrimSpace(got))
+	} else if !strings.HasSuffix(got, "all of it is on screen") || !strings.Contains(got, "space unfold") {
+		t.Errorf("80x24 reader: not the stand this pins: %q", strings.TrimSpace(got))
+	}
+	// The live list at a hundred, on an asking session `x` cannot hide,
+	// with `a ask` and `/ search` already shed: the hide key goes.
+	if got := foot(t, 100, 30, walk[:6]); strings.Contains(got, "x hide") {
+		t.Errorf("100x30 list: the row keeps a hide key that answers %q: %q",
+			"infra stays · it is asking", strings.TrimSpace(got))
+	} else if !strings.HasSuffix(got, "search cleared") || !strings.Contains(got, "g grab") {
+		t.Errorf("100x30 list: not the stand this pins: %q", strings.TrimSpace(got))
+	}
+	// The reader at 120 under `❯ 1/1`: the walk keys refuse with no
+	// search to walk (#223), and the cells buy `h/l session`, which moves
+	// 21 drawn rows from this stand.
+	if got := foot(t, 120, 34, walk[:14]); strings.Contains(got, "n/N") {
+		t.Errorf("120x34 reader: the row keeps a walk key with no search to walk: %q", strings.TrimSpace(got))
+	} else if !strings.Contains(got, " · h/l session") {
+		t.Errorf("120x34 reader: the freed cells were expected to name a key that acts: %q", strings.TrimSpace(got))
+	}
+	// The other side, #193: at 220 nothing is shed, so the stuck walk key
+	// stands and the footer still names what `n` and `N` are.
+	if got := foot(t, 220, 48, walk[:14]); !strings.Contains(got, " · n/N") {
+		t.Errorf("220x48 reader: an unshed row dropped a stuck key: %q", strings.TrimSpace(got))
 	}
 }

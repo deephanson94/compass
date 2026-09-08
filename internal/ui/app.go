@@ -3857,7 +3857,9 @@ func (m *Model) chapterYield(whole string, drops []string, fits func(string) boo
 			// stuck ones are passed over rather than the whole trade refused
 			// on the first of them: a row that also gains a key that acts
 			// has bought its cells back.
-			if keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield, cannotMove) == "" {
+			was := shedKeys(whole, order, fits)
+			if keysActGained(was, shedKeys(whole, next, fits), next, yield, cannotMove) == "" &&
+				!rowAlreadyShed(whole, was, order, cannotMove) {
 				continue
 			}
 			head, order = cand, next
@@ -3865,6 +3867,45 @@ func (m *Model) chapterYield(whole string, drops []string, fits func(string) boo
 		}
 	}
 	return order
+}
+
+// rowAlreadyShed says whether the row, as it stands, has given up a key
+// that acts. #210's gate — a stuck key yields only where a key that acts
+// comes back — was written for the row where nothing is shed, so that "a
+// wide footer still names what `[` and `]` are" (#193); where the row has
+// already given a key that acts up for width that reason is spent, and
+// the gate was the only thing left holding a key that cannot move. At
+// eighty the reader stood at 79 of 80 on ` space unfold · [ ] turns · esc
+// back · ? help · q quit`, where `[` answers `no earlier turn` and `]`
+// answers `no later turn` and neither moves a drawn cell with colour on
+// or off, having shed `/ search`, `n/N`, `r reply`, `a ask` and `enter
+// attach`: nothing could come back — `enter attach` is one cell too wide
+// and `a ask` is ranked under it (#39) — so twelve cells stayed on a key
+// that refuses both halves. The cells are given up, not spent: no key
+// comes back, so #39's rank is untouched, and the help still teaches the
+// key (#43, #78).
+// A key that is itself stuck is not a key that acts (#216), the attach
+// aside is not a key (#55), and a key the row still draws in its other
+// form — the head forms `enter attach · ` and `space unfold · ` name the
+// same key as their separator-led fragments — has not been shed at all.
+func rowAlreadyShed(whole, was string, order []string, stuck map[string]bool) bool {
+	for _, d := range order {
+		if d == attachHint || d == " · enter · no pane" || stuck[d] {
+			continue
+		}
+		if strings.Contains(whole, d) && !strings.Contains(was, keyWord(d)) {
+			return true
+		}
+	}
+	return false
+}
+
+// keyWord is the fragment's key without the separator it is joined by or
+// the attach aside it may carry, so a key is read as one key whichever
+// form the row draws it in.
+func keyWord(frag string) string {
+	k := strings.TrimSuffix(strings.TrimPrefix(frag, " · "), " · ")
+	return strings.TrimSpace(strings.ReplaceAll(k, attachHint, ""))
 }
 
 // stuckKeys are the keys this row offers that cannot move from where it
