@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -183,15 +184,16 @@ func (m *Model) hadAPIError(s fleet.Session) bool {
 // screen: the fleet Manager owns the truth, the feeds own the trails, and tmux
 // owns the panes.
 type Model struct {
-	mgr       *fleet.Manager
-	feeds     *feedStore
-	runner    tmuxop.Runner
-	replyBox  box      // where the reply panel will land, set in View before the body (#108)
-	replyRows []string // what that panel says, so a covered row can leave its sentence to it (#133)
-	bodyRows  []string // the body as drawn, settled before the footer
-	trailRows []string // the trail column's drawn rows, settled before the fleet column
-	proc      tmuxop.Proc
-	narrator  Narrator
+	mgr        *fleet.Manager
+	feeds      *feedStore
+	runner     tmuxop.Runner
+	replyBox   box      // where the reply panel will land, set in View before the body (#108)
+	panelSteps bool     // the box steps a column right: its first placement covered the strip whole
+	replyRows  []string // what that panel says, so a covered row can leave its sentence to it (#133)
+	bodyRows   []string // the body as drawn, settled before the footer
+	trailRows  []string // the trail column's drawn rows, settled before the fleet column
+	proc       tmuxop.Proc
+	narrator   Narrator
 
 	sessions []fleet.Session
 	panes    map[string]tmuxop.Pane // keyed by SessionInfo.Key(), like everything else
@@ -2347,8 +2349,49 @@ const glyphCircling = "↻"
 // type clears, which the needs-you glyph read as a question.
 const glyphAPIError = "⊘"
 
-// View renders the whole deck.
+// View renders the whole deck. The reply box floats over the deck, and the
+// board's leftmost column begins at cell zero, so a box placed by that
+// column stands on the strip whole — the archive's own line, its count and
+// the key that browses it. The panel's footer is its own and `A` does not
+// act while the panel is up (#62, #64), so no key can say it either, and
+// the frame named neither. Where the frame it drew names the archive
+// nowhere and the box is what covered it, the box steps one board column
+// right and the deck is drawn again: the strip keeps its cells and the
+// band beside it is composed at the width the box leaves (#126) — the
+// placement the very same panel already has one column over.
 func (m *Model) View() string {
+	m.panelSteps = false
+	out := m.viewOnce()
+	if !m.replying || m.archiveView || m.showHelp || m.archivedCount() == 0 || frameNamesTheArchive(out) {
+		return out
+	}
+	m.panelSteps = true
+	if stepped := m.viewOnce(); frameNamesTheArchive(stepped) {
+		return stepped
+	}
+	// A step that buys nothing is not taken: the frame stands as it was,
+	// and the model's box and body rows are that frame's.
+	m.panelSteps = false
+	return m.viewOnce()
+}
+
+// frameNamesTheArchive asks rowNamesTheArchive's question of a drawn
+// frame — the reply box's overlay included, so the door is read off the
+// row the person sees and not off the row under the box. The box's own
+// edge may stand on the same row, so the door is matched where it ends
+// rather than by what the row ends with.
+var doorOnARow = regexp.MustCompile(`archived · (?:[^·]*hidden · )?A(?: browses)?(?:\s|$)`)
+
+func frameNamesTheArchive(frame string) bool {
+	for _, row := range strings.Split(ansi.Strip(frame), "\n") {
+		if doorOnARow.MatchString(row + " ") {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) viewOnce() string {
 	w, h := m.width, m.height
 	if w <= 0 {
 		w = 80
@@ -2426,6 +2469,23 @@ func (m *Model) View() string {
 		out[i] = strings.Repeat(" ", edgePad) + line
 	}
 	return strings.Join(out, "\n")
+}
+
+// steppedLeft is the box's left after View has found that the frame it
+// drew names the archive nowhere: one board column right, where the strip
+// keeps its cells and the band beside it draws at a column's width.
+func (m *Model) steppedLeft(left, inner, pw int) int {
+	if !m.panelSteps {
+		return left
+	}
+	n, cw := boardColumns(inner, m.drawnCount(m.viewOrder()))
+	if n == 0 {
+		return left
+	}
+	if step := min(bandWidth(inner, n, cw)+gutterWidth, max(inner-pw, 0)); step > left && step-1 >= fleetWidth {
+		return step
+	}
+	return left
 }
 
 // panelWidth is the widest row of a panel.
@@ -2754,7 +2814,7 @@ func (m *Model) panelPlace(inner, pw, ph int, tight bool) (left, top, cap int) {
 	if m.level == levelBoard && m.boardShown() {
 		if x, y, bh, last, ok := m.boardBandAt(inner); ok {
 			top := y + 3
-			left := min(x, max(inner-pw, 0))
+			left := m.steppedLeft(min(x, max(inner-pw, 0)), inner, pw)
 			if last {
 				if bh < ph && y+bh+1+ph <= body {
 					// A band shorter than the panel, with free rows under it:

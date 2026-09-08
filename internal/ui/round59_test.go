@@ -3280,3 +3280,121 @@ func TestTheAttachRefusalYieldsToTheKeyThatActs(t *testing.T) {
 		}
 	}
 }
+
+// TestTheReplyBoxDoesNotStandOnTheStrip pins round seventy-eight's second
+// finding: the reply box floats over the deck, and the board's leftmost
+// column begins at cell zero, so a box placed by that column stood on the
+// strip whole — the archive's own line, its count and the key that browses
+// it. The panel's footer is its own and `A` does not act while the panel is
+// up (#62, #64), so no key could say it either, and at 120, 152 and 220 the
+// frame over forty-one archived sessions named neither, while the same
+// keypress one column over named both. Both sides: the frame names the
+// door, and the box does not move where it never covered it.
+func TestTheReplyBoxDoesNotStandOnTheStrip(t *testing.T) {
+	forceASCII(t)
+	// The door in every form it sheds to, matched where it ends: the
+	// box's own edge may stand on the same row (#176).
+	door := regexp.MustCompile(`archived · (?:[^·]*hidden · )?A(?: browses)?(?:\s|$)`)
+	for _, c := range []struct {
+		name string
+		sc   scene
+	}{
+		{"fleet-hygiene", sceneFleetHygiene()},
+		{"many-idle", sceneManyIdle()},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			sc := c.sc
+			m := sceneModel(sc, size[0], size[1])
+			pressKey(m, "r")
+			poll(m, sc)
+			if !m.replying {
+				t.Fatalf("%s %dx%d: r did not open the panel", c.name, size[0], size[1])
+			}
+			frame := ansi.Strip(m.View())
+			if !strings.Contains(frame, "reply to ") {
+				t.Fatalf("%s %dx%d: no reply box on the frame", c.name, size[0], size[1])
+			}
+			named := false
+			for _, row := range strings.Split(frame, "\n") {
+				if door.MatchString(row + " ") {
+					named = true
+				}
+			}
+			if !named {
+				var foot string
+				if rows := strings.Split(frame, "\n"); len(rows) > 0 {
+					foot = strings.TrimSpace(rows[len(rows)-1])
+				}
+				t.Errorf("%s %dx%d: the reply box leaves the frame naming neither the archive nor its key (footer %q)", c.name, size[0], size[1], foot)
+			}
+			// The step is taken only where it buys the door: on a fleet
+			// whose strip the box never covered, the box stays by the
+			// column it is about.
+			if c.name == "many-idle" && size[0] >= 120 && m.replyBox.left != 0 {
+				t.Errorf("%s %dx%d: the box stepped where the strip already stood: left=%d", c.name, size[0], size[1], m.replyBox.left)
+			}
+		}
+	}
+}
+
+// TestTheCardYieldsThePaneTheHeaderDrawsToTheClock pins round seventy-eight's
+// one thing: the board card's third row is the tag's row, and #59's last-rung
+// fallback took a bare pane even where taking it cost the trace a clause.
+// #85's reason for that rung — "the pane is what attaches and is nowhere else
+// on the board" — is false on the frame the identity header titles by that
+// very pane: at 120 the selected column spent " · 0s ago", the send's clock
+// and on no other row of the column, to draw "⌁ harness:1.0" a second time,
+// one cell short. #90's device — the tag yields to the trace's clock where
+// the frame says the tag elsewhere — from the tool word to the bare pane.
+func TestTheCardYieldsThePaneTheHeaderDrawsToTheClock(t *testing.T) {
+	forceASCII(t)
+	pane := regexp.MustCompile(`⌁ [A-Za-z0-9_.:-]+`)
+	for _, c := range []struct {
+		name string
+		sc   scene
+	}{
+		{"fleet-hygiene", sceneFleetHygiene()},
+		{"subagents", sceneSubagents()},
+	} {
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			sc := c.sc
+			m := sceneModel(sc, size[0], size[1])
+			for _, k := range []string{"j", "r", "t", "go on", "enter"} {
+				pressKey(m, k)
+				poll(m, sc)
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			if len(rows) < 4 {
+				t.Fatalf("%s %dx%d: no frame", c.name, size[0], size[1])
+			}
+			said := pane.FindString(rows[0])
+			if said == "" {
+				t.Fatalf("%s %dx%d: the header names no pane: %q", c.name, size[0], size[1], strings.TrimSpace(rows[0]))
+			}
+			// The column that carries the send is the one whose trace the
+			// reply wrote; it is the selected one, the one the header
+			// titles.
+			var trace string
+			for _, r := range rows[1:] {
+				for _, col := range strings.Split(r, "│") {
+					if strings.Contains(col, `↪ sent "go on"`) {
+						trace = strings.TrimSpace(col)
+					}
+				}
+			}
+			if trace == "" {
+				t.Fatalf("%s %dx%d: no column carries the reply", c.name, size[0], size[1])
+			}
+			// Both sides. The clock is the send's own and is on no other
+			// row of the column, so it stands at every width; and where
+			// the column is wide enough for both, the pane stays — the
+			// yield is priced in cells, not a shed of the tag (#85).
+			if !strings.Contains(trace, " ago") {
+				t.Errorf("%s %dx%d: the trace spends its clock to draw %s a second time: %q", c.name, size[0], size[1], said, trace)
+			}
+			if size[0] == 220 && !strings.Contains(trace, said) {
+				t.Errorf("%s %dx%d: the pane went where both fit: %q", c.name, size[0], size[1], trace)
+			}
+		}
+	}
+}

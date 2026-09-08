@@ -1082,13 +1082,30 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 // columnTag is the tag the column's third row draws — the pane, or the
 // tool and its model where the digest leaves room (#50, #59, #90).
 func (m *Model) columnTag(key string, s fleet.Session, w int) string {
-	tag := tagBesideDigest(m.tagLadder(s), w, func(room int) string { return m.boardDelta(key, s, room) })
+	ladder := m.tagLadder(s)
+	tag := tagBesideDigest(ladder, w, func(room int) string { return m.boardDelta(key, s, room) })
 	if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(key, s, w-lipgloss.Width(tag)-2) != m.boardDelta(key, s, w) {
 		// A fleet of one: the header names the tool on every frame, so a
 		// bare tool word that costs the trace its clock says a thing the
 		// frame already says and loses one it does not (#90). The pane
 		// is nowhere else and stays (#85).
 		return ""
+	}
+	if len(ladder) > 0 && tag != "" && tag == ladder[len(ladder)-1] && tag == m.boardTag(s) && m.headerDrawsTag(tag) {
+		// The last rung is a bare pane, and #85's reason for it — "the
+		// pane is nowhere else on the board" — is false where the
+		// identity header draws this very pane. #59's last-rung fallback
+		// took it anyway: at 120 the selected column spent " · 0s ago",
+		// the send's clock and on no other row of the column, to draw
+		// "⌁ harness:1.0" a second time, one cell short. #90's device,
+		// from the tool word to the bare pane: the tag yields to the
+		// trace's clock where the frame says the tag elsewhere (#167,
+		// #189, #196, #197 gate a row against the header).
+		full := m.boardDelta(key, s, w)
+		if beside := m.boardDelta(key, s, w-lipgloss.Width(tag)-2); beside != full &&
+			strings.HasPrefix(full, "↪ ") && strings.HasSuffix(full, " ago") && strings.HasPrefix(full, beside) {
+			return ""
+		}
 	}
 	return tag
 }
@@ -2161,4 +2178,10 @@ func shedClauses(s string, w int) string {
 		s = s[:i]
 	}
 	return s
+}
+
+// headerDrawsTag reports whether the identity header draws this tag whole
+// — the device #167's tagTheHeaderSays uses, asked of one clause.
+func (m *Model) headerDrawsTag(tag string) bool {
+	return tag != "" && strings.Contains(ansi.Strip(m.headerLine(m.width)), tag)
 }
