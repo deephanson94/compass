@@ -9823,3 +9823,113 @@ func TestTheArchiveBoardSaysWhatWasAskedOnce(t *testing.T) {
 		lipgloss.SetColorProfile(old)
 	}
 }
+
+// ---- round 94, fleet-hygiene ----
+// r94fhStand opens a scene at a size and presses the keys, polling as the
+// deck does after every press.
+func r94fhStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r94fhScene is the scene of that name, from the walkthrough's own set.
+func r94fhScene(t *testing.T, name string) scene {
+	t.Helper()
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc
+		}
+	}
+	t.Fatalf("no scene %q", name)
+	return scene{}
+}
+
+// r94fhHeads is every card head row the board draws: the segments between
+// the column rules that begin with a state glyph, less the trailing air.
+func r94fhHeads(view string) []string {
+	var out []string
+	for _, row := range strings.Split(ansi.Strip(view), "\n") {
+		for _, seg := range strings.Split(row, "│") {
+			bare := strings.TrimRight(seg, " ")
+			trimmed := strings.TrimLeft(bare, " ▸0123456789")
+			if !strings.HasPrefix(trimmed, "○ ") && !strings.HasPrefix(trimmed, "● ") {
+				continue
+			}
+			out = append(out, strings.TrimSpace(bare))
+		}
+	}
+	return out
+}
+
+// TestNoTwoArchiveBoardCardsDrawTheSameHeadRow is the rule #265 owes its
+// own reason: the head yields what was asked only where the row it leaves
+// still tells this card from every other card the frame draws. The band
+// caps at nine digits (#260), so on an archive of one project the yield
+// drew five cards headed `○ api  2d` and nothing else — one row, five
+// sessions (#86).
+func TestNoTwoArchiveBoardCardsDrawTheSameHeadRow(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				m := r94fhStand(sc, size[0], size[1], "A", "shift+tab")
+				rows := strings.Split(ansi.Strip(m.View()), "\n")
+				if !strings.Contains(rows[0], "· board") {
+					continue // no board under 110 columns
+				}
+				stands++
+				seen := map[string]bool{}
+				for _, head := range r94fhHeads(m.View()) {
+					if seen[head] {
+						t.Errorf("%s %dx%d %v: two archive cards draw the same head row — %q",
+							sc.name, size[0], size[1], prof, head)
+					}
+					seen[head] = true
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 40 {
+		t.Fatalf("only %d archive-board stands — the stand is wrong", stands)
+	}
+}
+
+// TestTheArchiveBoardKeepsTheAskWhereTheNameCannotTellTheCardsApart is the
+// frame: on an archive whose sessions share one project the head keeps
+// what was asked, and where the name does tell them apart it still yields
+// it to the card's own ◉ row (#265).
+func TestTheArchiveBoardKeepsTheAskWhereTheNameCannotTellTheCardsApart(t *testing.T) {
+	forceASCII(t)
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{152, 40}, {220, 48}} {
+			// One project, forty archived sessions: the head keeps the ask.
+			m := r94fhStand(r94fhScene(t, "fleet-hygiene"), size[0], size[1], "A", "shift+tab")
+			got := ansi.Strip(m.View())
+			if !strings.Contains(got, "○ port the client to the n") && !strings.Contains(got, "○ port the client to the new sdk") {
+				t.Errorf("fleet-hygiene %dx%d %v: the archive board's card head lost the ask the project cannot say", size[0], size[1], prof)
+			}
+			// The typed name still stands where the archive gives it one (#79).
+			if !strings.Contains(got, "○ the pane I closed half a") {
+				t.Errorf("fleet-hygiene %dx%d %v: the archive board's card head lost the name its person typed", size[0], size[1], prof)
+			}
+			// Many projects: the head still yields the ask to the ◉ row (#265).
+			sd := r94fhStand(r94fhScene(t, "second-day"), size[0], size[1], "A", "shift+tab")
+			for _, want := range []string{"○ webapp", "○ etl", "○ checkout-flake-hunt"} {
+				if !strings.Contains(ansi.Strip(sd.View()), want) {
+					t.Errorf("second-day %dx%d %v: the head lost the name the archive gives the session: no %q", size[0], size[1], prof, want)
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}
