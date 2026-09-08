@@ -281,6 +281,7 @@ type Model struct {
 	before      map[string]hookState
 	pulse       bool // HEAD's breath is on its off-beat
 	noLaneHeads bool // the board packed tighter than its lanes' heads (round 47)
+	askBelow    bool // the card below this row draws its ask on its own ◉ row (#107)
 	readonly    bool
 
 	// The board's data: one trail per column, and each column's narrated

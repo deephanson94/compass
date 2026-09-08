@@ -335,6 +335,28 @@ func (m *Model) boardLines(w, h int) []string {
 						break
 					}
 				}
+				// The archive's card draws what was asked on its own ◉
+				// row, and its head drew the same sentence three rows up
+				// (#64, #107 — the card yields what a row below it says).
+				// The head yields it here, where the frame is known to
+				// draw that row, and keeps the name the archive gives the
+				// session instead.
+				if m.archiveView {
+					ask := archiveHeadline(m.sessions[m.boardRows()[colKeys[ci]].sess])
+					for k := 3; k < len(c.rows) && k < bh; k++ {
+						if m.panelHides(x, c.width, y+k) {
+							continue
+						}
+						if !sameAsk(ask, saidAsk(c.rows[k])) {
+							continue
+						}
+						m.askBelow = true
+						head := m.columnHeader(colKeys[ci], m.boardRows()[colKeys[ci]], c.width)
+						m.askBelow = false
+						c.rows[0] = head[0]
+						break
+					}
+				}
 				// The count yields before the rungs are hoisted: where the
 				// tag row can afford the whole word, model and pane once
 				// the digest has gone, the identity stands on one row —
@@ -2218,4 +2240,34 @@ func shedClauses(s string, w int) string {
 // — the device #167's tagTheHeaderSays uses, asked of one clause.
 func (m *Model) headerDrawsTag(tag string) bool {
 	return tag != "" && strings.Contains(ansi.Strip(m.headerLine(m.width)), tag)
+}
+
+// saidClock is the right-aligned relative clock a ◉ row ends on — "3h
+// ago", "10h ago" — however few spaces are left between it and the
+// sentence at the width the row is drawn at (§4).
+var saidClock = regexp.MustCompile(`\s+\S+ ago$`)
+
+// saidAsk is the sentence a drawn ◉ row says: the prompt a card's trail
+// opens on, less its glyph, its quotes and its right-aligned clock.
+func saidAsk(row string) string {
+	bare := strings.TrimSpace(strings.TrimRight(ansi.Strip(row), " "))
+	rest, ok := strings.CutPrefix(bare, glyphPrompt+" ")
+	if !ok {
+		return ""
+	}
+	rest = saidClock.ReplaceAllString(rest, "")
+	return strings.Trim(strings.TrimSpace(rest), `"`)
+}
+
+// sameAsk reports whether two drawn copies of one sentence say the same
+// thing — whole, or one clipped where the other is whole (#107's compare,
+// on two rows that are the sentence and nothing else). The floor is two
+// words, as saysSame's is (#110): one word is not a sentence said twice.
+func sameAsk(a, b string) bool {
+	a = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(a), "…"))
+	b = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(b), "…"))
+	if len(strings.Fields(a)) < 2 || len(strings.Fields(b)) < 2 {
+		return false
+	}
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }

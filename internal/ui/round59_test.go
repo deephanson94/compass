@@ -9683,3 +9683,143 @@ func TestTheArchivesOffTheBoardNoteCostsNoKeyThatActs(t *testing.T) {
 	}
 	t.Logf("off-the-board footers checked: %d", stands)
 }
+
+// ---- round 93, two-tools ----
+// ---- round 93, two-tools ----
+
+// r93ttStand plays keys into a fresh scene and returns the deck.
+func r93ttStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r93ttScene finds a scene by name.
+func r93ttScene(t *testing.T, name string) scene {
+	t.Helper()
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc
+		}
+	}
+	t.Fatalf("no scene %q", name)
+	return scene{}
+}
+
+// r93ttCells splits a board row into its columns, keyed by the cell the
+// column begins at, so a head row and the ◉ row three rows below it are
+// compared inside one card and never across the gutter.
+func r93ttCells(row string) map[int]string {
+	out := map[int]string{}
+	start, cell := 0, 0
+	bare := ansi.Strip(row)
+	for i, ch := range bare {
+		if ch == '│' {
+			out[start] = bare[start:i]
+			start = cell + 1
+		}
+		cell = i + len(string(ch))
+	}
+	out[start] = bare[start:]
+	return out
+}
+
+var r93ttClock = regexp.MustCompile(`\s+\S+ ago$`)
+
+// r93ttSaid is what a drawn ◉ row says, less its glyph, quotes and clock.
+func r93ttSaid(seg string) string {
+	s := strings.TrimSpace(seg)
+	rest, ok := strings.CutPrefix(s, "◉ ")
+	if !ok {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(r93ttClock.ReplaceAllString(rest, "")), `"…`)
+}
+
+// TestTheArchiveBoardSaysWhatWasAskedOnce: on the archive's board (`A`,
+// then `⇧tab board`) the card draws the prompt on its own ◉ row, with the
+// ask's own clock. Its head row drew the same sentence three rows up —
+// whole on a wide terminal, the clipped copy of a whole one at 120 — so a
+// card nine rows tall spent two of them on one sentence (#64, #107). The
+// head keeps the name the archive gives the session: the one its person
+// typed (#79, #234), else the project it is grouped under (#11), which the
+// archive's board draws on no other row. The archive's *list*, which draws
+// no ◉ row of its own beside the row, keeps the ask (#56, #86) — the held
+// side, and it passes at HEAD too.
+func TestTheArchiveBoardSaysWhatWasAskedOnce(t *testing.T) {
+	forceASCII(t)
+	tt := r93ttScene(t, "two-tools")
+	sd := r93ttScene(t, "second-day")
+	cases := []struct {
+		sc   scene
+		keys []string
+	}{
+		{tt, []string{"2", "x", "x", "A", "shift+tab"}},
+		{sd, []string{"A", "shift+tab"}},
+	}
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			for _, c := range cases {
+				m := r93ttStand(c.sc, size[0], size[1], c.keys...)
+				rows := strings.Split(ansi.Strip(m.View()), "\n")
+				if !strings.Contains(rows[0], "· board") {
+					t.Fatalf("%s %dx%d: not on the archive's board: %q", c.sc.name, size[0], size[1], strings.TrimSpace(rows[0]))
+				}
+				said := 0
+				for j, row := range rows {
+					if !strings.Contains(row, "◉") {
+						continue
+					}
+					for at, seg := range r93ttCells(row) {
+						ask := r93ttSaid(seg)
+						if len(strings.Fields(ask)) < 2 {
+							continue
+						}
+						said++
+						for k := max(0, j-4); k < j; k++ {
+							head, ok := r93ttCells(rows[k])[at]
+							if !ok {
+								continue
+							}
+							bare := strings.TrimSpace(strings.Trim(strings.TrimSpace(head), "…"))
+							if !strings.Contains(bare, "○") && !strings.Contains(bare, "●") {
+								continue
+							}
+							if strings.Contains(bare, ask) || strings.Contains(bare, strings.TrimRight(ask, "…")) {
+								t.Errorf("%s %dx%d %v: the archive board's card says what was asked twice — %q over %q",
+									c.sc.name, size[0], size[1], prof, strings.TrimSpace(head), strings.TrimSpace(seg))
+							}
+						}
+					}
+				}
+				if said == 0 {
+					t.Errorf("%s %dx%d %v: no card drew a ◉ row — the stand is wrong", c.sc.name, size[0], size[1], prof)
+				}
+				// The head still names the session, and the board now
+				// names the project it never drew.
+				body := strings.Join(rows, "\n")
+				want := map[string][]string{
+					"two-tools":  {"1 ● api", "2 ● api"},
+					"second-day": {"3 ○ checkout-flake-hunt", "○ webapp", "○ etl"},
+				}[c.sc.name]
+				for _, w := range want {
+					if !strings.Contains(body, w) {
+						t.Errorf("%s %dx%d %v: the head lost the name the archive gives the session: no %q", c.sc.name, size[0], size[1], prof, w)
+					}
+				}
+			}
+			// The archive's list draws no ◉ row beside its rows, so it
+			// keeps the ask (#56, #86): the held side.
+			l := r93ttStand(sd, size[0], size[1], "A")
+			if got := ansi.Strip(l.View()); !strings.Contains(got, "○ port the client to the new sdk") {
+				t.Errorf("second-day %dx%d %v: the archive list lost the ask its row is named by", size[0], size[1], prof)
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}

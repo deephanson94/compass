@@ -790,7 +790,21 @@ func (m *Model) entryLinesUnder(r fleetRow, w int, tag string) []string {
 		// named after its project: the row spends that width on the one thing the
 		// header cannot say — what you asked for.
 		age, head = padLeft(m.age(s.Info.LastEventAt), ageWidth), archiveHeadline(s)
-		if s.Live || s.Info.Name != "" {
+		if m.askBelow {
+			// On the board the card below this row draws the very same
+			// ask on its own ◉ row, with its own clock — the sentence
+			// stood twice, three rows apart, in one card (#64, #107: the
+			// card yields what a row below it says). The head keeps the
+			// name the archive gives the session: the one its person
+			// typed (#79, #234), else the project it is grouped under
+			// (#11), which the archive's board draws on no other row —
+			// its list draws it as a heading (#234) and its board draws
+			// no heading at all. #86's reason for the ask here — "four
+			// project names cannot tell forty sessions apart" — is the
+			// strip's, where nothing else says what was asked; on the
+			// card the ask is three rows down and still tells them apart.
+			head = ""
+		} else if s.Live || s.Info.Name != "" {
 			// A live session `x` took off the board: it keeps its glyph
 			// and its name — the header over it says it is hidden, and
 			// "hidden · add watch driver tests" lost the one word the
@@ -849,7 +863,7 @@ func (m *Model) entryLinesUnder(r fleetRow, w int, tag string) []string {
 	}
 	body := nameStyle.Render(pad(clip(sessionName(s.Info), nameW), nameW)) +
 		midStyle.Render(padLeft(clip(head, headW), headW))
-	if m.archiveView {
+	if m.archiveView && !m.askBelow {
 		// No name: the whole line is the prompt the session was given.
 		body = midStyle.Render(pad(clip(head, avail), avail))
 	}
