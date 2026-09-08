@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // The porter column draws the lead's message as the ask, worn as a relay:
@@ -3901,135 +3902,205 @@ func TestTheMovementKeyYieldsWhereItCannotMove(t *testing.T) {
 	}
 }
 
-// TestTheTurnKeysYieldOnAPageDrawnWhole holds #211's rule to what the frame
-// does. `turnKeysMove` called the turn keys movers wherever the reader was
-// not standing on a turn — "off any turn, one of them lands on it" — but the
-// reader draws no cursor on the turn it stands on, so on a conversation it
-// draws whole the landing moves no drawn cell: the press writes its note and
-// nothing else. At eighty that cost the porter reader `enter attach` and
-// `a ask`, the two keys a live session has, while the same page two presses
-// later already shed the key.
+// TestTheTurnKeyThatMovesTheMarkStays pins round eighty-one's one thing:
+// #214 called `[` a key that cannot move wherever the page is drawn whole,
+// on the reason that "the reader draws no cursor on the turn it stands on,
+// so that landing writes its note and changes no drawn cell". It draws
+// one. `landOnTurn` marks the turn with the inverse bar the trail's cursor
+// uses (#110, #211), and the frame before the press draws that bar on the
+// line the reader is anchored to: pressing `[` on the two-tools reader at
+// eighty moves seventy-nine cells of reverse video seven rows up, from
+// `I need a decision before I change the rule.` to
+// `❯ tighten the vpc security groups`, and the same is true on the
+// fleet-hygiene reader the fold was pinned on. The guard could not see it
+// because it rendered under the ASCII profile, where the bar is nothing
+// but the trailing spaces its padding leaves, and then trimmed them.
 //
-// Both sides, at every case: where the two presses move a drawn cell the
-// footer still names the key; under the key's own note it stays (#24); and
-// where no key that acts comes back it stays (#211's own guard).
-func TestTheTurnKeysYieldOnAPageDrawnWhole(t *testing.T) {
-	forceASCII(t)
-
-	// readerAt replays keys from a scene's opening frame and returns the
-	// deck, its footer and its body with the padding taken off.
-	readerAt := func(t *testing.T, name string, w, h int, keys ...string) (*Model, string, string) {
-		t.Helper()
-		var sc scene
-		for _, s := range allScenes() {
-			if s.name == name {
-				sc = s
-			}
-		}
-		if sc.name == "" {
-			t.Fatalf("no scene %q", name)
-		}
+// So the key acts and stays on the row. Both sides: standing on the only
+// turn both keys refuse and #211's own pin holds the shed there.
+func TestTheTurnKeyThatMovesTheMarkStays(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the bar is a style, not a space
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	reader := func(sc scene, w, h int, extra ...string) *Model {
 		m := sceneModel(sc, w, h)
-		for _, k := range keys {
+		for _, k := range append([]string{"tab", "tab"}, extra...) {
 			pressKey(m, k)
 			poll(m, sc)
 		}
-		rows := strings.Split(m.View(), "\n")
-		foot := strings.TrimRight(rows[len(rows)-1], " ")
-		for i := range rows {
-			rows[i] = strings.TrimRight(rows[i], " ")
-		}
-		return m, foot, strings.Join(rows[:len(rows)-1], "\n")
+		return m
 	}
-	// pressMoves says whether `[` or `]` changes a drawn cell of the body.
-	pressMoves := func(t *testing.T, name string, w, h int, keys ...string) bool {
-		t.Helper()
-		_, _, base := readerAt(t, name, w, h, keys...)
-		for _, probe := range []string{"[", "]"} {
-			if _, _, after := readerAt(t, name, w, h, append(append([]string(nil), keys...), probe)...); after != base {
-				return true
+	// bar is the body row the inverse mark stands on, -1 when none does.
+	bar := func(m *Model) int {
+		for i, r := range strings.Split(m.View(), "\n") {
+			if strings.Contains(r, "\x1b[7m") {
+				return i
 			}
 		}
-		return false
+		return -1
 	}
-
-	stuck := []struct {
-		scene    string
-		w, h     int
-		keys     []string
-		wantKeys []string // keys that act, which the yielded cells buy back
-	}{
-		{"fleet-hygiene", 80, 24, []string{"tab", "tab"}, []string{"a ask", "enter attach"}},
-		{"fleet-hygiene", 100, 30, []string{"tab", "tab"}, []string{"/ search", "n/N"}},
-		{"few-ongoing", 80, 24, []string{"tab", "tab"}, []string{"a ask", "enter attach"}},
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
 	}
-	for _, c := range stuck {
-		m, foot, _ := readerAt(t, c.scene, c.w, c.h, c.keys...)
-		if m.level != levelReader {
-			t.Fatalf("%s %dx%d: %v lands at Lv%d, not the reader", c.scene, c.w, c.h, c.keys, m.level)
-		}
-		if pressMoves(t, c.scene, c.w, c.h, c.keys...) {
-			t.Fatalf("%s %dx%d: the page moves under the turn keys — not this test's case", c.scene, c.w, c.h)
-		}
-		if strings.Contains(foot, "[ ] turns") {
-			t.Errorf("%s %dx%d: neither turn key moves a drawn cell and the footer still spends its width on them: %q", c.scene, c.w, c.h, foot)
-		}
-		for _, k := range c.wantKeys {
-			if !strings.Contains(foot, k) {
-				t.Errorf("%s %dx%d: the cells the stuck turn keys held did not buy back %q: %q", c.scene, c.w, c.h, k, foot)
-			}
-		}
-	}
-
-	// The other side, one: a reader whose page the keys do move keeps them.
 	for _, c := range []struct {
-		scene string
+		name  string
+		scene func() scene
 		w, h  int
-		keys  []string
 	}{
-		{"many-idle", 80, 24, []string{"tab", "tab"}},
-		{"many-idle", 100, 30, []string{"tab", "tab"}},
+		{"two-tools", sceneTwoTools, 80, 24},
+		{"fleet-hygiene", sceneFleetHygiene, 80, 24},
+		{"fleet-hygiene", sceneFleetHygiene, 100, 30},
+		{"few-ongoing", sceneFewOngoing, 80, 24},
 	} {
-		_, foot, _ := readerAt(t, c.scene, c.w, c.h, c.keys...)
-		if !pressMoves(t, c.scene, c.w, c.h, c.keys...) {
-			t.Fatalf("%s %dx%d: the page does not move — not this side's case", c.scene, c.w, c.h)
+		was := bar(reader(c.scene(), c.w, c.h))
+		now := bar(reader(c.scene(), c.w, c.h, "["))
+		if was < 0 || now < 0 || was == now {
+			t.Fatalf("%s %dx%d: `[` was expected to move the reader's mark, it stood at row %d and row %d",
+				c.name, c.w, c.h, was, now)
 		}
-		if !strings.Contains(foot, "[ ] turns") {
-			t.Errorf("%s %dx%d: a turn key that moves the page is not named: %q", c.scene, c.w, c.h, foot)
-		}
-	}
-
-	// The other side, two: under the key's own note the key stays (#24).
-	for _, c := range []struct {
-		scene string
-		w, h  int
-	}{{"fleet-hygiene", 80, 24}, {"fleet-hygiene", 100, 30}} {
-		_, foot, _ := readerAt(t, c.scene, c.w, c.h, "tab", "tab", "[")
-		if !strings.Contains(foot, "❯ 1/1") {
-			t.Fatalf("%s %dx%d: `[` did not land on the only turn: %q", c.scene, c.w, c.h, foot)
-		}
-		if !strings.Contains(foot, "[ ] turns") {
-			t.Errorf("%s %dx%d: the key is gone from under its own note (#24): %q", c.scene, c.w, c.h, foot)
+		if f := foot(reader(c.scene(), c.w, c.h)); !strings.Contains(f, "[ ] turns") {
+			t.Errorf("%s %dx%d: the row sheds a turn key that moves the mark %d rows: %q",
+				c.name, c.w, c.h, now-was, f)
 		}
 	}
+}
 
-	// The other side, three: where no key that acts comes back for the cells,
-	// the key stays — the paneless session's reader at eighty, where `enter`
-	// and `r` are refusals (#211's own guard).
-	{
-		to := canonicalKeys[:33] // the walkthrough's second reader: the paneless session's
-		m, foot, _ := readerAt(t, "fleet-hygiene", 80, 24, to...)
-		if m.level != levelReader || selectedName(m) != "notebooks" {
-			t.Fatalf("fleet-hygiene 80x24: the walkthrough's second reader is Lv%d on %s", m.level, selectedName(m))
+// TestAStuckKeyIsNotTheGainThatBuysTheTrade pins round eighty-one's one
+// thing: #213 took the movement key's cells "only where a key that acts
+// comes back for it", and `keysActGained` never asked whether the key that
+// came back was one the same rule calls stuck. On the archive's list —
+// one hidden session, and a trail of one prompt beside it — `j/k move`
+// answers `the only session` and the eleven cells it gave up bought
+// `[ ] chapters`, fifteen cells on a pair where `[` answers `no earlier
+// prompt` and `]` answers `no later prompt`. The row spent four cells more
+// on a key that refuses. #210, #211 and #213 are one rule: a key that
+// cannot move is not the gain that buys the trade.
+//
+// Both sides: where a key that acts comes back the movement key still
+// yields (#213), and where nothing acts the stuck movement key stands, so
+// the row still names what `j` and `k` are (#193).
+func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
+	forceASCII(t)
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// archive is the walkthrough's route into the archive list: the fleet,
+	// a session hidden, then `A`.
+	archive := func(w, h, n int) (*Model, scene) {
+		sc := sceneTwoTools()
+		m := sceneModel(sc, w, h)
+		for _, k := range canonicalKeys[:n] {
+			pressKey(m, k)
+			poll(m, sc)
 		}
-		// Nothing comes back for the cells here: `enter` and `r` are
-		// refusals on a session with no pane (#206), and `a ask` is
-		// already named. The key stays.
-		if !strings.Contains(foot, "a ask") {
-			t.Fatalf("fleet-hygiene 80x24: the paneless reader already sheds `a ask` — not this side's case: %q", foot)
+		return m, sc
+	}
+	const keys = 39 // ends on the first `A`: the archive's own list
+	for _, size := range [][2]int{{100, 30}, {120, 34}} {
+		w, h := size[0], size[1]
+		// Neither key moves from this stand, whichever is pressed.
+		for _, r := range []struct{ key, want string }{
+			{"[", "no earlier prompt"}, {"]", "no later prompt"},
+			{"j", "the only session"}, {"k", "the only session"},
+		} {
+			m, _ := archive(w, h, keys)
+			pressKey(m, r.key)
+			if m.note != r.want {
+				t.Fatalf("%dx%d: `%s` moves from this stand: %q", w, h, r.key, m.note)
+			}
 		}
-		if !strings.Contains(foot, "[ ] turns") {
-			t.Errorf("fleet-hygiene 80x24: the key yielded with no key that acts to come back for it: %q", foot)
+		m, _ := archive(w, h, keys)
+		if f := foot(m); strings.Contains(f, "[ ] chapters") {
+			t.Errorf("%dx%d: the movement key's cells bought a chapter key that refuses: %q", w, h, f)
 		}
+		// Nothing on this row acts in its place, so the key stands (#193).
+		if f := foot(m); !strings.Contains(f, "j/k move") {
+			t.Errorf("%dx%d: a yield that buys nothing took the movement key: %q", w, h, f)
+		}
+	}
+	// #213 still holds where a key that acts comes back: at eighty the
+	// search leaves one row and the cells buy `g grab`.
+	m, _ := archive(80, 24, 5)
+	if f := foot(m); strings.Contains(f, "j/k move") || !strings.Contains(f, "g grab") {
+		t.Errorf("80x24: the movement key did not yield to a key that acts: %q", f)
+	}
+}
+
+// TestTheLiveRowSaysWhatTheHeaderDoesNot pins round eighty-one's one thing:
+// #196 and #197 split the header from the row on the archive's two halves
+// and left the live list alone, where the gate is still #96's fleet of one
+// (`liveCount() == 1`). On a fleet of four the selected row drew the tool
+// word and the model the identity header of the same frame draws whole —
+// `claude · sonnet-4-5` under `⌂ compass · 1 infra · claude · sonnet-4-5`
+// — and at eighty it cost the trace its clock: `↪ answered 1 · 0s claude`
+// where the freed cells draw `↪ answered 1 · 0s ago`, #90's own device.
+//
+// Both sides. An unselected row keeps its word, which is what tells it
+// from its neighbour where the fleet runs two tools (#80): rows 2, 3 and 4
+// still name theirs. And a tag the header does not draw whole stays — the
+// row's pane is its suffix, `⌁ :2.0`, and the header says `⌁ dev:2.0`.
+func TestTheLiveRowSaysWhatTheHeaderDoesNot(t *testing.T) {
+	forceASCII(t)
+	// list is the fleet column of the frame, the rows as they are drawn.
+	list := func(m *Model) string {
+		var keep []string
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			i := strings.Index(l, "│")
+			if i < 0 {
+				continue // the header, the rules and the footer are not rows
+			}
+			keep = append(keep, l[:i])
+		}
+		return strings.Join(keep, "\n")
+	}
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		w, h := size[0], size[1]
+		sc := sceneTwoTools()
+		m := sceneModel(sc, w, h)
+		poll(m, sc)
+		head := ansi.Strip(m.headerLine(m.width))
+		if !strings.Contains(head, "claude · sonnet-4-5") {
+			t.Fatalf("%dx%d: the header does not draw the selected session's tag: %q", w, h, head)
+		}
+		if got := list(m); strings.Contains(got, "claude · sonnet-4-5") {
+			t.Errorf("%dx%d: the selected row draws the tag the header draws whole:\n%s", w, h, got)
+		}
+		// The neighbours keep their words (#80).
+		for _, want := range []string{"opencode", "claude · ⌁ :1.0", "opencode · gpt-5 · ⌁ :3.0"} {
+			if got := list(m); !strings.Contains(got, want) {
+				t.Errorf("%dx%d: an unselected row lost %q:\n%s", w, h, want, got)
+			}
+		}
+		// The cells go to the trace's clock (#90): `r`, then the answer.
+		for _, k := range []string{"r", "1"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		got := list(m)
+		if !strings.Contains(got, "↪ answered 1 · 0s ago") {
+			t.Errorf("%dx%d: the trace lost its clock to a word the header says:\n%s", w, h, got)
+		}
+		for _, line := range strings.Split(got, "\n") {
+			if strings.Contains(line, "↪ answered") && strings.Contains(line, "claude") {
+				t.Errorf("%dx%d: the trace's row wears the header's own word: %q", w, h, line)
+			}
+		}
+	}
+	// A tag the header does not draw whole stays: the row's pane is its
+	// suffix under the group header, and the identity header says the
+	// full address.
+	sc := sceneTwoTools()
+	m := sceneModel(sc, 100, 30)
+	poll(m, sc)
+	pressKey(m, "2") // the second session: opencode, in the tmux session it shares
+	poll(m, sc)
+	head := ansi.Strip(m.headerLine(m.width))
+	if !strings.Contains(head, "⌁ dev:2.0") {
+		t.Fatalf("100x30: the header does not draw the second session's address: %q", head)
+	}
+	if got := list(m); !strings.Contains(got, "⌁ :2.0") {
+		t.Errorf("100x30: a tag the header does not draw whole was shed:\n%s", got)
 	}
 }

@@ -3783,7 +3783,12 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
 	order := drops
 	var head []string
-	for _, yield := range m.stuckKeys(whole) {
+	stuck := m.stuckKeys(whole)
+	cannotMove := map[string]bool{}
+	for _, k := range stuck {
+		cannotMove[k] = true
+	}
+	for _, yield := range stuck {
 		cand := append(append([]string(nil), head...), yield)
 		next := append([]string(nil), cand...)
 		for _, d := range drops {
@@ -3797,7 +3802,15 @@ func (m *Model) chapterYield(whole string, drops []string, fits func(string) boo
 				next = append(next, d)
 			}
 		}
-		if keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield) == "" {
+		gain := keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield)
+		if gain == "" || cannotMove[gain] {
+			// A key that cannot move is not the gain that buys the
+			// trade: the archive's list traded eleven cells of a
+			// movement key that answers `the only session` for fifteen
+			// of `[ ] chapters` on a trail of one prompt, where `[`
+			// answers `no earlier prompt` and `]` answers `no later
+			// prompt`. Both keys are the same rule (#210, #211, #213),
+			// so one of them coming back for the other buys nothing.
 			continue
 		}
 		head, order = cand, next

@@ -66,7 +66,10 @@ func TestShortModelNames(t *testing.T) {
 }
 
 // An opencode session is a session: the same states, the same row, its
-// tool named on the narrow list where the pane tag would go.
+// tool named on the narrow list where the pane tag would go — or, on the
+// selected row, by the identity header of the same frame, which draws the
+// tag whole (#167, #196, #197's split between header and row). The frame
+// names the tool once; the assertion is that it names it.
 func TestAnOpencodeSessionIsARow(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(100, 30)
@@ -79,8 +82,9 @@ func TestAnOpencodeSessionIsARow(t *testing.T) {
 	m.SetSessions(m.sessions, now)
 	m.point(s.Info.Key())
 	list := ansi.Strip(strings.Join(m.fleetLines(40, 28), "\n"))
-	if !strings.Contains(list, "ocproj") || !strings.Contains(list, "opencode · mock-1") {
-		t.Errorf("the narrow list does not name the opencode session and its tool:\n%s", list)
+	head := ansi.Strip(m.headerLine(m.width))
+	if !strings.Contains(list, "ocproj") || !(strings.Contains(list, "opencode · mock-1") || strings.Contains(head, "opencode · mock-1")) {
+		t.Errorf("the frame does not name the opencode session and its tool:\nheader: %s\n%s", head, list)
 	}
 }
 

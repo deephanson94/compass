@@ -914,6 +914,16 @@ func (m *Model) entryLinesTagged(r fleetRow, w int, tagged bool) []string {
 			return m.countLessBeside(s, d)
 		}
 		tag = tagBesideDigest(ladder, w-4, delta)
+		if tag != "" && s.Info.Key() == m.selectedKey && m.headerDrawsTag(tag) {
+			// The identity header of this very frame names this very
+			// session: where it draws every clause of the tag, the row
+			// sheds it and spends the cells on what the frame does not
+			// say — the trace's clock here (#90's device, #167's split
+			// between header and row, #196 and #197 on the archive's
+			// halves). An unselected row keeps its word, which is what
+			// tells it from its neighbour where the fleet runs two (#80).
+			tag = ""
+		}
 		if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && strings.Contains(m.headerLine(m.width), " · "+s.Info.ToolName()) {
 			// A fleet of one: the header names the tool on this very
 			// frame, so a bare tool word on the row says a thing the frame
