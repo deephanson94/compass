@@ -1633,6 +1633,16 @@ func (m *Model) zoomOut() {
 				m.clearQuery()
 			}
 		}
+	case m.level > levelBoard && m.boardFits() && !m.boardShown():
+		// The board fits but the view has no session to put in a column,
+		// so one level down the deck draws this very list again — the
+		// same rows, the board-less deck's own keymap, and the trail
+		// beside it — while the look on that trail was committed and the
+		// fleet's title lost the word that says where the keys are (#20,
+		// #63). There is no board to go out to, and the note says so in
+		// the shape the width's refusal already has (#31); the row that
+		// says why is on the frame already (#64).
+		m.note = "no board"
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
 		m.commitLook(m.selectedKey)
@@ -1640,6 +1650,8 @@ func (m *Model) zoomOut() {
 		m.note = "nothing to zoom out to" // no board at any width (#31)
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
+	case m.level == levelBoard && !m.boardShown():
+		m.note = "no board" // a list is drawn: the note is the frame's, not the level's
 	case m.level == levelBoard:
 		m.note = "the board is the top"
 	}
@@ -1777,6 +1789,14 @@ func (m *Model) toggleHidden() {
 	if m.hidden[key] {
 		delete(m.hidden, key)
 		m.saveHidden()
+		if m.archiveView && m.level == levelBoard && !m.boardShown() {
+			// That row was the last one the archive's board had: the
+			// board is gone from under the keys and the deck draws the
+			// list in its place, so the level is the list's too. Left at
+			// the board's, `tab deeper` landed on the same rows one level
+			// down and `⇧tab` called that list a board.
+			m.level = levelTrail
+		}
 		// The note wears the number of the view it names, as the hide
 		// note does (#256): the row leaves the archive the moment the
 		// key acts, so the frame that follows draws it nowhere, and on

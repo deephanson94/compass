@@ -10020,3 +10020,180 @@ func TestTheShipRowIsNotAClippedCopyOfTheAskItShortened(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 94, two-tools ----
+// r94ttStand plays a key run on a scene at a size and hands back the model.
+func r94ttStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r94ttScene finds a scene by name.
+func r94ttScene(t *testing.T, name string) scene {
+	t.Helper()
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc
+		}
+	}
+	t.Fatalf("no scene %q", name)
+	return scene{}
+}
+
+// r94ttRows is the drawn frame, escapes stripped and trailing pad ignored.
+func r94ttRows(m *Model) []string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, r := range rows {
+		rows[i] = strings.TrimRight(r, " ")
+	}
+	return rows
+}
+
+// r94ttFooter is the frame's last drawn row: the keymap and its note.
+func r94ttFooter(rows []string) string {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.TrimSpace(rows[i]) != "" {
+			return rows[i]
+		}
+	}
+	return ""
+}
+
+// r94ttFleetTitle is the row the fleet column's title stands on, or "".
+func r94ttFleetTitle(rows []string) string {
+	for _, r := range rows {
+		if strings.Contains(r, "FLEET · ") {
+			return r
+		}
+	}
+	return ""
+}
+
+// r94ttKeys is the set of key fragments a footer names, less any note: the
+// fragments before the note's own gap, split on the separator the footer
+// uses.
+func r94ttKeys(footer string) map[string]bool {
+	out := map[string]bool{}
+	keys := footer
+	if i := strings.Index(footer, "  "); i > 0 {
+		keys = footer[:i]
+	}
+	for _, k := range strings.Split(keys, " · ") {
+		if k = strings.TrimSpace(k); k != "" {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// TestTheEmptyArchiveIsNotABoard: an archive with nothing in it has no
+// board, and the deck does not stand at the board's level over it.
+//
+// `⇧tab` on the archive's list dropped the deck to the board level while
+// `boardShown` was false, so the deck drew the list again one level down:
+// the same rows, the same board-less keymap, and the fleet's title stripped
+// of `[fleet]`, the word that says where the keys are (#20, #63) — 96 such
+// frames over the runs this round measured, none of them marking a row and
+// none wearing the word, against 1,197 of 1,197 at the list's own level.
+// The look on the trail beside it was committed on the way down, so `you
+// were here` left a trail still drawn. `⇧tab` pressed again then answered
+// `the board is the top` over a frame with no board on it.
+//
+// The level follows the frame: where the board fits but has no session to
+// put in a column, `⇧tab` refuses with `no board` — eight cells, which
+// costs no key the footer names at any width, the row that says why (`no
+// archived sessions`) being on the frame already (#64) — and where the last
+// row leaves the archive's board under the keys, the deck falls back to the
+// list's level with it. The archive that still draws rows keeps its board
+// (#262, #265): the held side, which passes at HEAD too.
+func TestTheEmptyArchiveIsNotABoard(t *testing.T) {
+	forceASCII(t)
+	scenes := []scene{r94ttScene(t, "two-tools"), r94ttScene(t, "subagents")}
+	sd := r94ttScene(t, "second-day")
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			for _, sc := range scenes {
+				// The archive both `api`s were hidden into, emptied again.
+				m := r94ttStand(sc, w, h, "2", "x", "x", "A", "x", "x")
+				before := r94ttRows(m)
+				if !strings.Contains(strings.Join(before, "\n"), "no archived sessions") {
+					t.Fatalf("%s %dx%d %v: the stand is wrong — the archive is not empty", sc.name, w, h, prof)
+				}
+				if m.level == levelBoard {
+					t.Fatalf("%s %dx%d %v: the stand is wrong — already at the board's level", sc.name, w, h, prof)
+				}
+				pressKey(m, "shift+tab")
+				poll(m, sc)
+				after := r94ttRows(m)
+				if m.level == levelBoard {
+					t.Errorf("%s %dx%d %v: ⇧tab took the deck to the board's level over an archive with no board on it", sc.name, w, h, prof)
+				}
+				if title := r94ttFleetTitle(after); !strings.Contains(title, "[fleet]") {
+					t.Errorf("%s %dx%d %v: the drawn list lost the word that says where the keys are: %q", sc.name, w, h, prof, strings.TrimSpace(title))
+				}
+				foot := r94ttFooter(after)
+				if !strings.HasSuffix(strings.TrimRight(foot, " "), "no board") {
+					t.Errorf("%s %dx%d %v: ⇧tab answered %q, not `no board`", sc.name, w, h, prof, strings.TrimSpace(foot))
+				}
+				kept := r94ttKeys(foot)
+				for k := range r94ttKeys(r94ttFooter(before)) {
+					has := false
+					for got := range kept {
+						// A key the reserve backfilled says more, not
+						// less: `enter attach (prefix d returns)` (#39).
+						if got == k || strings.HasPrefix(got, k+" ") || strings.HasPrefix(k, got+" ") {
+							has = true
+						}
+					}
+					if !has {
+						t.Errorf("%s %dx%d %v: the refusal cost the footer %q: %q", sc.name, w, h, prof, k, strings.TrimSpace(foot))
+					}
+				}
+				// Nothing but the note moved: the same rows, the trail's
+				// own marker among them.
+				for i := 0; i < len(before)-1 && i < len(after)-1; i++ {
+					if before[i] != after[i] && !strings.Contains(after[i], "[fleet]") {
+						t.Errorf("%s %dx%d %v: the refused ⇧tab redrew a row: %q became %q", sc.name, w, h, prof, before[i], after[i])
+					}
+				}
+
+				// The board emptied under the keys: the last row of the
+				// archive's board unhidden while standing on it.
+				b := r94ttStand(sc, w, h, "2", "x", "x", "A", "shift+tab")
+				if b.level != levelBoard {
+					t.Fatalf("%s %dx%d %v: the stand is wrong — ⇧tab did not reach the archive's board", sc.name, w, h, prof)
+				}
+				pressKey(b, "x")
+				poll(b, sc)
+				pressKey(b, "x")
+				poll(b, sc)
+				rows := r94ttRows(b)
+				if !strings.Contains(strings.Join(rows, "\n"), "no archived sessions") {
+					t.Fatalf("%s %dx%d %v: the stand is wrong — the archive's board did not empty", sc.name, w, h, prof)
+				}
+				if b.level == levelBoard {
+					t.Errorf("%s %dx%d %v: the archive's board emptied and the deck stayed at the board's level", sc.name, w, h, prof)
+				}
+				if title := r94ttFleetTitle(rows); !strings.Contains(title, "[fleet]") {
+					t.Errorf("%s %dx%d %v: the list the emptied board fell back to lost `[fleet]`: %q", sc.name, w, h, prof, strings.TrimSpace(title))
+				}
+			}
+			// Held: an archive that still draws rows keeps its board.
+			l := r94ttStand(sd, w, h, "A", "shift+tab")
+			if l.level != levelBoard {
+				t.Errorf("second-day %dx%d %v: the archive with rows in it lost its board", w, h, prof)
+			}
+			if got := ansi.Strip(l.View()); !strings.Contains(strings.Split(got, "\n")[0], "· board") {
+				t.Errorf("second-day %dx%d %v: the archive's board no longer says it is one: %q", w, h, prof, strings.TrimSpace(strings.Split(got, "\n")[0]))
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}
