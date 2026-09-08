@@ -857,6 +857,14 @@ func (m *Model) toggleFold() {
 }
 
 // jumpMatch is n/N: the next (or previous) document row the query appears in.
+//
+// The walk asks the page whether it moved, the device `ctrl+d` and `G`
+// already use (#24, #228, #231): `clampScroll` pins the page where every
+// match is already drawn — on a conversation the reader draws whole it
+// can never leave nought — so the key the row names beside `/ search`
+// drew nothing and said nothing, the dead key SPEC's round-one rule
+// bans. Where the page does not move, the match the walk was going to is
+// on the screen already, and the row says so.
 func (m *Model) jumpMatch(dir int) {
 	if m.query == "" {
 		m.note = "no search — / starts one"
@@ -868,6 +876,15 @@ func (m *Model) jumpMatch(dir int) {
 		m.note = "no matches"
 		return
 	}
+	was := m.readerTop(doc)
+	m.walkTo(doc, matches, dir)
+	if m.readerTop(doc) == was {
+		m.note = "the match is on screen"
+	}
+}
+
+// walkTo scrolls to the next (or previous) match, wrapping at the ends.
+func (m *Model) walkTo(doc []readerLine, matches []int, dir int) {
 	if dir > 0 {
 		for _, line := range matches {
 			if line > m.scroll {

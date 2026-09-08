@@ -5739,3 +5739,130 @@ func TestTheArchiveGroupsByProjectNotByTheNameItsPersonGave(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSearchWalkSaysWhereItLanded pins round eighty-five's one thing.
+// The reader's footer names `/ search · n/N` together — the key that
+// starts a search and the pair that walks it — and #223 gave the pair its
+// own refusal, `no search — / starts one`, for the row where no search
+// stands. Start the search the row names and the pair goes silent
+// instead: `jumpMatch` set `m.scroll` and asked nothing, so on a
+// conversation the reader draws whole `clampScroll` pinned the page to
+// nought and the press drew nothing and said nothing — the dead key
+// SPEC's round-one rule bans and the rule #228 and #231 folded at `j` and
+// at `G`; every one of the 1,901 silent presses stood on a page the match
+// was already drawn on
+// (#20). The walk asks the page whether it moved, as `ctrl+d` and `G`
+// already do, and where it did not the row says the match is on screen.
+func TestTheSearchWalkSaysWhereItLanded(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name string
+		sc   scene
+		n    int
+	}{
+		{"fleet-hygiene", sceneFleetHygiene(), 13},
+		{"fleet-hygiene", sceneFleetHygiene(), 15},
+		{"many-idle", sceneManyIdle(), 13},
+		{"many-idle", sceneManyIdle(), 33},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+			w, h := size[0], size[1]
+			m := r85fhReaderSearch(c.sc, w, h, c.n, "pytest")
+			if m == nil {
+				t.Fatalf("%s %dx%d prefix %d: no reader stand with a search to walk", c.name, w, h, c.n)
+			}
+			for _, k := range []string{"n", "n", "N"} {
+				m.note = ""
+				before := m.View()
+				pressKey(m, k)
+				poll(m, c.sc)
+				if m.View() == before {
+					t.Errorf("%s %dx%d prefix %d: %q on a running search drew nothing and said nothing",
+						c.name, w, h, c.n, k)
+					continue
+				}
+				if m.note != "" && m.note != "the match is on screen" {
+					t.Errorf("%s %dx%d prefix %d: %q on a running search said %q",
+						c.name, w, h, c.n, k, m.note)
+				}
+			}
+		}
+	}
+}
+
+// TestNoReaderWalkKeyIsSilentlyDead is the rule behind it, asked of every
+// canonical reader stand of every scene at every width: with a search
+// running, `n` and `N` must change the frame — a note is a drawn cell,
+// and a key that changes nothing at all is the dead key round one bans.
+func TestNoReaderWalkKeyIsSilentlyDead(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			// One walk finds the reader's stands; only those are replayed.
+			var stands []int
+			m := sceneModel(sc, w, h)
+			for n := range keys {
+				if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+					stands = append(stands, n)
+				}
+				pressKey(m, keys[n])
+				poll(m, sc)
+			}
+			if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+				stands = append(stands, len(keys))
+			}
+			for _, n := range stands {
+				mm := r85fhReaderSearch(sc, w, h, n, "pytest")
+				if mm == nil {
+					continue // nothing to walk: #223's own case
+				}
+				for _, k := range []string{"n", "N"} {
+					mm.note = ""
+					before := mm.View()
+					pressKey(mm, k)
+					poll(mm, sc)
+					if mm.View() == before {
+						t.Errorf("%s %dx%d after %d keys: %q on a running search drew nothing and said nothing",
+							sc.name, w, h, n, k)
+					}
+				}
+			}
+		}
+	}
+}
+
+// r85fhReaderSearch replays the first n keys of a scene's own walkthrough
+// and then presses the two keys the reader's own footer names — `/`, the
+// query, enter — returning nil where the search finds nothing to walk.
+func r85fhReaderSearch(sc scene, w, h, n int, query string) *Model {
+	m := sceneModel(sc, w, h)
+	keys := append(append([]string{}, canonicalKeys...), "esc")
+	keys = append(keys, sc.extra...)
+	if n > len(keys) {
+		n = len(keys)
+	}
+	for _, k := range keys[:n] {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if m.level != levelReader || m.showHelp || m.searching || m.replying {
+		return nil
+	}
+	pressKey(m, "/")
+	for _, r := range query {
+		pressKey(m, string(r))
+	}
+	pressKey(m, "enter")
+	poll(m, sc)
+	if m.query == "" || len(readerMatches(m.doc(m.readerWidth()), m.query)) == 0 {
+		return nil
+	}
+	return m
+}

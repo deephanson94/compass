@@ -4345,7 +4345,30 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// the level's own rank stands.
 		order = append(order, keep...)
 	}
+	if m.walkNote() {
+		// The same rule at the walk key (#24, #57): under the note `n`
+		// and `N` put there the row keeps the pair, as it keeps the
+		// chapter keys under a chapter key's. A row that said the match
+		// was on screen while shedding the key that had said so read as
+		// the key having gone — the harm #223 pinned from the other side.
+		var keep []string
+		for i := 0; i < len(order); i++ {
+			if order[i] == " · n/N" {
+				keep = append(keep, order[i])
+				order = append(order[:i], order[i+1:]...)
+				i--
+			}
+		}
+		order = append(order, keep...)
+	}
 	return append(order, " · ? help")
+}
+
+// walkNote says whether the note is the walk key's own: the answer `n` and
+// `N` give where the match they were going to is already drawn. Under it
+// the pair stays, as the chapter keys stay under a chapter key's note (#24).
+func (m *Model) walkNote() bool {
+	return m.note == "the match is on screen"
 }
 
 // fitQuote is form with its quoted clause clipped so the whole fits room,
