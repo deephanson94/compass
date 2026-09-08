@@ -7500,3 +7500,213 @@ func TestNoMoveOnAnEmptyViewCountsASession(t *testing.T) {
 	}
 	t.Logf("%d empty-view stands", stands)
 }
+
+// r89sdEmptyList drives a standing search the list cannot answer and, when
+// arch is true, `A` on top of it: either way the list draws no row.
+func r89sdEmptyList(sc scene, w, h int, arch bool) *Model {
+	m := sceneModel(sc, w, h)
+	keys := []string{"/", "zzzznothing", "enter"}
+	if arch {
+		keys = append(keys, "A")
+	}
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestNoMoveKeyCallsAnEmptyListTheOnlySession pins round eighty-nine's
+// second-day second finding.
+//
+// `onlyOrLast` refused a move on `len(viewOrder()) <= 1`, so a list a
+// standing search had emptied — nought rows, not one — answered `the only
+// session` in the archive and `the only live one` on the fleet: on the
+// second day that sentence stood over a body reading `no session matches
+// /pytest` and a header counting `archive 0 of 12`, and on few-ongoing
+// `the only live one` stood over a fleet of four. Nought is not one; the
+// move's own question is where the row would go, and the answer is the
+// deck's own form for a move with nowhere to land (#24).
+func TestNoMoveKeyCallsAnEmptyListTheOnlySession(t *testing.T) {
+	forceASCII(t)
+	const want = "no session to move to"
+	for _, sc := range []scene{sceneSecondDay(), sceneManyIdle(), sceneFewOngoing()} {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				for _, arch := range []bool{true, false} {
+					old := lipgloss.ColorProfile()
+					lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+					for _, mv := range []string{"j", "k"} {
+						m := r89sdEmptyList(sc, wh[0], wh[1], arch)
+						if len(m.viewOrder()) != 0 {
+							lipgloss.SetColorProfile(old)
+							t.Fatalf("%s %dx%d arch=%v: the query left rows, so the stand is not the one", sc.name, wh[0], wh[1], arch)
+						}
+						if m.level >= levelWaypoints && len(TrailRows(m.trail, m.level)) > 1 {
+							continue // the keys are the trail's here, not the list's
+						}
+						pressKey(m, mv)
+						poll(m, sc)
+						if m.note == "the only session" || m.note == "the only live one" {
+							t.Errorf("%s %dx%d (%v) arch=%v: `%s` called a list drawing no row %q",
+								sc.name, wh[0], wh[1], prof, arch, mv, m.note)
+						}
+						if m.note != "" && m.note != want && !strings.HasPrefix(m.note, "no ") {
+							t.Errorf("%s %dx%d (%v) arch=%v: `%s` answered %q, not %q",
+								sc.name, wh[0], wh[1], prof, arch, mv, m.note, want)
+						}
+						rows := strings.Split(ansi.Strip(m.View()), "\n")
+						if foot := rows[len(rows)-1]; strings.Contains(foot, "the only session") || strings.Contains(foot, "the only live one") {
+							t.Errorf("%s %dx%d (%v) arch=%v: the footer still counts one: %q",
+								sc.name, wh[0], wh[1], prof, arch, foot)
+						}
+					}
+					lipgloss.SetColorProfile(old)
+				}
+			}
+		}
+	}
+
+	// The other side, at 100: a list that really does draw one row keeps
+	// the sentence #152 scoped — `the only live one` on the fleet of one,
+	// and the unscoped word in the archive.
+	sd := sceneSecondDay()
+	m := sceneModel(sd, 100, 30)
+	if len(m.viewOrder()) != 1 {
+		t.Fatalf("second-day: the live list is not a list of one")
+	}
+	pressKey(m, "j")
+	poll(m, sd)
+	if m.note != "the only live one" {
+		t.Errorf("the fleet of one lost #152's scoped word: %q", m.note)
+	}
+	fh := sceneFleetHygiene()
+	m = sceneModel(fh, 100, 30)
+	for _, k := range []string{"/", "closed", "enter", "A"} {
+		pressKey(m, k)
+		poll(m, fh)
+	}
+	if len(m.viewOrder()) == 1 {
+		pressKey(m, "j")
+		poll(m, fh)
+		if m.note != "the only session" {
+			t.Errorf("the archive of one lost #152's unscoped word: %q", m.note)
+		}
+	}
+}
+
+// r89sdHead is the identity header row, ansi stripped.
+func r89sdHead(m *Model) string {
+	return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+}
+
+// r89sdFoot is the note row.
+func r89sdFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// r89sdEmptyArchive puts the deck in an archive that draws no row at all: a
+// standing fleet query the archive cannot answer, then `A`. #244 keeps the
+// live session the person left selected there — the header names it, the
+// trail beside it draws it, and `enter attach` is offered for its pane.
+func r89sdEmptyArchive(sc scene, w, h int, query string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{"/", query, "enter", "A"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheHeaderKeepsTheDigitOfTheLiveRowItIsDrawing pins round eighty-nine's
+// second-day one thing.
+//
+// In the archive the numbers on the header are the archive's own, as drawn
+// (#32) — but an archive drawing no row claims no number, and the guard
+// `d > 0 && !m.archiveView` dropped the digit from the header of the live
+// session the frame is still selecting, drawing the trail of and offering
+// `enter attach` for (#244). The same frame's own refusal calls that session
+// `1 hello is live` (#242) and the board one `esc` away calls it `1 hello`:
+// a live session takes its number on first sight and keeps it (#30), and the
+// header is the place the deck says it (#79, #233).
+func TestTheHeaderKeepsTheDigitOfTheLiveRowItIsDrawing(t *testing.T) {
+	forceASCII(t)
+	for _, sc := range []scene{sceneSecondDay(), sceneManyIdle(), sceneFewOngoing()} {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+				m := r89sdEmptyArchive(sc, wh[0], wh[1], "pytest")
+				if !m.archiveView || len(m.viewOrder()) != 0 {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the stand is not an archive drawing no row", sc.name, wh[0], wh[1])
+				}
+				s, ok := m.selected()
+				if !ok || !s.Live {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the empty archive is not keeping a live row (#244)", sc.name, wh[0], wh[1])
+				}
+				d := m.digits[s.Info.Key()]
+				if d < 1 || d > 9 {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the live row wears no digit", sc.name, wh[0], wh[1])
+				}
+				want := fmt.Sprintf("%d %s", d, sessionName(s.Info))
+				if head := r89sdHead(m); !strings.Contains(head, want) {
+					t.Errorf("%s %dx%d (%v): the header dropped the live row's digit: want %q in %q",
+						sc.name, wh[0], wh[1], prof, want, head)
+				}
+				// The header still fits its terminal, and no clause of it
+				// was sold for the digit: the tool word and the standing
+				// query stay (#79, #82).
+				if x := lipgloss.Width(strings.SplitN(m.View(), "\n", 2)[0]); x > wh[0] {
+					t.Errorf("%s %dx%d (%v): the header runs past the terminal (%d)", sc.name, wh[0], wh[1], prof, x)
+				}
+				if !strings.Contains(r89sdHead(m), "/pytest") {
+					t.Errorf("%s %dx%d (%v): the header lost the standing query: %q",
+						sc.name, wh[0], wh[1], prof, r89sdHead(m))
+				}
+				// #242 is untouched: the digit pressed there still says
+				// where the session is, and now the header agrees with it.
+				pressKey(m, fmt.Sprintf("%d", d))
+				poll(m, sc)
+				if wantNote := fmt.Sprintf("%d %s is live", d, sessionName(s.Info)); !strings.Contains(r89sdFoot(m), wantNote) {
+					t.Errorf("%s %dx%d (%v): #242's note went: want %q in %q",
+						sc.name, wh[0], wh[1], prof, wantNote, r89sdFoot(m))
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+
+	// The other side, at 120: where the archive DOES draw rows the numbers
+	// stay the archive's own, as drawn (#32) — the header wears the number
+	// the row beside it wears, not the session's fleet digit.
+	sd := sceneSecondDay()
+	m := sceneModel(sd, 120, 34)
+	pressKey(m, "A")
+	poll(m, sd)
+	if len(m.viewOrder()) == 0 {
+		t.Fatalf("second-day: `A` drew no archive, so the control is not a control")
+	}
+	s, ok := m.selected()
+	if !ok {
+		t.Fatalf("second-day: the archive selected nothing")
+	}
+	if s.Live {
+		t.Fatalf("second-day: the archive opened on a live row")
+	}
+	if r, ok := m.boardRows()[s.Info.Key()]; !ok || r.num != 1 {
+		t.Fatalf("second-day: the archive's first row is not numbered 1")
+	}
+	if head := r89sdHead(m); !strings.Contains(head, "1 fix the 401 on token refresh") {
+		t.Errorf("the drawing archive lost its own numbering (#32): %q", head)
+	}
+
+	// And off the archive nothing moves: the board's header is the board's.
+	m = sceneModel(sd, 120, 34)
+	if head := r89sdHead(m); !strings.Contains(head, "1 hello") {
+		t.Errorf("the board's header lost the digit: %q", head)
+	}
+}

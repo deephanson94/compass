@@ -3152,8 +3152,15 @@ func (m *Model) headerName() (digit, name, tag string) {
 	}
 	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
 		digit = strconv.Itoa(r.num)
-	} else if d := m.digits[s.Info.Key()]; d > 0 && !m.archiveView {
-		digit = strconv.Itoa(d) // off the view under a search: the digit is still its own
+	} else if d := m.digits[s.Info.Key()]; d > 0 && (!m.archiveView || (s.Live && len(m.viewOrder()) == 0)) {
+		// Off the view under a search: the digit is still its own. In the
+		// archive the numbers are the archive's own (#32) — but an archive
+		// drawing no row claims no number, and the live session the frame
+		// is still selecting, drawing the trail of and offering `enter
+		// attach` for (#244) wears the digit it took for life (#30); its
+		// own refusal on that frame already calls it `1 hello is live`
+		// (#242), a digit the header must not be the one to drop.
+		digit = strconv.Itoa(d)
 	}
 	for _, o := range m.sessions {
 		if o.Info.Key() != s.Info.Key() && o.Live == s.Live && sessionName(o.Info) == name {
