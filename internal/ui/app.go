@@ -1776,7 +1776,22 @@ func (m *Model) toggleHidden() {
 	if m.hidden[key] {
 		delete(m.hidden, key)
 		m.saveHidden()
-		m.note = sessionName(s.Info) + " is back on the board"
+		// The note wears the number of the view it names, as the hide
+		// note does (#256): the row leaves the archive the moment the
+		// key acts, so the frame that follows draws it nowhere, and on
+		// a fleet with two sessions called `api` every `api` left on
+		// the frame — the header's and the one row the archive still
+		// lists — is the other one, the one still hidden. The board is
+		// where this one went and the board digit is the key that
+		// reaches it there (#16), so the note says which `api` came
+		// back. `m.digits` is kept for a session's life and hiding
+		// never moved it (`assignDigits`), so the digit is the one the
+		// hide note spent and the one the board draws on the next `A`.
+		back := sessionName(s.Info)
+		if d := m.digits[key]; d > 0 {
+			back = strconv.Itoa(d) + " " + back
+		}
+		m.note = back + " is back on the board"
 		return
 	}
 	if refusal := m.hideRefusal(s); refusal != "" {
@@ -2830,7 +2845,16 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	s, ok := m.selected()
 	if ok {
 		name = sessionName(s.Info)
-		if d := m.digits[s.Info.Key()]; d > 0 && (!m.archiveView || (s.Live && len(m.viewOrder()) == 0)) {
+		if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
+			// The number the frame draws, which is the header's own
+			// device (`headerName`): in the archive the numbers are the
+			// archive's own (#32), and the card sat over a row drawn
+			// `▸1 ● api` under a header reading `1 api` saying only
+			// `reply to api`, on a fleet drawing two rows by that name.
+			// The card prints the row's digit (#31) — the drawn one,
+			// as the hide note takes it (#256) and the refusal (#245).
+			who = strconv.Itoa(r.num) + " · "
+		} else if d := m.digits[s.Info.Key()]; d > 0 && (!m.archiveView || (s.Live && len(m.viewOrder()) == 0)) {
 			// The row's own digit, which is the session's for life — a
 			// position named another session on the same screen. In the
 			// archive the numbers are the archive's own (#32), but an

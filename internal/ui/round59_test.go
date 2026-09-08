@@ -8662,3 +8662,173 @@ func TestNoArchiveHideNoteNamesADigitTheFrameDoesNotDraw(t *testing.T) {
 	}
 	t.Logf("%d archive-hide stands", stands)
 }
+
+// ---- round 91, two-tools ----
+// r91ttStand plays a key run on a scene and hands back the model.
+func r91ttStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r91ttFoot is the frame's last drawn row, escapes stripped.
+func r91ttFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// TestTheUnhideNoteNamesWhichSessionCameBack pins round ninety-one's one
+// thing for the two-tools operator. `x` in the archive puts a hidden
+// session back on the board, and the row leaves the archive the moment
+// the key acts — so the frame that follows draws it nowhere. On a fleet
+// with two live sessions called `api` the note said `api is back on the
+// board` while every `api` still on the frame — the header's, and the one
+// row the archive goes on listing — was the other one, the one still
+// hidden. The note wears the number of the view it names, as the hide
+// note does (#256) and the header (#248) and the refusal (#251) do: the
+// board digit, which is the key that reaches the session there (#16) and
+// the same digit the hide note spent one press earlier.
+//
+// The other side is held: where the archive is left with nothing to draw
+// and the selection stays on the session that came back, the note still
+// wears that session's board digit, and it is the digit the header on the
+// same frame draws.
+func TestTheUnhideNoteNamesWhichSessionCameBack(t *testing.T) {
+	forceASCII(t)
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := fmt.Sprintf("%dx%d %v", w, h, prof)
+
+			// Both `api` sessions off the board: the notes name them
+			// `2 api` and `3 api`, the digits the board gave them.
+			m := r91ttStand(sceneTwoTools(), w, h, "2", "x")
+			if foot := r91ttFoot(m); !strings.Contains(foot, "2 api is hidden") {
+				t.Fatalf("%s: the run did not hide session 2: %q", where, foot)
+			}
+			m = r91ttStand(sceneTwoTools(), w, h, "2", "x", "x")
+			if foot := r91ttFoot(m); !strings.Contains(foot, "3 api is hidden") {
+				t.Fatalf("%s: the run did not hide session 3: %q", where, foot)
+			}
+
+			// The archive lists both; `x` brings the first back.
+			m = r91ttStand(sceneTwoTools(), w, h, "2", "x", "x", "A")
+			if !m.archiveView || len(m.viewOrder()) < 2 {
+				t.Fatalf("%s: the run did not reach an archive drawing both rows", where)
+			}
+			m = r91ttStand(sceneTwoTools(), w, h, "2", "x", "x", "A", "x")
+			foot := r91ttFoot(m)
+			if !strings.Contains(foot, "is back on the board") {
+				t.Fatalf("%s: `x` did not put the session back: %q", where, foot)
+			}
+			if strings.Contains(foot, " api is back on the board") &&
+				!strings.Contains(foot, "2 api is back on the board") {
+				t.Errorf("%s: the unhide note names no session: %q", where, foot)
+			}
+			if !strings.Contains(foot, "2 api is back on the board") {
+				t.Errorf("%s: the note does not name the session that came back: %q", where, foot)
+			}
+			// The frame it stands on draws the other `api`, still hidden:
+			// the header names it and the archive still lists it, so a
+			// note without a number names the session the frame does not.
+			view := ansi.Strip(m.View())
+			head := strings.Split(view, "\n")[0]
+			if !strings.Contains(head, "api") || strings.Contains(head, "2 api") {
+				t.Errorf("%s: the header does not draw the other api: %q", where, strings.TrimSpace(head))
+			}
+			if len(m.viewOrder()) != 1 {
+				t.Errorf("%s: the archive no longer draws the row that stayed hidden", where)
+			}
+
+			// Held: with nothing left in the archive the note still wears
+			// the digit, and it is the one the header draws.
+			m = r91ttStand(sceneTwoTools(), w, h, "2", "x", "x", "A", "x", "x")
+			foot = r91ttFoot(m)
+			if !strings.Contains(foot, "3 api is back on the board") {
+				t.Errorf("%s: the last unhide lost its number: %q", where, foot)
+			}
+			head = strings.Split(ansi.Strip(m.View()), "\n")[0]
+			if !strings.Contains(head, "3 api") {
+				t.Errorf("%s: the header does not draw the session the note names: %q", where, strings.TrimSpace(head))
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}
+
+// TestTheReplyCardWearsTheNumberTheArchiveDraws pins round ninety-one's
+// second finding. The reply panel prints the row's digit (#31), and in the
+// archive the numbers are the archive's own (#32) — the header takes them
+// from `boardRows` for exactly that reason (#248) and the hide note does
+// too (#256). The card did not: over a row drawn `▸1 ● api`, under a
+// header reading `1 api`, on a fleet listing two rows called `api`, it
+// said only `reply to api`, because it read `m.digits` and then dropped
+// the digit wherever the archive drew rows. #254's stand — the archive a
+// query has cut to none, where the live session keeps its board digit —
+// is held beside it.
+func TestTheReplyCardWearsTheNumberTheArchiveDraws(t *testing.T) {
+	forceASCII(t)
+	head := func(m *Model) string {
+		for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if strings.Contains(row, "reply to ") {
+				return row
+			}
+		}
+		return ""
+	}
+	stand := func(sc scene, w, h int, keys ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := fmt.Sprintf("%dx%d %v", w, h, prof)
+
+			// The archive lists both hidden `api` rows: `1` and `2`.
+			for i, keys := range [][]string{
+				{"2", "x", "x", "A", "r"},
+				{"2", "x", "x", "A", "j", "r"},
+			} {
+				m := stand(sceneTwoTools(), w, h, keys...)
+				if !m.archiveView || len(m.viewOrder()) < 2 {
+					t.Fatalf("%s: the run did not reach an archive drawing both rows", where)
+				}
+				card := head(m)
+				if card == "" {
+					t.Fatalf("%s: no reply card on the frame", where)
+				}
+				want := fmt.Sprintf("reply to %d · api", i+1)
+				if !strings.Contains(card, want) {
+					t.Errorf("%s: the card does not wear the number the archive draws (%q): %q", where, want, strings.TrimSpace(card))
+				}
+				// The header on the same frame draws that number.
+				if first := strings.Split(ansi.Strip(m.View()), "\n")[0]; !strings.Contains(first, fmt.Sprintf("%d api", i+1)) {
+					t.Errorf("%s: the header lost the archive's number: %q", where, strings.TrimSpace(first))
+				}
+			}
+
+			// Held (#254): an archive drawing no row claims no number of
+			// its own, and the card keeps the live session's board digit.
+			m := stand(sceneTwoTools(), w, h, "2", "x", "A", "x", "r")
+			if !m.archiveView || len(m.viewOrder()) != 0 {
+				t.Fatalf("%s: the run did not reach an archive drawing no row", where)
+			}
+			if card := head(m); !strings.Contains(card, "reply to 2 · api") {
+				t.Errorf("%s: the empty archive's card lost the board digit: %q", where, strings.TrimSpace(card))
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}
