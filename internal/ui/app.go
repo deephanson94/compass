@@ -919,7 +919,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.sessionView() && m.level == levelWaypoints:
 			m.note = "the live pane"
 		case m.level == levelBoard:
-			m.note = "mirror on · beside a session (tab)" // the flag flipped: said as a state, not a refusal
+			// The flag flipped: said as a state, not a refusal (#37), and
+			// nothing the frame already says — `beside a session` is the
+			// help's own `m` row and `(tab)` this footer's `tab session`;
+			// the 34-cell form cost the 120 footer three keys (#177).
+			m.note = "mirror on"
 		case m.sessionView() && m.level >= levelReader:
 			// The live pane has no keys: they go back to the trail.
 			m.level = levelWaypoints

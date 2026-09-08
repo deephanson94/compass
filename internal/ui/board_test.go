@@ -440,8 +440,10 @@ func TestNoCaptureOnTheBoard(t *testing.T) {
 	if m.capture() != nil {
 		t.Error("the board polls a pane for a mirror it does not draw")
 	}
-	if !strings.Contains(m.note, "tab") {
-		t.Errorf("m on the board said %q; it should say the mirror shows on one trail (tab)", m.note)
+	if m.note != "mirror on" || !strings.Contains(ansi.Strip(m.View()), "tab session") {
+		// The note says the flag flipped; the way to the mirror is the
+		// footer's own `tab session` on the same row (#177).
+		t.Errorf("m on the board said %q; the footer should name the way to the mirror", m.note)
 	}
 }
 

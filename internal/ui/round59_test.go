@@ -1912,3 +1912,42 @@ func TestTheHiddenCountCountsTheSearchToo(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 71, two-tools ----
+// The board's `m` note says the flag flipped and nothing the frame already
+// says. `mirror on · beside a session (tab)` is 34 cells against the twelve
+// -cell floor: `beside a session` is the help's own `m` row and `(tab)` is
+// the very footer's `tab session`, so every cell over the floor is a second
+// copy — and it cost the 120 footer `/ search` and `g grab` and the 152
+// footer `enter attach (prefix d returns)` (#166, #57, #165).
+func TestTheBoardsMirrorNoteKeepsTheBoardsKeys(t *testing.T) {
+	forceASCII(t)
+	want := map[int][]string{
+		120: {"/ search", "g grab"},
+		152: {"(prefix d returns)"},
+	}
+	for _, size := range [][2]int{{120, 34}, {152, 40}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		pressKey(m, "m")
+		view := ansi.Strip(m.View())
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "mirror on") {
+			t.Fatalf("%dx%d: not the board's mirror note: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+		if !strings.Contains(foot, "tab session") {
+			t.Errorf("%dx%d: the note's own row does not name the way to the mirror: %q",
+				size[0], size[1], strings.TrimSpace(foot))
+		}
+		for _, k := range want[size[0]] {
+			if !strings.Contains(foot, k) {
+				t.Errorf("%dx%d: the board's mirror note sheds %q: %q",
+					size[0], size[1], k, strings.TrimSpace(foot))
+			}
+		}
+	}
+}
