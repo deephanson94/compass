@@ -10665,3 +10665,108 @@ func TestTheHeaderSaysTheAskOnceAndKeepsTheToolWord(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 97, fleet-hygiene ----
+// TestTheRelayedCardsHeadYieldsItsAskLikeAnyOther pins round ninety-seven's
+// one thing.
+//
+// #265 sent the archive board card's ask down to the card's own `◉` row and
+// left the head the name the archive gives the session; #266 kept the ask on
+// the head only where the name and age it would fall back to are another
+// drawn card's too. The one card whose prompt came from another session
+// (#97) fell through both: its `◉` row wears the relay verb outside the
+// quotes — `◉ relayed "the encoder is in…` — so `saidAsk` handed `sameAsk` a
+// string beginning `relayed "`, the prefix compare could never match, and the
+// head kept `porter · relayed "the enco…` over its own row three lines down.
+// Its head key (`porter`, `1m`) is no other row's, so #266 is not what held
+// it. At every board width both copies were clipped, so the card spent two
+// rows on a sentence it said whole on neither.
+//
+// The rule: on the archive board no card's head draws the sentence its own
+// `◉` row draws, whatever verb that row wears. Held on the other side too —
+// the ask stays on the `◉` row with its verb, and a card whose archive title
+// is not its first prompt still keeps that title on the head (#265's own
+// `sameAsk` gate), so blanking every live head does not satisfy this.
+func TestTheRelayedCardsHeadYieldsItsAskLikeAnyOther(t *testing.T) {
+	var sc scene
+	for _, s := range allScenes() {
+		if s.name == "fleet-hygiene" {
+			sc = s
+		}
+	}
+	if sc.name == "" {
+		t.Fatal("no fleet-hygiene scene")
+	}
+	headRow := regexp.MustCompile(`^▸?[1-9] [●○◍▲⊘] \S`)
+	heads := func(frame string) []string {
+		var out []string
+		for _, line := range strings.Split(ansi.Strip(frame), "\n") {
+			for _, seg := range strings.Split(line, "│") {
+				seg = strings.TrimSpace(seg)
+				if strings.HasPrefix(seg, "◉") || seg == "" {
+					continue
+				}
+				if headRow.MatchString(seg) {
+					out = append(out, seg)
+				}
+			}
+		}
+		return out
+	}
+	yielded, kept, asks := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			for _, tail := range [][]string{{"x", "A", "shift+tab"}, {"x", "x", "A", "shift+tab"}} {
+				m := sceneModel(sc, size[0], size[1])
+				for _, k := range tail {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				if !m.archiveView || m.level != levelBoard {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%dx%d %v: not the archive board", size[0], size[1], tail)
+				}
+				frame := ansi.Strip(m.View())
+				hs := heads(frame)
+				relay, closed := "", ""
+				for _, h := range hs {
+					if strings.Contains(h, "porter") {
+						relay = h
+					}
+					if strings.Contains(h, "the pane I closed") {
+						closed = h
+					}
+				}
+				if relay == "" {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%dx%d %v: the relayed session draws no card head", size[0], size[1], tail)
+				}
+				if strings.Contains(relay, "encoder") || strings.Contains(relay, "relayed") {
+					t.Errorf("%dx%d %v prof=%v: the relayed card's head says its own ◉ row over again: %q",
+						size[0], size[1], tail, prof, relay)
+				} else {
+					yielded++
+				}
+				// The ask is not lost: it stays on the card's ◉ row, verb and all.
+				if !strings.Contains(frame, `◉ relayed "the encoder`) {
+					t.Errorf("%dx%d %v prof=%v: the relayed ask left the frame with the head", size[0], size[1], tail, prof)
+				} else {
+					asks++
+				}
+				// A card whose archive title is not its first prompt keeps it.
+				if closed == "" {
+					t.Errorf("%dx%d %v prof=%v: the closed-pane card stopped saying its own title", size[0], size[1], tail, prof)
+				} else {
+					kept++
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if yielded == 0 || kept == 0 || asks == 0 {
+		t.Fatalf("vacuous: yielded %d, titles kept %d, asks drawn %d", yielded, kept, asks)
+	}
+	t.Logf("relayed heads yielded: %d · titles kept: %d · asks still drawn: %d", yielded, kept, asks)
+}

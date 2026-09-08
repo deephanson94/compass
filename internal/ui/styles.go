@@ -253,10 +253,14 @@ func truncateWhole(line string, n int) string {
 // glyph, and outside the quotes so the quote is still the ask (#97).
 func askQuote(text string, relayed bool) string {
 	if relayed {
-		return `relayed "` + text + `"`
+		return relayVerb + `"` + text + `"`
 	}
 	return `"` + text + `"`
 }
+
+// relayVerb is the word a relayed ask wears before its quotes (#97): the
+// verb is the row's, the sentence inside the quotes is the session's.
+const relayVerb = "relayed "
 
 // askRelayed says whether an archived headline is the session's relayed
 // title, rather than a state word the headline fell back to.

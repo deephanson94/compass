@@ -2280,6 +2280,14 @@ func saidAsk(row string) string {
 		return ""
 	}
 	rest = saidClock.ReplaceAllString(rest, "")
+	// A relayed prompt wears its verb outside the quotes (#97) — `◉
+	// relayed "the encoder is in…` — and the sentence the head draws
+	// beside the name is what is inside them. Without dropping the verb
+	// the prefix compare below can never match, so the one card whose
+	// prompt came from another session kept a head that said its own ◉
+	// row over again, both copies clipped, while the live card beside it
+	// yielded (#265, #266).
+	rest = strings.TrimPrefix(strings.TrimSpace(rest), relayVerb)
 	return strings.Trim(strings.TrimSpace(rest), `"`)
 }
 
