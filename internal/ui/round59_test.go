@@ -2806,3 +2806,53 @@ func TestTheArchivesListKeepsTheWayDeeper(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 76, fleet-hygiene, the one thing ----
+// The reader's footer names the archive where no row does. #62 handed the
+// door to the footer below the board's width, on the reason that there
+// "the reader takes the whole screen and no band or fleet row names the
+// archive". Above that width the door is the band's — the fleet's own last
+// line is not drawn beside the reader — and the band takes the digits the
+// live fleet has not used, so a fleet of nine or more live sessions leaves
+// it none. Twelve live sessions and three hundred archived: at 120, 152
+// and 220 the reader's frame named neither the count nor the key, while
+// the same keypresses at a hundred columns named both, and `A` opens the
+// archive at every depth. The question is what the frame drew, not how
+// wide it is; the frame that names the door on a row does not name it
+// twice.
+func TestTheReadersFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sc   scene
+	}{
+		{"many-idle", sceneManyIdle()},
+		{"fleet-hygiene", sceneFleetHygiene()},
+	} {
+		for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			sc := c.sc
+			m := sceneModel(sc, size[0], size[1])
+			for _, k := range []string{"tab", "tab"} {
+				pressKey(m, k)
+				poll(m, sc)
+			}
+			if m.level < levelReader {
+				t.Fatalf("%s %dx%d: the route does not reach the reader", c.name, size[0], size[1])
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			foot := rows[len(rows)-1]
+			onRow := false
+			for _, r := range rows[:len(rows)-1] {
+				if strings.Contains(r, "archived · A") {
+					onRow = true
+				}
+			}
+			if inFoot := strings.Contains(foot, "A archive"); inFoot == onRow {
+				if onRow {
+					t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+				} else {
+					t.Errorf("%s %dx%d: no row and no key names the archive: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+				}
+			}
+		}
+	}
+}

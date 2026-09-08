@@ -102,6 +102,7 @@ func TestTheLiveReaderNamesTheArchiveDoorBelowTheBoard(t *testing.T) {
 		m := sceneModel(sceneSecondDay(), w, 30)
 		pressTab(m)
 		pressTab(m)
+		m.View() // the footer is composed against the rows the frame drew
 		if foot := ansi.Strip(m.footerLine(w - 2)); !strings.Contains(foot, "A archive") {
 			t.Errorf("at %d the live reader's footer = %q", w, foot)
 		}
@@ -109,6 +110,7 @@ func TestTheLiveReaderNamesTheArchiveDoorBelowTheBoard(t *testing.T) {
 	m := sceneModel(sceneSecondDay(), 120, 34)
 	pressTab(m)
 	pressTab(m)
+	m.View()
 	if foot := ansi.Strip(m.footerLine(118)); strings.Contains(foot, "A archive") {
 		t.Errorf("at 120 the band names the archive; the footer = %q", foot)
 	}

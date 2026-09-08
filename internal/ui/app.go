@@ -3135,9 +3135,17 @@ func (m *Model) keymap() string {
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
 		}
 	}
-	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && m.width < deckWideCols {
-		// Below the board's width the reader takes the whole screen and
-		// no band or fleet row names the archive: the footer does (#62).
+	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
+		// Where no band or fleet row names the archive, the footer does
+		// (#62). The question is what the frame drew, not how wide it is:
+		// below the board's width the reader takes the whole screen and
+		// nothing names it, and above it the door is the band's — the
+		// fleet's own last line is not drawn beside the reader — so a
+		// fleet that leaves the band no digit (`free = 9 - used`) leaves
+		// the frame nothing that names the archive. Twelve live sessions
+		// and three hundred archived: at 120, 152 and 220 the reader's
+		// frame named neither the count nor the key, while the same
+		// keypresses at a hundred columns named both.
 		keys = strings.Replace(keys, " · esc back", " · esc back · A archive", 1)
 	}
 	if m.archiveView {
@@ -4139,6 +4147,30 @@ func levelKeyLost(base, keys string) bool {
 	for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
 		if strings.Contains(base, k) && !strings.Contains(keys, k) {
 			return true
+		}
+	}
+	return false
+}
+
+// rowNamesTheArchive says whether a drawn row of this frame already names
+// the archive door and the key that browses it — the band's header beside
+// the reader or the fleet's own last line, in every form they shed to:
+// `recent · 41 archived · A browses`, `0 of 300 archived · A browses`,
+// `41 archived · 1 hidden · A`.
+func (m *Model) rowNamesTheArchive() bool {
+	for _, row := range m.bodyRows {
+		for _, seg := range strings.Split(ansi.Strip(row), "│") {
+			i := strings.Index(seg, "archived · ")
+			if i < 0 {
+				continue
+			}
+			rest := strings.Trim(seg[i+len("archived · "):], "─ ")
+			if j := strings.LastIndex(rest, " · "); j >= 0 {
+				rest = rest[j+len(" · "):] // the hidden count stands between the count and the key (#176)
+			}
+			if rest == "A" || rest == "A browses" {
+				return true
+			}
 		}
 	}
 	return false
