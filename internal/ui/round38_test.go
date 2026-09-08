@@ -163,7 +163,7 @@ func TestTheReaderTitleNeverRepeatsItsName(t *testing.T) {
 			poll(m, sc)
 		}
 		title := ansi.Strip(m.readerTitle(w - 2))
-		if m.anchor < 0 || !strings.Contains(title, "15:31") {
+		if m.anchor < 0 || m.anchorAt.IsZero() {
 			t.Fatalf("at %d the reader has no anchored row to shed: %q", w, title)
 		}
 		// The clause whole, with its bracket, earns its cells (220, and

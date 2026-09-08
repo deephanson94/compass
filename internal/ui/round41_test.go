@@ -48,7 +48,10 @@ func TestTheReaderTitleShedsTheNameAndABracket(t *testing.T) {
 			poll(m, sc)
 		}
 		title := ansi.Strip(m.readerTitle(w - 2))
-		if strings.Count(title, "fix the 401 on token refresh") != 1 || !strings.Contains(title, "15:31") {
+		if m.anchor < 0 || m.anchorAt.IsZero() {
+			t.Fatalf("at %d the reader has no anchored row to shed: %q", w, title)
+		}
+		if strings.Count(title, "fix the 401 on token refresh") != 1 {
 			t.Errorf("at %d the reader's title = %q", w, title)
 		}
 	}

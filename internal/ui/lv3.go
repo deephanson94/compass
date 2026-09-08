@@ -491,13 +491,23 @@ func (m *Model) readerTitleAs(w int, anchorClause, bare bool) string {
 		right = m.anchorAt.Local().Format("15:04")
 		if m.anchorText != "" {
 			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
-			if note := clipQuestion(m.anchorText, room); room >= 8 && !strings.HasPrefix(name, strings.TrimSuffix(note, "…")) && !nameAndBracket(name, note) {
+			note := clipQuestion(m.anchorText, room)
+			said := strings.HasPrefix(name, strings.TrimSuffix(note, "…")) || nameAndBracket(name, note)
+			switch {
+			case room >= 8 && !said:
 				// The bracket clause whole or gone; clip marks the cut
 				// with …. And the clause goes when what survives the cut
 				// is the name already on the row: "fix the 401 on token
 				// refresh (commit)" cut before its bracket said the
 				// title's name twice and the leg never (#64).
 				right = note + " · " + right
+			case said:
+				// #64 dropped the clause because it was the name already
+				// on the row — and the clock goes with the clause (#115).
+				// Alone it is read against the name beside it: "READER ·
+				// fix the 401 on token refresh   15:31" over an ask its
+				// own turn row times 15:00.
+				right = ""
 			}
 		}
 	}

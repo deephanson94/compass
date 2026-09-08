@@ -2066,3 +2066,40 @@ func TestAShortNoteCostsTheFooterNoKey(t *testing.T) {
 		t.Errorf("the mirror note costs the board keys:\n note-free %q\n with note %q", want, got)
 	}
 }
+
+// ---- round 72, second-day ----
+// The archive reader's title names the ask (#59, #105), so a clock
+// right-aligned beside it is read as that ask's moment. Where #64 drops the
+// anchored row's clause because what survives its cut is the name already on
+// the row, the clock it timed goes with it (#115): left alone it stood as
+// "READER · fix the 401 on token refresh   15:31" over an ask its own turn
+// row times 15:00.
+func TestTheArchiveReaderTitleClockGoesWithItsClause(t *testing.T) {
+	forceASCII(t)
+	clock := regexp.MustCompile(`\d\d:\d\d\s*$`)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneSecondDay()
+		m := sceneModel(sc, size[0], size[1])
+		for _, k := range []string{"2", "tab", "tab"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			for _, seg := range strings.Split(l, "│") {
+				j := strings.Index(seg, "READER · ")
+				if j < 0 {
+					continue
+				}
+				row := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(seg[j:]), "[reader]"))
+				if !clock.MatchString(row) {
+					continue
+				}
+				said := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(row, "READER · "), clock.FindString(row)))
+				if !strings.Contains(said, " · ") {
+					t.Errorf("%dx%d: the reader's title wears a clock with no clause to time: %q",
+						size[0], size[1], row)
+				}
+			}
+		}
+	}
+}
