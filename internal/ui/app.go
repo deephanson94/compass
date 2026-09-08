@@ -3254,14 +3254,20 @@ func (m *Model) keymap() string {
 		}
 	}
 	if m.level == levelWaypoints && !m.showHelp && !m.searching && !m.replying {
-		// #83 at the level the page keys page: on a trail the panel draws
-		// whole, `ctrl+d/u` moves nothing, and the row spent 21 cells
-		// naming it on a two-row trail (#220).
-		if w, h := m.trailBox(); h > 0 {
-			if doc, _ := trailDoc(m.trail, m.trailOpts(w, h)); len(doc) <= h {
-				keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
-				keys = strings.Replace(keys, " · ctrl+d/u half page", "", 1)
-			}
+		// #220's rule at what the keys actually do here. At Lv1 and in the
+		// reader `ctrl+d/u` move the viewport, so a page that fits leaves
+		// them nothing (#83, #200); at Lv2 they move the *cursor* half a
+		// screenful of rows — "the cursor is what the viewport follows
+		// here, so the cursor is what moves" (§3) — and on a trail the
+		// panel draws whole they still walk the `▸` down the rail. So the
+		// question is the cursor's, not the viewport's: where the trail
+		// has one row the cursor has nowhere to go and both keys refuse
+		// (`no leg to move to`), which is the movement key's own test
+		// (#213, #219); anywhere else the key acts and stays (#215, #218:
+		// the frame is what a person sees).
+		if len(TrailRows(m.trail, m.level)) <= 1 {
+			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
+			keys = strings.Replace(keys, " · ctrl+d/u half page", "", 1)
 		}
 	}
 	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying {
@@ -3813,15 +3819,15 @@ func (m *Model) chapterYield(whole string, drops []string, fits func(string) boo
 				next = append(next, d)
 			}
 		}
-		gain := keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield)
-		if gain == "" || cannotMove[gain] {
-			// A key that cannot move is not the gain that buys the
-			// trade: the archive's list traded eleven cells of a
-			// movement key that answers `the only session` for fifteen
-			// of `[ ] chapters` on a trail of one prompt, where `[`
-			// answers `no earlier prompt` and `]` answers `no later
-			// prompt`. Both keys are the same rule (#210, #211, #213),
-			// so one of them coming back for the other buys nothing.
+		// A key that cannot move is not the gain that buys the trade
+		// (#216): the archive's list traded eleven cells of a movement
+		// key that answers `the only session` for fifteen of
+		// `[ ] chapters` on a trail of one prompt, where both chapter
+		// keys refuse. A trade brings back more than one key, so the
+		// stuck ones are passed over rather than the whole trade refused
+		// on the first of them: a row that also gains a key that acts
+		// has bought its cells back.
+		if keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield, cannotMove) == "" {
 			continue
 		}
 		head, order = cand, next
@@ -3842,7 +3848,75 @@ func (m *Model) stuckKeys(whole string) []string {
 	if k := m.moveKeyStuck(whole); k != "" {
 		stuck = append(stuck, k)
 	}
+	if k := m.unfoldKeyStuck(whole); k != "" {
+		stuck = append(stuck, k)
+	}
+	if k := m.walkKeyStuck(whole); k != "" {
+		stuck = append(stuck, k)
+	}
 	return stuck
+}
+
+// unfoldKeyStuck is the reader's `space unfold` on a page where no row can
+// fold or unfold — or "" when the row does not offer it or the key acts.
+// The same rule as the chapter key and the movement key (#210, #211,
+// #213, #219), at the one reader key they did not reach: on a conversation
+// whose screen holds no tool result, Space answers `nothing to unfold on
+// screen` whichever row is on top and at every width, while the reader's
+// shed order ranks it above `/ search`, `r reply`, `a ask` and
+// `enter attach` — the keys that act on the session it reads. Under its
+// own note the key stays (#24, #57): the row refusing Space must name it.
+func (m *Model) unfoldKeyStuck(whole string) string {
+	if m.level < levelReader || m.unfoldNote() || m.unfoldKeyMoves() {
+		return ""
+	}
+	for _, k := range []string{" · space unfold", "space unfold · "} {
+		if strings.Contains(whole, k) {
+			return k
+		}
+	}
+	return ""
+}
+
+// unfoldNote says whether the note is Space's own: a fold it opened or
+// closed, or its refusal (#24).
+func (m *Model) unfoldNote() bool {
+	return m.note == "nothing to unfold on screen" ||
+		strings.HasPrefix(m.note, "unfolded ") || strings.HasPrefix(m.note, "folded ")
+}
+
+// unfoldKeyMoves reports whether Space acts from where the reader stands:
+// a foldable row on the screen it draws — `toggleFold`'s own walk, which
+// takes the first folded result from the top of the screen down.
+func (m *Model) unfoldKeyMoves() bool {
+	doc := m.doc(m.readerWidth())
+	top := m.readerTop(doc)
+	for i := top; i < len(doc) && i < top+m.readerHeight(); i++ {
+		if doc[i].foldable() {
+			return true
+		}
+	}
+	return false
+}
+
+// walkKeyStuck is the reader's `n/N` with no search to walk — or "" when
+// the row does not offer it or the key acts. Until `/` has been entered
+// `jumpMatch` answers `no search — / starts one` to both keys, whichever
+// is pressed and at every width, and the row already knows the pair rides
+// only with the search it walks (`shedKeys`): the same rule as the chapter
+// key and the movement key at the pair they did not reach (#210, #211,
+// #213, #219). `/ search` stands beside it and says how a walk begins, so
+// the row still teaches how to start one. Under its own note the key
+// stays (#24, #57).
+func (m *Model) walkKeyStuck(whole string) string {
+	if m.level < levelReader || m.note == "no search — / starts one" || m.query != "" {
+		return ""
+	}
+	const walk = " · n/N"
+	if strings.Contains(whole, walk) {
+		return walk
+	}
+	return ""
 }
 
 // moveKeyStuck is the movement key this row leads with that cannot move
@@ -3923,7 +3997,7 @@ func (m *Model) chapterKeyStuck(whole string) string {
 // page key is the first fragment the row gives up, a shortcut for a
 // distance `j` covers and one the help teaches (#42, #51). None of the
 // four is the gain that buys the trade.
-func keysActGained(was, now string, drops []string, yield string) string {
+func keysActGained(was, now string, drops []string, yield string, stuck map[string]bool) string {
 	// The aside is not a key (#55), and it is the one fragment that
 	// changes the *form* the attach key wears: a row that draws
 	// `enter attach` mid-row and then wears `enter attach (prefix d
@@ -3933,11 +4007,17 @@ func keysActGained(was, now string, drops []string, yield string) string {
 	was = strings.Replace(was, attachHint, "", 1)
 	now = strings.Replace(now, attachHint, "", 1)
 	for _, d := range drops {
-		in, had := strings.Contains(now, d), strings.Contains(was, d)
+		// A key is on the row whichever form it wears: the shed order
+		// carries both `" · enter attach"` and `"enter attach · "`, and a
+		// key that led the row before the trade and stands mid-row after
+		// it has not been lost — nor is a key that leads the row after
+		// the trade one the trade did not bring back.
+		name := strings.TrimSuffix(strings.TrimPrefix(d, " · "), " · ")
+		in, had := strings.Contains(now, name), strings.Contains(was, name)
 		if had && !in && d != yield {
 			return "" // something the row drew is gone
 		}
-		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" && d != "ctrl+d/u half page · " {
+		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" && d != "ctrl+d/u half page · " && !stuck[d] {
 			return d
 		}
 	}

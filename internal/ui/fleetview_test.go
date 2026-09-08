@@ -952,7 +952,11 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 		m := groupedModel(80, 24)
 		// Each level keeps at least one of its own keys, whole, beside the
 		// way out: which one depends on what the width leaves.
-		for _, own := range [][]string{{"tab deeper"}, {"[ ] chapters", "r reply"}, {"space unfold", "[ ] turns"}} {
+		// The reader's own keys are `space unfold`, `[ ] turns` and the
+		// search pair: where the page holds nothing to unfold and the
+		// conversation is one turn, the first two are keys that cannot
+		// move and the search is what the level keeps (#210, #211).
+		for _, own := range [][]string{{"tab deeper"}, {"[ ] chapters", "r reply"}, {"space unfold", "[ ] turns", "/ search"}} {
 			lines := strings.Split(m.View(), "\n")
 			foot := strings.TrimSpace(lines[len(lines)-1])
 			kept := false

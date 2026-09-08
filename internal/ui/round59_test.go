@@ -4360,3 +4360,217 @@ func TestThePageKeyShedsFromATrailDrawnWhole(t *testing.T) {
 		t.Errorf("220x48: a trail longer than its box lost the page key: %q", foot)
 	}
 }
+
+// TestThePageKeyThatWalksTheCursorStays pins round eighty-two's one thing:
+// #220 shed `ctrl+d/u half page` from every Lv2 trail whose document fits
+// its box, on the reason that "on a trail the panel draws whole
+// `ctrl+d/u` moves nothing". At Lv2 they do not move the viewport — they
+// walk the cursor half a screenful of rows, as the handler says of itself
+// ("the cursor is what the viewport follows here, so the cursor is what
+// moves", §3) — so on a trail drawn whole the press still moves the `▸`.
+// #83's and #200's viewport test belongs to the levels whose keys page;
+// here the question is the cursor's, and it is the movement key's own test
+// (#213, #219): only a trail of one row leaves both keys nothing.
+//
+// Both sides: on the two-tools legs at 152 and 220 the press moves the
+// cursor and the key stays; on a trail of one row it refuses
+// (`no leg to move to`) and the row sheds it.
+func TestThePageKeyThatWalksTheCursorStays(t *testing.T) {
+	forceASCII(t)
+	legs := func(sc scene, w, h int, extra ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for m.level != levelWaypoints {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		for _, k := range extra {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	body := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.Join(rows[:len(rows)-1], "\n")
+	}
+	for _, c := range []struct {
+		name  string
+		scene func() scene
+		w, h  int
+	}{
+		{"two-tools", sceneTwoTools, 152, 40},
+		{"two-tools", sceneTwoTools, 220, 48},
+		{"fleet-hygiene", sceneFleetHygiene, 152, 40},
+	} {
+		m := legs(c.scene(), c.w, c.h)
+		if body(legs(c.scene(), c.w, c.h, "ctrl+u")) == body(m) {
+			t.Fatalf("%s %dx%d: `ctrl+u` was expected to walk the cursor, it moved no drawn row", c.name, c.w, c.h)
+		}
+		if f := foot(m); !strings.Contains(f, "ctrl+d/u half page") {
+			t.Errorf("%s %dx%d: the row sheds a page key that walks the cursor: %q", c.name, c.w, c.h, f)
+		}
+	}
+	// The other side: a trail of one row leaves the cursor nowhere, both
+	// keys answer `no leg to move to`, and the row sheds the key.
+	for _, w := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := legs(sceneSecondDay(), w[0], w[1])
+		if len(TrailRows(m.trail, m.level)) > 1 {
+			t.Fatalf("second-day %dx%d: this side wants a trail of one row, it has %d",
+				w[0], w[1], len(TrailRows(m.trail, m.level)))
+		}
+		if f := foot(m); strings.Contains(f, "ctrl+d/u half page") {
+			t.Errorf("second-day %dx%d: the row names a page key with nowhere to walk: %q", w[0], w[1], f)
+		}
+	}
+}
+
+// TestTheUnfoldKeyYieldsWhereItCannotUnfold pins round eighty-two's one
+// thing: the reader's `space unfold` on a page where no row can fold or
+// unfold. #210 took the chapter key that cannot move, #211 the turn key,
+// #213 the movement key; Space is the fourth key of the same shape and the
+// one they did not reach. On the second day's reader at eighty the page
+// holds one prompt and one thinking leg — nothing foldable — so Space
+// answers `nothing to unfold on screen` whichever row is on top and at
+// every width, while the reader's shed order ranks the twelve cells it
+// spends above `/ search`, `n/N` and `r reply`, all of which act on the
+// conversation it reads.
+//
+// Both sides. Where the screen holds a fold the key stays and acts (the
+// two-tools reader unfolds `Read(main.tf)`), and under its own refusal the
+// key stays where it is (#24, #57): the row refusing Space must name Space.
+func TestTheUnfoldKeyYieldsWhereItCannotUnfold(t *testing.T) {
+	forceASCII(t)
+	reader := func(sc scene, w, h, n int, extra ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for i := 0; i < n; i++ {
+			pressKey(m, canonicalKeys[i])
+			poll(m, sc)
+		}
+		for _, k := range extra {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// n is the walkthrough prefix that lands in the reader: the thirteenth
+	// key is the `tab` from the waypoints into the conversation.
+	for _, c := range []struct {
+		name   string
+		scene  func() scene
+		w, h   int
+		n      int
+		gained string
+	}{
+		{"second-day", sceneSecondDay, 80, 24, 13, "/ search"},
+		{"first-session", sceneFirstSession, 80, 24, 13, "r reply"},
+		{"second-day", sceneSecondDay, 100, 30, 13, "r reply"},
+		{"first-session", sceneFirstSession, 100, 30, 16, "/ search"},
+	} {
+		m := reader(c.scene(), c.w, c.h, c.n)
+		if note := reader(c.scene(), c.w, c.h, c.n, "space").note; note != "nothing to unfold on screen" {
+			t.Fatalf("%s %dx%d: Space was expected to refuse, it said %q", c.name, c.w, c.h, note)
+		}
+		f := foot(m)
+		if strings.Contains(f, "space unfold") {
+			t.Errorf("%s %dx%d: the row spends twelve cells on a key that answers `nothing to unfold on screen`: %q",
+				c.name, c.w, c.h, f)
+		}
+		if !strings.Contains(f, c.gained) {
+			t.Errorf("%s %dx%d: the freed cells were expected to name %q, the row is %q", c.name, c.w, c.h, c.gained, f)
+		}
+	}
+	// The key stays where it acts: the two-tools reader has a folded
+	// result on screen and Space opens it.
+	m := reader(sceneTwoTools(), 80, 24, 13)
+	if note := reader(sceneTwoTools(), 80, 24, 13, "space").note; !strings.HasPrefix(note, "unfolded ") {
+		t.Fatalf("two-tools 80x24: Space was expected to unfold, it said %q", note)
+	}
+	if f := foot(m); !strings.Contains(f, "space unfold") {
+		t.Errorf("two-tools 80x24: the row sheds a key that acts: %q", f)
+	}
+	// And it stays under its own note: the row refusing Space names Space.
+	if f := foot(reader(sceneFirstSession(), 80, 24, 0, "tab", "tab", "tab", "space")); !strings.Contains(f, "space unfold") {
+		t.Errorf("first-session 80x24: the row refusing Space does not name Space: %q", f)
+	}
+}
+
+// TestTheWalkKeyYieldsWithNoSearchToWalk pins round eighty-two's second
+// finding: the reader's `n/N` on a conversation nobody has searched. Until
+// `/` has been entered `jumpMatch` answers `no search — / starts one` to
+// both keys, at every width, so the six cells the pair spends buy a
+// promise the next keypress refuses — #210's, #211's and #213's rule at
+// the pair they did not reach. `/ search` stands beside it and says how a
+// walk begins, so the row loses nothing it was teaching.
+//
+// Both sides. Where a search is standing the pair walks it and stays;
+// under its own refusal the key stays where it is (#24, #57); and a
+// stuck key still buys nothing (#216) — the trade is taken only where
+// the freed cells name a key that acts.
+func TestTheWalkKeyYieldsWithNoSearchToWalk(t *testing.T) {
+	forceASCII(t)
+	reader := func(sc scene, w, h, n int, extra ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for i := 0; i < n; i++ {
+			pressKey(m, canonicalKeys[i])
+			poll(m, sc)
+		}
+		for _, k := range extra {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	for _, c := range []struct {
+		name   string
+		scene  func() scene
+		w, h   int
+		n      int
+		gained string
+	}{
+		{"two-tools", sceneTwoTools, 100, 30, 13, "r reply"},
+		{"subagents", sceneSubagents, 100, 30, 33, "r reply"},
+		{"two-tools", sceneTwoTools, 120, 34, 19, "h/l session"},
+	} {
+		m := reader(c.scene(), c.w, c.h, c.n)
+		for _, k := range []string{"n", "N"} {
+			if note := reader(c.scene(), c.w, c.h, c.n, k).note; note != "no search — / starts one" {
+				t.Fatalf("%s %dx%d: %q was expected to refuse, it said %q", c.name, c.w, c.h, k, note)
+			}
+		}
+		f := foot(m)
+		if strings.Contains(f, "n/N") {
+			t.Errorf("%s %dx%d: the row names a pair that answers `no search — / starts one`: %q", c.name, c.w, c.h, f)
+		}
+		if !strings.Contains(f, c.gained) {
+			t.Errorf("%s %dx%d: the freed cells were expected to name %q, the row is %q", c.name, c.w, c.h, c.gained, f)
+		}
+		// The row still teaches how a walk begins.
+		if !strings.Contains(f, "/ search") {
+			t.Errorf("%s %dx%d: the row that sheds the walk keys must keep the search: %q", c.name, c.w, c.h, f)
+		}
+		// Where a search is standing the pair walks it and stays.
+		if g := foot(reader(c.scene(), c.w, c.h, c.n, "/", "e", "enter")); !strings.Contains(g, "n/N") {
+			t.Errorf("%s %dx%d: the row sheds a walk key with a search to walk: %q", c.name, c.w, c.h, g)
+		}
+	}
+	// Under its own refusal the key stays where the width leaves it room
+	// (#24, #57): the row refusing `n` names `n/N`.
+	for _, w := range [][2]int{{152, 40}, {220, 48}} {
+		g := foot(reader(sceneTwoTools(), w[0], w[1], 13, "n"))
+		if !strings.Contains(g, "no search — / starts one") || !strings.Contains(g, "n/N") {
+			t.Errorf("two-tools %dx%d: the row refusing `n` does not name it: %q", w[0], w[1], g)
+		}
+	}
+}
