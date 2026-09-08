@@ -8262,3 +8262,403 @@ func TestTheReplyCardKeepsTheDigitOfTheLiveRowItTypesInto(t *testing.T) {
 		t.Fatal("no empty archive opened a reply card on a live row: the pin is not standing on its frame")
 	}
 }
+
+// ---- round 90, fleet-hygiene ----
+// Round ninety, the fleet-hygiene operator, the one thing.
+//
+// #47 gave the recent band its digits — "numbered on from the live fleet's
+// last digit … A digit opens its row in the archive, where the trail is
+// already known how to draw, and `A` comes back to the live fleet where
+// you were" — and #51 held only that such a digit "lands under a different
+// number (#32)", which presumes it lands.
+//
+// It does not land on the board. `recentRows` refuses the board (#43), and
+// `strandedBand` lifts that refusal for the one render call that draws a
+// band under the strip where the columns have run out. `openRecent` calls
+// `recentRows` outside that call, sees no band, and answers `no session 5`
+// on a frame drawing `5 ○ api · "the pane I closed half an hour ago"` five
+// rows above the footer — the digit denying a row the frame numbers (#243,
+// #245), while the same digit on the same fleet twenty columns narrower
+// opens it. The key now reads the band the frame drew, and no other row.
+
+// r90fhBandRowRe matches a band row as drawn: two or three cells of air,
+// the digit, the archived glyph.
+var r90fhBandRowRe = regexp.MustCompile(`^\s{1,3}(\d) ○ `)
+
+// r90fhBandDigits reads the digits the frame draws on its band — the rows
+// under the band's own `A browses` header that no live column wears.
+func r90fhBandDigits(m *Model) []int {
+	live := map[int]bool{}
+	for _, r := range m.boardRows() {
+		live[r.num] = true
+	}
+	var out []int
+	below := false
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(row, "· A browses") || strings.Contains(row, "archived · A") {
+			below = true
+			continue
+		}
+		if !below {
+			continue
+		}
+		if mm := r90fhBandRowRe.FindStringSubmatch(row); mm != nil {
+			d, _ := strconv.Atoi(mm[1])
+			if !live[d] {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+// r90fhBandName is the session name the band's row for this digit draws.
+func r90fhBandName(m *Model, d int) string {
+	below := false
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(row, "· A browses") || strings.Contains(row, "archived · A") {
+			below = true
+			continue
+		}
+		if !below {
+			continue
+		}
+		if mm := r90fhBandRowRe.FindStringSubmatch(row); mm != nil {
+			if n, _ := strconv.Atoi(mm[1]); n == d {
+				rest := strings.TrimSpace(row[strings.Index(row, "○ ")+len("○ "):])
+				if i := strings.Index(rest, " · "); i > 0 {
+					return rest[:i]
+				}
+				return rest
+			}
+		}
+	}
+	return ""
+}
+
+// TestTheBoardsBandOpensOnItsDigit is the fold on its frame: fleet-hygiene
+// at 120, 152 and 220, where the board strands a band under its strip.
+func TestTheBoardsBandOpensOnItsDigit(t *testing.T) {
+	forceASCII(t)
+	var fh scene
+	for _, sc := range allScenes() {
+		if sc.name == "fleet-hygiene" {
+			fh = sc
+		}
+	}
+	if fh.name == "" {
+		t.Fatal("no fleet-hygiene scene")
+	}
+	for _, wh := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+			old := lipgloss.ColorProfile()
+			lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+			m := sceneModel(fh, wh[0], wh[1])
+			if m.level != levelBoard || !m.boardShown() {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: fleet-hygiene does not open on the board", wh[0], wh[1])
+			}
+			digits := r90fhBandDigits(m)
+			if len(digits) == 0 {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: the board strands no band, so the stand is not the stand", wh[0], wh[1])
+			}
+			for _, d := range digits {
+				c := sceneModel(fh, wh[0], wh[1])
+				_ = c.View() // the key is pressed on a drawn frame, as the deck presses it (#221)
+				want := r90fhBandName(c, d)
+				was := c.selectedKey
+				pressKey(c, strconv.Itoa(d))
+				poll(c, fh)
+				if note := ansi.Strip(c.note); strings.HasPrefix(note, "no session ") {
+					t.Errorf("%dx%d (%v): `%d` answered %q over the band row it draws (%s)",
+						wh[0], wh[1], prof, d, note, want)
+					continue
+				}
+				if !c.archiveView {
+					t.Errorf("%dx%d (%v): `%d` did not open the archive", wh[0], wh[1], prof, d)
+					continue
+				}
+				s, ok := c.selected()
+				if !ok || s.Live {
+					t.Errorf("%dx%d (%v): `%d` landed on no archived session", wh[0], wh[1], prof, d)
+					continue
+				}
+				if got := sessionName(s.Info); got != want && !strings.Contains(archiveHeadline(s), want) {
+					t.Errorf("%dx%d (%v): `%d` opened %q where its row names %q", wh[0], wh[1], prof, d, got, want)
+				}
+				// #47's other half: `A` comes back to the live fleet
+				// where you were, at the level the digit was pressed (#54).
+				pressKey(c, "A")
+				poll(c, fh)
+				if c.archiveView || c.level != levelBoard || c.selectedKey != was {
+					t.Errorf("%dx%d (%v): after `%d` then `A` the deck is not back on the board it left (archive=%v level=%d)",
+						wh[0], wh[1], prof, d, c.archiveView, c.level)
+				}
+			}
+			lipgloss.SetColorProfile(old)
+		}
+	}
+}
+
+// TestNoBandRowRefusesTheDigitItWears is the rule behind it, over every
+// scene and width: a digit the frame draws on its band opens that row, and
+// a digit no row wears is still refused.
+func TestNoBandRowRefusesTheDigitItWears(t *testing.T) {
+	forceASCII(t)
+	drawn, refusedRight := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := wh[0], wh[1]
+				base := sceneModel(sc, w, h)
+				_ = base.View()
+				band := map[int]bool{}
+				for _, d := range r90fhBandDigits(base) {
+					band[d] = true
+				}
+				for d := 1; d <= 9; d++ {
+					m := sceneModel(sc, w, h)
+					_ = m.View() // pressed on a drawn frame (#221)
+					pressKey(m, strconv.Itoa(d))
+					poll(m, sc)
+					note := ansi.Strip(m.note)
+					refused := note == fmt.Sprintf("no session %d", d)
+					if band[d] {
+						drawn++
+						if refused {
+							t.Errorf("%s %dx%d (%v): `%d` answered %q over the band row it draws",
+								sc.name, w, h, prof, d, note)
+						}
+					} else if refused {
+						// The other side: a digit no row wears is still
+						// refused, and the fold gives the board no band
+						// it did not draw.
+						refusedRight++
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if drawn < 40 {
+		t.Fatalf("only %d band digits drawn: the sweep is not sweeping", drawn)
+	}
+	t.Logf("%d band digits drawn, %d digits no row wears still refused", drawn, refusedRight)
+}
+
+// Round ninety, the fleet-hygiene operator.
+//
+// The hide note names the session the way its row does — digit, name, and
+// the pane where namesakes share a tmux session (#57, #62, #101). On the
+// board that digit is the fleet's own and the row is gone the moment the
+// key acts, so the note is the only place it stands. In the archive the
+// numbers are the archive's own (#32) and the frame goes on drawing the
+// hidden row under the cursor, so the note's `2 harness is hidden` stood
+// over `▸1 ● harness` beneath a header reading `1 harness` — a number
+// neither the row nor the header wears. That is the digit the frame does
+// not draw: #245 took it out of
+// the refusal one branch away, #248 kept the header true to the row, and
+// `boardRows` already numbers a hidden row as drawn for the same stated
+// reason — a digit is a key, and one digit must not name two sessions.
+//
+// The fold makes the note wear the number the frame draws, and only where
+// the fleet gave the session a digit at all, so no note grows a cell.
+
+// r90fhCursorNum is the number the frame draws on the row under the cursor.
+var r90fhCursorNum = regexp.MustCompile(`^\s*[▸>]\s*(\d)\s`)
+
+// r90fhNoteNum is the digit the note leads with, or 0.
+var r90fhNoteNum = regexp.MustCompile(`^(\d) `)
+
+// r90fhDrawnNum reads the cursor row's number off the frame itself.
+func r90fhDrawnNum(m *Model) int {
+	for _, r := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if mm := r90fhCursorNum.FindStringSubmatch(r); mm != nil {
+			n, _ := strconv.Atoi(mm[1])
+			return n
+		}
+	}
+	return 0
+}
+
+// r90fhOnlyQuery is a query this live session alone answers and no
+// archived session answers at all — the search that leaves the archive
+// with no rows, so `A` keeps the live session selected (#244) and `x`
+// there hides the row the archive then draws.
+func r90fhOnlyQuery(sc scene, w, h int, key, title string) string {
+	for _, cand := range strings.Fields(strings.ToLower(title)) {
+		if len(cand) < 4 {
+			continue
+		}
+		m := sceneModel(sc, w, h)
+		m.fleetQuery = cand
+		only, archived := true, 0
+		for _, s := range m.sessions {
+			if !m.matchesQuery(s) {
+				continue
+			}
+			if s.Live {
+				if s.Info.Key() != key {
+					only = false
+				}
+			} else {
+				archived++
+			}
+		}
+		if only && archived == 0 {
+			return cand
+		}
+	}
+	return ""
+}
+
+// r90fhHideStand presses `/ q enter A x` on one live session and returns
+// the deck, or nil where that stand does not exist on this scene.
+func r90fhHideStand(sc scene, w, h int, key, query string) *Model {
+	m := sceneModel(sc, w, h)
+	m.point(key)
+	for _, k := range []string{"/", query, "enter", "A"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if !m.archiveView || len(m.viewOrder()) != 0 {
+		return nil
+	}
+	if s, ok := m.selected(); !ok || !s.Live {
+		return nil
+	}
+	pressKey(m, "x")
+	poll(m, sc)
+	if !m.archiveView || !strings.Contains(ansi.Strip(m.note), " is hidden") {
+		return nil
+	}
+	return m
+}
+
+// r90fhFooter is the footer row of the frame as a person sees it.
+func r90fhFooter(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// r90fhHeader is the identity row.
+func r90fhHeader(m *Model) string {
+	return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+}
+
+// TestTheArchivesHideNoteWearsTheNumberTheFrameDraws is the fold on its
+// frame: fleet-hygiene at every width, `/watch`, `enter`, `A`, `x`. The
+// archive draws the hidden `harness` under its own `1`, the header says
+// `1 harness`, and the note must not be the frame's only `2`.
+func TestTheArchivesHideNoteWearsTheNumberTheFrameDraws(t *testing.T) {
+	forceASCII(t)
+	var fh scene
+	for _, sc := range allScenes() {
+		if sc.name == "fleet-hygiene" {
+			fh = sc
+		}
+	}
+	if fh.name == "" {
+		t.Fatal("no fleet-hygiene scene")
+	}
+	var key string
+	for _, s := range sceneModel(fh, 80, 24).sessions {
+		if s.Live && sessionName(s.Info) == "harness" {
+			if q := r90fhOnlyQuery(fh, 80, 24, s.Info.Key(), "watch"); q != "" {
+				key = s.Info.Key()
+				break
+			}
+		}
+	}
+	if key == "" {
+		t.Fatal("fleet-hygiene: no live harness a query singles out")
+	}
+	for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+			old := lipgloss.ColorProfile()
+			lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+			m := r90fhHideStand(fh, wh[0], wh[1], key, "watch")
+			if m == nil {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: the archive-hide stand did not stand", wh[0], wh[1])
+			}
+			drawn := r90fhDrawnNum(m)
+			if drawn == 0 {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d (%v): the frame draws no number on the row under the cursor", wh[0], wh[1], prof)
+			}
+			note := ansi.Strip(m.note)
+			if mm := r90fhNoteNum.FindStringSubmatch(note); mm != nil {
+				if got, _ := strconv.Atoi(mm[1]); got != drawn {
+					t.Errorf("%dx%d (%v): the hide note says %q where the frame draws that row as %d",
+						wh[0], wh[1], prof, note, drawn)
+				}
+			} else {
+				t.Errorf("%dx%d (%v): the hide note dropped the number the frame draws: %q", wh[0], wh[1], prof, note)
+			}
+			// The frame the note answers: the row is drawn, the header
+			// agrees with it, and the way back is the key this footer
+			// names (#250), not a digit.
+			if head := r90fhHeader(m); !strings.Contains(head, strconv.Itoa(drawn)+" harness") {
+				t.Errorf("%dx%d (%v): the header does not draw the row's number: %q", wh[0], wh[1], prof, head)
+			}
+			if foot := r90fhFooter(m); !strings.Contains(foot, "x unhide") {
+				t.Errorf("%dx%d (%v): the footer stopped offering the way back: %q", wh[0], wh[1], prof, foot)
+			}
+			if x := lipgloss.Width(r90fhFooter(m)); x > wh[0] {
+				t.Errorf("%dx%d (%v): the footer runs past the terminal (%d)", wh[0], wh[1], prof, x)
+			}
+			lipgloss.SetColorProfile(old)
+		}
+	}
+}
+
+// TestNoArchiveHideNoteNamesADigitTheFrameDoesNotDraw is the rule behind
+// it, asked of every scene, every width and every live session a query can
+// single out: a hide inside the archive never names a number the frame
+// does not draw.
+func TestNoArchiveHideNoteNamesADigitTheFrameDoesNotDraw(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := wh[0], wh[1]
+				for _, s := range sceneModel(sc, w, h).sessions {
+					if !s.Live {
+						continue
+					}
+					q := r90fhOnlyQuery(sc, w, h, s.Info.Key(), sessionName(s.Info)+" "+archiveHeadline(s))
+					if q == "" {
+						continue
+					}
+					m := r90fhHideStand(sc, w, h, s.Info.Key(), q)
+					if m == nil {
+						continue
+					}
+					stands++
+					note := ansi.Strip(m.note)
+					mm := r90fhNoteNum.FindStringSubmatch(note)
+					if mm == nil {
+						continue
+					}
+					got, _ := strconv.Atoi(mm[1])
+					if drawn := r90fhDrawnNum(m); drawn != 0 && got != drawn {
+						t.Errorf("%s %dx%d (%v): %q over a row the frame draws as %d",
+							sc.name, w, h, prof, note, drawn)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 100 {
+		t.Fatalf("only %d archive-hide stands: the sweep is not sweeping", stands)
+	}
+	t.Logf("%d archive-hide stands", stands)
+}

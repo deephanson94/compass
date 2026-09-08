@@ -340,7 +340,22 @@ const (
 // with that number opens the archive on that session, as `A` and a search
 // would have. False when no band row wears the digit.
 func (m *Model) openRecent(num int) bool {
-	for _, r := range m.recentRows(9) {
+	rows := m.recentRows(9)
+	if m.level == levelBoard && m.boardShown() {
+		// The board draws no band of its own — its blank rows are more
+		// columns' (#43, #47) — but where the columns run out
+		// `strandedBand` draws one under the strip, numbered on from the
+		// last column. `recentRows` is shut to the board for the
+		// renderer's sake and opened for that one call, so the key saw
+		// no band where the frame drew five rows: `5 ○ api · "the pane I
+		// closed half an hour ago"` five rows above a footer that
+		// answered `no session 5`, the digit denying a row the frame
+		// numbers (#243, #245), while the same digit twenty columns
+		// narrower opened it. The key reads the band the frame drew, and
+		// no other row: where the board drew none there is no session 5.
+		rows = m.drawnBand
+	}
+	for _, r := range rows {
 		if r.num == num {
 			key := m.sessions[r.sess].Info.Key()
 			m.archiveView = true
@@ -363,5 +378,11 @@ func (m *Model) openRecent(num int) bool {
 func (m *Model) strandedBand(w, avail int) []string {
 	m.onBoardBand = true
 	defer func() { m.onBoardBand = false }()
-	return m.recentLines(w, avail)
+	lines := m.recentLines(w, avail)
+	if len(lines) > 1 {
+		// What the board drew, as drawn: the digit pressed on this frame
+		// reads these rows and no others (#47).
+		m.drawnBand = m.recentRows(avail - 1)
+	}
+	return lines
 }

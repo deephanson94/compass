@@ -260,6 +260,9 @@ type Model struct {
 	restLevel   int    // the level the archive was opened from, for the way back (#53)
 	fleetScroll int
 	onBoardBand bool
+	// drawnBand is the stranded band the board's last frame drew under
+	// its strip, as drawn: the rows a digit on that frame can open (#47).
+	drawnBand []recentRow
 
 	showHelp    bool
 	searching   bool
@@ -1798,9 +1801,22 @@ func (m *Model) toggleHidden() {
 	m.hidden[key] = true
 	m.saveHidden()
 	// The note names the session the way its row does — digit, and the
-	// pane when a namesake shares its tmux session.
+	// pane when a namesake shares its tmux session. In the archive the
+	// numbers are the archive's own (#32) and the frame goes on drawing
+	// this row under the cursor: `▸1 ● harness`, under a header reading
+	// `1 harness`, while the note said `2 harness is hidden` — a number
+	// neither the row nor the header wears, the digit the frame does not
+	// draw that #245 took out of the refusal one branch away and #248
+	// kept the header true to. `boardRows` already numbers the hidden row
+	// as drawn, for the same reason: a digit is a key, and one digit must
+	// not name two sessions. The note wears the number the frame draws.
 	if d := m.digits[key]; d > 0 {
-		name = strconv.Itoa(d) + " " + name
+		if m.archiveView {
+			d = m.boardRows()[key].num
+		}
+		if d > 0 {
+			name = strconv.Itoa(d) + " " + name
+		}
 	}
 	m.note = name + " is hidden · A, then x" // the strip's own form: it fits eighty columns beside the keys
 	if m.archiveView {
