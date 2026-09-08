@@ -3799,3 +3799,104 @@ func TestTheMarkSaysWhatThisColumnLost(t *testing.T) {
 			ansi.Strip(m.View()))
 	}
 }
+
+// TestTheMovementKeyYieldsWhereItCannotMove pins round eighty-one's one
+// thing: #210's and #211's rule at the key the row leads with. On a fleet
+// of one `j` and `k` both answer `the only live one`, and on a trail whose
+// one row the cursor is already on they both answer `no leg to move to` —
+// whichever is pressed and at every width — yet the footer spent ten cells
+// on `j/k move` and shed `a ask`, `r reply` and `/ search` to do it. #44
+// already ranks the movement key below the way out and the way in ("the
+// arrows move too, and the help says so"); this is the rank read the other
+// way round: a key that cannot move is not on the row.
+//
+// Both sides, as #210 and #193 have them: where the cells buy nothing back
+// the key stands (second-day at 120 sheds nothing), under the movement
+// key's own note the key the note is about stays (#24, #57), and where the
+// key moves it stays — many-idle's list walks eight sessions.
+func TestTheMovementKeyYieldsWhereItCannotMove(t *testing.T) {
+	forceASCII(t)
+	footer := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	stand := func(sc scene, w, h int, keys ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	for _, c := range []struct {
+		name   string
+		scene  func() scene
+		w, h   int
+		keys   []string
+		refuse string
+		gains  []string
+	}{
+		{"second-day", sceneSecondDay, 80, 24, nil, "the only live one", []string{"a ask"}},
+		{"first-session", sceneFirstSession, 80, 24, nil, "the only live one", []string{"a ask"}},
+		{"second-day", sceneSecondDay, 80, 24, []string{"shift+tab"}, "the only live one", []string{"r reply"}},
+		{"second-day", sceneSecondDay, 100, 30, []string{"shift+tab"}, "the only live one", []string{"a ask", "/ search"}},
+		{"first-session", sceneFirstSession, 100, 30, []string{"shift+tab"}, "the only live one", []string{"a ask", "/ search"}},
+		{"second-day", sceneSecondDay, 80, 24, []string{"tab", "shift+tab", "x"}, "the only live one", []string{"r reply"}},
+	} {
+		// The key cannot move: both movement keys refuse from this stand.
+		for _, key := range []string{"j", "k"} {
+			sc := c.scene()
+			m := stand(sc, c.w, c.h, append(append([]string(nil), c.keys...), key)...)
+			if m.note != c.refuse {
+				t.Fatalf("%s %dx%d after %v: `%s` moves from this stand: %q",
+					c.name, c.w, c.h, c.keys, key, m.note)
+			}
+			// #24 still holds: the key the note is about stays on the row.
+			if foot := footer(m); !strings.Contains(foot, "j/k ") {
+				t.Errorf("%s %dx%d after %v: the movement key's own note sheds the key it is about: %q",
+					c.name, c.w, c.h, c.keys, foot)
+			}
+		}
+		// And the footer whose cells are short spends none on it.
+		sc := c.scene()
+		foot := footer(stand(sc, c.w, c.h, c.keys...))
+		if strings.Contains(foot, "j/k ") {
+			t.Errorf("%s %dx%d after %v: the row offers a movement key that refuses on both sides: %q",
+				c.name, c.w, c.h, c.keys, foot)
+		}
+		for _, gain := range c.gains {
+			if !strings.Contains(foot, gain) {
+				t.Errorf("%s %dx%d after %v: the cells the movement key spends buy no `%s`: %q",
+					c.name, c.w, c.h, c.keys, gain, foot)
+			}
+		}
+	}
+	// A yield that buys nothing is not taken: at 120, 152 and 220 the trail
+	// of one leg sheds no key, so the row still names what `j` and `k` are
+	// (#193).
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneSecondDay()
+		m := stand(sc, size[0], size[1])
+		if foot := footer(m); !strings.Contains(foot, "j/k legs") {
+			t.Errorf("%dx%d: a yield that buys nothing took the trail's movement key: %q",
+				size[0], size[1], foot)
+		}
+		m2 := stand(sc, size[0], size[1], "j")
+		if m2.note != "no leg to move to" {
+			t.Errorf("%dx%d: the trail of one leg was expected to refuse `j`, answered %q",
+				size[0], size[1], m2.note)
+		}
+	}
+	// And where the movement key does move, it stays.
+	sc := sceneManyIdle()
+	m := stand(sc, 80, 24)
+	if foot := footer(m); !strings.Contains(foot, "j/k move") {
+		t.Errorf("many-idle 80x24: a list whose movement key moves lost it: %q", foot)
+	}
+	was := m.selectedKey
+	pressKey(m, "j")
+	poll(m, sc)
+	if m.selectedKey == was {
+		t.Errorf("many-idle 80x24: `j` was expected to move the list, stayed on %q", was)
+	}
+}

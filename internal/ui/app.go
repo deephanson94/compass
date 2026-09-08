@@ -3781,21 +3781,92 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 // what `[` and `]` are (#193). Under a chapter key's own note the key the
 // note is about stays where it is (#24, #57).
 func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
-	yield := m.chapterKeyStuck(whole)
-	if yield == "" {
-		return drops
-	}
-	order := make([]string, 0, len(drops)+1)
-	order = append(order, yield)
-	for _, d := range drops {
-		if d != yield {
-			order = append(order, d)
+	order := drops
+	var head []string
+	for _, yield := range m.stuckKeys(whole) {
+		cand := append(append([]string(nil), head...), yield)
+		next := append([]string(nil), cand...)
+		for _, d := range drops {
+			stood := false
+			for _, c := range cand {
+				if c == d {
+					stood = true
+				}
+			}
+			if !stood {
+				next = append(next, d)
+			}
 		}
-	}
-	if keysActGained(shedKeys(whole, drops, fits), shedKeys(whole, order, fits), order, yield) == "" {
-		return drops
+		if keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield) == "" {
+			continue
+		}
+		head, order = cand, next
 	}
 	return order
+}
+
+// stuckKeys are the keys this row offers that cannot move from where it
+// stands, in the order their cells are spent: the chapter key first, then
+// the row's own movement key. Both are one rule — a key that cannot move
+// is not on the row — and each is taken only where a key that acts comes
+// back for it, so where nothing is shed both keys stand (#193).
+func (m *Model) stuckKeys(whole string) []string {
+	var stuck []string
+	if k := m.chapterKeyStuck(whole); k != "" {
+		stuck = append(stuck, k)
+	}
+	if k := m.moveKeyStuck(whole); k != "" {
+		stuck = append(stuck, k)
+	}
+	return stuck
+}
+
+// moveKeyStuck is the movement key this row leads with that cannot move
+// from where it stands — `j/k move` on the list and the board, `j/k rows`
+// and `j/k legs` on a trail — or "" when the row leads with none or the
+// key acts. A fleet of one has nowhere to move to and answers `the only
+// live one`; a trail whose one row the cursor is on answers `no leg to
+// move to`, whichever of `j` and `k` is pressed and at every width. Under
+// the movement key's own note the key stays, as a chapter key does under
+// its own (#24, #57): the row refusing `j` must name `j`.
+func (m *Model) moveKeyStuck(whole string) string {
+	if m.moveNote() || m.moveKeysMove() {
+		return ""
+	}
+	for _, k := range []string{"j/k move · ", "j/k rows · ", "j/k legs · ", "j/k scroll · "} {
+		if strings.Contains(whole, k) {
+			return k
+		}
+	}
+	return ""
+}
+
+// moveNote says whether the note is the movement key's own: a move that
+// moved nothing, at either end or with nowhere to go (#24).
+func (m *Model) moveNote() bool {
+	switch m.note {
+	case "no leg to move to", "at the start", "at the present", "at the present · k goes back",
+		"the only live one", "the only session", "the last session", "the first session":
+		return true
+	}
+	return false
+}
+
+// moveKeysMove reports whether `j` or `k` moves anything from where the
+// row stands: another row to land on. On the trail that is a second row
+// (`TrailRows`, the list the cursor walks); on the list and the board a
+// second session in view (`viewOrder`, the count `onlyOrLast` refuses on).
+// In the reader the scroll keys are already gone from a page that is all
+// on screen (#200), and where they stand the page scrolls.
+func (m *Model) moveKeysMove() bool {
+	switch {
+	case m.level >= levelReader:
+		return true
+	case m.level >= levelWaypoints:
+		return len(TrailRows(m.trail, m.level)) > 1
+	default:
+		return len(m.viewOrder()) > 1
+	}
 }
 
 // chapterKeyStuck is the chapter key this row offers that cannot move from
