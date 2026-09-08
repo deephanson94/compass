@@ -3135,6 +3135,21 @@ func (m *Model) keymap() string {
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
 		}
 	}
+	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying {
+		// #83 one level down: on a page that is all on screen the keys
+		// that move the viewport move nothing, and the app says so itself
+		// the moment they are pressed ("all of it is on screen") — so a
+		// footer naming them beside that note offered a key and its own
+		// refusal on the same row. The keys that still act on a page that
+		// fits stay: `[ ]` steps turns, `space` unfolds, `/` and `n/N`
+		// search. #56 already drops both from a lane's page with no turns
+		// at all; this is the same rule on a page that has turns and no
+		// scroll.
+		if doc := m.doc(m.readerWidth()); len(doc) <= m.readerHeight() {
+			keys = strings.Replace(keys, "j/k scroll · ", "", 1)
+			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
+		}
+	}
 	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
 		// Where no band or fleet row names the archive, the footer does
 		// (#62). The question is what the frame drew, not how wide it is:
@@ -3658,7 +3673,12 @@ func (m *Model) shedOrder(chapter bool) []string {
 			// (#24: the way out is the last key to go). The attach key
 			// sheds at its own rank wherever it leads the row.
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
-			" · esc back", " · esc board", " · [ ] turns", " · space unfold", " · A archive"}
+			" · esc back", " · esc board", " · [ ] turns", " · space unfold",
+			// A page that is all on screen offers no scroll key, so
+			// `space unfold` leads the row and the separator-led form
+			// above matches nothing — the same head-form the attach key
+			// needs two lines up.
+			"space unfold · ", " · A archive"}
 	case m.level >= levelWaypoints:
 		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
 	default:

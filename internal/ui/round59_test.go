@@ -2471,7 +2471,10 @@ func TestTheReserveIsWhatTheNoteDraws(t *testing.T) {
 		w, h int
 		key  string
 	}{
-		{80, 24, " · space unfold"},
+		// The page is all on screen, so it offers no scroll key and
+		// `space unfold` leads the row: what this test asserts is that
+		// the reader's own key is drawn, which is unmoved.
+		{80, 24, "space unfold"},
 		{100, 30, " · a ask"},
 		{120, 34, " · n/N"},
 	} {
@@ -2854,5 +2857,72 @@ func TestTheReadersFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// ---- round 77, second-day, the one thing ----
+// A page that is all on screen offers no key that scrolls it. #83 dropped
+// `ctrl+d/u half page` from the Lv1 footer on a frame whose trail fits,
+// because there the page keys "do nothing" and a footer naming them read
+// as though they paged the list; #56 drops the whole set from a lane's
+// page with no turns. The reader's own page was left offering `j/k scroll`
+// and `ctrl+d/u half page` on a page it fits whole — the app itself says
+// `all of it is on screen` the moment either is pressed — and at eighty
+// that cost the `[` refusal the archive door, the frame's only naming of
+// the archive (#62, #199), while the `]` refusal two cells shorter kept
+// it.
+func TestAPageAllOnScreenOffersNoScrollKey(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		// Into the live session's reader: one prompt, no reply yet, a
+		// page of five rows in every terminal the walkthrough draws.
+		m := sceneModel(sceneSecondDay(), w, h)
+		pressKey(m, "tab")
+		pressKey(m, "tab")
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := strings.TrimSpace(rows[len(rows)-1])
+		if !strings.Contains(strings.Join(rows, "\n"), "READER · hello") {
+			t.Fatalf("%dx%d: not the reader: %q", w, h, foot)
+		}
+		// The page fits: `k` says so rather than moving.
+		probe := sceneModel(sceneSecondDay(), w, h)
+		pressKey(probe, "tab")
+		pressKey(probe, "tab")
+		pressKey(probe, "k")
+		prows := strings.Split(ansi.Strip(probe.View()), "\n")
+		if !strings.Contains(prows[len(prows)-1], "all of it is on screen") {
+			t.Fatalf("%dx%d: not a page that fits: %q", w, h, strings.TrimSpace(prows[len(prows)-1]))
+		}
+		for _, key := range []string{"j/k scroll", "ctrl+d/u half page"} {
+			if strings.Contains(foot, key) {
+				t.Errorf("%dx%d: the reader offers %q on a page that is all on screen: %q", w, h, key, foot)
+			}
+		}
+		if strings.Contains(strings.TrimSpace(prows[len(prows)-1]), "j/k scroll") {
+			t.Errorf("%dx%d: the footer names the scroll key beside its own refusal: %q",
+				w, h, strings.TrimSpace(prows[len(prows)-1]))
+		}
+	}
+	// The cell the idle key was spending: at eighty the `[` refusal on
+	// that page named neither the archive count nor the key that browses
+	// it, and no row of the frame named either.
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	for _, k := range []string{"tab", "tab", "["} {
+		pressKey(m, k)
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	foot := strings.TrimSpace(rows[len(rows)-1])
+	if !strings.Contains(foot, "no earlier turn") {
+		t.Fatalf("80x24: not the chapter refusal: %q", foot)
+	}
+	named := strings.Contains(foot, "A archive")
+	for _, r := range rows[:len(rows)-1] {
+		if strings.Contains(r, "archived · A") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("80x24: the reader's `[` refusal names the archive nowhere: %q", foot)
 	}
 }
