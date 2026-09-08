@@ -1788,10 +1788,39 @@ func (m *Model) toggleHidden() {
 		// never moved it (`assignDigits`), so the digit is the one the
 		// hide note spent and the one the board draws on the next `A`.
 		back := sessionName(s.Info)
-		if d := m.digits[key]; d > 0 {
+		d := m.digits[key]
+		if m.archiveView {
+			// In the archive the numbers are the archive's own and they
+			// are positional (#32): the row this session just left hands
+			// its number straight to the next one, so the board digit
+			// the note spends can be the number the frame draws for
+			// another session — `1 porter is back on the board` under a
+			// header reading `1 harness`, over a row drawn `▸1 ● harness`
+			// that `1` opens. That is the hide note's own rule, one
+			// keypress later: a digit is a key, and one digit must not
+			// name two sessions (#245, #256). The note wears the number
+			// the frame draws for this session where the archive still
+			// draws it, keeps the board digit where the frame draws no
+			// row wearing it — the empty archive #257 holds — and where
+			// another row wears it spends no digit at all.
+			if row, ok := m.boardRows()[key]; ok {
+				d = row.num
+			} else if m.numberDrawn(d) {
+				d = 0
+			}
+		}
+		if d > 0 {
 			back = strconv.Itoa(d) + " " + back
 		}
 		m.note = back + " is back on the board"
+		if d == 0 && m.sharesTmux(s) {
+			// No number to tell two namesakes apart: the pane does, the
+			// clause the hide note spends one keypress earlier (#53,
+			// #62), and it is the first thing shed for the keys.
+			if pane, ok := m.panes[key]; ok {
+				m.note += " · " + mirrorMark + " " + pane.Target
+			}
+		}
 		return
 	}
 	if refusal := m.hideRefusal(s); refusal != "" {
@@ -1854,6 +1883,22 @@ func (m *Model) toggleHidden() {
 		}
 		m.clampSelection()
 	}
+}
+
+// numberDrawn says whether the frame that follows draws a row of its own
+// wearing this number — the archive's positional numbers included (#32).
+// A note that spends a number the frame draws for another session gives
+// one digit two sessions (#245, #256).
+func (m *Model) numberDrawn(num int) bool {
+	if num <= 0 {
+		return false
+	}
+	for _, row := range m.boardRows() {
+		if row.num == num {
+			return true
+		}
+	}
+	return false
 }
 
 // hideRefusal is what `x` answers about this session instead of taking it

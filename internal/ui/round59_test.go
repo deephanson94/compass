@@ -9119,3 +9119,150 @@ func TestNoDigitOffTheFrameOpensTheArchive(t *testing.T) {
 	}
 	t.Logf("%d band digits drawn and opened, %d digits off the frame opened the archive", bandDigits, off)
 }
+
+// ---- round 92, fleet-hygiene ----
+// r92fhStand walks a scene to a stand, key by key, as the deck does.
+func r92fhStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r92fhFoot is the frame's last row, where the note is drawn.
+func r92fhFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// r92fhBackNote is the unhide note's digit and name, or ("", "") where the
+// frame carries no unhide note.
+var r92fhBack = regexp.MustCompile(`(\d)? ?([^·]+?) is back on the board`)
+
+// TestTheUnhideNoteWearsNoNumberTheFrameGivesAnother is the frame:
+// fleet-hygiene, where the archive holds forty-one finished sessions and
+// numbers its own rows from one. `x` there puts a hidden session back on the
+// board, and the frame that follows draws that number on another session's
+// row — and in its header. The note must not spend it (#245, #256).
+func TestTheUnhideNoteWearsNoNumberTheFrameGivesAnother(t *testing.T) {
+	forceASCII(t)
+	sc := sceneFleetHygiene()
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := fmt.Sprintf("%dx%d %v", w, h, prof)
+
+			// `1 porter` off the board, then the archive, then back.
+			// The archive lists the still-hidden nothing and re-numbers
+			// its own rows: `1` is the first archived session.
+			m := r92fhStand(sc, w, h, "x", "A", "x")
+			foot := r92fhFoot(m)
+			if !strings.Contains(foot, "porter is back on the board") {
+				t.Fatalf("%s: `x` did not put porter back: %q", where, foot)
+			}
+			if strings.Contains(foot, "1 porter is back on the board") {
+				t.Errorf("%s: the note wears a number the frame gives another row: %q", where, foot)
+			}
+			if row, ok := m.boardRows()["porter"]; ok && row.num > 0 {
+				t.Errorf("%s: the archive still draws porter as %d", where, row.num)
+			}
+			drawn := ""
+			for key, row := range m.boardRows() {
+				if row.num == 1 {
+					drawn = key
+				}
+			}
+			if drawn == "" || drawn == "porter" {
+				t.Errorf("%s: the frame draws no other row wearing 1 (%q)", where, drawn)
+			}
+
+			// The two `harness` are the reason #257 gave the note a
+			// digit. Hide the working one, come back, and the archive is
+			// again drawing that number on a row of its own.
+			m = r92fhStand(sc, w, h, "2", "x", "A", "x")
+			foot = r92fhFoot(m)
+			if !strings.Contains(foot, "harness is back on the board") {
+				t.Fatalf("%s: `x` did not put harness back: %q", where, foot)
+			}
+			if strings.Contains(foot, "2 harness is back on the board") {
+				t.Errorf("%s: the note wears a number the frame gives another row: %q", where, foot)
+			}
+			two := ""
+			for key, row := range m.boardRows() {
+				if row.num == 2 {
+					two = key
+				}
+			}
+			if two == "" || strings.HasPrefix(two, "harness") {
+				t.Errorf("%s: the frame draws no other row wearing 2 (%q)", where, two)
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}
+
+// TestNoUnhideNoteSpendsADigitAnotherRowWears is the rule behind it, over
+// every scene and every width: whatever number an unhide note wears, no
+// other row of the frame it stands on wears it. One digit, one session
+// (#32, #245, #256).
+func TestNoUnhideNoteSpendsADigitAnotherRowWears(t *testing.T) {
+	forceASCII(t)
+	checked := 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for _, script := range [][]string{
+					{"x", "A", "x"},
+					{"2", "x", "A", "x"},
+					{"3", "x", "A", "x"},
+					{"x", "x", "A", "x", "x"},
+					{"2", "x", "3", "x", "A", "x", "x"},
+				} {
+					m := sceneModel(sc, w, h)
+					for _, k := range script {
+						pressKey(m, k)
+						poll(m, sc)
+						if !strings.HasSuffix(m.note, " is back on the board") &&
+							!strings.Contains(m.note, " is back on the board · ") {
+							continue
+						}
+						checked++
+						mm := r92fhBack.FindStringSubmatch(m.note)
+						if mm == nil || mm[1] == "" {
+							continue // no digit spent: nothing to collide
+						}
+						num, _ := strconv.Atoi(mm[1])
+						for key, row := range m.boardRows() {
+							if row.num == num && !strings.Contains(mm[2], sessionNameFor(m, key)) {
+								t.Errorf("%s %dx%d %v %v: note %q wears %d, the number the frame draws on %q",
+									sc.name, w, h, prof, script, m.note, num, key)
+							}
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if checked == 0 {
+		t.Fatal("no unhide note was reached: the sweep proves nothing")
+	}
+	t.Logf("unhide notes checked: %d", checked)
+}
+
+// sessionNameFor is the name the frame draws for a key.
+func sessionNameFor(m *Model, key string) string {
+	for _, s := range m.sessions {
+		if s.Info.Key() == key {
+			return sessionName(s.Info)
+		}
+	}
+	return key
+}
