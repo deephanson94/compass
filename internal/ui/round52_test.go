@@ -498,7 +498,7 @@ func TestALegLabelNeverEndsInsideAnOpenBracket(t *testing.T) {
 	forceASCII(t)
 	sc := sceneSecondDay()
 	m := sceneModel(sc, 80, 24)
-	for _, k := range []string{"A", "8"} { // the archive's cli, whose ship leg is "add --json to every command (commit)"
+	for _, k := range []string{"A", "9"} { // the archive's cli, whose ship leg is "add --json to every command (commit)"
 		pressKey(m, k)
 		poll(m, sc)
 	}

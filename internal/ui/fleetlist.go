@@ -585,7 +585,7 @@ func (m *Model) archiveGroups() []fleetGroup {
 		if m.onBoard(s) || !m.matchesQuery(s) {
 			continue
 		}
-		name := sessionName(s.Info)
+		name := projectOf(s.Info)
 		if s.Live {
 			name = hiddenGroup // what `x` took off the board, first
 		}
@@ -1665,6 +1665,19 @@ func sessionName(info fleet.SessionInfo) string {
 		return info.ID[:8]
 	}
 	return info.ID
+}
+
+// projectOf is the directory a session was started in, whatever its person
+// has since called it. The archive's bucket is the project (#11: "I start
+// sessions in the respective directory"), and a `/rename` names the row,
+// the header and the band (#79) — not the bucket. Grouping by the name
+// gave the one renamed session a heading of its own and drew its project
+// twice, ten rows apart, with six other projects between the two halves of
+// one directory's history.
+func projectOf(info fleet.SessionInfo) string {
+	bare := info
+	bare.Name = ""
+	return sessionName(bare)
 }
 
 // compactOverlap is an overlap line with its prose dropped: "⚠ webapp and

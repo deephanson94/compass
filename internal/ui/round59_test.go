@@ -5565,3 +5565,177 @@ func TestTheTraceNoteLeavesItsDestinationToTheRow(t *testing.T) {
 		t.Errorf("second-day 80: %q", foot)
 	}
 }
+
+// r85sdArchiveHeadings reads the archive's fleet column off a drawn frame:
+// the group headings in the order they are drawn, and, for each session row
+// on screen, the heading it stands under. The fleet column is everything
+// left of the deck's hairline; a heading is a row indented two cells that
+// carries no session mark, a session row carries `○` after its digit.
+func r85sdArchiveHeadings(m *Model) (headings []string, under map[string]string) {
+	under = map[string]string{}
+	cur := ""
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		col := row
+		if i := strings.Index(row, "│"); i >= 0 {
+			col = row[:i]
+		}
+		t := strings.TrimRight(col, " ")
+		if t == "" || !strings.HasPrefix(t, "  ") {
+			continue
+		}
+		body := strings.TrimSpace(t)
+		switch {
+		case strings.Contains(body, "○"):
+			// a session row: "3 ○ the checkout suite flakes on CI   4h"
+			if i := strings.Index(body, "○"); i >= 0 {
+				title := strings.TrimSpace(body[i+len("○"):])
+				under[title] = cur
+			}
+		case strings.HasPrefix(t, "     "), strings.HasPrefix(body, "▾"), strings.HasPrefix(body, "▴"),
+			strings.HasPrefix(body, "FLEET"), strings.HasPrefix(body, "▌"):
+			// a tag line, a fold mark or the panel's own title
+		default:
+			cur = body
+			headings = append(headings, body)
+		}
+	}
+	return headings, under
+}
+
+// TestTheArchiveGroupsByProjectNotByTheNameItsPersonGave pins the archive's
+// bucket to the directory the session was started in.
+//
+// #11: "Archive groups by project directory, newest first — I start
+// sessions in the respective directory." #79 gave the row, the header and
+// the band the name its person typed into `/rename`. `archiveGroups`
+// bucketed on `sessionName`, which is that name where one was given, so the
+// one renamed session of the second day left `webapp`'s bucket and took a
+// heading of its own: at 220 the archive drew `checkout-flake-hunt` over
+// one session and `webapp` over the other, ten rows and six other projects
+// apart, for one directory's history. The bucket is the project; the name
+// still stands on the strip, in the header and on the band, which is where
+// #79 put it.
+func TestTheArchiveGroupsByProjectNotByTheNameItsPersonGave(t *testing.T) {
+	const (
+		renamed = "the checkout suite flakes on CI"            // /home/user/webapp, renamed checkout-flake-hunt
+		sibling = "why does the nightly build take 40 minutes" // /home/user/webapp, never renamed
+		project = "webapp"
+		name    = "checkout-flake-hunt"
+	)
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, prof := range []struct {
+		what string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := func(s string) string { return prof.what + " " + s }
+
+			// The archive, as `A` draws it.
+			sc := sceneSecondDay()
+			m := sceneModel(sc, w, h)
+			pressKey(m, "A")
+			poll(m, sc)
+			headings, under := r85sdArchiveHeadings(m)
+			for _, hd := range headings {
+				if hd == name {
+					t.Errorf("%s %dx%d: the archive heads a group with the name its person gave a session, not the directory it ran in: %v",
+						where("archive"), w, h, headings)
+				}
+			}
+			// The title is clipped at the narrow widths and carries its
+			// age behind it, so the row is found on the head of its
+			// prompt — twenty-one cells, inside eighty's own clip.
+			seenRenamed := false
+			for title, hd := range under {
+				if !strings.HasPrefix(title, renamed[:21]) {
+					continue
+				}
+				seenRenamed = true
+				if hd != project {
+					t.Errorf("%s %dx%d: the renamed session stands under %q, the name its person gave it, not its project %q",
+						where("archive"), w, h, hd, project)
+				}
+			}
+			if !seenRenamed {
+				t.Errorf("%s %dx%d: the archive's first frame does not draw the renamed session at all", where("archive"), w, h)
+			}
+
+			// Both of the project's sessions under one heading, nothing
+			// between them: walk down from the renamed row to the sibling.
+			m2 := sceneModel(sc, w, h)
+			pressKey(m2, "A")
+			poll(m2, sc)
+			for i := 0; i < 14; i++ {
+				hs, un := r85sdArchiveHeadings(m2)
+				gotBoth := 0
+				for title, hd := range un {
+					if hd == project && title != "" {
+						gotBoth++
+					}
+				}
+				if gotBoth >= 2 {
+					break
+				}
+				_ = hs
+				pressKey(m2, "j")
+				poll(m2, sc)
+			}
+			_, un := r85sdArchiveHeadings(m2)
+			seen := 0
+			for title, hd := range un {
+				if hd == project {
+					seen++
+					_ = title
+				}
+			}
+			if seen < 2 {
+				t.Errorf("%s %dx%d: the project's two sessions never stand under one heading — %v",
+					where("archive"), w, h, un)
+			}
+
+			// The other side: the name its person gave is still on the
+			// board's recent strip and in the header that names the
+			// selection (#79). Neither is the group's heading.
+			m3 := sceneModel(sc, w, h)
+			if !strings.Contains(ansi.Strip(m3.View()), name) {
+				t.Errorf("%s %dx%d: the opening frame no longer names the renamed session %q", where("strip"), w, h, name)
+			}
+			m4 := sceneModel(sc, w, h)
+			pressKey(m4, "A")
+			poll(m4, sc)
+			found := false
+			for i := 0; i < 14 && !found; i++ {
+				head := strings.SplitN(ansi.Strip(m4.View()), "\n", 2)[0]
+				if strings.Contains(head, name) {
+					found = true
+					break
+				}
+				pressKey(m4, "j")
+				poll(m4, sc)
+			}
+			if !found {
+				t.Errorf("%s %dx%d: no archive stand names the renamed session %q in its header", where("header"), w, h, name)
+			}
+
+			// And the sibling is still drawn: nothing was grouped away.
+			m5 := sceneModel(sc, w, h)
+			pressKey(m5, "A")
+			poll(m5, sc)
+			ok := false
+			for i := 0; i < 16 && !ok; i++ {
+				if strings.Contains(ansi.Strip(m5.View()), sibling[:22]) {
+					ok = true
+					break
+				}
+				pressKey(m5, "j")
+				poll(m5, sc)
+			}
+			if !ok {
+				t.Errorf("%s %dx%d: the project's other session never appears", where("archive"), w, h)
+			}
+		}
+	}
+}
