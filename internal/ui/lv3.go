@@ -858,13 +858,15 @@ func (m *Model) toggleFold() {
 
 // jumpMatch is n/N: the next (or previous) document row the query appears in.
 //
-// The walk asks the page whether it moved, the device `ctrl+d` and `G`
-// already use (#24, #228, #231): `clampScroll` pins the page where every
-// match is already drawn — on a conversation the reader draws whole it
-// can never leave nought — so the key the row names beside `/ search`
-// drew nothing and said nothing, the dead key SPEC's round-one rule
-// bans. Where the page does not move, the match the walk was going to is
-// on the screen already, and the row says so.
+// The walk keeps its own place in the run and says it, every press:
+// `match 3/9`, the turn note's form without a quote, because the row the
+// page opens on is the match (#20, #236). Reading that place back off the
+// page instead — the shape #235 and #236 left — stopped the walk dead
+// wherever `clampScroll` pinned the page: the matches sharing the last
+// screenful could not be stepped between, `n` never reached the wrap
+// `walkTo` says it has, and the seventh press of `n` on `many-idle`'s
+// reader came back byte for byte the same, the dead key SPEC's round-one
+// rule bans.
 func (m *Model) jumpMatch(dir int) {
 	if m.query == "" {
 		m.note = "no search — / starts one"
@@ -876,50 +878,57 @@ func (m *Model) jumpMatch(dir int) {
 		m.note = "no matches"
 		return
 	}
-	was := m.readerTop(doc)
 	at := m.walkTo(doc, matches, dir)
-	if m.readerTop(doc) == was {
-		m.note = "the match is on screen"
-		return
-	}
-	// And the walk that did move says what it moved to, as `[` and `]`
-	// do (#20): the page went somewhere the person did not choose by
-	// hand and nothing on it named the match — the harm `landOnTurn` was
-	// written for, at the other key that jumps. The count is the turn
-	// note's own form, without a quote: the row the page opens on is the
-	// match itself.
+	// The walk says which match of how many it is standing on, every
+	// press, as `[` and `]` name the turn they landed on and count it
+	// (#20, #236). The count is the answer #235's `the match is on
+	// screen` was reaching for and a fuller one: it says which of the
+	// matches on that screen the walk is standing on, it changes under
+	// every press, and at nine cells it is thirteen shorter than the
+	// sentence it replaces — at eighty on `many-idle` the row keeps
+	// `A archive` where that sentence shed it.
 	m.note = fmt.Sprintf("match %d/%d", at+1, len(matches))
 }
 
-// walkTo scrolls to the next (or previous) match, wrapping at the ends,
-// and reports which of them it went to.
+// walkTo steps the walk one match on (or back), wrapping at the ends, and
+// reports which match it is now standing on.
+//
+// The step is the walk's own, not the page's. `clampScroll` pins the page
+// at the last screenful, so a walk that read its place back off `m.scroll`
+// stopped dead the moment the rest of the run shared one screen: on
+// `many-idle`'s reader `n` reached the fourth of nine matches and then
+// stood there for good, and on 552 of the corpus's 588 search stands it
+// never reached the wrap this function says it has.
 func (m *Model) walkTo(doc []readerLine, matches []int, dir int) int {
-	at := 0
-	if dir > 0 {
-		at = len(matches) - 1
-		for i, line := range matches {
-			if line > m.scroll {
-				at = i
-				break
-			}
-		}
-		if matches[at] <= m.scroll {
-			at = 0 // wrap
-		}
-	} else {
-		at = 0
-		for i := len(matches) - 1; i >= 0; i-- {
-			if matches[i] < m.scroll {
-				at = i
-				break
-			}
-		}
-		if matches[at] >= m.scroll {
-			at = len(matches) - 1 // wrap
-		}
-	}
+	at := m.walkStep(matches, dir)
+	m.walkRow = matches[at] + 1
 	m.scroll = clampScroll(matches[at], len(doc), m.readerHeight())
 	return at
+}
+
+// walkStep is the match the walk moves to: one on from where it stands,
+// and from the page where it stands nowhere yet — a fresh search, or a
+// document that has moved under it (a fold, a new width).
+func (m *Model) walkStep(matches []int, dir int) int {
+	for i, line := range matches {
+		if line == m.walkRow-1 {
+			return ((i+dir)%len(matches) + len(matches)) % len(matches)
+		}
+	}
+	if dir > 0 {
+		for i, line := range matches {
+			if line > m.scroll {
+				return i
+			}
+		}
+		return 0 // wrap
+	}
+	for i := len(matches) - 1; i >= 0; i-- {
+		if matches[i] < m.scroll {
+			return i
+		}
+	}
+	return len(matches) - 1
 }
 
 // searchKey handles a keypress while the query is being typed.
@@ -941,7 +950,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 		m.draft = ""
 		m.searching = false
 		if m.query != "" {
-			m.scroll = 0
+			m.scroll, m.walkRow = 0, 0
 			m.jumpMatch(1)
 		}
 	case "esc":

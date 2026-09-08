@@ -219,6 +219,13 @@ type Model struct {
 	scroll   int
 	unfolded map[int]bool
 	query    string
+	// walkRow is the document row `n` and `N` stand on, plus one — nought
+	// while no walk has been taken. The walk keeps its own place instead
+	// of reading it back off the page: `clampScroll` pins the page at the
+	// last screenful, so a walk that asks the page where it stands cannot
+	// step between the matches that share that screenful, and can never
+	// reach the wrap `walkTo` says it has.
+	walkRow  int
 	draft    string // the query being typed; searching is true while it is
 	docVer   int    // bumped whenever a fold changes, to retire the cache
 	docCache readerCache
@@ -832,7 +839,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		// At Lv3 a standing search clears first; the second Esc zooms out.
 		if m.level >= levelReader && m.query != "" {
-			m.query = ""
+			m.query, m.walkRow = "", 0
 			return m, nil
 		}
 		if m.level <= levelTrail && m.fleetQuery != "" {
@@ -4377,10 +4384,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 }
 
 // walkNote says whether the note is the walk key's own: the answer `n` and
-// `N` give where the match they were going to is already drawn. Under it
-// the pair stays, as the chapter keys stay under a chapter key's note (#24).
+// `N` give — which match of how many they are standing on. Under it the
+// pair stays, as the chapter keys stay under a chapter key's note (#24).
 func (m *Model) walkNote() bool {
-	return m.note == "the match is on screen" || strings.HasPrefix(m.note, "match ")
+	return strings.HasPrefix(m.note, "match ")
 }
 
 // fitQuote is form with its quoted clause clipped so the whole fits room,

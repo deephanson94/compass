@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/deephanson94/compass/internal/transcript"
@@ -5786,7 +5787,7 @@ func TestTheSearchWalkSaysWhereItLanded(t *testing.T) {
 						c.name, w, h, c.n, k)
 					continue
 				}
-				if m.note != "" && m.note != "the match is on screen" && !strings.HasPrefix(m.note, "match ") {
+				if m.note != "" && !strings.HasPrefix(m.note, "match ") {
 					t.Errorf("%s %dx%d prefix %d: %q on a running search said %q",
 						c.name, w, h, c.n, k, m.note)
 				}
@@ -6236,4 +6237,181 @@ func TestNoDigitOfTheRowYouAreOnIsSilent(t *testing.T) {
 			}
 		}
 	}
+}
+
+// r86fhMatchNote reads the walk's note: which match of how many.
+var r86fhMatchNote = regexp.MustCompile(`^match (\d+)/(\d+)$`)
+
+// TestTheSearchWalkWalksItsWholeRun pins round eighty-six's one thing.
+//
+// #235 gave `n` and `N` the question `ctrl+d` and `G` ask — did the page
+// move — and #236 gave the press that moved the page the count of the
+// match it landed on. Both read the walk's place back off `m.scroll`, and
+// `clampScroll` pins the page at the last screenful: so the moment the
+// rest of the run shared one screen the walk stopped, and every further
+// press recomputed the same match. On `many-idle`'s reader at 120x34,
+// searching `the`, `n` counted `match 3/9` … `match 6/9` and then stood
+// there — matches 7, 8 and 9 were never named, the seventh press came
+// back byte for byte the same frame, and `n` never reached the wrap
+// `walkTo` says it has. Over the corpus that was 552 of 588 search
+// stands and 2,082 matches a person could not walk to.
+//
+// The walk keeps its own place, steps it one match a press, and names it
+// every time (#20's `❯ 3/12`, at the other key that jumps).
+func TestTheSearchWalkWalksItsWholeRun(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name  string
+		sc    scene
+		n     int
+		query string
+	}{
+		{"many-idle", sceneManyIdle(), 13, "the"},
+		{"many-idle", sceneManyIdle(), 13, "pytest"},
+		{"fleet-hygiene", sceneFleetHygiene(), 13, "the"},
+		{"very-long", sceneVeryLong(), 13, "the"},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+			w, h := size[0], size[1]
+			m := r86fhSearch(sceneModel(c.sc, w, h), c.sc, c.n, c.query)
+			if m == nil {
+				continue
+			}
+			total := len(readerMatches(m.doc(m.readerWidth()), m.query))
+			if total < 2 {
+				continue
+			}
+			r86fhWalkRun(t, m, c.sc, total, c.name, c.query, w, h, true)
+		}
+	}
+}
+
+// TestNoReaderWalkKeyStandsStill is the rule behind it, asked of every
+// canonical reader stand of every scene at eighty and at 120: with a
+// search running, four presses of `n` stand on four different matches —
+// the walk that reads its place off the page repeats one instead. One
+// walkthrough per scene and width, the search taken and put back at each
+// stand, and the note read rather than the frame, so the sweep runs in a
+// few seconds.
+func TestNoReaderWalkKeyStandsStill(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {120, 34}} {
+			w, h := size[0], size[1]
+			m := sceneModel(sc, w, h)
+			for n := 0; n <= len(keys); n++ {
+				if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+					for _, q := range []string{"pytest"} {
+						// The search is taken and put back: every stand
+						// starts a query of its own, which is what resets
+						// the walk, so only the page and the note need
+						// restoring.
+						scroll, query, note := m.scroll, m.query, m.note
+						if mm := r86fhSearch(m, sc, -1, q); mm != nil {
+							if total := len(readerMatches(mm.doc(mm.readerWidth()), mm.query)); total >= 2 {
+								r86fhWalkRun(t, mm, sc, total, sc.name, q, w, h, false)
+							}
+						}
+						m.scroll, m.query, m.note = scroll, query, note
+					}
+				}
+				if n < len(keys) {
+					pressKey(m, keys[n])
+					poll(m, sc)
+				}
+			}
+		}
+	}
+}
+
+// r86fhWalkRun presses `n` a lap (or the first few steps of one) and asks
+// what a walk owes: a different match every press, counted out of the
+// whole run, and — where the caller asks for the frame too — a frame that
+// changes under every press.
+func r86fhWalkRun(t *testing.T, m *Model, sc scene, total int, name, query string, w, h int, frame bool) {
+	t.Helper()
+	lap := total
+	if frame && lap > 10 {
+		lap = 10 // a 168-match run is the same rule, ten presses in
+	}
+	if !frame && lap > 4 {
+		lap = 4
+	}
+	seen := map[int]bool{}
+	for i := 0; i < lap; i++ {
+		// The frame is taken as it stands, note and all: a key is dead
+		// when the frame a person is looking at comes back the same, and
+		// the note the last press left is part of that frame. A note left
+		// standing cannot pass for a fresh one either — it repeats an
+		// index, which the run below catches.
+		before := ""
+		if frame {
+			before = m.View()
+		}
+		pressKey(m, "n")
+		poll(m, sc)
+		if frame && m.View() == before {
+			t.Errorf("%s %dx%d /%s: press %d of %d drew nothing and said nothing",
+				name, w, h, query, i+1, lap)
+			return
+		}
+		g := r86fhMatchNote.FindStringSubmatch(m.note)
+		if g == nil {
+			t.Errorf("%s %dx%d /%s: press %d of %d said %q, not which match of how many",
+				name, w, h, query, i+1, lap, m.note)
+			return
+		}
+		at, _ := strconv.Atoi(g[1])
+		of, _ := strconv.Atoi(g[2])
+		if of != total {
+			t.Errorf("%s %dx%d /%s: the note counts %d matches, the document holds %d", name, w, h, query, of, total)
+			return
+		}
+		if seen[at] {
+			t.Errorf("%s %dx%d /%s: press %d of %d stood on match %d again — the run does not walk",
+				name, w, h, query, i+1, lap, at)
+			return
+		}
+		seen[at] = true
+	}
+	if len(seen) != lap {
+		t.Errorf("%s %dx%d /%s: %d presses of `n` named %d matches of %d", name, w, h, query, lap, len(seen), total)
+	}
+}
+
+// r86fhSearch presses the two keys the reader's own footer names — `/`,
+// the query, enter — on a model already at a reader stand, replaying the
+// first n keys of the scene's walkthrough first where n is not negative.
+// It returns nil where the search finds nothing to walk.
+func r86fhSearch(m *Model, sc scene, n int, query string) *Model {
+	if n >= 0 {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		if n > len(keys) {
+			n = len(keys)
+		}
+		for _, k := range keys[:n] {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+	}
+	if m.level != levelReader || m.showHelp || m.searching || m.replying {
+		return nil
+	}
+	pressKey(m, "/")
+	for _, r := range query {
+		pressKey(m, string(r))
+	}
+	pressKey(m, "enter")
+	poll(m, sc)
+	if m.query == "" || len(readerMatches(m.doc(m.readerWidth()), m.query)) == 0 {
+		return nil
+	}
+	return m
 }
