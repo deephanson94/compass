@@ -3681,3 +3681,121 @@ func TestTheTurnKeysYieldWhereTheyCannotMove(t *testing.T) {
 		}
 	}
 }
+
+// TestTheMarkSaysWhatThisColumnLost pins round eighty's one thing: the
+// overlay's right-hand mark answers "what did the box hide of this column",
+// so it stands where the box covered something of that column and nowhere
+// else. #64 wrote that rule — no right-hand mark when the peek rule blanked
+// the whole peek — but measured it on the whole rest of the row, and the
+// rest of the row runs on through board columns the box never touched. On
+// many-idle at 220 the reply box covered a column that was blank for six
+// rows, and every one of them wore `…` because a column two rules further
+// right had words in it; one was the box's own closing border. Both sides:
+// where the box covered so much as the trail's rail the mark stands (#75).
+func TestTheMarkSaysWhatThisColumnLost(t *testing.T) {
+	forceASCII(t)
+	step := func(m *Model, sc scene, keys ...string) {
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+	}
+
+	for _, tc := range []struct{ w, h int }{{220, 48}, {152, 40}, {120, 34}} {
+		sc := sceneManyIdle()
+		m := sceneModel(sc, tc.w, tc.h)
+		before := strings.Split(ansi.Strip(m.View()), "\n")
+		step(m, sc, "r")
+		got := strings.Split(ansi.Strip(m.View()), "\n")
+
+		top, left, pw := -1, 0, 0
+		for i, line := range got {
+			if j := strings.Index(line, "┌ reply to"); j >= 0 {
+				top = i
+				left = len([]rune(line[:j]))
+				pw = strings.Index(line[j:], "┐")
+				pw = len([]rune(line[j:j+pw])) + 2 // the border, and its column of air
+			}
+		}
+		if top < 0 {
+			t.Fatalf("many-idle %dx%d: no reply box drawn:\n%s", tc.w, tc.h, strings.Join(got, "\n"))
+		}
+
+		marked, bare, checked := 0, 0, 0
+		for i := top; i < len(got); i++ {
+			runes := []rune(got[i])
+			last := strings.Contains(got[i], "└─")
+			if len(runes) <= left+pw {
+				if last {
+					break
+				}
+				continue
+			}
+			after := strings.TrimSpace(string(runes[left+pw:]))
+			if after == "" {
+				continue
+			}
+			checked++
+			cut := ""
+			if b := []rune(before[i]); len(b) > left {
+				end := left + pw + 1
+				if end > len(b) {
+					end = len(b)
+				}
+				cut = string(b[left:end])
+				if j := strings.LastIndex(cut, "│"); j >= 0 {
+					cut = cut[j+len("│"):]
+				}
+			}
+			if strings.TrimSpace(cut) != "" {
+				marked++
+				if !strings.HasPrefix(after, "…") {
+					t.Errorf("many-idle %dx%d: the box hid %q of this column and the row does not say it was cut:\n%s",
+						tc.w, tc.h, strings.TrimSpace(cut), got[i])
+				}
+				if last {
+					break
+				}
+				continue
+			}
+			bare++
+			if strings.HasPrefix(after, "…") {
+				t.Errorf("many-idle %dx%d: the box cut nothing from this column and the row says it was cut:\n%s",
+					tc.w, tc.h, got[i])
+			}
+			if last {
+				break
+			}
+		}
+		if checked == 0 || marked == 0 || bare == 0 {
+			t.Fatalf("many-idle %dx%d: the frame does not carry both sides (checked %d, marked %d, bare %d):\n%s",
+				tc.w, tc.h, checked, marked, bare, strings.Join(got, "\n"))
+		}
+
+		// The mark stands on the row whose column the box cut down to its
+		// rail — #75's own case — and never on the box's closing border.
+		for _, line := range got {
+			if j := strings.Index(line, "└─"); j >= 0 {
+				if strings.Contains(line[j:], "…") {
+					t.Errorf("many-idle %dx%d: the box's closing border wears a cut mark for an empty column:\n%s",
+						tc.w, tc.h, line)
+				}
+			}
+		}
+	}
+
+	// #75: a peek that covered only the trail's rail keeps the mark.
+	sc := sceneManyIdle()
+	m := sceneModel(sc, 220, 48)
+	step(m, sc, "r")
+	rail := false
+	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(line, "● working for 1h") && strings.Contains(line, "…") {
+			rail = true
+		}
+	}
+	if !rail {
+		t.Errorf("many-idle 220x48: the row whose column the box cut down to its rail lost its mark:\n%s",
+			ansi.Strip(m.View()))
+	}
+}

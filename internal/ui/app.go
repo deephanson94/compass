@@ -2592,13 +2592,34 @@ func overlay(rows, panel []string, left, top int) {
 				// the row was cut (#64). And a lone word with no digit —
 				// "ago", "still", "report" — answers nothing: #55 kept the
 				// peek for the "2✗ 3m" and "for 33m" that read (#73).
-				after = "…" + rest
+				after = markCut(line, left, pw) + rest
 			}
 		}
 		// No paint past the panel: a row that ended in the box's own
 		// padding stood a cell into the terminal's margin (#63).
 		rows[top+i] = strings.TrimRight(before+pad(p, pw)+after, " ")
 	}
+}
+
+// markCut is the mark the overlay draws at the box's right edge: "…" where
+// the box covered something of the column the peek belongs to, and a bare
+// cell where it covered nothing. #64's rule — no right-hand mark when the
+// peek rule blanked the whole peek — was measured on the whole rest of the
+// row, so a board column the box covered while it was blank still wore the
+// mark because an untouched column further right had words in it: at 220
+// six rows of a reply frame said "something is hidden here" over a column
+// that was empty. The question is what this column lost, so the answer is
+// read from this column's own covered cells; a rail alone still counts
+// (#75).
+func markCut(line string, left, pw int) string {
+	cut := ansi.TruncateLeft(ansi.Truncate(line, left+pw+1, ""), left, "")
+	if plain := ansi.Strip(cut); strings.Contains(plain, "│") {
+		cut = plain[strings.LastIndex(plain, "│")+len("│"):]
+	}
+	if strings.TrimSpace(ansi.Strip(cut)) == "" {
+		return " "
+	}
+	return "…"
 }
 
 // replyPanelMax is the widest the reply panel gets: a long stock line

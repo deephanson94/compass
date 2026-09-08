@@ -539,8 +539,13 @@ func TestTheReplyPanelBlanksOnlyItsBox(t *testing.T) {
 		runes := []rune(got[i])
 		if len(runes) > left+pw {
 			if after := strings.TrimSpace(string(runes[left+pw:])); after != "" {
-				if !strings.HasPrefix(after, "…") {
+				// The mark answers what this column lost, so it stands
+				// where the panel covered something of it and not where
+				// it covered nothing (#64, #75).
+				if covered := panelCovered(before, i, left, pw); covered && !strings.HasPrefix(after, "…") {
 					t.Errorf("a row cut by the panel's right edge does not say so: %q", got[i])
+				} else if !covered && strings.HasPrefix(after, "…") {
+					t.Errorf("a row the panel cut nothing from says it was cut: %q", got[i])
 				}
 				kept++
 			}
@@ -558,6 +563,27 @@ func TestTheReplyPanelBlanksOnlyItsBox(t *testing.T) {
 		}
 	}
 	_ = before
+}
+
+// panelCovered says whether the panel at (left, pw) covers anything of the
+// board column its right-hand peek belongs to, on the unboxed row i.
+func panelCovered(before []string, i, left, pw int) bool {
+	if i >= len(before) {
+		return false
+	}
+	runes := []rune(before[i])
+	if len(runes) <= left {
+		return false
+	}
+	end := left + pw + 1
+	if end > len(runes) {
+		end = len(runes)
+	}
+	cut := string(runes[left:end])
+	if j := strings.LastIndex(cut, "│"); j >= 0 {
+		cut = cut[j+len("│"):]
+	}
+	return strings.TrimSpace(cut) != ""
 }
 
 // The panel's working line carries the turn's clock, not the last write's:
