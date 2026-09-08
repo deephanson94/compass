@@ -2418,3 +2418,35 @@ func TestTheArchiveReaderTitleSaysWhatTheHeaderDoesNot(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 74, fleet-hygiene, the one thing ----
+// A width refused keeps the way deeper. `no board under 110 columns` (26
+// cells) and `mirror needs 110 columns` (24) stand against the 22 the
+// eighty-column fleet-list footer leaves beside `tab deeper`, so both
+// cost that footer the frame's only naming of the way deeper — the harm
+// #175 and #187 each folded, on the very form #165 held up as the one
+// that "names the key and keeps the way in". The unit is the one word
+// the person's own terminal supplies; the number and the key stay.
+func TestTheWidthRefusalKeepsTheWayDeeper(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sc   scene
+	}{
+		{"fleet-hygiene", sceneFleetHygiene()},
+		{"many-idle", sceneManyIdle()},
+	} {
+		for _, k := range []string{"m", "shift+tab"} {
+			m := sceneModel(c.sc, 80, 24)
+			pressKey(m, k) // refused: no board, no mirror, under 110
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			foot := rows[len(rows)-1]
+			if !strings.Contains(foot, "110") {
+				t.Fatalf("%s %q: not the width refusal: %q", c.name, k, strings.TrimSpace(foot))
+			}
+			if !strings.Contains(foot, "tab deeper") {
+				t.Errorf("%s %q: the width refusal's unit costs the frame its only naming of the way deeper: %q",
+					c.name, k, strings.TrimSpace(foot))
+			}
+		}
+	}
+}

@@ -3344,6 +3344,22 @@ func (m *Model) footerWith(keys string, w int) string {
 			forms = noteForms(note)
 		}
 	}
+	if unit := " columns"; strings.HasSuffix(minimal, unit) && strings.HasSuffix(m.note, unit) {
+		// A width refused: `no board under 110 columns` (26) and `mirror
+		// needs 110 columns` (24) against the 22 the Lv1 footer leaves
+		// cost it `tab deeper`, the frame's only naming of the way
+		// deeper — the harm #175 and #187 each folded, on the very form
+		// #165 held up as the one that "names the key and keeps the way
+		// in". The unit is the one word of it the person's own terminal
+		// supplies; the number, which is the only thing to act on, and
+		// the key stay. Only where the key comes back.
+		short := strings.TrimSuffix(minimal, unit)
+		if k, base := shed(short, " · ? help"), shed("", ""); levelKeyLost(base, keys) && !levelKeyLost(base, k) {
+			keys, minimal = k, short
+			note = short
+			forms = noteForms(note)
+		}
+	}
 	if pane != "" {
 		// The pane clause goes before a key — not before the attach
 		// hint, which #31 ranks beneath a key or a note: the parenthetical
