@@ -2278,7 +2278,7 @@ func TestTheAnswersDigitIsTheRows(t *testing.T) {
 		if !row {
 			t.Fatalf("%dx%d: no drawn row carries the trace", size[0], size[1])
 		}
-		if !strings.Contains(foot, "to ⌁ ops:0.0") {
+		if !strings.Contains(foot, "⌁ ops:0.0") {
 			t.Fatalf("%dx%d: not the trace note: %q", size[0], size[1], strings.TrimSpace(foot))
 		}
 		if strings.Contains(foot, "answered 1") {
@@ -2572,6 +2572,41 @@ func TestTheArchiveFooterNamesTheChapterKeys(t *testing.T) {
 		}
 		if !strings.Contains(foot, "[ ] chapters") {
 			t.Errorf("%dx%d: the archive footer does not name the chapter keys it answers to: %q", size[0], size[1], foot)
+		}
+	}
+}
+
+// ---- round 75, fleet-hygiene, the one thing ----
+// A trace keeps the way deeper. `↪ sent to ⌁ harness:1.0` is 23 cells
+// against the 22 the eighty-column Lv1 footer leaves beside `tab deeper`,
+// so a reply to the fleet's own namesake cost the frame its only naming
+// of the way deeper while the same keys on `⌁ tinker:0.0` (22) kept it.
+// The destination stays; the arrow is its preposition.
+func TestTheTraceKeepsTheWayDeeper(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sc   scene
+		keys []string
+		dest string
+	}{
+		{"fleet-hygiene", sceneFleetHygiene(), []string{"2", "r", "1"}, "⌁ harness:1.0"},
+		{"alarm-storm", sceneAlarmStorm(), []string{"r", "1"}, "⌁ ops:0.0"},
+		{"subagents", sceneSubagents(), []string{"j", "r", "t", "go on", "enter"}, "⌁ harness:1.0"},
+	} {
+		sc := c.sc
+		m := sceneModel(sc, 80, 24)
+		for _, k := range c.keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := rows[len(rows)-1]
+		if !strings.Contains(foot, c.dest) {
+			t.Fatalf("%s: not the trace note: %q", c.name, strings.TrimSpace(foot))
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("%s: the trace's preposition costs the frame its only naming of the way deeper: %q",
+				c.name, strings.TrimSpace(foot))
 		}
 	}
 }

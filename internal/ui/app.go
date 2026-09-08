@@ -3362,6 +3362,24 @@ func (m *Model) footerWith(keys string, w int) string {
 			forms = noteForms(note)
 		}
 	}
+	if i := strings.Index(minimal, " to "+mirrorMark); i > 0 && strings.HasPrefix(minimal, "↪ ") && strings.HasPrefix(m.note, "↪ ") {
+		// A trace's destination proves where a line landed (#39) and
+		// stays; the arrow is its preposition. `↪ sent to ⌁ harness:1.0`
+		// is 23 cells against the 22 the eighty-column Lv1 footer leaves
+		// beside `tab deeper`, so a reply to this fleet's own namesake
+		// cost the frame its only naming of the way deeper while the same
+		// keys on `⌁ tinker:0.0` (22) kept it — the harm #175, #187 and
+		// #190 each folded. The word `to` answers no question the glyph
+		// does not: the header, the strip and the tag row all draw the
+		// pane as `⌁ harness:1.0` bare. So it yields to a key naming a
+		// level, and only where the key comes back.
+		short := minimal[:i] + " " + minimal[i+len(" to "):]
+		if k, base := shed(short, " · ? help"), shed("", ""); levelKeyLost(base, keys) && !levelKeyLost(base, k) {
+			keys, minimal = k, short
+			note = strings.Replace(note, " to "+mirrorMark, " "+mirrorMark, 1)
+			forms = noteForms(note)
+		}
+	}
 	if pane != "" {
 		// The pane clause goes before a key — not before the attach
 		// hint, which #31 ranks beneath a key or a note: the parenthetical
