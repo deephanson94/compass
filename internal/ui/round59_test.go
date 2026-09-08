@@ -7944,3 +7944,84 @@ func TestTheArchiveHideNoteNamesNoWayBackIn(t *testing.T) {
 		t.Errorf("the board's own hide note lost the way to the archive: %q", foot)
 	}
 }
+
+// r90ttFoot is the last drawn row of a frame, escapes off.
+func r90ttFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// r90ttStand plays a key run into a fresh model of the scene at one size.
+func r90ttStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestNoDigitDeniesALiveSessionTheFleetNumbers pins round ninety's one
+// thing. `no session 1` is the sentence for a digit no session ever had.
+// Under a fleet query that matches nothing, and in an archive that draws
+// no row, the view draws no row for the digit — but the fleet still
+// numbers a live session by it: the board one `esc` away calls it
+// `1 infra`, the chips on the same row count it (`▲1 4m`), and where the
+// digit is the selected session's own the deck already answers (#238,
+// #242, #243, #245). The refusal names it, as the hidden twin does (#57).
+//
+// The other side is held too: where the archive draws rows the digits are
+// the archive's own (#32), so a digit past its last row is still refused,
+// and a digit no session carries is still `no session 7`.
+func TestNoDigitDeniesALiveSessionTheFleetNumbers(t *testing.T) {
+	forceASCII(t)
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+
+			// The board under a query that matches nothing: `1` is the
+			// fleet's needs-you session, live, on the board one esc away.
+			m := r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "1")
+			foot := r90ttFoot(m)
+			if strings.Contains(foot, "no session 1") {
+				t.Errorf("%dx%d %v: the board denies the digit the fleet numbers: %q", w, h, prof, foot)
+			}
+			if !strings.Contains(foot, "1 infra") {
+				t.Errorf("%dx%d %v: the refusal does not name session 1: %q", w, h, prof, foot)
+			}
+			// A digit no session carries is still refused.
+			m = r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "7")
+			if foot := r90ttFoot(m); !strings.Contains(foot, "no session 7") {
+				t.Errorf("%dx%d %v: a digit no session carries lost its refusal: %q", w, h, prof, foot)
+			}
+
+			// An archive that draws no row: the numbers are nobody's, and
+			// the header on that very frame wears the board's digit (#248).
+			m = r90ttStand(sceneManyIdle(), w, h, "2", "/", "zzz", "enter", "A", "1")
+			foot = r90ttFoot(m)
+			if !m.archiveView {
+				t.Fatalf("%dx%d %v: the run did not reach the archive", w, h, prof)
+			}
+			if strings.Contains(foot, "no session 1") {
+				t.Errorf("%dx%d %v: the empty archive denies the digit the fleet numbers: %q", w, h, prof, foot)
+			}
+			if !strings.Contains(foot, "1 etl") {
+				t.Errorf("%dx%d %v: the empty archive's refusal does not name session 1: %q", w, h, prof, foot)
+			}
+
+			// An archive that draws rows numbers them itself (#32): a
+			// digit past its last row is refused, whatever the board
+			// calls that number.
+			m = r90ttStand(sceneTwoTools(), w, h, "2", "x", "A", "3")
+			if !m.archiveView || len(m.viewOrder()) == 0 {
+				t.Fatalf("%dx%d %v: the run did not reach an archive with rows", w, h, prof)
+			}
+			if foot := r90ttFoot(m); !strings.Contains(foot, "no session 3") {
+				t.Errorf("%dx%d %v: the archive's own numbering lost its refusal: %q", w, h, prof, foot)
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}

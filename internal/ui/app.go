@@ -1002,6 +1002,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.note = fmt.Sprintf("%d %s is live", i+1, sessionName(s.Info))
 				}
 			}
+			if m.note == fmt.Sprintf("no session %d", i+1) && (!m.archiveView || len(m.viewOrder()) == 0) {
+				// The view draws no row for this digit, but the fleet
+				// still numbers a live session by it: `no session 1` is
+				// the sentence for a digit no session ever had, and the
+				// board one `esc` away calls this one `1 infra` while
+				// the chips beside the note count it (`▲1 4m`). Where
+				// the digit is the selected session's the deck already
+				// says so (#238, #243) and in an archive drawing no row
+				// it names it (#242); this is the same frame's other
+				// digits. The refusal names it and says what it is, as
+				// the hidden twin above does (#57); the way back is
+				// already on the frame — `esc clears it` under a query,
+				// `A fleet` in the archive — so the note does not buy a
+				// key twice (#232). Where the archive draws rows the
+				// digits are its own (#32) and the refusal stands.
+				for _, s := range m.sessions {
+					if s.Live && !m.hidden[s.Info.Key()] && m.digits[s.Info.Key()] == i+1 {
+						m.note = fmt.Sprintf("%d %s is live", i+1, sessionName(s.Info))
+						break
+					}
+				}
+			}
 		}
 		return m, m.refresh()
 	}
