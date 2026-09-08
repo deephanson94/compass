@@ -1812,7 +1812,11 @@ func TestTheWayBackIsTaughtOnTheRowWithRoom(t *testing.T) {
 // the note's own cells buy (#166, #159, #156's shape).
 func TestTheTopOfTrailRefusalKeepsTheChapterKeys(t *testing.T) {
 	forceASCII(t)
-	want := map[int]string{80: "[ ] chapters", 100: "r reply", 120: "a ask", 152: "m live pane"}
+	// At eighty the key the note's cells buy is `tab deeper`: the trail's
+	// own keys stand one cell over what the twelve-cell floor leaves, so
+	// the chapter key yields to the way in there and the row keeps the
+	// same count of keys (round 77).
+	want := map[int]string{80: "tab deeper", 100: "r reply", 120: "a ask", 152: "m live pane"}
 	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
 		m := sceneModel(sceneTwoTools(), size[0], size[1])
 		for _, k := range []string{"tab", "ctrl+u", "ctrl+u"} {
@@ -2924,5 +2928,114 @@ func TestAPageAllOnScreenOffersNoScrollKey(t *testing.T) {
 	}
 	if !named {
 		t.Errorf("80x24: the reader's `[` refusal names the archive nowhere: %q", foot)
+	}
+}
+
+// ---- round 77, two-tools, the one thing ----
+// The trail's footer keeps the way deeper under a note of its own.
+//
+// At eighty the Lv2 keymap is 65 cells against the 64 the twelve-cell
+// note floor leaves, and `[ ] chapters` — fifteen cells, the widest
+// optional key on the row — outranked `tab deeper`, so every note the
+// trail draws that is not a chapter key's own (`at the start`, `no leg to
+// move to`, `mirror needs 110 columns`) cost the frame its only naming of
+// the way deeper: the harm #175, #187, #190, #194 and #198 each folded.
+// The chapter key yields to a key naming a level, and only where the key
+// comes back; under a chapter key's own note the key the note is about
+// stays where it is (#24, #57), which the second half asserts.
+func TestTheTrailsFooterKeepsTheWayDeeperUnderItsOwnNote(t *testing.T) {
+	forceASCII(t)
+	footer := func(m *Model) string {
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				return strings.TrimSpace(l)
+			}
+		}
+		return ""
+	}
+	for _, sc := range []struct {
+		name  string
+		scene scene
+	}{
+		{"two-tools", sceneTwoTools()},
+		{"second-day", sceneSecondDay()},
+		{"first-session", sceneFirstSession()},
+	} {
+		// The note the frame draws, and whether it is a chapter key's own.
+		for _, route := range []struct {
+			keys    []string
+			chapter bool
+		}{
+			{[]string{"tab", "ctrl+u", "ctrl+u"}, false},
+			{[]string{"tab", "m"}, false},
+			{[]string{"tab", "["}, true},
+		} {
+			m := sceneModel(sc.scene, 80, 24)
+			plain := ""
+			for i, k := range route.keys {
+				pressKey(m, k)
+				if i == 0 {
+					plain = footer(m) // the footer with no news on it
+				}
+			}
+			foot := footer(m)
+			if m.note == "" {
+				t.Fatalf("%s %v: no note on the frame: %q", sc.name, route.keys, foot)
+			}
+			if !strings.Contains(plain, "tab deeper") {
+				t.Fatalf("%s: the noteless Lv2 footer names no way deeper: %q", sc.name, plain)
+			}
+			if route.chapter {
+				if !strings.Contains(foot, "[ ] chapters") {
+					t.Errorf("%s %v: the chapter key's own note sheds the key it is about: %q",
+						sc.name, route.keys, foot)
+				}
+				continue
+			}
+			if !strings.Contains(foot, "tab deeper") {
+				t.Errorf("%s %v: the note %q costs the trail's footer the way deeper: %q",
+					sc.name, route.keys, m.note, foot)
+			}
+		}
+	}
+}
+
+// ---- round 77, two-tools, second finding ----
+// Above the board's width the session view names the hidden session. The
+// hidden count and its door are the fleet's last line and the board's
+// strip; at Lv2 and Lv3 above 110 columns no fleet body is drawn beside
+// the trail, so a fleet of four counted three on the chips and no row,
+// chip or key said where the fourth went, while the same keypresses at
+// eighty and a hundred drew `1 hidden · A, then x`. Where no fleet body
+// stands the chip carries the clause; where one does, the chip does not
+// (#64: one frame, one lesson) (#202, #199).
+func TestTheSessionViewNamesTheHiddenSession(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == "api" {
+				m.point(s.Info.Key())
+				break
+			}
+		}
+		pressKey(m, "x")
+		m.note = ""
+		pressKey(m, "tab")
+		if m.level < levelTrail {
+			t.Fatalf("%dx%d: the route does not reach the session view", size[0], size[1])
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		head := rows[0]
+		onRow := false
+		for _, r := range rows[1 : len(rows)-1] {
+			if strings.Contains(r, "hidden · A") {
+				onRow = true
+			}
+		}
+		inHead := strings.Contains(head, "hidden · A, then x")
+		if onRow == inHead {
+			t.Errorf("%dx%d: the hidden session is named %d times (row %v, chip %v): %q", size[0], size[1], map[bool]int{true: 2, false: 0}[onRow], onRow, inHead, strings.TrimSpace(head))
+		}
 	}
 }

@@ -3043,6 +3043,17 @@ func (m *Model) statusChips() string {
 			chip += fmt.Sprintf(" · %s hidden", m.hiddenDoorCount(n))
 		}
 		parts = append(parts, dimStyle.Render(chip))
+	} else if n := m.hiddenCount(); n > 0 && m.level >= levelTrail && m.sessionView() && !m.showHelp {
+		if fw, _, _ := m.layout(m.width); fw == 0 {
+			// The hidden count and its door are the fleet's last line and
+			// the board's strip; in the session view above the board's
+			// width neither is drawn, and a fleet of four counted three
+			// on the chips with no clause saying where the fourth went,
+			// while the same keypresses at eighty drew `1 hidden · A,
+			// then x`. The question is what the frame drew (#199): where
+			// no fleet body stands, the chip carries the clause (#202).
+			parts = append(parts, dimStyle.Render(fmt.Sprintf("%s hidden · A, then x", m.hiddenDoorCount(n))))
+		}
 	}
 	if len(parts) == 0 {
 		return dimStyle.Render("○ all quiet")
@@ -3401,6 +3412,48 @@ func (m *Model) footerWith(keys string, w int) string {
 			keys, minimal = k, short
 			note = strings.Replace(note, " to "+mirrorMark, " "+mirrorMark, 1)
 			forms = noteForms(note)
+		}
+	}
+	if chapters := " · [ ] chapters"; !m.chapterNote() && strings.Contains(whole, chapters) {
+		// The way in outlasts a key that moves inside a panel already
+		// open (#39). At eighty the trail's own keys are 65 cells
+		// against the 64 the twelve-cell note floor leaves, so every
+		// note the trail draws — `at the start`, `no leg to move to`,
+		// `mirror needs 110 columns` — cost the footer `tab deeper`,
+		// the frame's only naming of the way deeper (the harm #175,
+		// #187, #190, #194 and #198 each folded), while `[ ] chapters`,
+		// fifteen cells and the widest optional key on the row, stood.
+		// The chapter key yields to a key naming a level, and only
+		// where the key comes back. Under a chapter key's own note the
+		// key the note is about stays where it is (#24, #57).
+		order := make([]string, 0, len(drops))
+		moved := false
+		for _, d := range drops {
+			if d == chapters {
+				continue
+			}
+			if !moved && (d == " · tab deeper" || d == " · tab reader") {
+				order, moved = append(order, chapters), true
+			}
+			order = append(order, d)
+		}
+		if moved {
+			up := order
+			for i, d := range order {
+				if d == " · ? help" {
+					up = order[:i]
+					break
+				}
+			}
+			k := shedKeys(whole, up, func(k string) bool { return fitsWith(k, minimal) })
+			// The measure is the footer this frame draws with no news
+			// on it — what the person saw one keypress ago — not the
+			// note floor: at eighty the floor alone already costs the
+			// key, so #175's own base would say nothing was lost.
+			plain := shedKeys(whole, drops, func(k string) bool { return lipgloss.Width(k) <= w })
+			if levelKeyLost(plain, keys) && !levelKeyLost(plain, k) {
+				keys, drops = k, order
+			}
 		}
 	}
 	if pane != "" {
