@@ -1042,10 +1042,30 @@ func askBefore(tr journey.Trail, at time.Time) string {
 // bracket after it — "fix the 401 on token refresh (commit)" — and the
 // bracket's word, which is the half the ask does not already say.
 func askBracket(l journey.Leg, label string, o TrailOpts) (string, bool) {
-	if l.Class != journey.Ship || o.Ask == "" || !nameAndBracket(o.Ask, label) {
+	if l.Class != journey.Ship || o.Ask == "" {
 		return "", false
 	}
-	return strings.TrimSuffix(label[len(o.Ask)+2:], ")"), true
+	if nameAndBracket(o.Ask, label) {
+		return strings.TrimSuffix(label[len(o.Ask)+2:], ")"), true
+	}
+	// A commit subject is usually the ask shortened at a word — "port the
+	// client to the new (commit)" for "port the client to the new sdk" —
+	// and #192's test was the whole ask, so every ask longer than a
+	// commit subject fell through it: the row drew a clipped copy of the
+	// ask a second time and threw the bracket away, the very row #192
+	// folded one `j` above it. The subject is still the ask's own words
+	// when it is the ask's leading words cut at a word boundary; two
+	// words is the floor, as sameAsk's is (#110), since one word is not a
+	// sentence said twice.
+	i := strings.LastIndex(label, " (")
+	if i <= 0 || !strings.HasSuffix(label, ")") {
+		return "", false
+	}
+	subject := label[:i]
+	if len(strings.Fields(subject)) < 2 || !strings.HasPrefix(o.Ask, subject+" ") {
+		return "", false
+	}
+	return strings.TrimSuffix(label[i+2:], ")"), true
 }
 
 // legRow: glyph, class verb, label, and the age held at the right margin. HEAD

@@ -9933,3 +9933,90 @@ func TestTheArchiveBoardKeepsTheAskWhereTheNameCannotTellTheCardsApart(t *testin
 		lipgloss.SetColorProfile(old)
 	}
 }
+
+// ---- round 94, second-day ----
+// ---- round 94, second-day, the one thing ----
+// The row that shipped does not say the ask it shortened. #192 folded
+// `◆ ship   fix the 401 on token refresh…` — a clipped copy of the ask the
+// identity header and the ◉ row both draw whole, with `(commit)` thrown
+// away — but keyed the fold on `nameAndBracket`, the *whole* ask with a
+// bracket after it. A commit subject is the ask shortened at a word, so
+// every ask longer than its own commit subject fell through: one `j` below
+// the row #192 fixed, `A` then `2` at eighty drew
+// `◆ ship   port the client to the new…` under a header reading
+// `2 port the client to the new sdk` and a ◉ row drawing it whole again.
+// Where the label's subject is the ask's own leading words cut at a word
+// and the row will not fit, the row draws the bracket's word: `◆ ship
+// commit` (#64's device on the reader's title, #189, #192).
+func TestTheShipRowIsNotAClippedCopyOfTheAskItShortened(t *testing.T) {
+	forceASCII(t)
+
+	// The frame it was found on.
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	for _, k := range []string{"A", "2"} {
+		pressKey(m, k)
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	var ship string
+	for _, l := range rows {
+		for _, seg := range strings.Split(l, "│") {
+			if strings.Contains(seg, "◆ ship") {
+				ship = strings.TrimSpace(seg)
+			}
+		}
+	}
+	if ship == "" {
+		t.Fatalf("80x24 A,2: no ship row on the frame:\n%s", strings.Join(rows, "\n"))
+	}
+	if !strings.HasPrefix(ship, "◆ ship   commit") {
+		t.Errorf("80x24 A,2: the ship row spends itself on the ask again: %q", ship)
+	}
+
+	// The rule, over every scene, five widths, both colour profiles and
+	// four routes: a ship row's clipped clause is never a clause the same
+	// frame draws whole somewhere else.
+	clipped := regexp.MustCompile(`ship\s+(\S[^│]*?)…`)
+	routes := [][]string{{"A"}, {"A", "2"}, {"A", "2", "tab"}, {"A", "shift+tab"}}
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				for _, route := range routes {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(m, k)
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					for _, l := range rows {
+						for _, seg := range strings.Split(l, "│") {
+							mt := clipped.FindStringSubmatch(seg)
+							if mt == nil {
+								continue
+							}
+							clause := strings.TrimSpace(mt[1])
+							if len([]rune(clause)) < 10 {
+								continue
+							}
+							for _, other := range rows {
+								if other == l {
+									continue
+								}
+								i := strings.Index(other, clause)
+								if i < 0 {
+									continue
+								}
+								if !strings.HasPrefix(other[i+len(clause):], "…") {
+									t.Errorf("%s %dx%d %v %v: the ship row is a clipped copy of a clause the frame draws whole: %q under %q",
+										sc.name, size[0], size[1], prof, route,
+										strings.TrimSpace(seg), strings.TrimSpace(other))
+								}
+							}
+						}
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+}
