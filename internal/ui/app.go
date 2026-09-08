@@ -3382,6 +3382,18 @@ func (m *Model) footerWith(keys string, w int) string {
 	if room < noteFloor() {
 		return dimStyle.Render(shedClauses(note, w)) // no keymap fits beside it
 	}
+	// The reserve is room the note grows into (#134, #180). Where the note
+	// has no form to grow into it the cells stand blank and a key is
+	// missing — `❯ 1/1` beside 22 of them at eighty, with `space unfold`
+	// shed — so a key comes back while the note is drawn at the same width
+	// beside it.
+	if back := keysHeld(whole, drops, keys, func(k string) int {
+		return m.noteDrawnIn(note, w-lipgloss.Width(clip(k, w))-2)
+	}); back != keys {
+		keys = back
+		left = dimStyle.Render(clip(keys, w))
+		room = w - lipgloss.Width(left) - 2
+	}
 	shown := ""
 	for _, f := range forms {
 		if lipgloss.Width(f) <= room {
@@ -3405,6 +3417,71 @@ func (m *Model) footerWith(keys string, w int) string {
 	}
 	gap := w - lipgloss.Width(left) - lipgloss.Width(shown)
 	return left + strings.Repeat(" ", gap) + shown
+}
+
+// noteDrawnIn is the width the note is drawn at in room cells — the fullest
+// form that fits there, the quote clipped where that is allowed, the last
+// form shed to the room when none fits. It is what the footer's reserve is
+// measuring: twelve cells the note cannot grow into are blank cells.
+func (m *Model) noteDrawnIn(note string, room int) int {
+	if room < 0 {
+		return 0
+	}
+	forms := noteForms(note)
+	for _, f := range forms {
+		if w := lipgloss.Width(f); w <= room {
+			return w
+		}
+		if m.chapterNote() && (strings.HasPrefix(note, glyphSaid) || strings.HasPrefix(note, glyphBranch)) {
+			continue
+		}
+		if q := fitQuote(f, room); q != "" {
+			return lipgloss.Width(q)
+		}
+	}
+	return lipgloss.Width(shedClauses(forms[len(forms)-1], room))
+}
+
+// keysHeld puts the shed fragments back, lowest-ranked first, while held —
+// the width the note is drawn at beside the keys — does not fall. It is the
+// backfill of shedKeys measured against the note rather than against the
+// reserve, and it keeps #39's discipline: a key comes back only if every
+// key ranked below it came back too.
+func keysHeld(whole string, order []string, keys string, held func(string) int) string {
+	gone := map[string]bool{}
+	for _, frag := range order {
+		if strings.Contains(whole, frag) && !strings.Contains(keys, frag) {
+			gone[frag] = true
+		}
+	}
+	build := func() string {
+		k := whole
+		for _, frag := range order {
+			if gone[frag] {
+				k = strings.Replace(k, frag, "", 1)
+			}
+		}
+		return k
+	}
+	if build() != keys {
+		return keys // the shed is not a plain subset: leave it alone
+	}
+	want := held(keys)
+	for i := len(order) - 1; i >= 0; i-- {
+		frag := order[i]
+		if !gone[frag] {
+			continue
+		}
+		if frag == " · n/N" && gone[" · / search"] {
+			continue // the walk keys ride only with the search they walk
+		}
+		gone[frag] = false
+		if held(build()) < want {
+			gone[frag] = true
+			break
+		}
+	}
+	return build()
 }
 
 // noteForms is a footer note at every length it can be shown, fullest

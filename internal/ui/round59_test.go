@@ -2450,3 +2450,46 @@ func TestTheWidthRefusalKeepsTheWayDeeper(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 74, two-tools, the one thing ----
+// The reserve is what the note draws. #180 stopped the footer holding
+// twelve cells for a note with no longer form to grow into; a note whose
+// only longer form is far wider than twelve is the same case. In the
+// reader the chapter note `❯ 1/1` has two forms — the count alone and the
+// count beside the whole prompt — and nothing between, so at eighty the
+// row stood `❯ 1/1` beside 22 blank cells with `space unfold`, the
+// reader's own key, shed for them; at a hundred `a ask`, at 120 `n/N`.
+// A key comes back while the note is drawn at the same width beside it.
+func TestTheReserveIsWhatTheNoteDraws(t *testing.T) {
+	forceASCII(t)
+	// The walkthrough's route into the reader's previous turn.
+	keys := []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "["}
+	for _, want := range []struct {
+		w, h int
+		key  string
+	}{
+		{80, 24, " · space unfold"},
+		{100, 30, " · a ask"},
+		{120, 34, " · n/N"},
+	} {
+		sc := sceneTwoTools()
+		m := sceneModel(sc, want.w, want.h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := strings.TrimRight(rows[len(rows)-1], " ")
+		if !strings.HasSuffix(foot, "❯ 1/1") {
+			t.Fatalf("%dx%d: not the note this pins: %q", want.w, want.h, strings.TrimSpace(foot))
+		}
+		if !strings.Contains(foot, want.key) {
+			t.Errorf("%dx%d: %q shed for a reserve the note cannot grow into: %q",
+				want.w, want.h, strings.TrimSpace(want.key), strings.TrimSpace(foot))
+		}
+		// The note is unchanged by the key coming back.
+		if !strings.Contains(foot, "? help · q quit") {
+			t.Errorf("%dx%d: the keymap went: %q", want.w, want.h, strings.TrimSpace(foot))
+		}
+	}
+}
