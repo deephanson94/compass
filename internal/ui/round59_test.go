@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -3182,5 +3183,100 @@ func TestAWrappedLabelKeepsTheWordsBeforeTheOptions(t *testing.T) {
 	}
 	if got, want := wrappedLabel(split, 0, len(split)), "▲ design Open port 22 to the office CIDR?"; got != want {
 		t.Errorf("wrappedLabel (two rows) = %q, want %q", got, want)
+	}
+}
+
+// ---- round 78, second-day, the one thing ----
+// An attach that cannot work is a refusal, not a key: it goes before the
+// keys that act.
+//
+// `enter · no pane` is what the footer draws where the selected session
+// has no pane to hand the terminal to (`enterKeymap`). The archive's own
+// list already ranks it that way — "a refusal goes before the way in"
+// (#52, #198) — but the reader's shed order ranked it *above* `a ask`,
+// and `shedKeys` lets a key back only when every key ranked above it came
+// back too. So at eighty the reader of a paneless session held eighteen
+// cells for a refusal that could not be drawn at that width either and
+// shed `a ask` — which in the archive is the reason to be there, "a
+// claude on a session you can no longer attach to" (#52), and on a live
+// paneless session is the one action left — leaving sixteen blank cells
+// on the row. At a hundred, under a thirteen-cell note, the row spent
+// eighteen cells on the refusal and shed the ask outright.
+//
+// The frames: second-day's archive reader at eighty
+// (`space unfold · [ ] turns · esc back · A fleet · ? help · q quit`, 63
+// cells in a 79-cell field) and fleet-hygiene's paneless live reader at
+// eighty and, under `]`'s note, at a hundred.
+func TestTheAttachRefusalYieldsToTheKeyThatActs(t *testing.T) {
+	forceASCII(t)
+	footer := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	cases := []struct {
+		name  string
+		scene func() scene
+		keys  []string
+		w, h  int
+		title string
+	}{
+		{"second-day archive reader", sceneSecondDay, []string{"A", "8", "tab", "tab"}, 80, 24, "READER · cli"},
+		{"second-day archive waypoints", sceneSecondDay, []string{"A", "8", "tab"}, 100, 30, "TRAIL · cli"},
+		{"fleet-hygiene paneless reader", sceneFleetHygiene, []string{"3", "tab", "tab"}, 80, 24, "READER · notebooks"},
+		{"fleet-hygiene paneless waypoints", sceneFleetHygiene, []string{"3", "tab"}, 80, 24, "TRAIL · notebooks"},
+		{"fleet-hygiene paneless reader under a note", sceneFleetHygiene, []string{"3", "tab", "tab", "]"}, 100, 30, "READER · notebooks"},
+	}
+	for _, c := range cases {
+		sc := c.scene()
+		m := sceneModel(sc, c.w, c.h)
+		for _, k := range c.keys {
+			pressKey(m, k)
+			poll(m, sc) // the refresh the deck does after every key
+		}
+		if !strings.Contains(ansi.Strip(m.View()), c.title) {
+			t.Fatalf("%s %dx%d: not the reader: %q", c.name, c.w, c.h, footer(m))
+		}
+		// The selected session has no pane: `enter` is a refusal here.
+		if m.enterKeymap() != "enter · no pane" {
+			t.Fatalf("%s %dx%d: the row can be attached to: %q", c.name, c.w, c.h, m.enterKeymap())
+		}
+		foot := footer(m)
+		if !strings.Contains(foot, "a ask") {
+			t.Errorf("%s %dx%d: a session with no pane is offered no way to ask it: %q",
+				c.name, c.w, c.h, foot)
+		}
+		// And the cells were there: the row the fold draws fits its field.
+		if w := lipgloss.Width(foot); w > c.w-1 {
+			t.Errorf("%s %dx%d: the footer overruns its field: %d cells", c.name, c.w, c.h, w)
+		}
+	}
+	// The rank, stated: in the reader the refusal is shed before `a ask`,
+	// as the archive's list sheds it before `tab deeper` and `a ask`.
+	for _, lv := range []struct {
+		name string
+		keys []string
+	}{{"the waypoints", []string{"A", "8", "tab"}}, {"the reader", []string{"A", "8", "tab", "tab"}}} {
+		sc := sceneSecondDay()
+		m := sceneModel(sc, 80, 24)
+		for _, k := range lv.keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		order := m.shedOrder(false)
+		refusal, ask := -1, -1
+		for i, frag := range order {
+			switch frag {
+			case " · enter · no pane":
+				refusal = i
+			case " · a ask":
+				ask = i
+			}
+		}
+		if refusal < 0 || ask < 0 {
+			t.Fatalf("%s shed order names neither the refusal nor the ask: %v", lv.name, order)
+		}
+		if refusal > ask {
+			t.Errorf("%s sheds `a ask` before the attach refusal: refusal at %d, ask at %d", lv.name, refusal, ask)
+		}
 	}
 }
