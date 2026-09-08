@@ -5647,10 +5647,12 @@ func TestTheArchiveGroupsByProjectNotByTheNameItsPersonGave(t *testing.T) {
 			}
 			// The title is clipped at the narrow widths and carries its
 			// age behind it, so the row is found on the head of its
-			// prompt — twenty-one cells, inside eighty's own clip.
+			// prompt — twenty-one cells, inside eighty's own clip — or,
+			// since the row keeps the name its person gave it before that
+			// prompt, on the name.
 			seenRenamed := false
 			for title, hd := range under {
-				if !strings.HasPrefix(title, renamed[:21]) {
+				if !strings.HasPrefix(title, renamed[:21]) && !strings.HasPrefix(title, name) {
 					continue
 				}
 				seenRenamed = true
@@ -5965,4 +5967,130 @@ func r85fhReaderPage(m *Model) string {
 		}
 	}
 	return ""
+}
+
+// r86sdArchiveRows reads the archive's fleet column off a drawn frame:
+// the heading each session row stands under, and the row's own title —
+// everything the row draws right of its state glyph.
+func r86sdArchiveRows(m *Model) (under map[string]string) {
+	under = map[string]string{}
+	cur := ""
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		col := row
+		if i := strings.Index(row, "│"); i >= 0 {
+			col = row[:i]
+		}
+		t := strings.TrimRight(col, " ")
+		if t == "" || !strings.HasPrefix(t, "  ") {
+			continue
+		}
+		body := strings.TrimSpace(t)
+		switch {
+		case strings.Contains(body, "○"):
+			if i := strings.Index(body, "○"); i >= 0 {
+				under[strings.TrimSpace(body[i+len("○"):])] = cur
+			}
+		case strings.HasPrefix(t, "     "), strings.HasPrefix(body, "▾"), strings.HasPrefix(body, "▴"),
+			strings.HasPrefix(body, "FLEET"), strings.HasPrefix(body, "▌"):
+			// a tag line, a fold mark or the panel's own title
+		default:
+			cur = body
+		}
+	}
+	return under
+}
+
+// TestTheArchiveRowKeepsTheNameItsPersonGave pins the archive's list row
+// to the name its person typed into `/rename`.
+//
+// #79 gives that name four places — "the fleet row, the header, the band,
+// and the archive, where a renamed session keeps its name before its
+// prompt". The archive's row was the one that leaned on its heading for
+// it: `fleetlist.go` spent the row on the ask because "an archived session
+// is named after its project", which a renamed one is not. #234 made the
+// heading the project, as #11 asks, and with it went the last place the
+// archive said `checkout-flake-hunt`: at eighty the board's band draws
+// ` 3 ○ checkout-flake-hunt…   ✗ 4h` and one `A` later the same digit
+// draws ` 3 ○ the checkout suite fl…   4h`, under `webapp`.
+//
+// The row keeps its name before its prompt, in the form the archive
+// already draws for a hidden live session one branch above
+// (`1 ○ billing · "reconcile the inv…   3h`) and the form the header and
+// the trail title beside it already use. The other side is pinned too:
+// the bucket is still the project (#234, #11), a row nobody renamed is
+// still titled by what it asked for (#56, #59), and the band still names
+// the session it always did (#47, #79).
+func TestTheArchiveRowKeepsTheNameItsPersonGave(t *testing.T) {
+	const (
+		name    = "checkout-flake-hunt"
+		renamed = "the checkout suite flakes on CI"            // /home/user/webapp, renamed
+		sibling = "why does the nightly build take 40 minutes" // /home/user/webapp, never renamed
+		project = "webapp"
+	)
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, prof := range []struct {
+		what string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := prof.what + " " + "archive"
+
+			sc := sceneSecondDay()
+			m := sceneModel(sc, w, h)
+			pressKey(m, "A")
+			poll(m, sc)
+			rows := r86sdArchiveRows(m)
+
+			// 1. The renamed session's row names it, and still stands
+			//    under its project.
+			named := ""
+			for title, hd := range rows {
+				if strings.HasPrefix(title, name) {
+					named = title
+					if hd != project {
+						t.Errorf("%s %dx%d: the renamed row stands under %q, not its project %q",
+							where, w, h, hd, project)
+					}
+				}
+			}
+			if named == "" {
+				t.Errorf("%s %dx%d: no archive row names the session its person called %q — the rows are %v",
+					where, w, h, name, rows)
+			}
+
+			// 2. The name comes before the prompt, never instead of the
+			//    heading: no group is headed by it.
+			for _, hd := range rows {
+				if hd == name {
+					t.Errorf("%s %dx%d: the archive heads a group with %q, the name its person gave (#234)", where, w, h, name)
+				}
+			}
+
+			// 3. A row nobody renamed is still titled by what it asked
+			//    for: the sibling in the same directory keeps its prompt
+			//    and gains no name (#56, #59).
+			seenSibling := false
+			for title, hd := range rows {
+				if strings.HasPrefix(title, sibling[:22]) {
+					seenSibling = true
+					if hd != project {
+						t.Errorf("%s %dx%d: the sibling stands under %q, not %q", where, w, h, hd, project)
+					}
+				}
+			}
+			if !seenSibling && w >= 100 {
+				t.Errorf("%s %dx%d: the archive's first frame no longer draws the sibling %q", where, w, h, sibling)
+			}
+
+			// 4. The other side: the board's band still names the session
+			//    before its prompt, where #47 and #79 put it.
+			m2 := sceneModel(sc, w, h)
+			if !strings.Contains(ansi.Strip(m2.View()), name) {
+				t.Errorf("%s %dx%d: the opening frame no longer names %q on its recent band", prof.what+" band", w, h, name)
+			}
+		}
+	}
 }

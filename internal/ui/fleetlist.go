@@ -788,11 +788,16 @@ func (m *Model) entryLinesTagged(r fleetRow, w int, tagged bool) []string {
 		// named after its project: the row spends that width on the one thing the
 		// header cannot say — what you asked for.
 		age, head = padLeft(m.age(s.Info.LastEventAt), ageWidth), archiveHeadline(s)
-		if s.Live {
+		if s.Live || s.Info.Name != "" {
 			// A live session `x` took off the board: it keeps its glyph
 			// and its name — the header over it says it is hidden, and
 			// "hidden · add watch driver tests" lost the one word the
-			// person went looking for.
+			// person went looking for. A session its person renamed is
+			// the same case since the bucket became the project (#234):
+			// the heading says `webapp`, the row says what was asked, and
+			// the name the person typed was on neither. It keeps its name
+			// before its prompt, as its header, its trail title and the
+			// band already do (#79).
 			head = sessionName(s.Info) + " · " + askQuote(head, askRelayed(s))
 		}
 	}
