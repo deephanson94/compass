@@ -6094,3 +6094,145 @@ func TestTheArchiveRowKeepsTheNameItsPersonGave(t *testing.T) {
 		}
 	}
 }
+
+// Round eighty-six, the two-tools operator's one thing: the digit of the
+// row you are already on says so.
+//
+// `1`–`9` selects session N (§3). Where N is the row the deck is already
+// on, `boardSelect` found it, `point` returned at once and the handler set
+// no note: the key drew nothing and said nothing — the dead key round one
+// bans, and the rule #228, #231 and #235 folded for `j`, `G` and the
+// search walk. The two-tools walkthrough ends on that press, so the last
+// frame of all five files was byte-identical to the one before it. The
+// digit now asks the selection whether it moved and says the deck's own
+// sentence for the row you are on; a digit that moves, a digit no row
+// wears and a hidden session's digit are untouched.
+func r86ttScene(t *testing.T, name string) scene {
+	t.Helper()
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc
+		}
+	}
+	t.Fatalf("no scene %q", name)
+	return scene{}
+}
+
+// r86ttWalk plays a scene's whole walkthrough (canonical keys and the
+// scene's own tail) minus the last n keys, and hands back the model.
+func r86ttWalk(sc scene, w, h, drop int) (*Model, []string) {
+	keys := canonicalKeys
+	if len(sc.extra) > 0 {
+		keys = append(append(append([]string(nil), keys...), "esc"), sc.extra...)
+	}
+	keys = keys[:len(keys)-drop]
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m, keys
+}
+
+func r86ttFooter(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+func TestTheDigitOfTheRowYouAreOnSaysSo(t *testing.T) {
+	const note = "the session you are on"
+	sc := r86ttScene(t, "two-tools")
+	for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+			old := lipgloss.ColorProfile()
+			lipgloss.SetColorProfile(prof)
+			// The walkthrough's last key is `3`, and `3 api` is already
+			// the selection: at the stand before it the frame carries no
+			// note of its own.
+			m, _ := r86ttWalk(sc, wh[0], wh[1], 1)
+			before := m.View()
+			if strings.TrimSpace(m.note) != "" {
+				t.Fatalf("%dx%d: the stand before the digit already carries a note %q", wh[0], wh[1], m.note)
+			}
+			pressKey(m, "3")
+			poll(m, sc)
+			if m.View() == before {
+				t.Errorf("%dx%d (%v): `3` on the row the deck is on drew a byte-identical frame:\n%s",
+					wh[0], wh[1], prof, r86ttFooter(m))
+			}
+			if !strings.Contains(r86ttFooter(m), note) {
+				t.Errorf("%dx%d (%v): `3` said nothing: %q", wh[0], wh[1], prof, r86ttFooter(m))
+			}
+			lipgloss.SetColorProfile(old)
+		}
+	}
+	// Held, three sides, at 120 where every one of them is on a frame.
+	m, _ := r86ttWalk(sc, 120, 34, 1)
+	before := m.View()
+	pressKey(m, "1") // a digit that moves says nothing of the kind
+	poll(m, sc)
+	if m.View() == before {
+		t.Errorf("`1` from `3 api` moved nothing")
+	}
+	if strings.Contains(r86ttFooter(m), note) {
+		t.Errorf("a digit that moved wore the note: %q", r86ttFooter(m))
+	}
+	m, _ = r86ttWalk(sc, 120, 34, 1)
+	pressKey(m, "2") // the hidden session's digit keeps its own refusal
+	poll(m, sc)
+	if !strings.Contains(r86ttFooter(m), "2 api is hidden") || strings.Contains(r86ttFooter(m), note) {
+		t.Errorf("the hidden digit's refusal moved: %q", r86ttFooter(m))
+	}
+	m, _ = r86ttWalk(sc, 120, 34, 1)
+	pressKey(m, "9") // a digit no row wears
+	poll(m, sc)
+	if !strings.Contains(r86ttFooter(m), "no session 9") || strings.Contains(r86ttFooter(m), note) {
+		t.Errorf("the unused digit's refusal moved: %q", r86ttFooter(m))
+	}
+}
+
+// The sweep: at every stand of two scenes' walkthroughs, press the digit
+// the selected row wears and hold it to answering. One pass per width —
+// the note the digit leaves is cleared by the next keypress (#24), so the
+// walk carries on unchanged.
+func TestNoDigitOfTheRowYouAreOnIsSilent(t *testing.T) {
+	for _, name := range []string{"two-tools", "alarm-storm"} {
+		sc := r86ttScene(t, name)
+		for _, wh := range [][2]int{{80, 24}, {120, 34}} {
+			keys := canonicalKeys
+			if len(sc.extra) > 0 {
+				keys = append(append(append([]string(nil), keys...), "esc"), sc.extra...)
+			}
+			m := sceneModel(sc, wh[0], wh[1])
+			for stand := 0; stand <= len(keys); stand++ {
+				if stand > 0 {
+					pressKey(m, keys[stand-1])
+					poll(m, sc)
+				}
+				foot := r86ttFooter(m)
+				if strings.Contains(foot, "enter keeps it") || strings.Contains(foot, "enter sends") ||
+					strings.Contains(foot, "a digit acts") || strings.Contains(foot, "closes help") {
+					continue // a panel or the help owns the digits
+				}
+				d := m.digits[m.selectedKey]
+				if m.archiveView {
+					d = 0
+					for i, idx := range m.viewOrder() {
+						if m.sessions[idx].Info.Key() == m.selectedKey {
+							d = i + 1
+						}
+					}
+				}
+				if d < 1 || d > 9 {
+					continue
+				}
+				before := m.View()
+				pressKey(m, fmt.Sprintf("%d", d))
+				if m.View() == before && strings.TrimSpace(m.note) == "" {
+					t.Fatalf("%s %dx%d stand %d: `%d` on the row the deck is on drew nothing and said nothing:\n%s",
+						name, wh[0], wh[1], stand, d, foot)
+				}
+			}
+		}
+	}
+}

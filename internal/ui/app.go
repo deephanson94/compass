@@ -937,7 +937,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.capture()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		i := int(key[0] - '1')
-		if !m.selectIndex(i) && !m.openRecent(i+1) {
+		was, wasArchive := m.selectedKey, m.archiveView
+		if found := m.selectIndex(i) || m.openRecent(i+1); found {
+			if m.selectedKey == was && m.archiveView == wasArchive {
+				// The digit names the row the deck is already on: it
+				// moved nothing and it is not refused, so it says why —
+				// the device `h/l` uses at either end of the board and
+				// `j`, `G` and the search walk use one level down (#24,
+				// #221, #228, #231, #235). The header names the row at
+				// the same cells on every frame, so the note leaves the
+				// digit and the name to it (#233).
+				m.note = "the session you are on"
+			}
+		} else {
 			m.note = fmt.Sprintf("no session %d", i+1)
 			for _, s := range m.sessions {
 				if s.Live && m.hidden[s.Info.Key()] && m.digits[s.Info.Key()] == i+1 && !m.archiveView {
