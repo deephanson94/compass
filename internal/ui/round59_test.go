@@ -1989,3 +1989,44 @@ func TestTheArchiveHeaderCountsWhatItsListHolds(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 71, second-day ----
+// At 120 and up the archive reader's title drew the ask whole two
+// rows over the turn row that draws it whole — the repeat #105 folded for
+// the archive's title, #110 for the live reader's and #138 for the trail's.
+// #122 kept it here because a bare title would repeat the trail's title
+// beside it; the day is the half that repeats, not the name.
+func TestTheArchiveReaderTitleLeavesTheAskToItsTurnRow(t *testing.T) {
+	forceASCII(t)
+	turnRow := regexp.MustCompile(`^\s*❯ (.+?)\s{2,}\d\d:\d\d\s*$`)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneSecondDay()
+		m := sceneModel(sc, size[0], size[1])
+		for _, k := range []string{"2", "tab", "tab"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		view := ansi.Strip(m.View())
+		said, turns := "", []string{}
+		for _, l := range strings.Split(view, "\n") {
+			for _, seg := range strings.Split(l, "│") {
+				if j := strings.Index(seg, "READER · "); j >= 0 && said == "" {
+					s := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(seg[j:]), "[reader]"))
+					said = strings.TrimSpace(strings.TrimPrefix(s, "READER ·"))
+				}
+				if mm := turnRow.FindStringSubmatch(seg); mm != nil {
+					turns = append(turns, strings.TrimSpace(mm[1]))
+				}
+			}
+		}
+		if said == "" || len(turns) == 0 {
+			t.Fatalf("%dx%d: not the archive reader on its turn:\n%s", size[0], size[1], view)
+		}
+		for _, turn := range turns {
+			if turn == said {
+				t.Errorf("%dx%d: the reader's title repeats the ask its own turn row draws: %q over %q",
+					size[0], size[1], "READER · "+said, "❯ "+turn)
+			}
+		}
+	}
+}

@@ -286,14 +286,16 @@ func (m *Model) readerColumn(w, h int) []string {
 						break
 					}
 				}
-				if fw, mw, _ := m.layout(m.width); drawn && fw == 0 && mw == 0 {
+				if drawn {
+					// The title names the session wherever the turn row
+					// draws the ask. #122 kept the ask at 120 and up
+					// because a bare title would repeat the trail's
+					// beside it — but the day is the half that repeats,
+					// not the name: the live reader's `READER · hello`
+					// stands beside its own card's `1 ● hello` at every
+					// width (#115). The day goes to the trail's title,
+					// #138's device one column over (#105, #110, #120).
 					rows[0] = m.readerTitleBare(w)
-				} else if drawn {
-					// Wider the title keeps the ask, but its clock is the
-					// cursor's moment, not the ask's: "15:31" over a turn
-					// row that times those same words "15:00". The clock
-					// goes with the clause it does not time (#122, #115).
-					rows[0] = m.readerTitleWith(w, false)
 				}
 			}
 		}
@@ -430,6 +432,9 @@ func (m *Model) readerTitleAs(w int, anchorClause, bare bool) string {
 			name = archiveHeadline(s) // as the trail beside it and the header above name it (#59)
 		} else if m.archiveView && !s.Live {
 			day := trailDay(m.trail, m.now, false)
+			if fw, mw, _ := m.layout(m.width); fw != 0 || mw != 0 {
+				day = "" // a trail title stands beside this one and carries it
+			}
 			reserve := 0
 			if m.level >= levelReader && (m.sessionView() || m.boardFits()) {
 				reserve = lipgloss.Width("[reader]") + 2
