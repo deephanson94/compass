@@ -5277,3 +5277,207 @@ func TestTheAttachRefusalGoesBeforeTheSearchKey(t *testing.T) {
 		t.Errorf("at 120 the archive's row should name both: %q", foot)
 	}
 }
+
+// r84fhReaderStand replays the first n keys of a scene's own walkthrough.
+func r84fhReaderStand(sc scene, w, h, n int) *Model {
+	m := sceneModel(sc, w, h)
+	keys := append(append([]string{}, canonicalKeys...), "esc")
+	keys = append(keys, sc.extra...)
+	for _, k := range keys[:n] {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheReadersPresentIsTheEndOfTheConversation pins round eighty-four's
+// one thing. #228 gave `j` and `G` at Lv2 the question the move's own —
+// did the move move — because an index compare had let the key draw
+// nothing and say nothing. In the reader `G` still threw its result away:
+//
+//	case "G":
+//	    m.scrollBy(1 << 30) // clamped to the last screenful
+//
+// `scrollBy` reports whether the page moved, which is exactly how
+// `ctrl+d` two cases up reaches `end of the conversation`. On a page
+// already showing the last screenful — where `tab` from a trail standing
+// at the present lands — `G` returned a byte-identical frame with an
+// empty note, while `j` and `ctrl+d`, which go to the same place a row
+// and a half-page at a time, both answered `end of the conversation`.
+// The key whose whole definition is "back to the present: the newest
+// row" was the one key on that page that said nothing.
+func TestTheReadersPresentIsTheEndOfTheConversation(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name string
+		sc   scene
+		n    int
+	}{
+		{"many-idle", sceneManyIdle(), 13},
+		{"many-idle", sceneManyIdle(), 33},
+		{"very-long", sceneVeryLong(), 13},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+			w, h := size[0], size[1]
+			m := r84fhReaderStand(c.sc, w, h, c.n)
+			if m.level != levelReader {
+				t.Fatalf("%s %dx%d prefix %d: not in the reader", c.name, w, h, c.n)
+			}
+			m.note = ""
+			before := m.View()
+			pressKey(m, "G")
+			poll(m, c.sc)
+			if m.View() == before {
+				t.Errorf("%s %dx%d prefix %d: %q on the last page drew nothing and said nothing",
+					c.name, w, h, c.n, "G")
+				continue
+			}
+			if m.note != "end of the conversation" && m.note == "" {
+				t.Errorf("%s %dx%d prefix %d: G moved the page and said %q", c.name, w, h, c.n, m.note)
+			}
+		}
+	}
+}
+
+// TestNoReaderPageKeyIsSilentlyDead is the rule behind it, asked of every
+// canonical reader stand of every scene at every width: `G` must change
+// the frame — a note is a drawn cell, and a key that changes nothing at
+// all is the dead key SPEC's round-one rule bans.
+func TestNoReaderPageKeyIsSilentlyDead(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			// One walk finds the reader's stands; only those are replayed.
+			var stands []int
+			m := sceneModel(sc, w, h)
+			for n := range keys {
+				if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+					stands = append(stands, n)
+				}
+				pressKey(m, keys[n])
+				poll(m, sc)
+			}
+			if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+				stands = append(stands, len(keys))
+			}
+			for _, n := range stands {
+				m := r84fhReaderStand(sc, w, h, n)
+				m.note = ""
+				before := m.View()
+				pressKey(m, "G")
+				poll(m, sc)
+				if m.View() == before {
+					t.Errorf("%s %dx%d after %d keys: \"G\" in the reader drew nothing and said nothing", sc.name, w, h, n)
+				}
+			}
+		}
+	}
+}
+
+// r84fhListStand replays the first n keys of a scene's own walkthrough.
+func r84fhListStand(sc scene, w, h, n int) *Model {
+	m := sceneModel(sc, w, h)
+	keys := append(append([]string{}, canonicalKeys...), "esc")
+	keys = append(keys, sc.extra...)
+	for _, k := range keys[:n] {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r84fhFooterRow is the last drawn row of a frame, with the colour off.
+func r84fhFooterRow(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.TrimSpace(rows[i]) != "" {
+			return rows[i]
+		}
+	}
+	return ""
+}
+
+// TestTheAttachRefusalYieldsToTheNoteThatSaysIt pins round eighty-four's
+// second finding. On a paneless session the footer stands with
+// `enter · no pane` — what Enter does here, since an attach that cannot
+// work is not promised (#40). Press Enter and the note is `attach needs a
+// pane`: the same sentence, twelve cells to the right, and the row pays
+// for the repetition with keys that act — `/ search` and `x hide` at
+// eighty, `a ask` at a hundred. #165 gave the note the key's own name, in
+// the form `mirror needs 110 columns` already used, precisely so naming
+// the key would buy a key back; the clause beside it buys nothing. A
+// refusal goes before a key that acts (#52, #198, #206), so under the note
+// that says it the clause is shed first — and, like every yield, only
+// where a key that acts comes back (#193, #216).
+func TestTheAttachRefusalYieldsToTheNoteThatSaysIt(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	sc := sceneFleetHygiene()
+	for _, c := range []struct {
+		w, h  int
+		gains string
+	}{
+		{80, 24, "x hide"},
+		{100, 30, "a ask"},
+	} {
+		// The walkthrough's own stand on the paneless session, one key
+		// before its `enter`.
+		m := r84fhListStand(sc, c.w, c.h, 28)
+		if m.level != levelTrail || !strings.Contains(r84fhFooterRow(m), "enter · no pane") {
+			t.Fatalf("%dx%d: not the paneless list stand: %q", c.w, c.h, r84fhFooterRow(m))
+		}
+		pressKey(m, "enter")
+		poll(m, sc)
+		foot := r84fhFooterRow(m)
+		if m.note != "attach needs a pane" {
+			t.Fatalf("%dx%d: enter said %q", c.w, c.h, m.note)
+		}
+		if strings.Contains(foot, "enter · no pane") {
+			t.Errorf("%dx%d: the row says the refusal twice — %q beside `enter · no pane`:\n%s", c.w, c.h, m.note, foot)
+		}
+		if !strings.Contains(foot, c.gains) {
+			t.Errorf("%dx%d: the cells bought back no key that acts (wanted %q):\n%s", c.w, c.h, c.gains, foot)
+		}
+		if !strings.Contains(foot, "attach needs a pane") {
+			t.Errorf("%dx%d: the refusal went and the note did not stand:\n%s", c.w, c.h, foot)
+		}
+	}
+}
+
+// TestTheAttachRefusalStandsWithNoNoteToSayIt is the other side of the same
+// rule, and the reason the clause exists: with no note on the row — and
+// under a note about another key — the paneless session's footer still
+// says what Enter does. Only the note that speaks the refusal takes its
+// cells.
+func TestTheAttachRefusalStandsWithNoNoteToSayIt(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	sc := sceneFleetHygiene()
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		m := r84fhListStand(sc, w, h, 28)
+		if m.level != levelTrail {
+			continue // the wide decks stand on the board here, with no list row
+		}
+		if !strings.Contains(r84fhFooterRow(m), "enter · no pane") {
+			t.Errorf("%dx%d: with no note the paneless row does not say what enter does:\n%s", w, h, r84fhFooterRow(m))
+		}
+		pressKey(m, "r") // another key's refusal: `reply needs a pane`
+		poll(m, sc)
+		if m.note != "reply needs a pane" {
+			t.Fatalf("%dx%d: r said %q", w, h, m.note)
+		}
+		if !strings.Contains(r84fhFooterRow(m), "enter · no pane") {
+			t.Errorf("%dx%d: another key's note took the attach refusal's cells:\n%s", w, h, r84fhFooterRow(m))
+		}
+	}
+}

@@ -1165,7 +1165,16 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 	case "g":
 		m.scroll = 0
 	case "G":
-		m.scrollBy(1 << 30) // clamped to the last screenful
+		// Back to the present, which in the reader is the end of the
+		// conversation. The question is the page's own — did the page
+		// move — the device `ctrl+d` two cases up already uses, and the
+		// sentence is the reader's own for that end (#24, #228): on a
+		// page already showing the last screenful `G` moved no line and
+		// said nothing, the dead key SPEC's round-one rule bans while
+		// `j` and `ctrl+d` on the same page both answered.
+		if !m.scrollBy(1 << 30) { // clamped to the last screenful
+			m.note = "end of the conversation"
+		}
 	case " ", "space":
 		m.toggleFold()
 	case "/":
@@ -3930,7 +3939,32 @@ func (m *Model) stuckKeys(whole string) []string {
 	if k := m.hideKeyStuck(whole); k != "" {
 		stuck = append(stuck, k)
 	}
+	if k := m.attachRefusalSaid(whole); k != "" {
+		stuck = append(stuck, k)
+	}
 	return stuck
+}
+
+// attachRefusalSaid is the row's own `enter · no pane` under the note that
+// already says it — or "" anywhere else. Every other stuck key stays under
+// its own note because the note does not name it: `infra stays · it is
+// asking` never says `x`, so the row refusing `x` must (#24, #57). The
+// attach refusal is the one whose note does name it — #165 gave it the
+// form `mirror needs 110 columns` already used, `attach needs a pane`,
+// precisely so that naming the key would buy a key back — and beside that
+// note the clause is the same sentence twice, twelve cells to its left.
+// A refusal goes before a key that acts (#52, #198, #206), and this one is
+// taken only where one comes back.
+func (m *Model) attachRefusalSaid(whole string) string {
+	if m.note != "attach needs a pane" {
+		return ""
+	}
+	for _, k := range []string{" · enter · no pane", "enter · no pane · "} {
+		if strings.Contains(whole, k) {
+			return k
+		}
+	}
+	return ""
 }
 
 // hideKeyStuck is the board's or the list's `x hide` on a selection it
