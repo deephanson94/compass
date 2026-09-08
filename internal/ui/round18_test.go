@@ -34,8 +34,12 @@ func TestTheKeysComeBackWhenTheNoteSheds(t *testing.T) {
 		t.Errorf("the destination outlasts the optional keys: %q", foot)
 	}
 	m.note = "billing stays · dead on the API"
-	if foot := ansi.Strip(m.footerLine(78)); !strings.Contains(foot, "? help") || !strings.Contains(foot, "dead on the API") {
-		t.Errorf("a refusal stands whole beside the help at 80: %q", foot)
+	// The refusal keeps its name beside the help — and, where its reason
+	// would cost the frame a key naming a level, the way deeper too: the
+	// reason is the selected row's own state, drawn on that row (#175's
+	// rung, on the refusal).
+	if foot := ansi.Strip(m.footerLine(78)); !strings.Contains(foot, "? help") || !strings.Contains(foot, "billing stays") || !strings.Contains(foot, "tab deeper") {
+		t.Errorf("a refusal keeps its name beside the help and the way deeper at 80: %q", foot)
 	}
 }
 

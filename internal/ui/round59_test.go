@@ -2286,3 +2286,89 @@ func TestTheAnswersDigitIsTheRows(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 73, fleet-hygiene, the one thing ----
+// A hidden live column names its pane once. On the archive board the
+// hidden session's row draws `⌁ work:2.0 · main` (#53's "where it lives")
+// two rows over the column's tag row, which draws `⌁ work:2.0` again —
+// the repeat #64, #105, #110, #120, #138 and #179 each folded. The tag
+// row is the invariant ("the third row is the tag's row, always"); the
+// row above it keeps the branch, which the tag cannot say.
+func TestTheHiddenColumnNamesItsPaneOnce(t *testing.T) {
+	tag := regexp.MustCompile(`⌁ [^ │]+`)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneManyIdle(), size[0], size[1])
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == "webapp" {
+				m.point(s.Info.Key())
+			}
+		}
+		pressKey(m, "x")   // webapp leaves the board
+		pressKey(m, "A")   // the archive, as a list
+		pressKey(m, "esc") // one level out: the archive as a board
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		found := false
+		for i := 0; i+2 < len(rows); i++ {
+			cols := strings.Split(rows[i], "│")
+			second := strings.Split(rows[i+1], "│")
+			third := strings.Split(rows[i+2], "│")
+			for k := range cols {
+				if k >= len(second) || k >= len(third) {
+					break
+				}
+				if !strings.Contains(cols[k], "○ webapp") {
+					continue
+				}
+				found = true
+				a := tag.FindAllString(second[k], -1)
+				b := tag.FindAllString(third[k], -1)
+				for _, x := range a {
+					for _, y := range b {
+						if x == y {
+							t.Errorf("%dx%d: the hidden column names %s twice:\n %s\n %s\n %s",
+								size[0], size[1], x, cols[k], second[k], third[k])
+						}
+					}
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%dx%d: the hidden column is not on the archive board:\n%s", size[0], size[1], strings.Join(rows, "\n"))
+		}
+	}
+}
+
+// ---- round 73, fleet-hygiene, second finding ----
+// A hide refused keeps the way deeper. `billing stays · dead on the API`
+// and `etl stays · it is looping` are 31 and 24 cells against the twelve
+// the footer reserves, and at eighty they cost the footer `tab deeper` —
+// the frame's only naming of the way deeper — while `etl stays · it
+// hangs`, twenty cells on the same scene at the same width, kept it. The
+// reason is the selected row's own state, drawn on that row; #175's rung,
+// on the refusal.
+func TestTheRefusalKeepsTheWayDeeper(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sc   scene
+		row  string
+	}{
+		{"alarm-storm", sceneAlarmStorm(), "billing"},
+		{"very-long", sceneVeryLong(), "etl"},
+	} {
+		m := sceneModel(c.sc, 80, 24)
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == c.row {
+				m.point(s.Info.Key())
+			}
+		}
+		pressKey(m, "x") // refused: it owes an alarm
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := rows[len(rows)-1]
+		if !strings.Contains(foot, c.row+" stays") {
+			t.Fatalf("%s: not the refusal: %q", c.name, foot)
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("%s: the refusal's reason costs the frame its only naming of the way deeper: %q", c.name, strings.TrimSpace(foot))
+		}
+	}
+}

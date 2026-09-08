@@ -1027,7 +1027,14 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 // so does the session view, so the view reads as the column expanded.
 func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	s := m.sessions[r.sess]
-	entry := m.entryLines(r, w)
+	// The tag is decided before the row that stands over it: a hidden live
+	// session's row names where it lives (#53), and on the board the tag
+	// row below draws that same pane, so the column said its address
+	// twice, two rows apart (#64 — a line answers a question once). The
+	// tag row is the invariant here ("always", below); the row yields the
+	// address to it and keeps the branch, which the tag cannot say.
+	tag := m.columnTag(key, s, w)
+	entry := m.entryLinesTagged(r, w, strings.Contains(tag, mirrorMark))
 	second := entry[1]
 	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
 		// A working column shows its HEAD row anyway — pinned, it is always
@@ -1046,14 +1053,6 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	// where none does, the last rung (#59): a 120 column dropped
 	// "· 0s ago" to draw a pane the header and footer already named,
 	// while the 152 column beside it kept the clock.
-	tag := tagBesideDigest(m.tagLadder(s), w, func(room int) string { return m.boardDelta(key, s, room) })
-	if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(key, s, w-lipgloss.Width(tag)-2) != m.boardDelta(key, s, w) {
-		// A fleet of one: the header names the tool on every frame, so a
-		// bare tool word that costs the trace its clock says a thing the
-		// frame already says and loses one it does not (#90). The pane
-		// is nowhere else and stays (#85).
-		tag = ""
-	}
 	room := w
 	if tag != "" {
 		room = w - lipgloss.Width(tag) - 2
@@ -1066,6 +1065,20 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 		third = pad(third, w-lipgloss.Width(tag)) + dimStyle.Render(tag)
 	}
 	return []string{entry[0], second, third}
+}
+
+// columnTag is the tag the column's third row draws — the pane, or the
+// tool and its model where the digest leaves room (#50, #59, #90).
+func (m *Model) columnTag(key string, s fleet.Session, w int) string {
+	tag := tagBesideDigest(m.tagLadder(s), w, func(room int) string { return m.boardDelta(key, s, room) })
+	if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(key, s, w-lipgloss.Width(tag)-2) != m.boardDelta(key, s, w) {
+		// A fleet of one: the header names the tool on every frame, so a
+		// bare tool word that costs the trace its clock says a thing the
+		// frame already says and loses one it does not (#90). The pane
+		// is nowhere else and stays (#85).
+		return ""
+	}
+	return tag
 }
 
 // boardVerdict is how a journey came out, in words, from its own tail: what

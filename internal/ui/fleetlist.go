@@ -740,6 +740,13 @@ func echoWidth(echo string) int {
 // entryLines renders one session: "N ● name  activity  age" over a dim line
 // saying where it lives.
 func (m *Model) entryLines(r fleetRow, w int) []string {
+	return m.entryLinesTagged(r, w, false)
+}
+
+// entryLinesTagged is entryLines with the caller's answer to whether it
+// draws the row's pane itself, beneath it: the board's column does (the
+// tag row), the fleet list and the archive list do not.
+func (m *Model) entryLinesTagged(r fleetRow, w int, tagged bool) []string {
 	s := m.sessions[r.sess]
 	selected := s.Info.Key() == m.selectedKey
 	st := s.Snap.State
@@ -850,7 +857,7 @@ func (m *Model) entryLines(r fleetRow, w int) []string {
 	first := marker + indexStyled + " " + accent.Render(glyph) + " " +
 		body + " " + dimStyle.Render(age)
 
-	lines := []string{first, strings.Repeat(" ", 4) + m.secondLine(s, w-4)}
+	lines := []string{first, strings.Repeat(" ", 4) + m.secondLineTagged(s, w-4, tagged)}
 	if strings.TrimSpace(ansi.Strip(lines[1])) == "" {
 		lines = lines[:1] // the trail beside says the present; the trace moves up (#111)
 	}
@@ -1050,6 +1057,12 @@ func (m *Model) presentBesideRow(s fleet.Session, w int) bool {
 // own header, and `compass panes` has them all. A branch reading "HEAD" three
 // times in a fleet says less than nothing.
 func (m *Model) secondLine(s fleet.Session, w int) string {
+	return m.secondLineTagged(s, w, false)
+}
+
+// secondLineTagged is secondLine with the caller's answer to whether the
+// pane is drawn beside this row already.
+func (m *Model) secondLineTagged(s fleet.Session, w int, tagged bool) string {
 	if m.archiveView {
 		// A hidden live session: where it lives, and the tool where the
 		// fleet runs two — that is how its namesake on the board is told
@@ -1067,6 +1080,11 @@ func (m *Model) secondLine(s fleet.Session, w int) string {
 				if cand := strings.TrimPrefix(word+" · "+model, " · ") + " · " + branchOf(s.Info); lipgloss.Width(cand) <= w {
 					addr = model
 				}
+			}
+			if tagged && addr == mirrorMark+" "+pane.Target {
+				// The tag row two rows down draws this very address:
+				// the row keeps the branch, which the tag cannot say.
+				return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+branchOf(s.Info), " · "), w))
 			}
 			return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+addr, " · ")+" · "+branchOf(s.Info), w))
 		}

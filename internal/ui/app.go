@@ -1656,7 +1656,7 @@ func (m *Model) toggleHidden() {
 	name := sessionName(s.Info)
 	switch {
 	case s.Snap.APIError:
-		m.note = name + " stays · dead on the API" // short enough to stand whole beside the help at 80
+		m.note = name + " stays · dead on the API"
 		return
 	case s.Snap.State == state.NeedsYou:
 		m.note = name + " stays · it is asking"
@@ -3324,6 +3324,23 @@ func (m *Model) footerWith(keys string, w int) string {
 		if k, base := shed(short, " · ? help"), shed("", ""); levelKeyLost(base, keys) && !levelKeyLost(base, k) {
 			keys, minimal = k, short
 			note = strings.Replace(note, wayBack, "", 1)
+			forms = noteForms(note)
+		}
+	}
+	if i := strings.Index(minimal, " stays · "); i > 0 && strings.HasPrefix(m.note, minimal[:i+len(" stays")]) {
+		// A hide refused: the clause after "stays" is the selected row's
+		// own state, and the row two lines up draws it — `⊘ billing
+		// quota 18m` over `Please run /login · API Err…`, `◍ etl  stuck
+		// 6m`. So the reason yields to a key naming a level exactly as
+		// the way back does (#175), and only where the key comes back:
+		// `billing stays · dead on the API` cost the eighty-column
+		// footer `tab deeper`, the frame's only naming of the way
+		// deeper, while `etl stays · it hangs` on the same scene at the
+		// same width kept it.
+		short := minimal[:i+len(" stays")]
+		if k, base := shed(short, " · ? help"), shed("", ""); levelKeyLost(base, keys) && !levelKeyLost(base, k) {
+			keys, minimal = k, short
+			note = short
 			forms = noteForms(note)
 		}
 	}
