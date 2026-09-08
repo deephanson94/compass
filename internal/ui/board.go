@@ -811,10 +811,22 @@ func wrappedLabel(rows []string, k, h int) string {
 	text := oneSpace(head)
 	for j := k + 1; j < len(rows) && j < h; j++ {
 		plain := strings.TrimSpace(ansi.Strip(rows[j]))
-		if !(strings.HasPrefix(plain, "│  ├ ") || strings.HasPrefix(plain, "│  └ ")) || strings.Contains(plain, "[") {
+		if !(strings.HasPrefix(plain, "│  ├ ") || strings.HasPrefix(plain, "│  └ ")) {
 			break
 		}
-		text += " " + oneSpace(plain[len("│  ├ "):])
+		cont := plain[len("│  ├ "):]
+		if i := strings.Index(cont, "["); i >= 0 {
+			// The options are not the label's, but where they begin
+			// part-way along a continuation row the words before them
+			// still are: dropping the whole row lost the question's
+			// tail, and the card above it then drew a copy of the very
+			// sentence this row says (#107, #116).
+			if head := strings.TrimSpace(cont[:i]); head != "" {
+				text += " " + oneSpace(head)
+			}
+			break
+		}
+		text += " " + oneSpace(cont)
 	}
 	return oneSpace(text)
 }

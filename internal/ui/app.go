@@ -3318,7 +3318,7 @@ func (m *Model) footerWith(keys string, w int) string {
 			note = note[:i] + note[j:]
 		}
 	}
-	if strings.HasPrefix(note, "↪ answered") && !fits(note) {
+	if strings.HasPrefix(note, "↪ answered") {
 		// The digit is the answer's quote — which line went — and a
 		// drawn row of this frame carries it: the note keeps the verb
 		// and the destination, the shape "↪ sent to ⌁ dev:2.0" already

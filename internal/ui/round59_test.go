@@ -2265,7 +2265,9 @@ func TestTheMirrorsUndoIsNamedWhileTheMirrorStands(t *testing.T) {
 // the 152 footer the attach aside.
 func TestTheAnswersDigitIsTheRows(t *testing.T) {
 	forceASCII(t)
-	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
+	// At 220 too: the shed fires where a drawn row carries the head,
+	// not only where the note is costing a key (#205).
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 		sc := sceneTwoTools()
 		m := sceneModel(sc, size[0], size[1])
 		for _, k := range []string{"r", "1"} {
@@ -3096,5 +3098,89 @@ func TestTheSessionViewsFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 				t.Errorf("%s %dx%d: no row and no key names the archive: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
 			}
 		}
+	}
+}
+
+// ---- round 78, two-tools ----
+//
+// A board card says the question once, and keeps its model.
+//
+// #107 blanks a card's second row where a trail row of that same column
+// already says it, and #112 then hoists the tool and its model onto the
+// row the card gave up — which on a board whose question is which model
+// is the card's only naming of it. #116's reassembly of a label that
+// wrapped dropped the whole continuation row as soon as the options
+// began on it, so where the question's tail and its options shared one
+// row — `│  └ CIDR? [office CIDR / keep bastion]`, the shape a 48-cell
+// column draws — the compare failed: the card drew the sentence a
+// second time and the tag row fell to the bare tool word, while the
+// same card at 120 and at 220 drew `claude · sonnet-4-5`.
+//
+// The pin is the property, not the literal: on every board width the
+// card's second row is not a copy of the question its own trail row
+// says, and the column names the model.
+func TestTheBoardCardSaysTheQuestionOnce(t *testing.T) {
+	forceASCII(t)
+	// The words before the options, as the card would draw them.
+	const question = "Open port 22 to the office CIDR?"
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		// Answer the waiting question — the trace the card's tag row
+		// then draws is what leaves the tag no room — and hide the
+		// namesake so the board draws three columns.
+		for _, k := range []string{"r", "1", "j", "x"} {
+			pressKey(m, k)
+		}
+		if m.level != levelBoard {
+			t.Fatalf("%dx%d: not on the board (level %d)", size[0], size[1], m.level)
+		}
+		var col []string
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			col = append(col, strings.TrimRight(strings.SplitN(l, "│", 2)[0], " "))
+		}
+		head := -1
+		for i, l := range col {
+			if strings.Contains(l, "▲ infra") {
+				head = i
+				break
+			}
+		}
+		if head < 0 || head+2 >= len(col) {
+			t.Fatalf("%dx%d: no infra column on the board", size[0], size[1])
+		}
+		second := strings.TrimSpace(col[head+1])
+		if second != "" && strings.HasPrefix(question, strings.TrimSuffix(second, "…")) {
+			t.Errorf("%dx%d: the card's second row repeats the question its own trail row says: %q",
+				size[0], size[1], second)
+		}
+		named := false
+		for _, l := range col[head : head+3] {
+			if strings.Contains(l, "sonnet-4-5") {
+				named = true
+			}
+		}
+		if !named {
+			t.Errorf("%dx%d: the card names no model: %q", size[0], size[1], col[head:head+3])
+		}
+	}
+}
+
+// A label that wrapped is reassembled whole: the options are not the
+// label's, but the words before them on the same continuation row are.
+func TestAWrappedLabelKeepsTheWordsBeforeTheOptions(t *testing.T) {
+	rows := []string{
+		" ▲ design Open port 22 to the office   waiting 4m",
+		" │  └ CIDR? [office CIDR / keep bastion]",
+	}
+	if got, want := wrappedLabel(rows, 0, len(rows)), "▲ design Open port 22 to the office CIDR?"; got != want {
+		t.Errorf("wrappedLabel = %q, want %q", got, want)
+	}
+	split := []string{
+		" ▲ design Open port 22 to   waiting 4m",
+		" │  ├ the office CIDR?",
+		" │  └ [office CIDR / keep bastion]",
+	}
+	if got, want := wrappedLabel(split, 0, len(split)), "▲ design Open port 22 to the office CIDR?"; got != want {
+		t.Errorf("wrappedLabel (two rows) = %q, want %q", got, want)
 	}
 }
