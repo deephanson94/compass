@@ -4023,7 +4023,10 @@ func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
 			t.Errorf("%dx%d: the movement key's cells bought a chapter key that refuses: %q", w, h, f)
 		}
 		// Nothing on this row acts in its place, so the key stands (#193).
-		if f := foot(m); !strings.Contains(f, "j/k move") {
+		// Where a write does come back for it — `r reply` for the live row
+		// the archive selects — the yield has bought something and #213
+		// applies instead.
+		if f := foot(m); !strings.Contains(f, "j/k move") && !strings.Contains(f, "r reply") {
 			t.Errorf("%dx%d: a yield that buys nothing took the movement key: %q", w, h, f)
 		}
 	}
@@ -8079,5 +8082,183 @@ func TestTheBoardKeepsItsOrderWhileTheSelectionMoves(t *testing.T) {
 			}
 			before = after
 		}
+	}
+}
+
+// r90sdFooter is the row the person reads the keys off.
+func r90sdFooter(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.TrimRight(rows[len(rows)-1], " ")
+}
+
+// r90sdWalk builds the deck at this size and presses the route.
+func r90sdWalk(sc scene, w, h int, keys []string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r90sdArchiveRoutes are the two ways an archive comes to draw or select a
+// live row: a standing fleet query the archive cannot answer, then `A` — the
+// empty archive #244 and #248 settled — and a hide, then `A`, where the
+// hidden live session is the row the archive draws under `hidden · x brings
+// one back` (#29).
+var r90sdArchiveRoutes = [][]string{
+	{"/", "zzqqnothing", "enter", "A"},
+	{"x", "A"},
+}
+
+// TestTheArchiveOffersTheReplyKeyForTheLiveRowItSelects pins round ninety's
+// second-day one thing.
+//
+// compass has two writes and the footer offers them on the same test: does
+// the selected session have a pane. #53 took `r reply` off the row that says
+// `enter · no pane` — "a row that says no pane does not offer the other write
+// either" — but the archive's keymap string never carried `r reply` at all,
+// so wherever the archive draws or selects a *live* row the footer offered
+// `enter attach` for a pane and named nothing that types into it, while `r`
+// pressed there opened the reply card and a digit sent the line. One level
+// deeper, on the same session and the same pane, the footer names `r reply`.
+//
+// Both sides: where the archive's selection has a pane the footer names both
+// writes; where it has none it names neither (#53).
+func TestTheArchiveOffersTheReplyKeyForTheLiveRowItSelects(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, sc := range []scene{sceneSecondDay(), sceneManyIdle(), sceneFewOngoing(), sceneTwoTools()} {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+				for _, route := range r90sdArchiveRoutes {
+					m := r90sdWalk(sc, wh[0], wh[1], route)
+					s, ok := m.selected()
+					if !m.archiveView || !ok {
+						continue
+					}
+					foot := r90sdFooter(m)
+					pane, has := m.panes[s.Info.Key()]
+					if !has || pane.Target == "" {
+						// #53's side: no pane, neither write.
+						if strings.Contains(foot, "r reply") {
+							t.Errorf("%s %dx%d (%v) %v: the archive offered `r reply` for a row with no pane: %q",
+								sc.name, wh[0], wh[1], prof, route, foot)
+						}
+						continue
+					}
+					// The promise before any of it is shed for width: a
+					// live row with a pane is offered both writes.
+					if !strings.Contains(m.keymap(), "r reply") {
+						t.Errorf("%s %dx%d (%v) %v: the archive's keymap names no `r reply` for %q: %q",
+							sc.name, wh[0], wh[1], prof, route, sessionName(s.Info), m.keymap())
+					}
+					if !strings.Contains(foot, "enter attach") {
+						continue
+					}
+					if lipgloss.Width(foot)+len(" · r reply") > wh[0] {
+						// The row has no room for another key; #159's
+						// shedding, not the archive's silence.
+						continue
+					}
+					stands++
+					if !strings.Contains(foot, "r reply") {
+						t.Errorf("%s %dx%d (%v) %v: the archive named one write and not the other for %q: %q",
+							sc.name, wh[0], wh[1], prof, route, sessionName(s.Info), foot)
+					}
+					// The key the footer names is the key that acts: `r` on
+					// this very stand opens the reply card for that session.
+					r := r90sdWalk(sc, wh[0], wh[1], append(append([]string{}, route...), "r"))
+					if !r.replying {
+						t.Errorf("%s %dx%d (%v) %v: `r` in the archive did not open the reply card for %q",
+							sc.name, wh[0], wh[1], prof, route, sessionName(s.Info))
+					}
+					if x := lipgloss.Width(foot); x > wh[0] {
+						t.Errorf("%s %dx%d (%v) %v: the footer runs past the terminal (%d): %q",
+							sc.name, wh[0], wh[1], prof, route, x, foot)
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("no archive stand selected a live row with a pane: the pin is not standing on its frame")
+	}
+}
+
+// r90sdReplyCardRow is the reply card's title row, the one that names the
+// session the typed line will go to.
+func r90sdReplyCardRow(m *Model) string {
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(row, "reply to ") {
+			return row
+		}
+	}
+	return ""
+}
+
+// TestTheReplyCardKeepsTheDigitOfTheLiveRowItTypesInto pins round ninety's
+// second-day second finding.
+//
+// #31 put the row's digit on the reply card because a card naming a session
+// by board position stood over a list where that position was another
+// session. The guard was `d > 0 && !m.archiveView` — the same guard #248
+// took off the header: in the archive the numbers are the archive's own
+// (#32), but an archive drawing no row claims no number, and the live
+// session that frame still selects, draws the trail of and now offers both
+// writes for wears the digit its own header draws (#248) and its own refusal
+// calls it by (#242). The card three rows under that header said `reply to
+// hello` while the header said `1 hello`.
+func TestTheReplyCardKeepsTheDigitOfTheLiveRowItTypesInto(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, sc := range []scene{sceneSecondDay(), sceneManyIdle(), sceneFewOngoing()} {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+				m := sceneModel(sc, wh[0], wh[1])
+				for _, k := range []string{"/", "pytest", "enter", "A", "r"} {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				s, ok := m.selected()
+				if !ok || !m.archiveView || len(m.viewOrder()) != 0 || !s.Live || !m.replying {
+					lipgloss.SetColorProfile(old)
+					continue
+				}
+				d := m.digits[s.Info.Key()]
+				if d < 1 || d > 9 {
+					lipgloss.SetColorProfile(old)
+					continue
+				}
+				stands++
+				card := r90sdReplyCardRow(m)
+				want := "reply to " + strconv.Itoa(d) + " · " + sessionName(s.Info)
+				if !strings.Contains(card, want) {
+					t.Errorf("%s %dx%d (%v): the reply card dropped the live row's digit: want %q in %q",
+						sc.name, wh[0], wh[1], prof, want, card)
+				}
+				// The header of the same frame says it too, and the card
+				// still fits its terminal.
+				head := ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+				if !strings.Contains(head, fmt.Sprintf("%d %s", d, sessionName(s.Info))) {
+					t.Errorf("%s %dx%d (%v): #248's header is not standing: %q", sc.name, wh[0], wh[1], prof, head)
+				}
+				for _, row := range strings.Split(m.View(), "\n") {
+					if x := lipgloss.Width(row); x > wh[0] {
+						t.Errorf("%s %dx%d (%v): a row runs past the terminal (%d): %q",
+							sc.name, wh[0], wh[1], prof, x, ansi.Strip(row))
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("no empty archive opened a reply card on a live row: the pin is not standing on its frame")
 	}
 }

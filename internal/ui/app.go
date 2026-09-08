@@ -2814,9 +2814,14 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	s, ok := m.selected()
 	if ok {
 		name = sessionName(s.Info)
-		if d := m.digits[s.Info.Key()]; d > 0 && !m.archiveView {
+		if d := m.digits[s.Info.Key()]; d > 0 && (!m.archiveView || (s.Live && len(m.viewOrder()) == 0)) {
 			// The row's own digit, which is the session's for life — a
-			// position named another session on the same screen.
+			// position named another session on the same screen. In the
+			// archive the numbers are the archive's own (#32), but an
+			// archive drawing no row claims no number, and the live
+			// session such a frame still selects wears the digit its
+			// header draws three rows above (#248) and its own refusal
+			// calls it by (#242).
 			who = strconv.Itoa(d) + " · "
 		}
 	}
@@ -3386,7 +3391,15 @@ func (m *Model) keymap() string {
 		// on the fleet's own last row: "N archived · A browses". The chapter
 		// keys act here as they do on the live list, and answered
 		// `no earlier prompt` on a row that did not name them (#193).
-		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · a ask · / search · x unhide · A fleet · ? help · q quit"
+		// `r reply` stands here too: the archive draws and selects live
+		// rows — the hidden one under `hidden · x brings one back` (#29),
+		// and the live session an archive with nothing in it keeps (#244,
+		// #248) — and for those the pane is real. Which of the two writes
+		// a row is offered is the pane's question, not the view's (#53):
+		// the test below takes `r reply` off any row that says `no pane`,
+		// so an archived row loses it there and no row is offered one
+		// write and not the other.
+		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · A fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -3402,12 +3415,12 @@ func (m *Model) keymap() string {
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "h/l columns · " + m.enterKeymap() + " · tab session · / search · x unhide · A fleet · ? help · q quit"
+			keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit" // the chapter keys act here too (#193)
+			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit" // the chapter keys act here too (#193)
 		}
 	case m.level >= levelReader && m.sessionView():
 		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
