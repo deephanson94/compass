@@ -6415,3 +6415,144 @@ func r86fhSearch(m *Model, sc scene, n int, query string) *Model {
 	}
 	return m
 }
+
+// r87ttScene finds a walkthrough scene by name.
+func r87ttScene(t *testing.T, name string) scene {
+	t.Helper()
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc
+		}
+	}
+	t.Fatalf("no scene %q", name)
+	return scene{}
+}
+
+// r87ttReader opens session d's reader (Lv3) in a fresh deck.
+func r87ttReader(sc scene, w, h, d int) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{fmt.Sprintf("%d", d), "tab", "tab"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r87ttSearch types a query into the reader and presses enter.
+func r87ttSearch(m *Model, sc scene, q string) {
+	pressKey(m, "/")
+	pressKey(m, q)
+	pressKey(m, "enter")
+	poll(m, sc)
+}
+
+func r87ttFooter(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// TestTheSearchYouTypedOpensOnItsFirstMatch pins round eighty-seven's one
+// thing.
+//
+// #239 gave the walk its own place and made `enter` on a typed query the
+// walk's first press. But a fresh search stands at row nought and
+// `walkStep`'s fallback steps to the first match *after* the top of the
+// page — so a match on row nought, which is the opening prompt the person
+// themselves typed, was walked straight past. On the second day's reader
+// at eighty, `/the` answered `match 2/3` with `❯ fix the 401 on token
+// refresh` two rows above the page: the search named a match it had
+// skipped and did not draw. 2,556 of 5,422 fresh searches over the corpus
+// landed past their first match, 532 of them with that match off the page.
+//
+// Where the walk has no place yet the first press is a landing, not a
+// step: `landFirstMatch` opens on match one and says so.
+func TestTheSearchYouTypedOpensOnItsFirstMatch(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+	sc := r87ttScene(t, "second-day")
+	for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+			lipgloss.SetColorProfile(prof)
+			m := r87ttReader(sc, wh[0], wh[1], 2)
+			if m.level < levelReader {
+				t.Fatalf("%dx%d: never reached the reader", wh[0], wh[1])
+			}
+			r87ttSearch(m, sc, "the")
+			foot := r87ttFooter(m)
+			if !strings.Contains(foot, "match 1/") {
+				t.Errorf("%dx%d (%v): the search opened past its first match: %q", wh[0], wh[1], prof, foot)
+			}
+			// And the match it names is on the page it opened.
+			doc := m.doc(m.readerWidth())
+			ms := readerMatches(doc, m.query)
+			top := m.readerTop(doc)
+			if len(ms) == 0 {
+				t.Fatalf("%dx%d: /the found nothing", wh[0], wh[1])
+			}
+			if ms[0] < top || ms[0] >= top+m.readerHeight() {
+				t.Errorf("%dx%d (%v): match 1 sits on row %d, off a page of rows %d..%d",
+					wh[0], wh[1], prof, ms[0], top, top+m.readerHeight())
+			}
+			// The walk still steps on from there, and wraps back.
+			pressKey(m, "n")
+			poll(m, sc)
+			if !strings.Contains(r87ttFooter(m), fmt.Sprintf("match 2/%d", len(ms))) {
+				t.Errorf("%dx%d (%v): `n` off the landing: %q", wh[0], wh[1], prof, r87ttFooter(m))
+			}
+			pressKey(m, "N")
+			poll(m, sc)
+			if !strings.Contains(r87ttFooter(m), fmt.Sprintf("match 1/%d", len(ms))) {
+				t.Errorf("%dx%d (%v): `N` back to the landing: %q", wh[0], wh[1], prof, r87ttFooter(m))
+			}
+			pressKey(m, "N")
+			poll(m, sc)
+			if !strings.Contains(r87ttFooter(m), fmt.Sprintf("match %d/%d", len(ms), len(ms))) {
+				t.Errorf("%dx%d (%v): `N` off the landing wraps to the last: %q", wh[0], wh[1], prof, r87ttFooter(m))
+			}
+		}
+	}
+	// Held: a query nothing answers still refuses, and the refusal is not a count.
+	lipgloss.SetColorProfile(termenv.Ascii)
+	m := r87ttReader(sc, 120, 34, 2)
+	r87ttSearch(m, sc, "zzzznotalive")
+	if !strings.Contains(r87ttFooter(m), "no matches") {
+		t.Errorf("a query nothing answers: %q", r87ttFooter(m))
+	}
+}
+
+// The sweep: over every scene, every session's reader and a spread of
+// queries, no fresh search opens past its first match.
+func TestNoTypedSearchOpensPastItsFirstMatch(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+	lipgloss.SetColorProfile(termenv.Ascii)
+	queries := []string{"the", "a", "1", "read", "test"}
+	for _, sc := range allScenes() {
+		for _, wh := range [][2]int{{80, 24}, {120, 34}} {
+			for d := 1; d <= 9; d++ {
+				for _, q := range queries {
+					m := r87ttReader(sc, wh[0], wh[1], d)
+					if m.level < levelReader {
+						continue
+					}
+					r87ttSearch(m, sc, q)
+					note := strings.TrimSpace(m.note)
+					if !strings.HasPrefix(note, "match ") {
+						continue // `no matches` is its own refusal
+					}
+					if !strings.HasPrefix(note, "match 1/") {
+						t.Fatalf("%s %dx%d session %d /%s: the search opened on %q, past its first match",
+							sc.name, wh[0], wh[1], d, q, note)
+					}
+					doc := m.doc(m.readerWidth())
+					ms := readerMatches(doc, m.query)
+					top := m.readerTop(doc)
+					if ms[0] < top || ms[0] >= top+m.readerHeight() {
+						t.Fatalf("%s %dx%d session %d /%s: opened on %q with match 1 off the page (row %d, page %d..%d)",
+							sc.name, wh[0], wh[1], d, q, note, ms[0], top, top+m.readerHeight())
+					}
+				}
+			}
+		}
+	}
+}

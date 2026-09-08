@@ -890,6 +890,29 @@ func (m *Model) jumpMatch(dir int) {
 	m.note = fmt.Sprintf("match %d/%d", at+1, len(matches))
 }
 
+// landFirstMatch is where the search you just typed opens: the first match
+// in the run, not the first one below the top of the page.
+//
+// `jumpMatch` starts the walk from where the page stands, and a fresh
+// search stands at row nought — so `walkStep`'s strictly-greater step
+// walked straight past a match on row nought, which is the opening prompt
+// the person themselves typed. `/the` on the second day's reader answered
+// `match 2/3` with `❯ fix the 401 on token refresh` two rows above the
+// page and the row above the page counting them (#20): the search named a
+// match it had skipped and did not show. Where the walk has no place yet
+// the first press is a landing, not a step (#239).
+func (m *Model) landFirstMatch() {
+	doc := m.doc(m.readerWidth())
+	matches := readerMatches(doc, m.query)
+	if len(matches) == 0 {
+		m.note = "no matches"
+		return
+	}
+	m.walkRow = matches[0] + 1
+	m.scroll = clampScroll(matches[0], len(doc), m.readerHeight())
+	m.note = fmt.Sprintf("match 1/%d", len(matches))
+}
+
 // walkTo steps the walk one match on (or back), wrapping at the ends, and
 // reports which match it is now standing on.
 //
@@ -951,7 +974,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 		m.searching = false
 		if m.query != "" {
 			m.scroll, m.walkRow = 0, 0
-			m.jumpMatch(1)
+			m.landFirstMatch()
 		}
 	case "esc":
 		m.draft = ""
