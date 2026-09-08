@@ -4104,3 +4104,115 @@ func TestTheLiveRowSaysWhatTheHeaderDoesNot(t *testing.T) {
 		t.Errorf("100x30: a tag the header does not draw whole was shed:\n%s", got)
 	}
 }
+
+// TestTheCardYieldsThePaneWithColourOn pins round eighty-two's one thing.
+// #208's yield — the board card gives up a bare pane the identity header
+// already draws rather than spend the trace's clock on it — is decided in
+// `columnTag` by reading the trace back: `HasPrefix(full, "↪ ")`,
+// `HasSuffix(full, " ago")` and `HasPrefix(full, beside)`. `boardDelta`
+// returns `dimStyle.Render(trace)`, so with colour on those words sit
+// inside escape sequences and all three tests miss: the guard never fires,
+// the card draws `⌁ harness:1.0` a second time and the send's clock — the
+// one fact on no other row of the column — is off the frame. #208's own
+// pin could not see it because it renders under the ASCII profile, where
+// `dimStyle.Render` is the identity.
+//
+// #215 settled which frame answers: the one a person sees, colour and all.
+// So the trace is read through its style.
+//
+// Both sides: at 220 the column is wide enough for the pane and the clock
+// and the pane stays (#85), which is the yield being priced in cells and
+// not a shed of the tag.
+func TestTheCardYieldsThePaneWithColourOn(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the trace is drawn dim, not bare
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	pane := regexp.MustCompile(`⌁ [A-Za-z0-9_.:-]+`)
+	for _, c := range []struct {
+		name string
+		sc   scene
+	}{
+		{"fleet-hygiene", sceneFleetHygiene()},
+		{"subagents", sceneSubagents()},
+	} {
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			sc := c.sc
+			m := sceneModel(sc, size[0], size[1])
+			for _, k := range []string{"j", "r", "t", "go on", "enter"} {
+				pressKey(m, k)
+				poll(m, sc)
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			if len(rows) < 4 {
+				t.Fatalf("%s %dx%d: no frame", c.name, size[0], size[1])
+			}
+			said := pane.FindString(rows[0])
+			if said == "" {
+				t.Fatalf("%s %dx%d: the header names no pane: %q", c.name, size[0], size[1], strings.TrimSpace(rows[0]))
+			}
+			var trace string
+			for _, r := range rows[1:] {
+				for _, col := range strings.Split(r, "│") {
+					if strings.Contains(col, `↪ sent "go on"`) {
+						trace = strings.TrimSpace(col)
+					}
+				}
+			}
+			if trace == "" {
+				t.Fatalf("%s %dx%d: no column carries the reply", c.name, size[0], size[1])
+			}
+			if !strings.Contains(trace, " ago") {
+				t.Errorf("%s %dx%d: with colour on the trace spends its clock to draw %s a second time: %q",
+					c.name, size[0], size[1], said, trace)
+			}
+			if size[0] == 220 && !strings.Contains(trace, said) {
+				t.Errorf("%s %dx%d: the pane went where both fit: %q", c.name, size[0], size[1], trace)
+			}
+		}
+	}
+}
+
+// TestTheBoardSaysTheSameWordsWithColourOn is the rule behind it, asked of
+// the whole walkthrough rather than one frame: a style is how a row is
+// drawn, never what it says, so the canonical walkthrough must read the
+// same under the ASCII profile and under a colour one. Before the fold it
+// differed on six rows in three files — every one a board trace that lost
+// its clock to a pane the header draws.
+func TestTheBoardSaysTheSameWordsWithColourOn(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	frames := func(sc scene, w, h int) []string {
+		m := sceneModel(sc, w, h)
+		out := []string{ansi.Strip(m.View())}
+		for _, k := range canonicalKeys {
+			pressKey(m, k)
+			poll(m, sc)
+			out = append(out, ansi.Strip(m.View()))
+		}
+		return out
+	}
+	trimAll := func(s string) string {
+		rows := strings.Split(s, "\n")
+		for i, r := range rows {
+			rows[i] = strings.TrimRight(r, " ")
+		}
+		return strings.Join(rows, "\n")
+	}
+	for _, sc := range []scene{sceneFleetHygiene(), sceneSubagents()} {
+		for _, size := range [][2]int{{120, 34}, {152, 40}} {
+			lipgloss.SetColorProfile(termenv.Ascii)
+			mono := frames(sc, size[0], size[1])
+			lipgloss.SetColorProfile(termenv.TrueColor)
+			colour := frames(sc, size[0], size[1])
+			for i := range mono {
+				a, b := strings.Split(trimAll(mono[i]), "\n"), strings.Split(trimAll(colour[i]), "\n")
+				for j := range a {
+					if j < len(b) && a[j] != b[j] {
+						t.Errorf("%s %dx%d frame %d row %d: the colour profile changed what the row says\n ascii:  %q\n colour: %q",
+							sc.name, size[0], size[1], i, j, a[j], b[j])
+					}
+				}
+			}
+		}
+	}
+}

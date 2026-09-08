@@ -1101,8 +1101,13 @@ func (m *Model) columnTag(key string, s fleet.Session, w int) string {
 		// from the tool word to the bare pane: the tag yields to the
 		// trace's clock where the frame says the tag elsewhere (#167,
 		// #189, #196, #197 gate a row against the header).
-		full := m.boardDelta(key, s, w)
-		if beside := m.boardDelta(key, s, w-lipgloss.Width(tag)-2); beside != full &&
+		// The trace is drawn dim, so the words are read back through the
+		// style: with colour on, dimStyle wraps the clause in escapes and
+		// the three tests below all miss, which put the clock back on the
+		// frame the fold was measured to take it off (#215: the frame is
+		// the one a person sees, colour and all).
+		full := ansi.Strip(m.boardDelta(key, s, w))
+		if beside := ansi.Strip(m.boardDelta(key, s, w-lipgloss.Width(tag)-2)); beside != full &&
 			strings.HasPrefix(full, "↪ ") && strings.HasSuffix(full, " ago") && strings.HasPrefix(full, beside) {
 			return ""
 		}
