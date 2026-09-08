@@ -1182,7 +1182,17 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 	case "[", "]":
 		m.readerChapter(key)
 	case "g":
-		m.scroll = 0
+		// The start of the conversation, the other end of `G` below.
+		// The question is the page's own — did the page move — and the
+		// sentence is the one `k` and `ctrl+u` already give for this end
+		// (#24, #228). Before that, `g` was the reader's last silent
+		// key: on 522 of the corpus's 608 reader stands it moved no line
+		// and said nothing, and on 87 of those the frame came back byte
+		// for byte the same, the dead key SPEC's round-one rule bans,
+		// while `k` and `ctrl+u` on that very frame both answered.
+		if !m.scrollBy(-(1 << 30)) { // clamped to the first screenful
+			m.note = "start of the conversation"
+		}
 	case "G":
 		// Back to the present, which in the reader is the end of the
 		// conversation. The question is the page's own — did the page

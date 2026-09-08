@@ -6556,3 +6556,142 @@ func TestNoTypedSearchOpensPastItsFirstMatch(t *testing.T) {
 		}
 	}
 }
+
+// The reader's five up-and-down keys are one family: `j`, `k`, `ctrl+d`,
+// `ctrl+u` and `G` all ask the page whether it moved, and all answer when
+// it did not — "start of the conversation", "end of the conversation",
+// "all of it is on screen" (#24, #228, #232). `g`, the sixth, set
+// `m.scroll = 0` and said nothing, ever: over every canonical reader
+// stand of every scene at every width, 608 presses, `g` spoke on none,
+// moved no line on 522, and on 87 of those the frame came back byte for
+// byte the same — the dead key SPEC's round-one rule bans, on a frame
+// where `k` and `ctrl+u` both answer.
+//
+// TestTheReaderStartKeyAnswersLikeItsPair is the fold on one frame: on
+// fleet-hygiene's reader at eighty, where the whole conversation is on
+// screen, `k` says so and `g` must say the same thing; one screenful down,
+// `g` must carry the page back and `g` again must say where it stopped.
+func TestTheReaderStartKeyAnswersLikeItsPair(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name string
+		sc   scene
+		n    int
+	}{
+		{"fleet-hygiene", sceneFleetHygiene(), 13},
+		{"many-idle", sceneManyIdle(), 13},
+		{"very-long", sceneVeryLong(), 13},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+			w, h := size[0], size[1]
+			if r87fhPinAt(c.sc, w, h, c.n) == nil {
+				t.Fatalf("%s %dx%d: the walkthrough reaches no reader stand at key %d", c.name, w, h, c.n)
+			}
+			// The page carried to the start by the key that already
+			// answers there, so the two are asked the same question.
+			top := func() *Model {
+				mm := r87fhPinAt(c.sc, w, h, c.n)
+				for i := 0; i < 4000 && mm.readerTop(mm.doc(mm.readerWidth())) > 0; i++ {
+					pressKey(mm, "ctrl+u")
+					poll(mm, c.sc)
+				}
+				return mm
+			}
+			k := top()
+			pressKey(k, "k")
+			poll(k, c.sc)
+			want := k.note
+			if want == "" {
+				t.Fatalf("%s %dx%d: `k` said nothing at the start", c.name, w, h)
+			}
+			g := top()
+			pressKey(g, "g")
+			poll(g, c.sc)
+			if g.note == "" {
+				t.Errorf("%s %dx%d: `g` on a page already at the start said nothing (`k` said %q)", c.name, w, h, want)
+			}
+			if g.note != want {
+				t.Errorf("%s %dx%d: `g` says %q where `k` on the same page says %q", c.name, w, h, g.note, want)
+			}
+			// And the note is on the frame, not only in the model.
+			if !strings.Contains(ansi.Strip(g.View()), want) {
+				t.Errorf("%s %dx%d: %q is not on the frame `g` drew", c.name, w, h, want)
+			}
+			// One screenful down and back: `g` carries the page to the
+			// start, and the press after it says where it stopped.
+			d := r87fhPinAt(c.sc, w, h, c.n)
+			pressKey(d, "ctrl+d")
+			poll(d, c.sc)
+			if d.readerTop(d.doc(d.readerWidth())) == 0 {
+				continue // the whole conversation is on screen; nowhere to come back from
+			}
+			pressKey(d, "g")
+			poll(d, c.sc)
+			if at := d.readerTop(d.doc(d.readerWidth())); at != 0 {
+				t.Errorf("%s %dx%d: `g` left the page at line %d, not the start", c.name, w, h, at)
+			}
+			pressKey(d, "g")
+			poll(d, c.sc)
+			if d.note == "" {
+				t.Errorf("%s %dx%d: the second `g` at the start said nothing", c.name, w, h)
+			}
+		}
+	}
+}
+
+// TestNoReaderStartKeyIsSilent is the rule behind it, asked of every
+// canonical reader stand of every scene at every width: `g` answers, every
+// press, whether or not the page had anywhere to go. The key is pressed
+// and the page put back, so one walkthrough per scene and width covers
+// every stand and the sweep runs in a few seconds.
+func TestNoReaderStartKeyIsSilent(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			m := sceneModel(sc, w, h)
+			for n := 0; n <= len(keys); n++ {
+				if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+					scroll, note := m.scroll, m.note
+					top := m.readerTop(m.doc(m.readerWidth()))
+					pressKey(m, "g")
+					poll(m, sc)
+					moved := m.readerTop(m.doc(m.readerWidth())) != top
+					if !moved && m.note == "" {
+						t.Errorf("%s %dx%d stand %d: `g` moved no line and said nothing", sc.name, w, h, n)
+					}
+					m.scroll, m.note = scroll, note
+				}
+				if n < len(keys) {
+					pressKey(m, keys[n])
+					poll(m, sc)
+				}
+			}
+		}
+	}
+}
+
+// r87fhPinAt replays the first n keys of a scene's walkthrough and returns
+// the model where that leaves it, or nil where it is not in the reader.
+func r87fhPinAt(sc scene, w, h, n int) *Model {
+	keys := append(append([]string{}, canonicalKeys...), "esc")
+	keys = append(keys, sc.extra...)
+	if n > len(keys) {
+		n = len(keys)
+	}
+	m := sceneModel(sc, w, h)
+	for _, k := range keys[:n] {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if m.level != levelReader || m.showHelp || m.searching || m.replying {
+		return nil
+	}
+	return m
+}
