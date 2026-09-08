@@ -986,12 +986,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				if s.Live && m.archiveView && drawn && s.Info.Key() == shown.Info.Key() && m.digits[s.Info.Key()] == i+1 {
 					if m.archiveDrawsRow(s.Info.Key()) {
-						// The archive draws this row, under its own
-						// digit: the board's digit pressed on it is
-						// #238's question, and `2 api is live` beside a
-						// row the frame numbers `1` named a digit the
-						// frame does not (#245).
-						m.note = "the session you are on"
+						// The archive draws this row under the archive's
+						// own digit (#32), and that digit is not this
+						// one: the frame draws `▸1 ● api` and its header
+						// says `1 api`, so `2` is a number no row of the
+						// frame wears. #245 gave it `the session you are
+						// on` to keep #242's `2 api is live` from naming
+						// a digit the frame does not — but the sentence
+						// names one too, and it is then said of two
+						// digits at once: `1` answers it on the same
+						// frame, and on a two-card archive `2` and `3`
+						// both do. #245's reason was that refusing
+						// denies a session the frame has selected; the
+						// deck already refuses that very digit on that
+						// very frame from any other caret, so the
+						// refusal is the answer for a number no row
+						// wears, not a denial of the session. The way to
+						// the fleet's numbering is `A fleet`, on the
+						// footer already (#232). The deck's own sentence
+						// stands.
 						continue
 					}
 					// In the archive the digits are the archive's own

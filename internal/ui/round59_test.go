@@ -7320,11 +7320,14 @@ func TestNoHelpRowPromisesAGrabTheReaderWillNotMake(t *testing.T) {
 	}
 }
 
-// ---- round 88, two-tools, second finding ----
-// In the archive the board's digit pressed on a hidden live row the
-// archive draws is #238's question, not #242's: `2 api is live` beside a
-// row the frame numbers `1` named a digit the frame does not, while `1`
-// on the same frame said `the session you are on` (#245).
+// ---- round 88, two-tools, second finding, re-pointed by round 96 ----
+// #245 answered the board's digit pressed on a hidden live row the archive
+// draws with `the session you are on`, to keep #242's `2 api is live` from
+// naming a digit the frame does not. The sentence names one too: on this
+// very stand the frame draws one row, `▸1 ● api`, and both `1` and `2`
+// answered it. In the archive the digits are the archive's own (#32), so
+// the digit no row wears takes the deck's own refusal — the same one this
+// frame gives it from any other caret.
 func TestTheArchivesDrawnRowIsTheSessionYouAreOn(t *testing.T) {
 	forceASCII(t)
 	for _, size := range [][2]int{{80, 24}, {120, 34}, {220, 48}} {
@@ -7337,9 +7340,13 @@ func TestTheArchivesDrawnRowIsTheSessionYouAreOn(t *testing.T) {
 		}
 		pressKey(m, "x")
 		pressKey(m, "A")
-		pressKey(m, "2")
+		pressKey(m, "1")
 		if m.note != "the session you are on" {
-			t.Errorf("%dx%d: the archive answered %q to the board's digit of the row it draws", size[0], size[1], m.note)
+			t.Errorf("%dx%d: the archive answered %q to the digit its own row wears", size[0], size[1], m.note)
+		}
+		pressKey(m, "2")
+		if m.note != "no session 2" {
+			t.Errorf("%dx%d: the archive answered %q to a digit no row of the frame wears", size[0], size[1], m.note)
 		}
 	}
 }
@@ -10473,4 +10480,111 @@ func TestTheCutAtTheReplyBoxsEdgeIsAClip(t *testing.T) {
 		t.Fatalf("vacuous: no frame drew the box's border mark")
 	}
 	t.Logf("border marks examined: %d", marks)
+}
+
+// ---- round 96, two-tools ----
+// TestTheArchiveRefusesADigitNoRowWears pins round ninety-six's one thing.
+//
+// In the archive the digits are the archive's own (#32): the frame draws
+// `▸1 ● api` and its header says `1 api`. #245 answered `the session you
+// are on` where the pressed digit was the selected session's *live* digit
+// and the archive drew its row — so on a one-row archive both `1` and `2`
+// said it, and on a two-card archive `2` and `3` did, one frame answering
+// one sentence for two numbers while only one row is drawn. #245's reason
+// was that refusing "denies a session this very frame has selected"; the
+// deck already refuses that very digit on that very frame from any other
+// caret (`no session 3`), so the refusal is the answer for a number no row
+// wears, not a denial of the session.
+//
+// The rule: on an archive that draws rows, a digit past the last drawn row
+// takes the deck's own refusal, from every caret. Held on the other side
+// too — the digit the caret's own row wears still answers `the session you
+// are on`, so a blanket refusal does not satisfy this.
+func TestTheArchiveRefusesADigitNoRowWears(t *testing.T) {
+	forceASCII(t)
+	type stand struct {
+		scene string
+		tail  []string
+	}
+	stands := []stand{
+		{"two-tools", []string{"x", "A"}},
+		{"two-tools", []string{"2", "x", "x", "A"}},
+		{"two-tools", []string{"2", "x", "x", "A", "shift+tab"}},
+		{"subagents", []string{"x", "A"}},
+		{"fleet-hygiene", []string{"x", "A"}},
+		{"many-idle", []string{"x", "x", "A"}},
+	}
+	refusals, wearers, triggers := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, st := range stands {
+			var sc scene
+			found := false
+			for _, s := range allScenes() {
+				if s.name == st.scene {
+					sc, found = s, true
+				}
+			}
+			if !found {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("no scene %q", st.scene)
+			}
+			for _, size := range [][2]int{{80, 24}, {120, 34}, {220, 48}} {
+				m := sceneModel(sc, size[0], size[1])
+				for _, k := range st.tail {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				if !m.archiveView {
+					continue
+				}
+				n := len(m.viewOrder())
+				if n == 0 || n > 9 {
+					continue // the empty archive is #242's, not this one
+				}
+				for caret := 1; caret <= n; caret++ {
+					pressKey(m, fmt.Sprintf("%d", caret))
+					poll(m, sc)
+					// The digit the caret's own row wears still answers.
+					if m.note != "the session you are on" && m.note != "" {
+						t.Errorf("%s %dx%d prof=%v: the archive's own digit %d answered %q",
+							st.scene, size[0], size[1], prof, caret, m.note)
+					}
+					pressKey(m, fmt.Sprintf("%d", caret))
+					poll(m, sc)
+					if m.note != "the session you are on" {
+						t.Errorf("%s %dx%d prof=%v: the digit the caret's row (%d) wears answered %q",
+							st.scene, size[0], size[1], prof, caret, m.note)
+					} else {
+						wearers++
+					}
+					live := m.digits[m.selectedKey]
+					for d := n + 1; d <= 9; d++ {
+						pressKey(m, fmt.Sprintf("%d", d))
+						poll(m, sc)
+						if d == live {
+							triggers++
+						}
+						refusals++
+						if want := fmt.Sprintf("no session %d", d); m.note != want {
+							t.Errorf("%s %dx%d prof=%v caret %d: `%d` on an archive drawing %d rows answered %q, not %q",
+								st.scene, size[0], size[1], prof, caret, d, n, m.note, want)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if refusals == 0 {
+		t.Fatalf("vacuous: no archive stand had a digit past its last drawn row")
+	}
+	if wearers == 0 {
+		t.Fatalf("vacuous: no archive row's own digit was pressed on it")
+	}
+	if triggers == 0 {
+		t.Fatalf("vacuous: no pressed digit was the selected session's live digit")
+	}
+	t.Logf("refusals held %d, drawn digits held %d, live-digit collisions %d", refusals, wearers, triggers)
 }
