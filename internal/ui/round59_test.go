@@ -4574,3 +4574,224 @@ func TestTheWalkKeyYieldsWithNoSearchToWalk(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 83, second-day, the second finding ----
+// The hairline runs beside the reply box. `joinColumns` stops the
+// hairline where the columns' content stops — "a hairline stops where the
+// content stops; empty rows stay empty" — but the reply box is
+// composited over the body afterwards (#108), so a box reaching past
+// every column's last row drew its own border with no hairline to its
+// left. On the first session at eighty the fleet is one row and eleven of
+// the box's fourteen rows stood past the hairline while the three above
+// them carried it; on the second day it was the box's last row. The box's
+// rows are the frame's content, so the hairline stops below them; where
+// no box stands, an empty row is still empty.
+func TestTheHairlineRunsBesideTheReplyBox(t *testing.T) {
+	// The frame is the coloured one (#215, #218): the hairline is a drawn
+	// cell either way, and this reads it through the profile a person has.
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	const bodyTop = 3 // header, hairline, blank
+	// at says whether the frame draws the hairline at cell col on row j.
+	at := func(rows []string, j, col int) bool {
+		if j < 0 || j >= len(rows) {
+			return false
+		}
+		run := []rune(rows[j])
+		return col < len(run) && run[col] == '│'
+	}
+
+	for _, c := range []struct {
+		name string
+		mk   func() scene
+		w, h int
+	}{
+		{"first-session", sceneFirstSession, 80, 24},
+		{"first-session", sceneFirstSession, 100, 30},
+		{"second-day", sceneSecondDay, 80, 24},
+		{"second-day", sceneSecondDay, 100, 30},
+	} {
+		sc := c.mk()
+		m := sceneModel(sc, c.w, c.h)
+		pressKey(m, "r")
+		poll(m, sc)
+		// `replyBox` is settled by View, which is where the box is placed.
+		rendered := ansi.Strip(m.View())
+		if !m.replyBox.on {
+			t.Fatalf("%s %dx%d: `r` was expected to raise the reply box", c.name, c.w, c.h)
+		}
+		rows := strings.Split(rendered, "\n")
+		top := bodyTop + m.replyBox.top
+		last := top + m.replyBox.h - 1
+		if last >= len(rows) {
+			t.Fatalf("%s %dx%d: the box runs past the frame", c.name, c.w, c.h)
+		}
+		// The deck's hairline is the leftmost stroke on the row above the
+		// box, left of where the box begins — the box draws strokes of
+		// its own, so it cannot be found by counting.
+		col := -1
+		for i, r := range []rune(rows[top-1]) {
+			if r == '│' && i < m.replyBox.left {
+				col = i
+				break
+			}
+		}
+		if col < 0 {
+			t.Fatalf("%s %dx%d: no hairline above the box on row %d: %q",
+				c.name, c.w, c.h, top-1, rows[top-1])
+		}
+		for j := top; j <= last; j++ {
+			if !at(rows, j, col) {
+				t.Errorf("%s %dx%d: the box draws row %d and the hairline stops above it: %q",
+					c.name, c.w, c.h, j, rows[j])
+			}
+		}
+		// It is one stroke, and it stops: nothing below the box carries it.
+		if at(rows, last+1, col) {
+			t.Errorf("%s %dx%d: the hairline runs past the box to row %d: %q",
+				c.name, c.w, c.h, last+1, rows[last+1])
+		}
+	}
+
+	// Where no box stands the hairline still stops where the columns do:
+	// the deck's blank tail carries none.
+	for _, c := range []struct {
+		name string
+		mk   func() scene
+		w, h int
+	}{
+		{"first-session", sceneFirstSession, 80, 24},
+		{"second-day", sceneSecondDay, 80, 24},
+	} {
+		m := sceneModel(c.mk(), c.w, c.h)
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		tail := rows[len(rows)-3] // the row above the footer's hairline
+		if strings.Contains(tail, "│") {
+			t.Errorf("%s %dx%d: the hairline runs into the deck's blank tail: %q",
+				c.name, c.w, c.h, tail)
+		}
+	}
+}
+
+// ---- round 83, second-day, the one thing ----
+// A stuck key is tried again once another has yielded. `chapterYield`
+// walked the stuck keys once, in the order their cells are spent, and
+// judged each trade against the row as it stood at that moment; a key
+// that bought nothing then was never looked at again, even after a later
+// yield had moved the row under it. At eighty the first session's reader
+// draws its whole conversation, so `[` and `]` answer `no earlier turn`
+// and `no later turn` and move no drawn cell — with colour on as well as
+// off (#215, #218) — yet the footer spent twelve of its seventy-nine
+// cells naming them and named no way into the session's pane. The turn
+// key was tried first, beside `space unfold` at the row's head, and
+// bought nothing; the unfold key then yielded and bought `/ search`; by
+// then the twelve cells were `enter attach`, and the pass had gone by.
+// The pass repeats while any yield is taken. Under the turn key's own
+// note the key stays (#24), and a reader whose turns move keeps it
+// (#215).
+func TestAStuckKeyIsTriedAgainOnceAnotherHasYielded(t *testing.T) {
+	// The frame is the coloured one: every press below is measured with
+	// the profile a person's terminal has (#215, #218).
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// body is the frame above the footer: what a press has to move for
+	// the key to be acting rather than writing its own refusal.
+	body := func(m *Model) string {
+		rows := strings.Split(m.View(), "\n")
+		return strings.Join(rows[:len(rows)-1], "\n")
+	}
+	stand := func(mk func() scene, w, h, n int) (*Model, scene) {
+		sc := mk()
+		m := sceneModel(sc, w, h)
+		for _, k := range canonicalKeys[:n] {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m, sc
+	}
+
+	// The five stands of the first session's reader at eighty whose note
+	// is the scroll key's, not the turn key's.
+	for _, n := range []int{16, 17, 18, 20, 21} {
+		m, _ := stand(sceneFirstSession, 80, 24, n)
+		if m.level < levelReader {
+			t.Fatalf("first-session 80x24 after %d keys: expected the reader, got Lv%d", n, m.level)
+		}
+		if m.note == "no earlier turn" || m.note == "no later turn" {
+			t.Fatalf("first-session 80x24 after %d keys: the stand wears the turn key's own note %q — #24 keeps the key there",
+				n, m.note)
+		}
+		// Neither turn key acts from this stand: each writes its refusal
+		// and moves no drawn cell.
+		for _, key := range []string{"[", "]"} {
+			m2, sc2 := stand(sceneFirstSession, 80, 24, n)
+			was := body(m2)
+			pressKey(m2, key)
+			poll(m2, sc2)
+			if body(m2) == was && m2.note != "no earlier turn" && m2.note != "no later turn" {
+				t.Fatalf("first-session 80x24 after %d keys: `%s` answered %q, not a turn refusal", n, key, m2.note)
+			}
+			if body(m2) != was {
+				t.Fatalf("first-session 80x24 after %d keys: `%s` moves a drawn cell — the key acts", n, key)
+			}
+		}
+		got := foot(m)
+		if strings.Contains(got, "[ ] turns") {
+			t.Errorf("first-session 80x24 after %d keys: the row offers a turn key that refuses on both sides: %q", n, got)
+		}
+		if !strings.Contains(got, "enter attach") {
+			t.Errorf("first-session 80x24 after %d keys: the cells the turn key spends buy no `enter attach`: %q", n, got)
+		}
+		// No key the row drew is lost for the trade (#216).
+		for _, keep := range []string{"/ search", "esc back", "? help", "q quit"} {
+			if !strings.Contains(got, keep) {
+				t.Errorf("first-session 80x24 after %d keys: the trade lost `%s`: %q", n, keep, got)
+			}
+		}
+	}
+
+	// #24 stands: under the turn key's own note the key the note is about
+	// stays on the row.
+	for _, n := range []int{14, 15} {
+		m, _ := stand(sceneFirstSession, 80, 24, n)
+		if m.note != "no earlier turn" && m.note != "no later turn" {
+			t.Fatalf("first-session 80x24 after %d keys: expected a turn key's own note, got %q", n, m.note)
+		}
+		if got := foot(m); !strings.Contains(got, "[ ] turns") {
+			t.Errorf("first-session 80x24 after %d keys: the turn key's own note shed the key it is about: %q", n, got)
+		}
+	}
+
+	// And where the turn key acts it stays: three readers whose `[` moves
+	// a drawn cell keep the key at the same width.
+	for _, c := range []struct {
+		name string
+		mk   func() scene
+	}{
+		{"fleet-hygiene", sceneFleetHygiene},
+		{"two-tools", sceneTwoTools},
+		{"many-idle", sceneManyIdle},
+	} {
+		m, sc := stand(c.mk, 80, 24, 13)
+		if m.level < levelReader {
+			t.Fatalf("%s 80x24: expected the reader, got Lv%d", c.name, m.level)
+		}
+		if got := foot(m); !strings.Contains(got, "[ ] turns") {
+			t.Errorf("%s 80x24: a reader whose turns move lost the turn key: %q", c.name, got)
+		}
+		was := body(m)
+		pressKey(m, "[")
+		poll(m, sc)
+		if body(m) == was {
+			t.Errorf("%s 80x24: `[` was expected to move the reader, drew the same frame", c.name)
+		}
+	}
+}

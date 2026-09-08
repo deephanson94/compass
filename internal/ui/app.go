@@ -3805,32 +3805,49 @@ func (m *Model) chapterYield(whole string, drops []string, fits func(string) boo
 	for _, k := range stuck {
 		cannotMove[k] = true
 	}
-	for _, yield := range stuck {
-		cand := append(append([]string(nil), head...), yield)
-		next := append([]string(nil), cand...)
-		for _, d := range drops {
-			stood := false
-			for _, c := range cand {
-				if c == d {
-					stood = true
+	// A stuck key is tried again once another has yielded. The trade is
+	// judged against the row as it stands, and the row moves as each
+	// yield is taken: at eighty the reader's `[ ] turns` bought nothing
+	// beside `space unfold` at the row's head, and once the unfold key
+	// had yielded and bought `/ search` the twelve cells were `enter
+	// attach` — but the pass had already gone by. So the pass repeats
+	// while any yield is taken; a key that buys nothing against the
+	// final row is still refused (#193), and the order the cells are
+	// spent in is unchanged.
+	taken := map[string]bool{}
+	for again := true; again; {
+		again = false
+		for _, yield := range stuck {
+			if taken[yield] {
+				continue
+			}
+			cand := append(append([]string(nil), head...), yield)
+			next := append([]string(nil), cand...)
+			for _, d := range drops {
+				stood := false
+				for _, c := range cand {
+					if c == d {
+						stood = true
+					}
+				}
+				if !stood {
+					next = append(next, d)
 				}
 			}
-			if !stood {
-				next = append(next, d)
+			// A key that cannot move is not the gain that buys the trade
+			// (#216): the archive's list traded eleven cells of a movement
+			// key that answers `the only session` for fifteen of
+			// `[ ] chapters` on a trail of one prompt, where both chapter
+			// keys refuse. A trade brings back more than one key, so the
+			// stuck ones are passed over rather than the whole trade refused
+			// on the first of them: a row that also gains a key that acts
+			// has bought its cells back.
+			if keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield, cannotMove) == "" {
+				continue
 			}
+			head, order = cand, next
+			taken[yield], again = true, true
 		}
-		// A key that cannot move is not the gain that buys the trade
-		// (#216): the archive's list traded eleven cells of a movement
-		// key that answers `the only session` for fifteen of
-		// `[ ] chapters` on a trail of one prompt, where both chapter
-		// keys refuse. A trade brings back more than one key, so the
-		// stuck ones are passed over rather than the whole trade refused
-		// on the first of them: a row that also gains a key that acts
-		// has bought its cells back.
-		if keysActGained(shedKeys(whole, order, fits), shedKeys(whole, next, fits), next, yield, cannotMove) == "" {
-			continue
-		}
-		head, order = cand, next
 	}
 	return order
 }
@@ -4399,10 +4416,10 @@ func (m *Model) deckLines(w, h int) []string {
 		if m.mirrorShown() {
 			companion = m.mirrorColumn
 		}
-		return joinColumns(h, []column{
+		return joinColumnsBelow(h, []column{
 			{tw, m.trailColumn(tw, h)},
 			{mw, companion(mw, h)},
-		})
+		}, m.boxFloor())
 	}
 	if fw == 0 {
 		one := m.trailColumn
@@ -4425,17 +4442,17 @@ func (m *Model) deckLines(w, h int) []string {
 			// right-hand trail — the middle is a rendering of something
 			// else — is the mirror's alone. Fleet, trail, reader; and the
 			// `tab` that drops the fleet then moves nothing (#46, #160).
-			return joinColumns(h, []column{
+			return joinColumnsBelow(h, []column{
 				{fw, m.fleetColumn(fw, h)},
 				{tw, trail},
 				{mw, middle(mw, h)},
-			})
+			}, m.boxFloor())
 		}
-		return joinColumns(h, []column{
+		return joinColumnsBelow(h, []column{
 			{fw, m.fleetColumn(fw, h)},
 			{mw, middle(mw, h)},
 			{tw, trail},
-		})
+		}, m.boxFloor())
 	}
 	// Two columns. At Lv3 on a terminal too narrow for three, the conversation
 	// takes the trail's place rather than going unread.
@@ -4448,10 +4465,19 @@ func (m *Model) deckLines(w, h int) []string {
 		m.trailRows = right
 		defer func() { m.trailRows = nil }()
 	}
-	return joinColumns(h, []column{
+	return joinColumnsBelow(h, []column{
 		{fw, m.fleetColumn(fw, h)},
 		{tw, right},
-	})
+	}, m.boxFloor())
+}
+
+// boxFloor is the row the reply box's last line lands on, one past it, or
+// zero when no box stands.
+func (m *Model) boxFloor() int {
+	if !m.replyBox.on {
+		return 0
+	}
+	return m.replyBox.top + m.replyBox.h
 }
 
 // sidePanelWidths shares out a three-column deck. The fleet and the trail are
@@ -4481,7 +4507,16 @@ func sidePanelWidths(w int) (fleet, trail int) {
 // vertical strokes on the deck. A hairline stops where the content stops;
 // empty rows stay empty.
 func joinColumns(h int, cols []column) []string {
-	stop := 0
+	return joinColumnsBelow(h, cols, 0)
+}
+
+// joinColumnsBelow is joinColumns with a floor under the hairline: the
+// reply box is drawn over the deck after the columns are joined, so a box
+// whose last row falls past every column's content left its own border
+// standing where the hairline had already stopped. The hairline stops
+// where the frame's content stops, the box's rows included.
+func joinColumnsBelow(h int, cols []column, least int) []string {
+	stop := least
 	rows := make([][]string, len(cols))
 	for i, c := range cols {
 		if len(c.rows) > stop {
