@@ -154,6 +154,26 @@ func (m *Model) boardKeys(n int) []string {
 	return keys
 }
 
+// owedKeys is every session that earns a column of its own, in the
+// fleet's order: boardKeys without the selected session pulled in (#252).
+func (m *Model) owedKeys() []string {
+	order := m.viewOrder()
+	owed := 0
+	for _, i := range order {
+		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+			owed++
+		}
+	}
+	var keys []string
+	for _, i := range order {
+		if owed > 0 && !m.archiveView && m.obligation(m.sessions[i]) > owedRank {
+			break
+		}
+		keys = append(keys, m.sessions[i].Info.Key())
+	}
+	return keys
+}
+
 // boardMove is j/k on the board: one session along the board's own order,
 // column by column and on into the strip, so the selection walks what is on
 // screen left to right rather than the fleet list's grouping.
@@ -363,11 +383,20 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	order := m.viewOrder()
 	var bands [][]string
 	rem := body
-	owed := m.boardKeys(len(order))
-	// What owes you gets a column first. The shipped-and-read follow only
-	// where a whole band of them fits in the rows that are left: naming
-	// them in the strip over twenty-eight blank rows answered nothing,
-	// and the wider the terminal the more it hid.
+	// What owes you gets a column first, in the fleet's own order. The
+	// selected session is not pulled forward here: `boardKeys` appends it
+	// to the owed so that a digit always shows its trail, and packing
+	// that list put a calm selected session at the head of the calm band,
+	// so `j` along four calm cards reshuffled the board on every press —
+	// the card the person had just read jumped to the front and the
+	// others slid. The calm band keeps the fleet's order; where the pack
+	// would trim the selected column off the end it takes the last drawn
+	// slot below, as before (#16, #90, #252).
+	owed := m.owedKeys()
+	// The shipped-and-read follow only where a whole band of them fits
+	// in the rows that are left: naming them in the strip over
+	// twenty-eight blank rows answered nothing, and the wider the
+	// terminal the more it hid.
 	all := append([]string(nil), owed...)
 	if !m.archiveView {
 		seen := map[string]bool{}

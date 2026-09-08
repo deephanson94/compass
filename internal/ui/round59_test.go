@@ -8025,3 +8025,59 @@ func TestNoDigitDeniesALiveSessionTheFleetNumbers(t *testing.T) {
 		lipgloss.SetColorProfile(old)
 	}
 }
+
+// ---- round 90, the owner's look ----
+// The board keeps its order while the selection moves along it. `boardKeys`
+// appends the selected session to the owed so a digit always shows its
+// trail, and the pack read that list as the board's order: a calm selected
+// session took the head of the calm band, and `j` along four calm cards
+// reshuffled the board on every press — the card just read jumped to the
+// front and the others slid (#252). Where the selected column would be
+// trimmed off the end it still takes the last drawn slot (#16, #90).
+func TestTheBoardKeepsItsOrderWhileTheSelectionMoves(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{152, 40}, {220, 48}} {
+		m := sceneModel(sceneManyIdle(), size[0], size[1])
+		inner := size[0] - 2*edgePad
+		n, cw := boardColumns(inner, m.drawnCount(m.viewOrder()))
+		if n < 2 {
+			t.Fatalf("%dx%d: not a board of columns", size[0], size[1])
+		}
+		before, _ := m.boardPack(n, cw, size[1]-6)
+		if len(before) < 4 {
+			t.Fatalf("%dx%d: too few columns to walk: %v", size[0], size[1], before)
+		}
+		// Walk the selection along every drawn column: the drawn order
+		// must not change while every selected column is already drawn.
+		for step := 0; step < len(before); step++ {
+			pressKey(m, "j")
+			after, _ := m.boardPack(n, cw, size[1]-6)
+			drawn := false
+			for _, k := range after {
+				if k == m.selectedKey {
+					drawn = true
+				}
+			}
+			if !drawn {
+				break // the walk left the board for the strip
+			}
+			wasDrawn := false
+			for _, k := range before {
+				if k == m.selectedKey {
+					wasDrawn = true
+				}
+			}
+			want := before
+			if !wasDrawn {
+				// The selection walked to a column the pack trims off
+				// the end: it takes the last drawn slot (#16, #90), and
+				// that is the one change allowed.
+				want = append(append([]string(nil), before[:len(before)-1]...), m.selectedKey)
+			}
+			if strings.Join(after, ",") != strings.Join(want, ",") {
+				t.Fatalf("%dx%d: after %d presses of j the board reshuffled:\n before %v\n after  %v", size[0], size[1], step+1, before, after)
+			}
+			before = after
+		}
+	}
+}
