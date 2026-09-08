@@ -6803,13 +6803,22 @@ func TestTheArchiveDoesNotDenyTheLiveRowItIsDrawing(t *testing.T) {
 		t.Errorf("a drawn archive row wore the refusal: %q", r87sdFoot(m))
 	}
 	// And the refutation this fold rests on: on the very frame that
-	// answered `no session 1`, the deck already names the digit — #57's
-	// hide note says `1 hello` one keypress away, in the same view, at
-	// the same width.
-	m = r87sdArchiveOnNothing(sc, 120, 34)
+	// answered `no session N`, the deck already names the digit — #57's
+	// hide note says it one keypress away, in the same view, at the same
+	// width. The scene is many-idle: second-day has one live session, and
+	// `x` on the last live one is `the live one stays` in the archive as
+	// on the board (#146, #156, and this round's rule), so on that scene
+	// it is not the press that shows this.
+	mi := sceneManyIdle()
+	m = r87sdArchiveOnNothing(mi, 120, 34)
+	sel, ok2 := m.selected()
+	if !ok2 || !sel.Live {
+		t.Fatalf("many-idle: the empty archive is not drawing a live row")
+	}
+	want := fmt.Sprintf("%d %s is hidden", m.digits[sel.Info.Key()], sessionName(sel.Info))
 	pressKey(m, "x")
-	poll(m, sc)
-	if !strings.Contains(r87sdFoot(m), "1 hello is hidden") {
+	poll(m, mi)
+	if !strings.Contains(r87sdFoot(m), want) {
 		t.Errorf("the hide note on the empty archive stopped naming the digit: %q", r87sdFoot(m))
 	}
 }
@@ -7708,5 +7717,230 @@ func TestTheHeaderKeepsTheDigitOfTheLiveRowItIsDrawing(t *testing.T) {
 	m = sceneModel(sd, 120, 34)
 	if head := r89sdHead(m); !strings.Contains(head, "1 hello") {
 		t.Errorf("the board's header lost the digit: %q", head)
+	}
+}
+
+// r89ttEmptyArchive puts the deck in the archive a standing fleet query has
+// cut to no rows, with the live session the person left still selected —
+// #244's stand, reached by four of the canonical walkthrough's own keys.
+func r89ttEmptyArchive(sc scene, w, h int) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{"/", "pytest", "enter", "A"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+func r89ttFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+func r89ttHead(m *Model) string {
+	return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+}
+
+// TestTheArchiveKeepsTheLastLiveSessionToo pins round eighty-nine's
+// two-tools one thing.
+//
+// `the live one stays` is a rule about the fleet: `liveCount` counts what
+// is `onBoard`, and that number is the same in the archive as on the
+// board. Its clause carried `&& !m.archiveView` from the round where the
+// count it read was `len(m.viewOrder())` — the archive's own list — so in
+// the archive the guard never fired, and `x` there took the one live
+// session off a board the frame does not draw. The board that came back
+// said `nothing live` and `○ all quiet` beside a trail still drawing
+// `● scout thinking… for 40s`, while the same key on the same session one
+// `A` away answered `the live one stays`.
+func TestTheArchiveKeepsTheLastLiveSessionToo(t *testing.T) {
+	sc := sceneSecondDay()
+	for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+			old := lipgloss.ColorProfile()
+			lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+			m := r89ttEmptyArchive(sc, wh[0], wh[1])
+			if !m.archiveView {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: `A` did not open the archive", wh[0], wh[1])
+			}
+			s, ok := m.selected()
+			if !ok || !s.Live {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: the empty archive is not drawing a live row", wh[0], wh[1])
+			}
+			if m.liveCount() != 1 {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: this stand needs a fleet of one live session, got %d", wh[0], wh[1], m.liveCount())
+			}
+			key := s.Info.Key()
+			pressKey(m, "x")
+			poll(m, sc)
+			if m.hidden[key] {
+				t.Errorf("%dx%d (%v): `x` in the archive took the last live session off the board", wh[0], wh[1], prof)
+			}
+			if m.liveCount() != 1 {
+				t.Errorf("%dx%d (%v): the fleet went from one live session to %d", wh[0], wh[1], prof, m.liveCount())
+			}
+			if foot := r89ttFoot(m); !strings.Contains(foot, "the live one stays") {
+				t.Errorf("%dx%d (%v): the archive did not answer `the live one stays`: %q", wh[0], wh[1], prof, foot)
+			}
+			// The board the person comes back to still has its row.
+			pressKey(m, "A")
+			poll(m, sc)
+			view := ansi.Strip(m.View())
+			if strings.Contains(view, "nothing live") {
+				t.Errorf("%dx%d (%v): the board says `nothing live` with a live session running:\n%s", wh[0], wh[1], prof, view)
+			}
+			if head := r89ttHead(m); strings.Contains(head, "all quiet") {
+				t.Errorf("%dx%d (%v): the header says `all quiet` with a live session running: %q", wh[0], wh[1], prof, head)
+			}
+			lipgloss.SetColorProfile(old)
+		}
+	}
+
+	// The other side, so the fix cannot be "stop hiding in the archive":
+	// where the fleet has more than one live session the archive's `x`
+	// still takes one off the board and names it (#57), and the unhide
+	// it undoes still works.
+	mi := sceneManyIdle()
+	m := r89ttEmptyArchive(mi, 120, 34)
+	s, ok := m.selected()
+	if !ok || !s.Live || m.liveCount() < 2 {
+		t.Fatalf("many-idle: this side needs a live row and more than one live session")
+	}
+	want := fmt.Sprintf("%d %s is hidden", m.digits[s.Info.Key()], sessionName(s.Info))
+	pressKey(m, "x")
+	poll(m, mi)
+	if !m.hidden[s.Info.Key()] {
+		t.Errorf("many-idle: the archive stopped hiding where the fleet has more than one live session")
+	}
+	if foot := r89ttFoot(m); !strings.Contains(foot, want) {
+		t.Errorf("many-idle: the hide note stopped naming the digit: %q", foot)
+	}
+	pressKey(m, "x")
+	poll(m, mi)
+	if m.hidden[s.Info.Key()] {
+		t.Errorf("many-idle: `x` again in the archive stopped bringing it back")
+	}
+	// And the board's own refusal is untouched: the canonical `x` on
+	// second-day still says it.
+	b := sceneModel(sc, 120, 34)
+	pressKey(b, "x")
+	poll(b, sc)
+	if !strings.Contains(r89ttFoot(b), "the live one stays") {
+		t.Errorf("the board's own refusal moved: %q", r89ttFoot(b))
+	}
+}
+
+// TestNoArchiveEmptiesTheLiveBoard is the sweep: over every scene at
+// eighty and 120, at every stand of a run that reaches the board, the
+// list, the archive with rows and the archive a query has cut to none,
+// `x` pressed on a live session while the fleet has exactly one live
+// session may never take that count to nought — in any view. It reads
+// the count off the model rather than the note, so a fold that answered
+// differently but still emptied the board would fail it, and it holds
+// the board's own side of the rule at the same stands.
+func TestNoArchiveEmptiesTheLiveBoard(t *testing.T) {
+	forceASCII(t)
+	stands, inArchive := 0, 0
+	run := []string{"/", "pytest", "enter", "A", "x", "x", "esc", "A", "A", "j", "x", "A", "x", "j", "esc", "A", "x"}
+	for _, sc := range allScenes() {
+		for _, wh := range [][2]int{{80, 24}, {120, 34}} {
+			for stand := 0; stand <= len(run); stand++ {
+				m := sceneModel(sc, wh[0], wh[1])
+				for _, k := range run[:stand] {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				s, ok := m.selected()
+				if !ok || !s.Live || m.hidden[s.Info.Key()] || m.liveCount() != 1 {
+					continue
+				}
+				stands++
+				if m.archiveView {
+					inArchive++
+				}
+				pressKey(m, "x")
+				poll(m, sc)
+				if m.liveCount() == 0 {
+					t.Errorf("%s %dx%d stand %d (archive=%v): `x` emptied the live board: %q",
+						sc.name, wh[0], wh[1], stand, m.archiveView, r89ttFoot(m))
+				}
+			}
+		}
+	}
+	if inArchive == 0 {
+		t.Fatal("the sweep reached no stand with one live session selected in the archive")
+	}
+	t.Logf("stands swept: %d, of them in the archive: %d", stands, inArchive)
+}
+
+// r89ttArchiveHide puts the deck in the archive a fleet query has cut to
+// no rows with a live board session still selected (#244), and hides it:
+// `j` to the second column, `x` to put one session behind the archive so
+// `A` has a door, then the query, then `A`, then the hide.
+func r89ttArchiveHide(sc scene, w, h int) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{"j", "x", "/", "zzz", "enter", "A", "x"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheArchiveHideNoteNamesNoWayBackIn pins round eighty-nine's
+// two-tools second finding.
+//
+// `x` in the archive answered `3 api is hidden · A, then x` — the strip's
+// route, which starts by leaving the view the person is standing in, for
+// a key the same frame's footer names `x unhide`. In the archive the note
+// keeps the fact and leaves the way to the row (#232, #233); at eighty
+// the cells the clause spent buy `x unhide` back onto the frame that had
+// shed it.
+func TestTheArchiveHideNoteNamesNoWayBackIn(t *testing.T) {
+	sc := sceneTwoTools()
+	for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+			old := lipgloss.ColorProfile()
+			lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+			m := r89ttArchiveHide(sc, wh[0], wh[1])
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			foot := rows[len(rows)-1]
+			if !m.archiveView {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: this stand is not the archive", wh[0], wh[1])
+			}
+			s, ok := m.selected()
+			if !ok || !m.hidden[s.Info.Key()] {
+				lipgloss.SetColorProfile(old)
+				t.Fatalf("%dx%d: `x` did not hide the row the archive is drawing", wh[0], wh[1])
+			}
+			if !strings.Contains(foot, sessionName(s.Info)+" is hidden") {
+				t.Errorf("%dx%d (%v): the hide note stopped naming the row: %q", wh[0], wh[1], prof, foot)
+			}
+			if strings.Contains(foot, "A, then x") {
+				t.Errorf("%dx%d (%v): the archive's own hide note sends the person out and back: %q",
+					wh[0], wh[1], prof, foot)
+			}
+			if !strings.Contains(foot, "x unhide") {
+				t.Errorf("%dx%d (%v): the frame names no way back for the row it just hid: %q",
+					wh[0], wh[1], prof, foot)
+			}
+			lipgloss.SetColorProfile(old)
+		}
+	}
+
+	// The other side, so the fix cannot be "drop the route everywhere":
+	// off the archive the strip's route is the only way named, and the
+	// note keeps it wherever the row has the cells for it.
+	m := sceneModel(sceneFleetHygiene(), 152, 40)
+	for _, k := range []string{"j", "x"} {
+		pressKey(m, k)
+		poll(m, sceneFleetHygiene())
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	if foot := rows[len(rows)-1]; !strings.Contains(foot, "A, then x") {
+		t.Errorf("the board's own hide note lost the way to the archive: %q", foot)
 	}
 }

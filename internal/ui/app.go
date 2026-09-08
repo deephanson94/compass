@@ -1781,6 +1781,15 @@ func (m *Model) toggleHidden() {
 		name = strconv.Itoa(d) + " " + name
 	}
 	m.note = name + " is hidden · A, then x" // the strip's own form: it fits eighty columns beside the keys
+	if m.archiveView {
+		// In the archive the route is the view the person is standing
+		// in: `A, then x` sends them out and back for a key this very
+		// frame's footer names, `x unhide` — the repetition #233 folded,
+		// and #232's rule that a note yields to the key it names. At
+		// eighty the eleven cells the clause spends are what `x unhide`
+		// costs, so the note buys back the key it was pointing at.
+		m.note = name + " is hidden"
+	}
 	if m.sharesTmux(s) {
 		if pane, ok := m.panes[key]; ok {
 			m.note += " · " + mirrorMark + " " + pane.Target // the last clause, the first shed
@@ -1804,7 +1813,17 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 	switch {
 	case !s.Live:
 		return "the archive is already off the board"
-	case m.liveCount() <= 1 && !m.archiveView:
+	case m.liveCount() <= 1:
+		// The rule is the fleet's, not the view's: `liveCount` counts
+		// what is `onBoard`, the same number in the archive as on the
+		// board. The `&& !m.archiveView` this clause carried was written
+		// when the count was `len(m.viewOrder())`, which in the archive
+		// is the archive's own list (round 15) — so the scope came off
+		// the number and stayed on the clause, and `x` pressed in the
+		// archive on the one live session took it off a board the frame
+		// does not draw, leaving `nothing live` and `○ all quiet` beside
+		// a trail still drawing `● scout thinking… for 40s`. The same
+		// key on the same session one `A` away already says this.
 		return "the live one stays"
 	case s.Snap.APIError:
 		return name + " stays · dead on the API"
