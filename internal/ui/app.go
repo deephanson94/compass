@@ -1168,13 +1168,12 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// chapter is `[` / `]`: the previous or next prompt, treated as a chapter
-// of the trail. A day-long journey is a dozen of your own prompts with the
-// work between them, and "take me to where I said 'now the audit log'" is
-// what getting back to an hour actually means. At Lv1 the viewport opens on
-// the prompt; at Lv2 the cursor lands on it. The note says which chapter
-// this is and when it began.
-func (m *Model) chapter(key string) {
+// chapterStand is where the chapter keys stand: the trail's rows, the
+// indices of its prompts, the map from row to document line, and `at` —
+// the cursor at Lv2, the top of the viewport at Lv1. `chapter` moves from
+// it and `chapterKeysMove` asks whether there is anywhere to move to, so
+// the key the footer offers and the answer the press gives are one thing.
+func (m *Model) chapterStand() ([]TrailRow, []int, map[int]int, int) {
 	rows := TrailRows(m.trail, m.level)
 	var prompts []int // indices into rows
 	for i, r := range rows {
@@ -1183,8 +1182,7 @@ func (m *Model) chapter(key string) {
 		}
 	}
 	if len(prompts) == 0 {
-		m.note = "no prompts in this trail"
-		return
+		return rows, nil, nil, -1
 	}
 	w, h := m.trailBox()
 	o := m.trailOpts(w, h)
@@ -1195,7 +1193,6 @@ func (m *Model) chapter(key string) {
 			docRow[r] = line
 		}
 	}
-	// Where we are: the cursor at Lv2, the top of the viewport at Lv1.
 	at := -1
 	if m.level >= levelWaypoints && m.cursor >= 0 {
 		at = m.cursor
@@ -1210,6 +1207,33 @@ func (m *Model) chapter(key string) {
 		if at < 0 {
 			at = len(rows)
 		}
+	}
+	return rows, prompts, docRow, at
+}
+
+// chapterKeysMove reports whether `[` or `]` moves anything from where the
+// trail stands: a prompt before it, or a prompt after it.
+func (m *Model) chapterKeysMove() bool {
+	_, prompts, _, at := m.chapterStand()
+	for _, p := range prompts {
+		if p != at {
+			return true
+		}
+	}
+	return false
+}
+
+// chapter is `[` / `]`: the previous or next prompt, treated as a chapter
+// of the trail. A day-long journey is a dozen of your own prompts with the
+// work between them, and "take me to where I said 'now the audit log'" is
+// what getting back to an hour actually means. At Lv1 the viewport opens on
+// the prompt; at Lv2 the cursor lands on it. The note says which chapter
+// this is and when it began.
+func (m *Model) chapter(key string) {
+	rows, prompts, docRow, at := m.chapterStand()
+	if len(prompts) == 0 {
+		m.note = "no prompts in this trail"
+		return
 	}
 	target := -1
 	if key == "]" {
@@ -1247,6 +1271,8 @@ func (m *Model) chapter(key string) {
 		m.cursor = target
 		m.cursorMove(0)
 	} else {
+		w, h := m.trailBox()
+		doc, _ := trailDoc(m.trail, m.trailOpts(w, h))
 		line := docRow[target]
 		m.trailScroll = clampScroll(line, len(doc), h)
 		m.trailPinned = m.trailScroll >= lastScreenful(len(doc), h)
@@ -3319,7 +3345,8 @@ func (m *Model) keymapAt(w int) string {
 // footerWith renders the keymap and the note into one row w wide.
 func (m *Model) footerWith(keys string, w int) string {
 	if m.note == "" {
-		keys = shedKeys(keys, m.footerDrops(false), func(k string) bool { return lipgloss.Width(k) <= w })
+		fits := func(k string) bool { return lipgloss.Width(k) <= w }
+		keys = shedKeys(keys, m.chapterYield(keys, m.footerDrops(false), fits), fits)
 		return dimStyle.Render(clip(keys, w))
 	}
 	var left string
@@ -3402,6 +3429,7 @@ func (m *Model) footerWith(keys string, w int) string {
 	// only as far as the note's shortest form needs, and the note then
 	// takes the room the keys leave — "◉ 11/12" beside 37 blank columns
 	// and three shed keys said less than either half could.
+	drops = m.chapterYield(whole, drops, func(k string) bool { return fitsWith(k, note) })
 	forms := noteForms(note)
 	// A chapter note's keys are shed against its first clause; any other
 	// note keeps its clauses (the way back, "A, then x") over the optional
@@ -3717,6 +3745,56 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 		}
 	}
 	return build()
+}
+
+// chapterYield is the drop order with `[ ] chapters` first to go, on a
+// trail whose one chapter the trail already stands on: `[` answers `no
+// earlier prompt` and `]` answers `no later prompt`, whichever is pressed
+// and at every width, so the fifteen cells the widest optional key on the
+// row spends buy a promise the next keypress refuses. #83 dropped the page
+// keys from a trail that fits, #56 the whole set from a lane's page with
+// no turns, #200 the scroll keys from a reader page all on screen: a key
+// that cannot move is not on the row. The cells go to a key that acts and
+// — as with #201's own yield and #207's step — only where one comes back,
+// so where nothing is shed the key stands and a wide footer still names
+// what `[` and `]` are (#193). Under a chapter key's own note the key the
+// note is about stays where it is (#24, #57).
+func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
+	const chapters = " · [ ] chapters"
+	if m.chapterNote() || !strings.Contains(whole, chapters) || m.chapterKeysMove() {
+		return drops
+	}
+	order := make([]string, 0, len(drops)+1)
+	order = append(order, chapters)
+	for _, d := range drops {
+		if d != chapters {
+			order = append(order, d)
+		}
+	}
+	if keysActGained(shedKeys(whole, drops, fits), shedKeys(whole, order, fits), order) == "" {
+		return drops
+	}
+	return order
+}
+
+// keysActGained is the key that acts that `now` names and `was` does not,
+// "" when there is none or when `now` drops a key `was` drew. The chapter
+// keys are the cells being spent; an attach that cannot work is a refusal,
+// not a key (#206); the attach aside is not a key at all (#55); and the
+// page key is the first fragment the row gives up, a shortcut for a
+// distance `j` covers and one the help teaches (#42, #51). None of the
+// four is the gain that buys the trade.
+func keysActGained(was, now string, drops []string) string {
+	for _, d := range drops {
+		in, had := strings.Contains(now, d), strings.Contains(was, d)
+		if had && !in && d != " · [ ] chapters" {
+			return "" // something the row drew is gone
+		}
+		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" {
+			return d
+		}
+	}
+	return ""
 }
 
 // chapterNote says whether the note is a chapter key's: a chapter counted,

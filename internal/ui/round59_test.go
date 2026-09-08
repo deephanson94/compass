@@ -3481,3 +3481,98 @@ func TestTheRowLeavesThePresentToTheTrailTheBoxLeavesStanding(t *testing.T) {
 		}
 	}
 }
+
+// TestTheChapterKeysYieldWhereTheyCannotMove pins round seventy-nine's one
+// thing: on a trail of one chapter, with the trail standing on it, `[`
+// answers `no earlier prompt` and `]` answers `no later prompt` — whichever
+// is pressed, at every width — so the fifteen cells `[ ] chapters` spends,
+// the widest optional key on the row, buy a promise the next keypress
+// refuses. At eighty the Lv2 footer of the one live session drew
+// `j/k rows · [ ] chapters · r reply · tab deeper · esc back · ? help ·
+// q quit` and named no way to attach: `enter attach`, fifteen cells and
+// §3's only write action, was shed for a key that cannot move. #83 dropped
+// the page keys from a trail that fits, #56 the whole set from a lane's
+// page with no turns, #200 the scroll keys from a page all on screen — a
+// key that cannot move is not on the row. Both sides: where the cells buy
+// nothing back the key stands (#193's wide archive footer), and under a
+// chapter key's own note the key the note is about stays (#24, #57).
+func TestTheChapterKeysYieldWhereTheyCannotMove(t *testing.T) {
+	forceASCII(t)
+	footer := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	for _, c := range []struct {
+		name  string
+		scene func() scene
+		w, h  int
+		// The route to a Lv2 footer whose cells are short: at eighty the
+		// keymap alone overruns the row, at a hundred a note takes the
+		// cells (`ctrl+u` on a trail that fits — `no leg to move to`).
+		after []string
+		gains string
+	}{
+		{"second-day", sceneSecondDay, 80, 24, nil, "enter attach"},
+		{"first-session", sceneFirstSession, 80, 24, nil, "enter attach"},
+		{"second-day", sceneSecondDay, 100, 30, []string{"ctrl+u"}, "enter attach"},
+		{"first-session", sceneFirstSession, 100, 30, []string{"ctrl+u"}, "enter attach"},
+	} {
+		// The key cannot move: both chapter keys refuse from this stand.
+		for _, r := range []struct{ key, want string }{
+			{"[", "no earlier prompt"}, {"]", "no later prompt"},
+		} {
+			sc := c.scene()
+			m := sceneModel(sc, c.w, c.h)
+			pressKey(m, "tab")
+			poll(m, sc)
+			pressKey(m, r.key)
+			if m.note != r.want {
+				t.Fatalf("%s %dx%d: `%s` moves from this stand: %q", c.name, c.w, c.h, r.key, m.note)
+			}
+			// #24 still holds: the key the note is about stays on the row.
+			if foot := footer(m); !strings.Contains(foot, "[ ] chapters") {
+				t.Errorf("%s %dx%d: the chapter key's own note sheds the key it is about: %q",
+					c.name, c.w, c.h, foot)
+			}
+		}
+		// And the footer whose cells are short spends none on it.
+		sc := c.scene()
+		m := sceneModel(sc, c.w, c.h)
+		pressKey(m, "tab")
+		poll(m, sc)
+		for _, k := range c.after {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		foot := footer(m)
+		if strings.Contains(foot, "[ ] chapters") {
+			t.Errorf("%s %dx%d: the footer offers a chapter key that refuses on both sides: %q",
+				c.name, c.w, c.h, foot)
+		}
+		if !strings.Contains(foot, c.gains) {
+			t.Errorf("%s %dx%d: the cells the chapter key spends buy no key that acts: %q",
+				c.name, c.w, c.h, foot)
+		}
+	}
+	// A step that buys nothing is not taken: at 220 the archive's own list
+	// sheds no key, so the footer still names what `[` and `]` are (#193).
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneSecondDay()
+		m := sceneModel(sc, size[0], size[1])
+		pressKey(m, "A")
+		poll(m, sc)
+		if foot := footer(m); !strings.Contains(foot, "[ ] chapters") {
+			t.Errorf("%dx%d: a yield that buys nothing took the archive footer's chapter keys: %q",
+				size[0], size[1], foot)
+		}
+	}
+	// And where a chapter key does move, it stays: the long day's trail
+	// has a dozen prompts and `[` steps them.
+	sc := sceneVeryLong()
+	m := sceneModel(sc, 80, 24)
+	pressKey(m, "tab")
+	poll(m, sc)
+	if foot := footer(m); !strings.Contains(foot, "[ ] chapters") {
+		t.Errorf("very-long 80x24: a trail of many chapters lost the keys that step them: %q", foot)
+	}
+}
