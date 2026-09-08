@@ -2203,3 +2203,86 @@ func TestTheSentTraceSaysWhen(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 73, two-tools ----
+// The mirror's undo is named on every frame the mirror owns, not only on the
+// frame `m` was pressed on. #62 holds `m` back from the shed while its own
+// note stands; one keypress later the note is gone, and at 120 columns `m`
+// went with it — so the session view drew the pane's own panel
+// ("⌁ dev:1.0 · the transcript, until the pane is captured") under a footer
+// naming no way back to the conversation, while the same frame at 152 and 220
+// named `m conversation`. The key the mirror replaced the panel with outlasts
+// `h/l session`, and the row keeps `enter attach` and `a ask` (#168).
+func TestTheMirrorsUndoIsNamedWhileTheMirrorStands(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneTwoTools()
+		m := sceneModel(sc, size[0], size[1])
+		// The mirror is turned on from the board, then a session is opened:
+		// two keypresses later the note is gone and the pane is the panel.
+		for _, k := range []string{"m", "2", "tab"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		panel, foot := false, ""
+		for _, l := range rows {
+			if strings.Contains(l, "the transcript, until the pane is captured") {
+				panel = true
+			}
+			if strings.Contains(l, "? help · q quit") {
+				foot = strings.TrimRight(l, " ")
+			}
+		}
+		if !panel {
+			t.Fatalf("%dx%d: the mirror does not own the panel here", size[0], size[1])
+		}
+		if !strings.Contains(foot, " · m conversation") {
+			t.Errorf("%dx%d: the mirror stands and no key undoes it: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+		for _, key := range []string{" · enter attach", " · a ask"} {
+			if !strings.Contains(foot, key) {
+				t.Errorf("%dx%d: naming `m` cost the row %q: %q", size[0], size[1], strings.TrimSpace(key), strings.TrimSpace(foot))
+			}
+		}
+	}
+}
+
+// ---- round 73, two-tools (second finding) ----
+// The answer's digit is the row's. #128 gives a trace note's bytes to the
+// row that draws them — "↪ sent to ⌁ dev:2.0" over a row saying
+// `↪ sent "go on"` — and the digit is the answer's bytes: which line went.
+// The footer kept it anyway, so `↪ answered 1 · to ⌁ ops:0.0` stood eight
+// cells wider than it needed over a row three lines up saying
+// `↪ answered 1 · 0s ago`, and cost the hundred-column footer `x hide` and
+// the 152 footer the attach aside.
+func TestTheAnswersDigitIsTheRows(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
+		sc := sceneTwoTools()
+		m := sceneModel(sc, size[0], size[1])
+		for _, k := range []string{"r", "1"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := strings.TrimRight(rows[len(rows)-1], " ")
+		row := false
+		for _, l := range rows[:len(rows)-1] {
+			for _, seg := range strings.Split(l, "│") {
+				if strings.HasPrefix(strings.TrimSpace(seg), "↪ answered 1") {
+					row = true
+				}
+			}
+		}
+		if !row {
+			t.Fatalf("%dx%d: no drawn row carries the trace", size[0], size[1])
+		}
+		if !strings.Contains(foot, "to ⌁ ops:0.0") {
+			t.Fatalf("%dx%d: not the trace note: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+		if strings.Contains(foot, "answered 1") {
+			t.Errorf("%dx%d: the note repeats the row's digit: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+	}
+}

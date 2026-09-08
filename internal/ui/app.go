@@ -3213,7 +3213,7 @@ func (m *Model) keymapAt(w int) string {
 // footerWith renders the keymap and the note into one row w wide.
 func (m *Model) footerWith(keys string, w int) string {
 	if m.note == "" {
-		keys = shedKeys(keys, m.shedOrder(false), func(k string) bool { return lipgloss.Width(k) <= w })
+		keys = shedKeys(keys, m.footerDrops(false), func(k string) bool { return lipgloss.Width(k) <= w })
 		return dimStyle.Render(clip(keys, w))
 	}
 	var left string
@@ -3223,18 +3223,7 @@ func (m *Model) footerWith(keys string, w int) string {
 	// The keys a note is about — the chapters it counts, the reply it
 	// reports — go last: a footer that dropped `[ ] turns` on the frame
 	// that said "❯ 3/12" read as the key having gone.
-	drops := m.shedOrder(m.chapterNote())
-	if m.mirrorNote() {
-		// `m` is the one key that replaces the panel, and its note is the
-		// frame its undo must be named on: the key is not optional there,
-		// whichever side the toggle is on (#62).
-		for i := 0; i < len(drops); i++ {
-			if drops[i] == " · m live pane" || drops[i] == " · m conversation" {
-				drops = append(drops[:i], drops[i+1:]...)
-				i--
-			}
-		}
-	}
+	drops := m.footerDrops(m.chapterNote())
 	note := m.note
 	// The trace note's quote is the row's: where a drawn row carries the
 	// bytes that went, the footer says only where they went — the row
@@ -3281,6 +3270,15 @@ func (m *Model) footerWith(keys string, w int) string {
 		// label, and goes before the destination does.
 		if i, j := strings.Index(note, " · "), strings.LastIndex(note, " · "); i > 0 && i != j && strings.Contains(note[i:j], `"`) {
 			note = note[:i] + note[j:]
+		}
+	}
+	if strings.HasPrefix(note, "↪ answered") && !fits(note) {
+		// The digit is the answer's quote — which line went — and a
+		// drawn row of this frame carries it: the note keeps the verb
+		// and the destination, the shape "↪ sent to ⌁ dev:2.0" already
+		// has (#128).
+		if i := strings.Index(note, " · "); i > 0 && m.rowCarriesTrace(note[:i]) {
+			note = "↪ answered" + note[i+len(" ·"):]
 		}
 	}
 	if i := strings.LastIndex(note, " · "); i > 0 && !fits(note) && strings.HasPrefix(note[i+len(" · "):], "to "+mirrorMark) {
@@ -3459,6 +3457,28 @@ func (m *Model) chapterNote() bool {
 // mirrorNote says whether the note is `m`'s own: the frame it was pressed on.
 func (m *Model) mirrorNote() bool {
 	return m.note == "the live pane" || m.note == "the conversation" || strings.HasPrefix(m.note, "mirror on")
+}
+
+// footerDrops is the shed order with `m` held back where the mirror owns the
+// panel: `m` is the one key that replaces the panel, so its undo is named on
+// the frames the mirror stands on, not only the frame it was pressed on —
+// one keypress later the note is gone and at 120 columns the key went with
+// it, over a panel the mirror still owned (#62's rule, off its own frame).
+// Under another note the note's own keys come first (#168): the news is one
+// keypress old, and `m` would cost the row `enter attach` and `a ask`.
+func (m *Model) footerDrops(chapter bool) []string {
+	drops := m.shedOrder(chapter)
+	if !m.mirrorNote() && !(m.note == "" && m.mirrorShown()) {
+		return drops
+	}
+	kept := drops[:0]
+	for _, drop := range drops {
+		if drop == " · m live pane" || drop == " · m conversation" {
+			continue
+		}
+		kept = append(kept, drop)
+	}
+	return kept
 }
 
 // shedOrder is the order the footer gives up its optional keys in, first
@@ -3979,6 +3999,19 @@ func levelKeyLost(base, keys string) bool {
 	for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
 		if strings.Contains(base, k) && !strings.Contains(keys, k) {
 			return true
+		}
+	}
+	return false
+}
+
+// rowCarriesTrace says whether a drawn row of this frame already begins with
+// the trace's own head — "↪ answered 1".
+func (m *Model) rowCarriesTrace(head string) bool {
+	for _, row := range m.bodyRows {
+		for _, seg := range strings.Split(ansi.Strip(row), "│") {
+			if strings.HasPrefix(strings.TrimSpace(seg), head) {
+				return true
+			}
 		}
 	}
 	return false
