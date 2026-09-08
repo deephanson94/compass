@@ -1112,7 +1112,18 @@ func (m *Model) secondLineTagged(s fleet.Session, w int, tagged bool) string {
 		// band draws, which is what answers "do I want this one back"
 		// (#47): eleven of twelve archived rows said nothing about
 		// whether the day went green or red (#103). It goes last, so a
-		// narrow archive sheds it first.
+		// narrow archive sheds it first. On the selected row the identity
+		// header of the same frame names this very session's tool, so the
+		// word goes where the header says it and the branch and the
+		// verdict take the cells — `chore/deps · ✓ shipped`, not
+		// `claude · chor… · ✓ shipped` under a header ending `· claude`.
+		// #196's split between header and row, on the archived half of
+		// the same list; an unselected row keeps its word, which is what
+		// tells it from its neighbour where the archive holds two (#80).
+		if word != "" && s.Info.Key() == m.selectedKey &&
+			strings.Contains(ansi.Strip(m.headerLine(m.width)), strings.TrimPrefix(word, " · ")) {
+			word = ""
+		}
 		line := strings.TrimPrefix(word+" · "+branchOf(s.Info), " · ")
 		if v := m.verdictClause(s); v != "" {
 			// The band's own ladder, not all or nothing: the counts go

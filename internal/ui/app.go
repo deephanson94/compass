@@ -3664,6 +3664,16 @@ func (m *Model) shedOrder(chapter bool) []string {
 			// "enter · no pane" is a refusal, and a refusal goes before
 			// the way in: the archive's `tab deeper` outlasts it (#52).
 			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · enter · no pane", " · tab deeper", " · enter attach", " · a ask", " · x unhide"}
+			if m.enterKeymap() != "enter · no pane" {
+				// #52 ranks `a` with the archive's own keys because in
+				// the archive it is "the reason to be there — a claude
+				// on a session you can no longer attach to". Where the
+				// row's own `enter` says `enter attach`, that reason is
+				// not this frame's: the session is still there to
+				// attach to, and `a ask` is a key that acts on a row,
+				// which the way in outlasts (#39).
+				own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · enter · no pane", " · tab deeper", " · enter attach", " · x unhide"}
+			}
 		}
 	}
 	order = append(order, own...)

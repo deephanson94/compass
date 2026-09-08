@@ -126,7 +126,10 @@ func TestTheArchiveRowSaysItsVerdict(t *testing.T) {
 	if !m.archiveView {
 		t.Fatalf("2 did not open the archive:\n%s", view)
 	}
-	if !strings.Contains(view, "claude · fix/api-timeouts · ✗ red") {
+	// The selected row sheds the tool word the identity header of the
+	// same frame draws (#196's split, on the archived half): what this
+	// test asserts is the verdict, which is unmoved.
+	if !strings.Contains(view, "fix/api-timeouts · ✗ red") {
 		t.Errorf("the archive row says nothing of whether the day went red:\n%s", view)
 	}
 }
@@ -2702,6 +2705,104 @@ func TestTheArchivesHiddenRowSaysWhatTheHeaderDoesNot(t *testing.T) {
 			if strings.Contains(head, c) && strings.Contains(row, c) {
 				t.Errorf("%dx%d: the hidden row repeats the header's %q: %q under %q", size[0], size[1], c, row, strings.TrimSpace(head))
 			}
+		}
+	}
+}
+
+// ---- round 76, second-day, the one thing ----
+// The archive's selected row says what the header does not. #196 split the
+// header from the row for the archive's hidden *live* row; the archived
+// row three lines below it in secondLineTagged kept drawing the tool word
+// the identity header of the same frame draws whole, and paid for it in
+// the one clause the row alone carries: `claude · chor… · ✓ shipped` under
+// `⌂ compass · 8 add --json to every command · claude`, four letters of
+// `chore/deps`, and `claude · fix/api-timeou… · ✗` where the whole branch
+// and the verdict's word both fit without it. An unselected row keeps its
+// word — that is what tells it from its neighbour where the archive holds
+// two tools (#80).
+func TestTheArchiveSelectedRowShedsTheToolWordTheHeaderSays(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}} {
+		for _, route := range [][]string{{"A"}, {"A", "8"}, {"A", "8", "tab"}} {
+			m := sceneModel(sceneSecondDay(), size[0], size[1])
+			for _, k := range route {
+				pressKey(m, k)
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			head := rows[0]
+			sel := -1
+			for i, l := range rows {
+				if strings.Contains(strings.SplitN(l, "│", 2)[0], "▸") && strings.Contains(l, "○") {
+					sel = i
+					break
+				}
+			}
+			if sel < 0 || sel+1 >= len(rows) {
+				t.Fatalf("%dx%d %v: no selected archive row:\n%s", size[0], size[1], route, strings.Join(rows, "\n"))
+			}
+			second := strings.TrimSpace(strings.SplitN(rows[sel+1], "│", 2)[0])
+			for _, word := range []string{"claude", "opencode"} {
+				if strings.HasPrefix(second, word+" ·") && strings.Contains(head, word) {
+					t.Errorf("%dx%d %v: the archive's selected row repeats the tool word its own header draws: %q under %q",
+						size[0], size[1], route, second, strings.TrimSpace(head))
+				}
+			}
+			if strings.Contains(second, "…") {
+				t.Errorf("%dx%d %v: the archive's selected row clips the one clause it alone carries: %q under %q",
+					size[0], size[1], route, second, strings.TrimSpace(head))
+			}
+		}
+	}
+}
+
+// ---- round 76, two-tools, the one thing ----
+// The archive's list keeps the way deeper. #52 ranks `a ask` with the
+// archive's own keys because there it is "the reason to be there — a
+// claude on a session you can no longer attach to", and on the eighty-
+// column archive list that rank cost the footer `tab deeper`, the frame's
+// only naming of the way deeper — on frames whose own `enter` key says
+// `enter attach`, so the session is still there to attach to and the
+// reason is not theirs. Where the row can be attached, `a ask` is a key
+// that acts on a row, which the way in outlasts (#39).
+func TestTheArchivesListKeepsTheWayDeeper(t *testing.T) {
+	forceASCII(t)
+	for _, tc := range []struct {
+		name string
+		sc   func() scene
+		keys []string
+	}{
+		{"two-tools", sceneTwoTools, []string{"j", "x", "A"}},
+		{"subagents", sceneSubagents, []string{"x", "A"}},
+		{"many-idle", sceneManyIdle, []string{"x", "A"}},
+	} {
+		sc := tc.sc()
+		m := sceneModel(sc, 80, 24)
+		for _, k := range tc.keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := ""
+		for _, r := range rows {
+			if strings.Contains(r, "q quit") {
+				foot = strings.TrimSpace(r)
+			}
+		}
+		if foot == "" || !strings.Contains(foot, "A fleet") {
+			t.Fatalf("%s: not the archive list's footer: %q", tc.name, foot)
+		}
+		if !strings.Contains(foot, "enter attach") {
+			continue // #52's reason holds: this row cannot be attached to
+		}
+		named := false
+		for _, k := range []string{"tab deeper", "tab session", "tab reader"} {
+			if strings.Contains(foot, k) {
+				named = true
+			}
+		}
+		if !named {
+			t.Errorf("%s at 80x24: the archive list's footer names no way deeper beside %q: %q",
+				tc.name, "enter attach", foot)
 		}
 	}
 }
