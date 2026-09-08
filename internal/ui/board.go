@@ -1539,6 +1539,16 @@ func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
 		switch {
 		case len([]rune(verb+quote+age)) <= w:
 			trace = verb + quote + age
+		case sent.answer == 0 && fitQuoteMin(verb+quote, w-len([]rune(age)), 8) != "":
+			// The clock is the other half of the fact: a line sent and
+			// not taken is read by how long it has stood, and the row
+			// beside it draws every other clock the column has (#90).
+			// #33 kept the bytes over the clock against a bare "↪ sent ·
+			// 0s ago"; the quote's tail is not the bytes — it yields for
+			// the clock while eight cells of it survive, the cut
+			// fitQuoteMin already calls readable, and below that the
+			// bytes stay whole as #33 has it.
+			trace = fitQuoteMin(verb+quote, w-len([]rune(age)), 8) + age
 		case sent.answer == 0 && len([]rune(verb+quote)) <= w:
 			trace = verb + quote
 		case sent.answer == 0 && fitQuoteMin(verb+quote, w, 3) != "":

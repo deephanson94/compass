@@ -162,7 +162,9 @@ func TestTheTraceRidesUnderTheFleetRow(t *testing.T) {
 		t.Fatal("1 sent nothing")
 	}
 	m.Update(cmd())
-	if view := ansi.Strip(m.View()); !strings.Contains(view, `↪ sent "please continue"`) {
+	// The literal is a proxy for "the entry carries the trace": at this
+	// width the row yields the quote's tail to the clock (#33's ladder).
+	if view := ansi.Strip(m.View()); !strings.Contains(view, `↪ sent "please`) {
 		t.Errorf("the fleet entry should carry the trace:\n%s", view)
 	}
 }

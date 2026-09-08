@@ -2160,3 +2160,46 @@ func TestTheFleetsSearchCountsWhatTheBoardCanDraw(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 73, second-day ----
+// A sent trace says when. The row that reports a line compass typed and
+// the session has not yet taken carries the proof of what went and the
+// clock that says how long it has stood (#33, #90). At eighty the quote
+// was keeping its tail and dropping the clock, so `↪ sent "please
+// continue"` stood untimed two rows under `40s` and `50s ago`, while the
+// same column on the same walkthrough drew `↪ sent "go on" · 0s ago`
+// once the person happened to type a shorter line. The quote yields its
+// tail for the clock while a readable stub of it survives.
+func TestTheSentTraceSaysWhen(t *testing.T) {
+	forceASCII(t)
+	quoted := regexp.MustCompile(`↪ sent "[^"]*"`)
+	aged := regexp.MustCompile(`↪ sent "[^"]*"\s+·\s+\d+[smhd] ago`)
+	for _, scene := range []struct {
+		name string
+		make func() scene
+	}{{"second-day", sceneSecondDay}, {"first-session", sceneFirstSession}} {
+		sc := scene.make()
+		m := sceneModel(sc, 80, 24)
+		for _, k := range []string{"r", "1"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		view := ansi.Strip(m.View())
+		hit := false
+		for _, l := range strings.Split(view, "\n") {
+			for _, seg := range strings.Split(l, "│") {
+				if !quoted.MatchString(seg) {
+					continue
+				}
+				hit = true
+				if !aged.MatchString(seg) {
+					t.Errorf("%s 80x24: the row says a line went and not when: %q",
+						scene.name, strings.TrimSpace(seg))
+				}
+			}
+		}
+		if !hit {
+			t.Fatalf("%s 80x24: the route draws no sent trace:\n%s", scene.name, view)
+		}
+	}
+}
