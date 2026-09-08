@@ -8832,3 +8832,77 @@ func TestTheReplyCardWearsTheNumberTheArchiveDraws(t *testing.T) {
 		lipgloss.SetColorProfile(old)
 	}
 }
+
+// ---- round 91, second-day ----
+// A line sent from a view a search has emptied leaves the trace note and a
+// row whose movement key cannot move. The row must not keep that key while
+// giving up every key that acts: at eighty the footer read ` j/k move · ?
+// help · q quit` beside `↪ sent "please continue" · to ⌁ main:0.0`, naming
+// neither the pane it had just written to nor the way deeper, and one
+// keypress later — under the shorter note `no row to move to` — both came
+// back (#210, #213, #216; §5 keeps the destination clause).
+func TestTheSentRowDoesNotKeepAMoveThatCannotMove(t *testing.T) {
+	forceASCII(t)
+	acts := []string{"enter attach", "tab deeper", "tab reader", "tab session", "r reply", "a ask", "/ search", "g grab", "x hide", "space unfold"}
+	checked := 0
+	for _, sc := range []scene{sceneSecondDay(), sceneFirstSession(), sceneSubagents(), sceneVeryLong()} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				m := sceneModel(sc, w, h)
+				lipgloss.SetColorProfile(prof)
+				for _, k := range []string{"/", "zzqqnothing", "enter", "r", "1"} {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				rows := strings.Split(ansi.Strip(m.View()), "\n")
+				foot := rows[len(rows)-1]
+				lipgloss.SetColorProfile(old)
+				if !strings.Contains(foot, "↪ ") {
+					t.Fatalf("%s %dx%d %v: no trace note on the sent row: %q", sc.name, w, h, prof, foot)
+				}
+				if !strings.Contains(foot, mirrorMark) {
+					t.Errorf("%s %dx%d %v: the trace lost its destination: %q", sc.name, w, h, prof, foot)
+				}
+				checked++
+				if !strings.Contains(foot, "j/k ") {
+					continue
+				}
+				// The row keeps its movement key: on this frame the view
+				// draws no row, so the key cannot move — it may stand
+				// only beside a key that acts.
+				if len(m.viewOrder()) > 1 {
+					continue
+				}
+				named := false
+				for _, a := range acts {
+					if strings.Contains(foot, a) {
+						named = true
+					}
+				}
+				if !named {
+					t.Errorf("%s %dx%d %v: the sent row kept a move that cannot move and named no key that acts: %q", sc.name, w, h, prof, foot)
+				}
+			}
+		}
+	}
+	// The frame the rule was found on.
+	lipgloss.SetColorProfile(termenv.Ascii)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	for _, k := range []string{"/", "pytest", "enter", "r", "1"} {
+		pressKey(m, k)
+		poll(m, sceneSecondDay())
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	foot := rows[len(rows)-1]
+	if !strings.Contains(foot, "enter attach") {
+		t.Errorf("second-day 80x24 sent row names no way to the pane it wrote to: %q", foot)
+	}
+	if !strings.Contains(foot, `↪ sent "please continue" · to `+mirrorMark+" main:0.0") {
+		t.Errorf("second-day 80x24 sent row lost its trace: %q", foot)
+	}
+	if checked == 0 {
+		t.Fatal("nothing checked")
+	}
+}

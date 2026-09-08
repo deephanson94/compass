@@ -3682,7 +3682,27 @@ func (m *Model) footerWith(keys string, w int) string {
 		// A trace's destination is the one clause that proves where a
 		// line landed (§5): it outranks the optional keys and yields only
 		// to the way out and the help.
-		if k := shed(note, " · ? help"); fitsWith(k, note) {
+		k := shed(note, " · ? help")
+		// The stuck key yields here too. This row is shed before the
+		// yield below is taken, so it was shed against the unyielded
+		// rank: at eighty a line sent from a list a search had emptied
+		// left ` j/k move · ? help · q quit` beside `↪ sent "please
+		// continue" · to ⌁ main:0.0` — the movement key, which on that
+		// frame answers `no row to move to`, held while `enter attach`
+		// and `tab deeper` went, and one keypress later, under the
+		// shorter note, both came back. A key that cannot move is not
+		// the key a row keeps over one that acts (#210, #213, #216).
+		// The trade is taken only where the row gives up nothing else it
+		// names: the yield may buy a key that acts with a key that
+		// cannot move, never with another key that acts (#39's ranks).
+		rank := drops
+		drops = m.chapterYield(whole, drops, func(k string) bool { return fitsWith(k, note) })
+		if y := shed(note, " · ? help"); fitsWith(y, note) && yieldKeepsTheRow(k, y, m.stuckKeys(whole)) {
+			k = y
+		} else {
+			drops = rank
+		}
+		if fitsWith(k, note) {
 			keys = k
 		} else {
 			note = note[:i]
@@ -5005,6 +5025,27 @@ func (m *Model) noteLeavesTheWayBackToTheRow(note string) string {
 		}
 	}
 	return note
+}
+
+// yieldKeepsTheRow says whether the row the yielded rank sheds to still
+// names every key the plain rank's row named, bar a stuck one it gives up:
+// the yield trades a key that cannot move for one that acts, and never a
+// key that acts for another — #39's ranks stand under it (#210, #213).
+func yieldKeepsTheRow(plain, yielded string, stuck []string) bool {
+	gone := map[string]bool{}
+	for _, frag := range stuck {
+		gone[keyWord(frag)] = true
+	}
+	for _, word := range strings.Split(plain, " · ") {
+		word = strings.TrimSpace(strings.ReplaceAll(word, attachHint, ""))
+		if word == "" || gone[word] {
+			continue
+		}
+		if !strings.Contains(yielded, word) {
+			return false
+		}
+	}
+	return true
 }
 
 // levelKeyLost says whether keys, shed for a note, lost a key naming a
