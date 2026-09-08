@@ -5481,3 +5481,87 @@ func TestTheAttachRefusalStandsWithNoNoteToSayIt(t *testing.T) {
 		}
 	}
 }
+
+// Round eighty-five, the two-tools operator's one thing: the trace note
+// leaves the destination to the row that draws it.
+//
+// #128 gave the note the destination because "the row answers what, the
+// note answers where" — and `noteLeavesTheQuoteToTheRow` then trimmed the
+// row's right-aligned pane clause off before comparing, on the stated
+// reason that "the note's destination clause is never on the row". On the
+// board that reason is false: where two sessions share a tmux session the
+// card's trace row draws the full target, so at 120 on two-tools the
+// frame drew `⌁ dev:2.0` on the header, on the row the trace is about and
+// in the note, and the note's clause cost the footer `a ask`. Where a
+// drawn row carries the destination in the note's own form the note keeps
+// only its verb (#186, #205's condition); where no row does, the clause
+// stays and proves where the line landed (#39, #128).
+func TestTheTraceNoteLeavesItsDestinationToTheRow(t *testing.T) {
+	scene := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+	frame := func(name string, w, h, n int) (rows []string, footer string) {
+		sc := scene(name)
+		m := sceneModel(sc, w, h)
+		for _, k := range canonicalKeys[:n] {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		for _, l := range strings.Split(m.View(), "\n") {
+			rows = append(rows, ansi.Strip(l))
+		}
+		return rows, rows[len(rows)-1]
+	}
+	// The walkthrough's twenty-ninth key sends the typed line; the board
+	// then draws the trace on the card of the session it went to.
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		rows, foot := frame("two-tools", 120, 34, 29)
+		drawn := false
+		for i, r := range rows[1 : len(rows)-1] {
+			if strings.Contains(r, "↪ sent") && strings.Contains(r, "⌁ dev:2.0") {
+				drawn = true
+				_ = i
+			}
+		}
+		if !drawn {
+			t.Fatalf("two-tools 120: no drawn row carries the trace and its destination")
+		}
+		if strings.Contains(foot, "⌁ dev:2.0") {
+			t.Errorf("two-tools 120 (%v): the note points at a pane the row beside it draws: %q", prof, foot)
+		}
+		if !strings.Contains(foot, "↪ sent") {
+			t.Errorf("two-tools 120 (%v): the note no longer says the line went: %q", prof, foot)
+		}
+		if !strings.Contains(foot, " · a ask · ") {
+			t.Errorf("two-tools 120 (%v): the cells the clause held did not buy `a ask`: %q", prof, foot)
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	// The same rule one fleet over: the cells buy the hide key.
+	if _, foot := frame("alarm-storm", 120, 34, 29); strings.Contains(foot, "⌁ work:3.0") || !strings.Contains(foot, " · x hide · ") {
+		t.Errorf("alarm-storm 120: %q", foot)
+	}
+	// Held: where no drawn row carries the destination the note keeps it.
+	// At a hundred the list row draws the trace without its pane.
+	rows, foot := frame("two-tools", 100, 30, 29)
+	for _, r := range rows[1 : len(rows)-1] {
+		if strings.Contains(r, "↪ sent") && strings.Contains(r, "⌁ dev:2.0") {
+			t.Fatalf("two-tools 100: a row does carry the destination: %q", r)
+		}
+	}
+	if !strings.Contains(foot, "↪ sent to ⌁ dev:2.0") {
+		t.Errorf("two-tools 100: the note gave up the one clause that says where the line went: %q", foot)
+	}
+	// And at eighty on second-day, where the pane is on no row at all.
+	if _, foot := frame("second-day", 80, 24, 29); !strings.Contains(foot, "⌁ main:0.0") {
+		t.Errorf("second-day 80: %q", foot)
+	}
+}

@@ -4845,14 +4845,19 @@ func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
 	if strings.HasPrefix(note, "↪ answered") {
 		short = head + " · " + dest
 	}
+	target := strings.TrimPrefix(dest, "to ")
 	for _, row := range m.bodyRows {
 		for _, seg := range strings.Split(ansi.Strip(row), "│") {
 			t := strings.TrimSpace(seg)
 			if !strings.HasPrefix(t, "↪ ") {
 				continue
 			}
+			rowDest := ""
 			if k := strings.Index(t, mirrorMark); k > 0 {
-				t = strings.TrimSpace(t[:k]) // the row's right-aligned pane clause is its own
+				// The row's right-aligned pane clause is its own — except
+				// where it is the very pane the note is pointing at.
+				rowDest = strings.TrimSpace(t[k:])
+				t = strings.TrimSpace(t[:k])
 			}
 			if k := strings.LastIndex(t, "  "); k > 0 && strings.Contains(t[:k], `"`) {
 				// Where the fleet runs two tools the row's right-aligned
@@ -4871,10 +4876,15 @@ func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
 				// never trimmed into one that seems to (#131).
 				t = t[:j]
 			}
-			// The note's destination clause is never on the row — the
-			// row's own pane clause was just taken off — so the row is
-			// compared to the note's sentence, not to the whole note.
+			// The row's own pane clause was just taken off, so the row
+			// is compared to the note's sentence, not to the whole note.
 			if saysSame(t, note[:i]) || saysSame(t, note) {
+				if rowDest == target {
+					// The row draws the destination too, in the note's own
+					// form: the note has nothing left to point at (#128's
+					// rule, #205's condition) and keeps only its verb.
+					return head, true
+				}
 				return short, true
 			}
 		}
