@@ -699,10 +699,21 @@ func (m *Model) scrollBy(delta int) bool {
 	return m.readerTop(doc) != was
 }
 
-// readerChapter is `[` / `]` in the reader: the previous or next turn of
-// yours — the ❯ rows — which are the conversation's chapters as the
-// prompts are the trail's.
-func (m *Model) readerChapter(key string) {
+// turnStand is where the reader's turn keys stand: the document, the
+// lines its ❯ rows begin on, the turn `[ ]` last landed on (-1 when the
+// page is not standing on one) and `at`, the line the page is anchored to.
+//
+// Where the reader is: the turn it is standing on, if `[ ]` put it there;
+// otherwise the line it is anchored to — HEAD's moment, or the row the
+// trail cursor chose — or the top of the page. `[` from a fresh page
+// lands on the turn governing that line: on a short conversation that
+// fits the panel, "no earlier turn" with a turn in plain sight was false
+// on its face.
+//
+// `readerChapter` moves from this stand and `turnKeysMove` asks whether
+// there is anywhere to move to, so the key the footer offers and the
+// answer the press gives are one thing (#210's device, in the reader).
+func (m *Model) turnStand() ([]readerLine, []int, int, int) {
 	doc := m.doc(m.readerWidth())
 	var turns []int
 	for i, l := range doc {
@@ -710,16 +721,6 @@ func (m *Model) readerChapter(key string) {
 			turns = append(turns, i)
 		}
 	}
-	if len(turns) == 0 {
-		m.note = "no turns of yours in this conversation"
-		return
-	}
-	// Where the reader is: the turn it is standing on, if `[ ]` put it
-	// there; otherwise the line it is anchored to — HEAD's moment, or the
-	// row the trail cursor chose — or the top of the page. `[` from a
-	// fresh page lands on the turn governing that line: on a short
-	// conversation that fits the panel, "no earlier turn" with a turn in
-	// plain sight was false on its face.
 	cur := -1
 	for i, t := range turns {
 		if t == m.anchor {
@@ -729,6 +730,33 @@ func (m *Model) readerChapter(key string) {
 	at := m.readerTop(doc)
 	if m.anchor > at {
 		at = m.anchor
+	}
+	return doc, turns, cur, at
+}
+
+// turnKeysMove reports whether `[` or `]` moves the reader from where it
+// stands: another turn of yours to land on. Standing on the only turn,
+// both keys refuse; off any turn, one of them lands on it, since every
+// turn is either after the anchored line or on or before it.
+func (m *Model) turnKeysMove() bool {
+	_, turns, cur, _ := m.turnStand()
+	if len(turns) == 0 {
+		return false
+	}
+	if cur < 0 {
+		return true
+	}
+	return len(turns) > 1
+}
+
+// readerChapter is `[` / `]` in the reader: the previous or next turn of
+// yours — the ❯ rows — which are the conversation's chapters as the
+// prompts are the trail's.
+func (m *Model) readerChapter(key string) {
+	doc, turns, cur, at := m.turnStand()
+	if len(turns) == 0 {
+		m.note = "no turns of yours in this conversation"
+		return
 	}
 	if key == "]" {
 		for i, t := range turns {

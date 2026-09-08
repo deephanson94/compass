@@ -3760,34 +3760,65 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 // what `[` and `]` are (#193). Under a chapter key's own note the key the
 // note is about stays where it is (#24, #57).
 func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
-	const chapters = " · [ ] chapters"
-	if m.chapterNote() || !strings.Contains(whole, chapters) || m.chapterKeysMove() {
+	yield := m.chapterKeyStuck(whole)
+	if yield == "" {
 		return drops
 	}
 	order := make([]string, 0, len(drops)+1)
-	order = append(order, chapters)
+	order = append(order, yield)
 	for _, d := range drops {
-		if d != chapters {
+		if d != yield {
 			order = append(order, d)
 		}
 	}
-	if keysActGained(shedKeys(whole, drops, fits), shedKeys(whole, order, fits), order) == "" {
+	if keysActGained(shedKeys(whole, drops, fits), shedKeys(whole, order, fits), order, yield) == "" {
 		return drops
 	}
 	return order
 }
 
+// chapterKeyStuck is the chapter key this row offers that cannot move from
+// where it stands — `[ ] chapters` on the trail, `[ ] turns` in the reader
+// — or "" when the row offers neither or the key acts. The reader's key is
+// the same key one level in: the ❯ rows are the conversation's chapters as
+// the prompts are the trail's (`readerChapter`), and standing on the only
+// turn of a first prompt `[` answers `no earlier turn` and `]` answers
+// `no later turn`, whichever is pressed and at every width. Under a
+// chapter key's own note the key the note is about stays (#24, #57).
+func (m *Model) chapterKeyStuck(whole string) string {
+	if m.chapterNote() {
+		return ""
+	}
+	const chapters = " · [ ] chapters"
+	if strings.Contains(whole, chapters) && !m.chapterKeysMove() {
+		return chapters
+	}
+	const turns = " · [ ] turns"
+	if m.level >= levelReader && strings.Contains(whole, turns) && !m.turnKeysMove() {
+		return turns
+	}
+	return ""
+}
+
 // keysActGained is the key that acts that `now` names and `was` does not,
-// "" when there is none or when `now` drops a key `was` drew. The chapter
-// keys are the cells being spent; an attach that cannot work is a refusal,
+// "" when there is none or when `now` drops a key `was` drew other than
+// `yield`, the chapter key whose cells are being spent; an attach that cannot work is a refusal,
 // not a key (#206); the attach aside is not a key at all (#55); and the
 // page key is the first fragment the row gives up, a shortcut for a
 // distance `j` covers and one the help teaches (#42, #51). None of the
 // four is the gain that buys the trade.
-func keysActGained(was, now string, drops []string) string {
+func keysActGained(was, now string, drops []string, yield string) string {
+	// The aside is not a key (#55), and it is the one fragment that
+	// changes the *form* the attach key wears: a row that draws
+	// `enter attach` mid-row and then wears `enter attach (prefix d
+	// returns) · ` at its head has gained the parenthetical, not the key.
+	// Both sides are read without it, so the head form and the
+	// separator-led form name the same key on both.
+	was = strings.Replace(was, attachHint, "", 1)
+	now = strings.Replace(now, attachHint, "", 1)
 	for _, d := range drops {
 		in, had := strings.Contains(now, d), strings.Contains(was, d)
-		if had && !in && d != " · [ ] chapters" {
+		if had && !in && d != yield {
 			return "" // something the row drew is gone
 		}
 		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" {

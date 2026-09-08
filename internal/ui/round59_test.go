@@ -3576,3 +3576,108 @@ func TestTheChapterKeysYieldWhereTheyCannotMove(t *testing.T) {
 		t.Errorf("very-long 80x24: a trail of many chapters lost the keys that step them: %q", foot)
 	}
 }
+
+// TestTheTurnKeysYieldWhereTheyCannotMove pins round eighty's one thing:
+// #210's rule one level in. The reader's `[ ] turns` is the same key as the
+// trail's `[ ] chapters` — the ❯ rows are the conversation's chapters as
+// the prompts are the trail's (`readerChapter`) — and on the first prompt
+// of a live session, with the reader anchored on the only turn there is,
+// `[` answers `no earlier turn` and `]` answers `no later turn`, whichever
+// is pressed and at every width. At eighty the Lv3 footer drew
+// `space unfold · [ ] turns · esc back · A archive · ? help · q quit`,
+// sixty-six of seventy-nine cells, and named no key that acts on the
+// session it was reading: `a ask` and `enter attach` were both shed for
+// twelve cells spent on a key that refuses on both sides.
+//
+// Both sides, as #210 has them: where the cells buy nothing back the key
+// stands (152 and 220 shed nothing), under a chapter key's own note the
+// key the note is about stays (#24, #57), and where a turn key moves it
+// stays — many-idle's reader lands on `❯ 1/1` and very-long's on
+// `❯ 12/12`.
+func TestTheTurnKeysYieldWhereTheyCannotMove(t *testing.T) {
+	forceASCII(t)
+	footer := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// reader is the Lv3 conversation of the selected session: one `tab` to
+	// the trail, one more to the reader.
+	reader := func(sc scene, w, h int) *Model {
+		m := sceneModel(sc, w, h)
+		for i := 0; i < 2; i++ {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		return m
+	}
+	for _, c := range []struct {
+		name  string
+		scene func() scene
+		w, h  int
+		gains []string
+	}{
+		{"second-day", sceneSecondDay, 80, 24, []string{"a ask", "enter attach"}},
+		{"first-session", sceneFirstSession, 80, 24, []string{"a ask", "enter attach"}},
+		{"second-day", sceneSecondDay, 100, 30, []string{"/ search"}},
+		{"first-session", sceneFirstSession, 100, 30, []string{"r reply"}},
+		{"second-day", sceneSecondDay, 120, 34, []string{"r reply"}},
+	} {
+		// The key cannot move: both turn keys refuse from this stand.
+		for _, r := range []struct{ key, want string }{
+			{"[", "no earlier turn"}, {"]", "no later turn"},
+		} {
+			sc := c.scene()
+			m := reader(sc, c.w, c.h)
+			pressKey(m, r.key)
+			if m.note != r.want {
+				t.Fatalf("%s %dx%d: `%s` moves the reader from this stand: %q",
+					c.name, c.w, c.h, r.key, m.note)
+			}
+			// #24 still holds: the key the note is about stays on the row.
+			if foot := footer(m); !strings.Contains(foot, "[ ] turns") {
+				t.Errorf("%s %dx%d: the turn key's own note sheds the key it is about: %q",
+					c.name, c.w, c.h, foot)
+			}
+		}
+		// And the footer whose cells are short spends none on it.
+		foot := footer(reader(c.scene(), c.w, c.h))
+		if strings.Contains(foot, "[ ] turns") {
+			t.Errorf("%s %dx%d: the reader offers a turn key that refuses on both sides: %q",
+				c.name, c.w, c.h, foot)
+		}
+		for _, gain := range c.gains {
+			if !strings.Contains(foot, gain) {
+				t.Errorf("%s %dx%d: the cells the turn key spends buy no `%s`: %q",
+					c.name, c.w, c.h, gain, foot)
+			}
+		}
+	}
+	// A yield that buys nothing is not taken: at 152 and 220 the reader
+	// sheds no key, so the row still names what `[` and `]` are (#193).
+	for _, size := range [][2]int{{152, 40}, {220, 48}} {
+		foot := footer(reader(sceneSecondDay(), size[0], size[1]))
+		if !strings.Contains(foot, "[ ] turns") {
+			t.Errorf("%dx%d: a yield that buys nothing took the reader's turn keys: %q",
+				size[0], size[1], foot)
+		}
+	}
+	// And where a turn key does move, it stays.
+	for _, c := range []struct {
+		name  string
+		scene func() scene
+		want  string
+	}{
+		{"many-idle", sceneManyIdle, "❯ 1/1"},
+		{"very-long", sceneVeryLong, "❯ 12/12"},
+	} {
+		sc := c.scene()
+		m := reader(sc, 80, 24)
+		if foot := footer(m); !strings.Contains(foot, "[ ] turns") {
+			t.Errorf("%s 80x24: a reader whose turn keys move lost them: %q", c.name, foot)
+		}
+		pressKey(m, "[")
+		if !strings.HasPrefix(m.note, c.want) {
+			t.Errorf("%s 80x24: `[` was expected to land on %s, answered %q", c.name, c.want, m.note)
+		}
+	}
+}
