@@ -3039,3 +3039,62 @@ func TestTheSessionViewNamesTheHiddenSession(t *testing.T) {
 		}
 	}
 }
+
+// The session view's footer names the archive where no row does. #62 gave
+// the archive door to the footer "below the board's width", on the reason
+// that there the reader takes the whole screen and no band or fleet row
+// names it; #199 replaced the width test with a test of what the frame
+// drew, but left the level test where #62 had put it — the reader alone.
+// One press shallower, the session view draws the trail and the reader
+// panel and no fleet row at all, and the band takes only the digits the
+// live fleet has not used (`free := 9 - used`), so a fleet of twelve over
+// three hundred archived left eleven frames at 120, 152 and 220 naming
+// neither the count nor the key, while the same keypresses at a hundred
+// columns — where the fleet list is still beside the trail — named both.
+// The door is named once on the frame: on a row, or on the footer.
+func TestTheSessionViewsFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
+	forceASCII(t)
+	for _, c := range []struct {
+		name string
+		sc   scene
+	}{
+		{"many-idle", sceneManyIdle()},
+		{"fleet-hygiene", sceneFleetHygiene()},
+	} {
+		for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			sc := c.sc
+			m := sceneModel(sc, size[0], size[1])
+			pressKey(m, "tab")
+			poll(m, sc)
+			if m.level != levelWaypoints {
+				t.Fatalf("%s %dx%d: one tab does not reach the session view", c.name, size[0], size[1])
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			foot := rows[len(rows)-1]
+			onRow := false
+			for _, r := range rows[:len(rows)-1] {
+				// every form the door sheds to: "41 archived · A browses",
+				// "300 archived · 1 hidden · A" (#176).
+				for _, seg := range strings.Split(r, "│") {
+					i := strings.Index(seg, "archived · ")
+					if i < 0 {
+						continue
+					}
+					rest := strings.Trim(seg[i+len("archived · "):], "─ ")
+					if j := strings.LastIndex(rest, " · "); j >= 0 {
+						rest = rest[j+len(" · "):]
+					}
+					if rest == "A" || rest == "A browses" {
+						onRow = true
+					}
+				}
+			}
+			switch inFoot := strings.Contains(foot, "A archive"); {
+			case inFoot && onRow:
+				t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+			case !inFoot && !onRow:
+				t.Errorf("%s %dx%d: no row and no key names the archive: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+			}
+		}
+	}
+}

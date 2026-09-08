@@ -104,6 +104,7 @@ func TestThePageKeyOutlastsTheAttachAside(t *testing.T) {
 		t.Fatalf("shed order ranks the aside %d and the page key %d: the aside must go first\n%q", aside, page, order)
 	}
 	m.inTmux = false
+	m.View() // the footer is composed against the rows the frame drew (#199)
 	if foot := ansi.Strip(m.footerLine(150)); !strings.Contains(foot, "ctrl+d/u half page") || strings.Contains(foot, "(prefix d returns)") {
 		t.Errorf("the 152 legs footer should carry the page key and shed the aside: %q", foot)
 	}

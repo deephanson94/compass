@@ -3161,7 +3161,7 @@ func (m *Model) keymap() string {
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
 		}
 	}
-	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
+	if m.level >= levelWaypoints && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
 		// Where no band or fleet row names the archive, the footer does
 		// (#62). The question is what the frame drew, not how wide it is:
 		// below the board's width the reader takes the whole screen and
@@ -3171,8 +3171,18 @@ func (m *Model) keymap() string {
 		// the frame nothing that names the archive. Twelve live sessions
 		// and three hundred archived: at 120, 152 and 220 the reader's
 		// frame named neither the count nor the key, while the same
-		// keypresses at a hundred columns named both.
-		keys = strings.Replace(keys, " · esc back", " · esc back · A archive", 1)
+		// keypresses at a hundred columns named both. The session view
+		// one press shallower is the same frame: the trail and the
+		// reader panel take the whole screen, the fleet list that names
+		// the door at a hundred columns is gone, and the band is not
+		// drawn — eleven more frames per width naming neither. The door
+		// goes before the way out, whichever word this level's way out
+		// wears (#56, #62).
+		if strings.Contains(keys, " · esc back") {
+			keys = strings.Replace(keys, " · esc back", " · esc back · A archive", 1)
+		} else {
+			keys = strings.Replace(keys, " · esc board", " · esc board · A archive", 1)
+		}
 	}
 	if m.archiveView {
 		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
@@ -3733,7 +3743,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 			// needs two lines up.
 			"space unfold · ", " · A archive"}
 	case m.level >= levelWaypoints:
-		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
+		// The archive door stands with the way out here as it does in
+		// the reader (#56, #62): last of the level's own keys.
+		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns", " · a ask", " · enter attach", " · enter · no pane", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters", " · A archive"}
 	default:
 		// The board and the list: the chapters belong to a trail that is
 		// not open, and the way in outlasts the keys that act on a row.
