@@ -229,6 +229,20 @@ func truncateWhole(line string, n int) string {
 			n--
 			continue
 		}
+		// The cut at the box's left edge is a clip like any other: a mark
+		// after a dot, a slash, a bracket or a comma reads as more of the
+		// token it cut, and an unclosed quote promises the words it was
+		// about to hold — the very cutset `clip` has carried since #58,
+		// #61, #63, #64 and #80. Without it the border drew
+		// `● scout  Red-teaming plugin/…` and `◉ "…`.
+		if k > 0 && k < len(full) && strings.ContainsRune("(./—–,;", kept[k-1]) {
+			n--
+			continue
+		}
+		if k > 0 && k < len(full) && kept[k-1] == '"' && strings.Count(string(kept), `"`)%2 == 1 {
+			n--
+			continue
+		}
 		return t
 	}
 	return ""

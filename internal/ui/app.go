@@ -2835,6 +2835,30 @@ func overlay(rows, panel []string, left, top int) {
 			// twelve cells left of the panel it read as a clipped prompt (#62).
 			before = pad(truncateWhole(line, left-1), left-1) + "…"
 		}
+		// The sliver this side of the box is its own column too (#139).
+		// Where the box begins inside a column's own prefix — glyph and
+		// class, the width `panelHides` already calls too narrow for the
+		// row to say anything — what stands left of it is not a row but
+		// a fragment of one cut at the border: `◉ "` inside an opening
+		// quote, `◆ t…` for a leg with no label, and blanks under a mark,
+		// which is the very thing #126 composes a column at the box's
+		// width to stop. The fragment goes blank and the mark goes with
+		// it. Where the box begins at a column's own edge the gap is the
+		// gutter alone and the mark still stands (#62, #64).
+		// The leftmost rail whose tail is a sliver is the column's own:
+		// a rail standing inside the fragment is a card's continuation
+		// and goes with it.
+		for plain, i := ansi.Strip(ansi.Truncate(line, left, "")), 0; i < len(plain); {
+			j := strings.Index(plain[i:], "│")
+			if j < 0 {
+				break
+			}
+			i += j + len("│")
+			if gap := ansi.StringWidth(plain[i:]); gap > 1 && gap <= trailPrefixWidth+1 {
+				before = ansi.Truncate(line, left-gap, "")
+				break
+			}
+		}
 		if w := lipgloss.Width(before); w < left {
 			before += strings.Repeat(" ", left-w)
 		}

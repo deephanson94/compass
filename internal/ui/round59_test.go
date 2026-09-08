@@ -10279,3 +10279,198 @@ func TestTheShipRowSaysTheAskOnceAtEveryWidth(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 95, two-tools ----
+// slivers reports, for one board frame with the reply box on it, the cells
+// standing between a board rail and the box's left edge where that gap is
+// too narrow for a row to say anything — the width `panelHides` already
+// calls the box beginning inside a row's own prefix. The leftmost rail
+// whose tail is that narrow is the column's own; a rail inside the
+// fragment is a card's continuation and belongs to the fragment.
+func slivers(frame string) (frags []string, edges int) {
+	rows := strings.Split(ansi.Strip(frame), "\n")
+	if len(rows) == 0 || !strings.Contains(rows[0], " · board") {
+		return nil, 0
+	}
+	// Rune counts, not byte offsets: every glyph on these rows is one cell.
+	at := func(row, glyph string) int {
+		i := strings.Index(row, glyph)
+		if i < 0 {
+			return -1
+		}
+		return len([]rune(row[:i]))
+	}
+	left, top, bot := -1, -1, -1
+	for i, r := range rows {
+		if strings.Contains(r, "┌ reply to ") {
+			left, top = at(r, "┌"), i
+		}
+		if left >= 0 && at(r, "└") == left {
+			bot = i
+		}
+	}
+	if left < 1 || top < 0 {
+		return nil, 0
+	}
+	if bot < 0 {
+		bot = len(rows) - 1
+	}
+	for i := top; i <= bot; i++ {
+		head := []rune(rows[i])
+		if len(head) < left {
+			continue
+		}
+		// The box is drawn one cell right of the row's own last cell.
+		line := []rune(string(head[:left-1]))
+		for j := 0; j < len(line); {
+			k := -1
+			for x := j; x < len(line); x++ {
+				if line[x] == '│' {
+					k = x
+					break
+				}
+			}
+			if k < 0 {
+				break
+			}
+			j = k + 1
+			gap := len(line[j:])
+			if gap <= 1 {
+				// The box begins at the column's own edge: the gutter
+				// alone stands between, and it carries the mark (#62).
+				if strings.TrimSpace(string(line[j:])) == "…" {
+					edges++
+				}
+				break
+			}
+			if gap <= trailPrefixWidth {
+				frags = append(frags, string(line[j:]))
+				break
+			}
+		}
+	}
+	return frags, edges
+}
+
+// TestTheReplyBoxLeavesNoSliverOfAColumn: where the reply box begins inside
+// a board column's own prefix, the cells it leaves cannot be a row — they
+// are a fragment of one cut at the border. On alarm-storm at 152 the cut
+// fell inside an opening quote (`◉ "…`), on subagents at 120 it left `◆ t…`
+// for a leg with no label, and on 196 rows it left blanks under a mark,
+// which is what #126 composes a column at the box's width to stop. The
+// fragment goes blank and the mark goes with it. Held on the other side
+// too: where the box begins at a column's own edge the mark still stands
+// (#62, #64).
+func TestTheReplyBoxLeavesNoSliverOfAColumn(t *testing.T) {
+	forceASCII(t)
+	keys := []string{"r", "esc", "l", "r", "esc", "l", "r", "esc", "l", "r", "esc", "l", "r", "esc", "l", "r"}
+	sizes := map[string][][2]int{
+		"alarm-storm": {{120, 34}, {152, 40}},
+		"few-ongoing": {{120, 34}, {152, 40}},
+		"many-idle":   {{120, 34}, {152, 40}},
+		"subagents":   {{120, 34}},
+		"very-long":   {{120, 34}},
+	}
+	stands, edges := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range sizes[sc.name] {
+				m := sceneModel(sc, size[0], size[1])
+				for ki, k := range keys {
+					pressKey(m, k)
+					poll(m, sc)
+					frags, e := slivers(m.View())
+					edges += e
+					for _, f := range frags {
+						stands++
+						if strings.TrimSpace(f) != "" {
+							t.Errorf("%s %dx%d prof=%v after %d keys: the reply box left a sliver of a column: %q",
+								sc.name, size[0], size[1], prof, ki+1, f)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands == 0 {
+		t.Fatalf("vacuous: no frame put the reply box inside a column's prefix")
+	}
+	if edges == 0 {
+		t.Fatalf("vacuous: no frame put the reply box at a column's own edge")
+	}
+	t.Logf("sliver stands %d, box-at-edge rows %d", stands, edges)
+}
+
+// TestTheCutAtTheReplyBoxsEdgeIsAClip: the border the reply box cuts a row
+// at is a clip like any other. `truncateWhole` knew only a number and a
+// separator, so at 152 on subagents the board drew
+// `● scout  Red-teaming plugin/…` — a mark after a slash, reading as more
+// of the path it cut — where `clip` has dropped the trailing dot, slash,
+// bracket, comma and unclosed quote since #58, #61, #63, #64 and #80.
+func TestTheCutAtTheReplyBoxsEdgeIsAClip(t *testing.T) {
+	forceASCII(t)
+	keys := []string{"r", "esc", "l", "r", "esc", "l", "r", "esc", "l", "r", "esc", "l", "r", "esc", "l", "r"}
+	sizes := map[string][][2]int{
+		"alarm-storm": {{120, 34}, {152, 40}},
+		"few-ongoing": {{120, 34}, {152, 40}},
+		"many-idle":   {{120, 34}, {152, 40}},
+		"subagents":   {{120, 34}, {152, 40}},
+		"very-long":   {{120, 34}, {152, 40}},
+	}
+	marks := 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range sizes[sc.name] {
+				m := sceneModel(sc, size[0], size[1])
+				for ki, k := range keys {
+					pressKey(m, k)
+					poll(m, sc)
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					if len(rows) == 0 || !strings.Contains(rows[0], " · board") {
+						continue
+					}
+					left := -1
+					for _, r := range rows {
+						if i := strings.Index(r, "┌ reply to "); i >= 0 {
+							left = len([]rune(r[:i]))
+						}
+					}
+					if left < 3 {
+						continue
+					}
+					for _, r := range rows {
+						run := []rune(r)
+						// The mark stands one cell left of the box (#62).
+						if len(run) < left-1 || run[left-2] != '…' {
+							continue
+						}
+						marks++
+						head := strings.TrimRight(string(run[:left-2]), " ")
+						if head == "" {
+							continue
+						}
+						last := []rune(head)[len([]rune(head))-1]
+						if strings.ContainsRune("(./—–,;", last) {
+							t.Errorf("%s %dx%d prof=%v after %d keys: the box's border cut after %q: %q",
+								sc.name, size[0], size[1], prof, ki+1, string(last), head)
+						}
+						if last == '"' && strings.Count(head, `"`)%2 == 1 {
+							t.Errorf("%s %dx%d prof=%v after %d keys: the box's border cut inside an opening quote: %q",
+								sc.name, size[0], size[1], prof, ki+1, head)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if marks == 0 {
+		t.Fatalf("vacuous: no frame drew the box's border mark")
+	}
+	t.Logf("border marks examined: %d", marks)
+}
