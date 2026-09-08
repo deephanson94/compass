@@ -201,12 +201,20 @@ func TestT16DeckViewGolden(t *testing.T) {
 	// The footer is clipped to the deck's inner width, so a keymap that
 	// overflowed would silently lose its tail rather than wrap. Eighty columns
 	// is the floor, and the attach hint is the longest thing it carries: both
-	// keymaps have to survive the clip whole.
+	// keymaps have to survive the clip whole. Re-pinned to the key the
+	// refusal's cells buy in the archive: there `enter · no pane` is a
+	// refusal and goes before `/ search`, which acts (#52, #206), so the
+	// archive's row names the search instead — still whole, still ending
+	// on the help and the quit.
 	for _, archive := range []bool{false, true} {
 		m.archiveView = archive
 		lines := strings.Split(m.View(), "\n")
 		foot := strings.TrimSpace(lines[len(lines)-1])
-		if lipgloss.Width(foot) > 78 || !strings.HasSuffix(foot, "? help · q quit") || !strings.Contains(foot, "enter · no pane") || (archive && !strings.Contains(foot, "A fleet")) {
+		named := "enter · no pane"
+		if archive {
+			named = "/ search"
+		}
+		if lipgloss.Width(foot) > 78 || !strings.HasSuffix(foot, "? help · q quit") || !strings.Contains(foot, named) || (archive && !strings.Contains(foot, "A fleet")) {
 			t.Errorf("the footer does not fit an 80-column deck whole (archive %v): %q", archive, foot)
 		}
 	}

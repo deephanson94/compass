@@ -4221,14 +4221,16 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// The archive door stands with the way out, as `A fleet` does
 		// below the archive's list (#56, #62): it outlasts the reader's
 		// own keys, which the help teaches, and goes before `esc`.
-		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply", " · n/N", " · / search",
+		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply",
 			// An attach that cannot work is a refusal, not a key, and a
 			// refusal goes before a key that acts — the rank the
 			// archive's own list already gives it (#52, #198). In the
 			// archive `a ask` is the reason to be there, and at eighty
 			// the reader shed it to hold eighteen cells for a refusal
-			// that could not be drawn at that width either.
-			" · enter · no pane", " · a ask", " · enter attach",
+			// that could not be drawn at that width either. `/ search`
+			// and the walk it starts are keys that act too, so the
+			// refusal goes before them as it goes before `a ask`.
+			" · enter · no pane", " · n/N", " · / search", " · a ask", " · enter attach",
 			// A lane's page with no turns offers the attach key first and
 			// the way out behind it, so the separator-led fragments above
 			// match nothing and `esc back` was the only key left to shed
@@ -4244,9 +4246,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 	case m.level >= levelWaypoints:
 		// The archive door stands with the way out here as it does in
 		// the reader (#56, #62): last of the level's own keys.
-		own = []string{" · g grab", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns",
+		own = []string{" · g grab",
 			// The refusal goes before the key that acts here too (#52).
-			" · enter · no pane", " · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters", " · A archive"}
+			" · enter · no pane", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns",
+			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters", " · A archive"}
 	default:
 		// The board and the list: the chapters belong to a trail that is
 		// not open, and the way in outlasts the keys that act on a row.
@@ -4257,7 +4260,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 		if m.archiveView {
 			// "enter · no pane" is a refusal, and a refusal goes before
 			// the way in: the archive's `tab deeper` outlasts it (#52).
-			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · enter · no pane", " · tab deeper", " · enter attach", " · a ask", " · x unhide"}
+			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · a ask", " · x unhide"}
 			if m.enterKeymap() != "enter · no pane" {
 				// #52 ranks `a` with the archive's own keys because in
 				// the archive it is "the reason to be there — a claude
@@ -4266,7 +4269,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 				// not this frame's: the session is still there to
 				// attach to, and `a ask` is a key that acts on a row,
 				// which the way in outlasts (#39).
-				own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · enter · no pane", " · tab deeper", " · enter attach", " · x unhide"}
+				own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · x unhide"}
 			}
 		}
 	}

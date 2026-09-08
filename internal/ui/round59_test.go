@@ -5133,3 +5133,147 @@ func TestAStuckKeyGoesFromARowAlreadyShed(t *testing.T) {
 		t.Errorf("220x48 reader: an unshed row dropped a stuck key: %q", strings.TrimSpace(got))
 	}
 }
+
+// ---- round 84, second-day, the one thing ----
+// The attach refusal goes before the search that acts. #206 taught the
+// reader's and the waypoints' shed orders that "an attach that cannot
+// work is a refusal, and a refusal goes before a key that acts", and
+// moved `enter · no pane` above `a ask`; it was left ranked *below*
+// `/ search` and `n/N` in all three orders, and `shedKeys` lets a key
+// back only when every key ranked above it came back too. So the
+// archive's own list at eighty — twelve finished sessions, four of them
+// on screen and `▾ 8 more below · j` — spent eighteen of its
+// seventy-six cells on a key that answers `attach needs a pane` at every
+// width and named no way to search the archive, while `/` there filters
+// the twelve to two and the header says `archive 2 of 12`. The
+// eighteen cells buy `· / search` (eleven) with seven to spare.
+//
+// Both sides: where the row's own `enter` says `enter attach` nothing
+// moves, and where the field is wide enough for both the refusal stays.
+func TestTheAttachRefusalGoesBeforeTheSearchKey(t *testing.T) {
+	// The frame is the coloured one (#215, #218): every press below is
+	// measured with the profile a person's terminal has.
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	footer := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// body is the frame without its footer: a note lands there on every
+	// press, so the body is what says whether a key moved a drawn cell.
+	body := func(m *Model) string {
+		rows := strings.Split(m.View(), "\n")
+		return strings.Join(rows[:len(rows)-1], "\n")
+	}
+	stand := func(mk func() scene, w, h int, keys []string) (*Model, scene) {
+		sc := mk()
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m, sc
+	}
+
+	for _, c := range []struct {
+		name string
+		mk   func() scene
+		keys []string
+		w, h int
+		kept []string
+	}{
+		{"second-day archive list", sceneSecondDay, []string{"A"}, 80, 24,
+			[]string{"j/k move", "tab deeper", "a ask", "A fleet", "? help", "q quit"}},
+		{"second-day archive list, one row on", sceneSecondDay, []string{"A", "j"}, 80, 24,
+			[]string{"j/k move", "tab deeper", "a ask", "A fleet", "? help", "q quit"}},
+		{"second-day archive reader", sceneSecondDay, []string{"A", "8", "tab", "tab"}, 100, 30,
+			[]string{"space unfold", "[ ] turns", "a ask", "esc back", "A fleet", "? help", "q quit"}},
+		{"fleet-hygiene paneless reader", sceneFleetHygiene, []string{"3", "tab", "tab"}, 100, 30,
+			[]string{"space unfold", "[ ] turns", "a ask", "esc back", "? help", "q quit"}},
+	} {
+		m, sc := stand(c.mk, c.w, c.h, c.keys)
+		if m.enterKeymap() != "enter · no pane" {
+			t.Fatalf("%s %dx%d: the row can be attached to: %q", c.name, c.w, c.h, m.enterKeymap())
+		}
+		// The refusal refuses: it moves no drawn cell of the body, with
+		// colour on, and answers in words.
+		before := body(m)
+		e, se := stand(c.mk, c.w, c.h, append(append([]string(nil), c.keys...), "enter"))
+		_ = se
+		if body(e) != before {
+			t.Errorf("%s %dx%d: `enter` moves a drawn cell — it is not a refusal here", c.name, c.w, c.h)
+		}
+		if e.note == "" {
+			t.Errorf("%s %dx%d: `enter` answers nothing", c.name, c.w, c.h)
+		}
+		// The search acts from this very stand.
+		s, _ := stand(c.mk, c.w, c.h, append(append([]string(nil), c.keys...), "/"))
+		if body(s) == before && footer(s) == footer(m) {
+			t.Errorf("%s %dx%d: `/` changes nothing — it is not a key that acts here", c.name, c.w, c.h)
+		}
+		foot := footer(m)
+		if strings.Contains(foot, "enter · no pane") {
+			t.Errorf("%s %dx%d: the row holds eighteen cells for a key that cannot work: %q",
+				c.name, c.w, c.h, foot)
+		}
+		if !strings.Contains(foot, "/ search") {
+			t.Errorf("%s %dx%d: the row names no way to search: %q", c.name, c.w, c.h, foot)
+		}
+		for _, k := range c.kept {
+			if !strings.Contains(foot, k) {
+				t.Errorf("%s %dx%d: the trade cost the row %q: %q", c.name, c.w, c.h, k, foot)
+			}
+		}
+		if w := lipgloss.Width(foot); w > c.w-1 {
+			t.Errorf("%s %dx%d: the footer overruns its field: %d cells", c.name, c.w, c.h, w)
+		}
+		_ = sc
+	}
+
+	// The rank, stated, at all three levels the refusal is offered at:
+	// the refusal sheds before `/ search` and before `n/N`.
+	for _, lv := range []struct {
+		name string
+		keys []string
+		w, h int
+	}{
+		{"the archive's list", []string{"A"}, 80, 24},
+		{"the waypoints", []string{"A", "8", "tab"}, 100, 30},
+		{"the reader", []string{"A", "8", "tab", "tab"}, 100, 30},
+	} {
+		m, _ := stand(sceneSecondDay, lv.w, lv.h, lv.keys)
+		order := m.shedOrder(false)
+		at := func(frag string) int {
+			for i, f := range order {
+				if f == frag {
+					return i
+				}
+			}
+			return -1
+		}
+		refusal, search, walk := at(" · enter · no pane"), at(" · / search"), at(" · n/N")
+		if refusal < 0 || search < 0 || walk < 0 {
+			t.Fatalf("%s: shed order names %d/%d/%d", lv.name, refusal, search, walk)
+		}
+		if refusal > search || refusal > walk {
+			t.Errorf("%s sheds a key that acts before the attach refusal: refusal %d, / search %d, n/N %d",
+				lv.name, refusal, search, walk)
+		}
+	}
+
+	// The other side. Where the row's own `enter` attaches, the keymap is
+	// unchanged: the live list at eighty still names `enter attach`.
+	m, _ := stand(sceneSecondDay, 80, 24, nil)
+	if foot := footer(m); !strings.Contains(foot, "enter attach") {
+		t.Errorf("the live list lost its attach key: %q", foot)
+	}
+	// And where the field holds both, the refusal stays: the same archive
+	// list at 120 names the refusal and the search.
+	w120, _ := stand(sceneSecondDay, 120, 34, []string{"A"})
+	foot := footer(w120)
+	if !strings.Contains(foot, "enter · no pane") || !strings.Contains(foot, "/ search") {
+		t.Errorf("at 120 the archive's row should name both: %q", foot)
+	}
+}
