@@ -1086,6 +1086,22 @@ func (m *Model) secondLineTagged(s fleet.Session, w int, tagged bool) string {
 				// the row keeps the branch, which the tag cannot say.
 				return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+branchOf(s.Info), " · "), w))
 			}
+			if s.Info.Key() == m.selectedKey {
+				// The identity header two rows up names this very session:
+				// where it says the tool word or the address the row sheds
+				// it (#167's and #189's device), and keeps the branch, the
+				// one word the frame does not otherwise say — `main`, not
+				// `opencode · ⌁ dev:2.0 · main` under a header saying
+				// `opencode · sonnet-4-5 · ⌁ dev:2.0` (#196).
+				head := ansi.Strip(m.headerLine(m.width))
+				line := ""
+				for _, c := range []string{strings.TrimPrefix(word, " · "), addr} {
+					if c != "" && !strings.Contains(head, c) {
+						line += " · " + c
+					}
+				}
+				return dimStyle.Render(clip(strings.TrimPrefix(line+" · "+branchOf(s.Info), " · "), w))
+			}
 			return dimStyle.Render(clip(strings.TrimPrefix(word+" · "+addr, " · ")+" · "+branchOf(s.Info), w))
 		}
 		if s.Live {

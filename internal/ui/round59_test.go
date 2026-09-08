@@ -2610,3 +2610,98 @@ func TestTheTraceKeepsTheWayDeeper(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 75, two-tools, the one thing ----
+// The reader's title says what the page does not. #110 bared the title
+// where the page draws the anchored turn; the anchored row is not always a
+// turn, and a leg's is drawn as its tool call — `⏺ AskUserQuestion(Open
+// port 22 to the office CIDR? [office CIDR / keep bastion])` two rows
+// under a title saying the same words, the leg's own highlighted row
+// between them. Where no turn row says the anchor and the page does, the
+// clause goes with its clock (#115), as it does one keypress later when
+// `[` clears the anchor and the same page carries a bare title.
+func TestTheReaderTitleSaysWhatThePageDoesNot(t *testing.T) {
+	forceASCII(t)
+	// The walkthrough's route into the reader, on the session whose
+	// anchored leg is the question.
+	keys := []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab"}
+	for _, size := range []struct{ w, h int }{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneTwoTools()
+		m := sceneModel(sc, size.w, size.h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		title, col, at := "", -1, -1
+		for i, r := range rows {
+			for j, seg := range strings.Split(r, "│") {
+				if strings.Contains(seg, "READER · ") {
+					title, col, at = seg, j, i
+				}
+			}
+			if at >= 0 {
+				break
+			}
+		}
+		if at < 0 {
+			t.Fatalf("%dx%d: no reader title on the frame", size.w, size.h)
+		}
+		clause := ""
+		if head, rest, cut := strings.Cut(strings.TrimSpace(strings.ReplaceAll(title, "[reader]", "")), "  "); cut {
+			_ = head
+			clause = strings.TrimSpace(rest)
+		}
+		if clause == "" {
+			continue // nothing to repeat
+		}
+		var page []string
+		for _, r := range rows[at+1:] {
+			if segs := strings.Split(r, "│"); len(segs) > col {
+				page = append(page, strings.TrimSpace(segs[col]))
+			}
+		}
+		said := oneSpace(strings.Join(page, " "))
+		core := strings.TrimSpace(clause)
+		if i := strings.LastIndex(core, " · "); i > 0 {
+			core = core[:i] // the clock
+		}
+		core = strings.TrimSuffix(core, "…")
+		if len(strings.Fields(core)) >= 2 && strings.Contains(said, core) {
+			t.Errorf("%dx%d: the reader's title repeats what its own page draws: %q over %q",
+				size.w, size.h, strings.TrimSpace(title), core)
+		}
+	}
+}
+
+// ---- round 75, two-tools, third finding ----
+// The archive's hidden row spends its cells on what the header does not
+// say. Under `⌂ compass · 1 api · opencode · sonnet-4-5 · ⌁ dev:2.0` the
+// hidden session's row drew `opencode · ⌁ dev:2.0 · main`, two of its
+// three clauses the header's, drawn identically; `main` is the one word
+// the frame does not otherwise say (#167, #189, #196).
+func TestTheArchivesHiddenRowSaysWhatTheHeaderDoesNot(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		pressKey(m, "j")
+		pressKey(m, "x") // api leaves the board
+		pressKey(m, "A") // and is the archive's one row
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		head := rows[0]
+		row := ""
+		for i, l := range rows {
+			if strings.Contains(l, "▸1 ") && i+1 < len(rows) {
+				row = strings.TrimSpace(strings.Split(rows[i+1], "│")[0])
+			}
+		}
+		if row == "" || !strings.Contains(row, "main") {
+			t.Fatalf("%dx%d: not the hidden row's second line: %q", size[0], size[1], row)
+		}
+		for _, c := range []string{"opencode", "⌁ dev:2.0"} {
+			if strings.Contains(head, c) && strings.Contains(row, c) {
+				t.Errorf("%dx%d: the hidden row repeats the header's %q: %q under %q", size[0], size[1], c, row, strings.TrimSpace(head))
+			}
+		}
+	}
+}

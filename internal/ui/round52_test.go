@@ -545,14 +545,16 @@ func TestTheHiddenRowDrawsTheModelTheHeaderShed(t *testing.T) {
 	if strings.Contains(head, "sonnet-4-5") {
 		t.Skip("the header carries the model here; nothing to pin")
 	}
-	if !strings.Contains(view, "opencode · sonnet-4-5 · main") {
-		t.Errorf("the hidden row should draw the model the header shed:\n%s\n%s", head, view)
+	// The tool word is the header's on this frame and goes to it (#196);
+	// the model the header shed is the row's.
+	if !strings.Contains(view, "sonnet-4-5 · main") || strings.Contains(view, "opencode · sonnet-4-5") {
+		t.Errorf("the hidden row should draw the model the header shed, and only that:\n%s\n%s", head, view)
 	}
 	wide := sceneModel(sceneTwoTools(), 120, 34)
 	press(wide, "2")
 	press(wide, "x")
 	press(wide, "A")
-	if v := ansi.Strip(wide.View()); !strings.Contains(v, "opencode · ⌁ dev:2.0 · main") {
-		t.Errorf("where the header says the model the row keeps its pane:\n%s", v)
+	if v := ansi.Strip(wide.View()); !strings.Contains(v, "⌁ dev:2.0") || strings.Contains(v, "opencode · ⌁ dev:2.0 · main") || !strings.Contains(v, "    main") {
+		t.Errorf("where the header says the model and the pane the row keeps the branch:\n%s", v)
 	}
 }

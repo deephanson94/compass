@@ -274,6 +274,26 @@ func (m *Model) readerColumn(w, h int) []string {
 			if turns == 1 && saysSame(oneSpace(m.anchorText), said) {
 				rows[0] = m.readerTitleWith(w, false)
 			}
+			// The anchored row is not always a turn. A leg's is drawn as
+			// its tool call — `⏺ AskUserQuestion(Open port 22 to the
+			// office CIDR? [office CIDR / keep bastion])`, wrapped over
+			// the lines it needs — and #110's reason is the same there:
+			// the title's copy stood two rows over the page's own, with
+			// the leg's own highlighted row between them. Only where no
+			// turn row says the anchor: a turn is #110's case and its
+			// count guard rules it, whatever this one would say. The page
+			// is read as one sentence so a wrapped call still says it,
+			// and `saysSame` keeps #110's floor of two words.
+			onTurn := false
+			for _, l := range page {
+				if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") && saysSame(oneSpace(m.anchorText), oneSpace(strings.TrimRight(r, " "))) {
+					onTurn = true
+					break
+				}
+			}
+			if !onTurn && saysSame(oneSpace(m.anchorText), oneSpace(strings.Join(strippedRows(page), " "))) {
+				rows[0] = m.readerTitleWith(w, false)
+			}
 			if s, ok := m.selected(); ok && m.archiveView && !s.Live {
 				// The archive's title names the session alone where the
 				// turn row draws the ask, as the trail's does (#105) — at
@@ -948,4 +968,15 @@ func (m *Model) readerName() string {
 		return sessionName(s.Info)
 	}
 	return "the lead"
+}
+
+// strippedRows is the page's rows without their styling, for reading the
+// page as text: a tool call the reader wrapped is one sentence again once
+// the rows are joined.
+func strippedRows(page []string) []string {
+	out := make([]string, 0, len(page))
+	for _, l := range page {
+		out = append(out, strings.TrimSpace(ansi.Strip(l)))
+	}
+	return out
 }

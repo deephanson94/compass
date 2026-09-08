@@ -93,8 +93,11 @@ func TestTheReplyHeadKeepsItsPaneAndTheArchiveRowLeadsWithTheTool(t *testing.T) 
 	press(wide, "esc")
 	press(wide, "x")
 	press(wide, "A")
-	if list := ansi.Strip(strings.Join(wide.fleetLines(46, 28), "\n")); !strings.Contains(list, "opencode · ⌁ dev:2.0 · main") {
-		t.Errorf("the archive's hidden row does not lead with the tool:\n%s", list)
+	// The tool and the pane are the header's on this frame, so the row
+	// keeps the branch, the one word the header does not say (#196).
+	list := ansi.Strip(strings.Join(wide.fleetLines(46, 28), "\n"))
+	if head := ansi.Strip(wide.headerLine(118)); !strings.Contains(head, "opencode · sonnet-4-5 · ⌁ dev:2.0") || !strings.Contains(list, "main") || strings.Contains(list, "opencode · ⌁ dev:2.0") {
+		t.Errorf("the archive's hidden row and its header split the tag between them:\n%s\n%s", head, list)
 	}
 }
 
