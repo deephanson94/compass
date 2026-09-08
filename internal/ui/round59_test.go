@@ -8906,3 +8906,216 @@ func TestTheSentRowDoesNotKeepAMoveThatCannotMove(t *testing.T) {
 		t.Fatal("nothing checked")
 	}
 }
+
+// ---- round 91, fleet-hygiene ----
+// Round ninety-one, the fleet-hygiene operator.
+//
+// #255 made the board's digit read the band the board drew. The list and
+// the session view draw the band too — the list into the rows the live
+// fleet leaves, oldest dropped first when they run out (#47), the session
+// view into the rows the trail leaves — and both drew fewer rows than
+// `recentRows(9)` returns, while `openRecent` went on asking that
+// could-hold list. So a digit no row on the frame wears opened the
+// archive: at eighty `fleet-hygiene` drew four live rows and no band at
+// all, and `5` to `9` each opened an archived session the frame never
+// named, in an order it never showed.
+//
+// The fold records the band where it is drawn — `recentLines` for the
+// list and the board, the session view's own branch for the trail — and
+// the digit reads that, as #255 wrote it: the digit is its row's.
+
+// r91fhRowNum matches a row the frame draws with a number of its own.
+var r91fhRowNum = regexp.MustCompile(`^\s{0,3}[▸ ]?(\d) [●○▲◍↻⊘]`)
+
+// r91fhBandRow matches an archived row of the band as drawn.
+var r91fhBandRow = regexp.MustCompile(`^\s{1,3}(\d) ○ `)
+
+// r91fhDrawnNums is every number the frame draws on a row of its own.
+func r91fhDrawnNums(m *Model) map[int]bool {
+	out := map[int]bool{}
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if mm := r91fhRowNum.FindStringSubmatch(row); mm != nil {
+			d, _ := strconv.Atoi(mm[1])
+			out[d] = true
+		}
+		for _, mm := range regexp.MustCompile(`(\d) [●○▲◍↻⊘]`).FindAllStringSubmatch(row, -1) {
+			d, _ := strconv.Atoi(mm[1]) // the strip carries the fleet's own digits on one line
+			out[d] = true
+		}
+	}
+	return out
+}
+
+// r91fhDrawnBandRows is the band as the frame drew it: number and the name
+// its row gives, for the rows no live column wears.
+func r91fhDrawnBandRows(m *Model) map[int]string {
+	live := map[int]bool{}
+	for _, r := range m.boardRows() {
+		live[r.num] = true
+	}
+	out := map[int]string{}
+	for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+		mm := r91fhBandRow.FindStringSubmatch(row)
+		if mm == nil {
+			continue
+		}
+		d, _ := strconv.Atoi(mm[1])
+		if live[d] {
+			continue
+		}
+		rest := strings.TrimSpace(row[strings.Index(row, "○ ")+len("○ "):])
+		if i := strings.Index(rest, " · "); i > 0 {
+			rest = rest[:i]
+		}
+		if _, seen := out[d]; !seen {
+			out[d] = rest
+		}
+	}
+	return out
+}
+
+func r91fhStand(sc scene, w, h int, keys []string) *Model {
+	m := sceneModel(sc, w, h)
+	_ = m.View()
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+		_ = m.View() // the key is pressed on a drawn frame (#221)
+	}
+	return m
+}
+
+// TestTheListsBandOpensOnlyTheRowsItDraws is the fold on its frame:
+// fleet-hygiene at eighty, where the list has no room for the band and
+// draws none, beside the same fleet at a hundred, where it draws five.
+func TestTheListsBandOpensOnlyTheRowsItDraws(t *testing.T) {
+	forceASCII(t)
+	var fh scene
+	for _, sc := range allScenes() {
+		if sc.name == "fleet-hygiene" {
+			fh = sc
+		}
+	}
+	if fh.name == "" {
+		t.Fatal("no fleet-hygiene scene")
+	}
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+
+		// Eighty: four live rows, no band row, and the archive's own line
+		// naming `A`. A digit past the fleet's last is no row's.
+		base := r91fhStand(fh, 80, 24, nil)
+		if got := r91fhDrawnBandRows(base); len(got) != 0 {
+			lipgloss.SetColorProfile(old)
+			t.Fatalf("80x24: the list draws a band (%v), so the stand is not the stand", got)
+		}
+		for d := 5; d <= 9; d++ {
+			c := r91fhStand(fh, 80, 24, nil)
+			pressKey(c, strconv.Itoa(d))
+			poll(c, fh)
+			if c.archiveView {
+				name := "—"
+				if s, ok := c.selected(); ok {
+					name = sessionName(s.Info)
+				}
+				t.Errorf("80x24 (%v): `%d` opened the archive on %q over a frame drawing no row that wears it", prof, d, name)
+			}
+			if note := ansi.Strip(c.note); note != "no session "+strconv.Itoa(d) {
+				t.Errorf("80x24 (%v): `%d` said %q, not %q", prof, d, note, "no session "+strconv.Itoa(d))
+			}
+		}
+
+		// A hundred: the same fleet, the band drawn 5 to 9, every digit
+		// opening its own row, and `A` back where it was (#47, #54).
+		wide := r91fhStand(fh, 100, 30, nil)
+		band := r91fhDrawnBandRows(wide)
+		if len(band) != 5 {
+			lipgloss.SetColorProfile(old)
+			t.Fatalf("100x30: the list draws %d band rows, want 5", len(band))
+		}
+		for d, want := range band {
+			c := r91fhStand(fh, 100, 30, nil)
+			was := c.selectedKey
+			pressKey(c, strconv.Itoa(d))
+			poll(c, fh)
+			s, ok := c.selected()
+			if !c.archiveView || !ok || s.Live {
+				t.Errorf("100x30 (%v): `%d` did not open the archived row its own line names (%q)", prof, d, want)
+				continue
+			}
+			if got := sessionName(s.Info); got != want && !strings.Contains(archiveHeadline(s), want) {
+				t.Errorf("100x30 (%v): `%d` opened %q where its row names %q", prof, d, got, want)
+			}
+			pressKey(c, "A")
+			poll(c, fh)
+			if c.archiveView || c.selectedKey != was {
+				t.Errorf("100x30 (%v): after `%d` then `A` the deck is not back where it was", prof, d)
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}
+
+// TestNoDigitOffTheFrameOpensTheArchive is the rule behind it, over every
+// scene, every width and both colour profiles, on the stands where each
+// of the band's three drawers draws it — the list, the board's stranded
+// band, and the session view's rule under the trail.
+func TestNoDigitOffTheFrameOpensTheArchive(t *testing.T) {
+	forceASCII(t)
+	stands := [][]string{nil, {"x"}, {"tab"}}
+	off, bandDigits := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := wh[0], wh[1]
+				for _, pre := range stands {
+					m := r91fhStand(sc, w, h, pre)
+					if m.archiveView || m.showHelp || m.searching || m.replying {
+						continue // in the archive the digits are its own (#32)
+					}
+					drawn := r91fhDrawnNums(m)
+					band := r91fhDrawnBandRows(m)
+					for d := 1; d <= 9; d++ {
+						want, isBand := band[d]
+						if drawn[d] && !isBand {
+							continue // a live row's own digit: #238's question, not this one
+						}
+						pressKey(m, strconv.Itoa(d)) // pressed on the drawn frame (#221)
+						opened := m.archiveView
+						s, ok := m.selected()
+						opened = opened && ok && !s.Live
+						switch {
+						case isBand:
+							bandDigits++
+							if !opened {
+								t.Errorf("%s %dx%d %v (%v): `%d` did not open the band row it draws (%q); note %q",
+									sc.name, w, h, pre, prof, d, want, ansi.Strip(m.note))
+							}
+						case opened:
+							off++
+							name := "—"
+							if ok {
+								name = sessionName(s.Info)
+							}
+							t.Errorf("%s %dx%d %v (%v): `%d` opened the archive on %q over a frame that draws no row wearing it",
+								sc.name, w, h, pre, prof, d, name)
+						}
+						if m.archiveView {
+							m = r91fhStand(sc, w, h, pre) // back to the frame for the next digit
+						} else {
+							m.note = "" // a refusal moved nothing: the frame, and its band, still stand
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if bandDigits < 40 {
+		t.Fatalf("only %d band digits drawn: the sweep is not sweeping", bandDigits)
+	}
+	t.Logf("%d band digits drawn and opened, %d digits off the frame opened the archive", bandDigits, off)
+}

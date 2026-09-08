@@ -237,7 +237,6 @@ func (m *Model) session(key string) (fleet.Session, bool) {
 // list itself is not drawn: its rows are the column headers, and what it did
 // beyond selecting a session the columns do better.
 func (m *Model) boardLines(w, h int) []string {
-	m.drawnBand = nil // the band this frame draws, recorded by `strandedBand` below
 	order := m.viewOrder()
 	n, cw := boardColumns(w, m.drawnCount(order))
 	rowOf := m.boardRows()

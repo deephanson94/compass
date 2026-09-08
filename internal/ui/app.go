@@ -2635,6 +2635,12 @@ func (m *Model) viewOnce() string {
 	var body []string
 	m.replyBox = box{}
 	m.replyRows = nil
+	// The band this frame draws is the frame's, like the reply box:
+	// each drawer records it where it draws it and a digit reads it
+	// there (#47, #255). Empty, not nil: a frame that draws no band has
+	// drawn one of no rows, and nil is the model no frame has been drawn
+	// from yet, which the deck never reads a key on (#221).
+	m.drawnBand = []recentRow{}
 	if m.replying {
 		panel := m.replyPanel(inner)
 		left, top, cap := m.panelPlace(inner, panelWidth(panel), len(panel), false)

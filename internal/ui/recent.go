@@ -104,6 +104,10 @@ func (m *Model) recentLines(w, avail int) []string {
 	if len(rows) == 0 {
 		return nil
 	}
+	// What the frame draws, as drawn: the digit pressed on this frame
+	// opens one of these rows and no other (#47, #255). Every caller
+	// that gets rows draws them.
+	m.drawnBand = rows
 	head := m.recentHeader()
 	if lipgloss.Width(head) > w {
 		head = strings.Replace(head, " · A browses", " · A", 1) // the key survives whole
@@ -340,20 +344,18 @@ const (
 // with that number opens the archive on that session, as `A` and a search
 // would have. False when no band row wears the digit.
 func (m *Model) openRecent(num int) bool {
-	rows := m.recentRows(9)
-	if m.level == levelBoard && m.boardShown() {
-		// The board draws no band of its own — its blank rows are more
-		// columns' (#43, #47) — but where the columns run out
-		// `strandedBand` draws one under the strip, numbered on from the
-		// last column. `recentRows` is shut to the board for the
-		// renderer's sake and opened for that one call, so the key saw
-		// no band where the frame drew five rows: `5 ○ api · "the pane I
-		// closed half an hour ago"` five rows above a footer that
-		// answered `no session 5`, the digit denying a row the frame
-		// numbers (#243, #245), while the same digit twenty columns
-		// narrower opened it. The key reads the band the frame drew, and
-		// no other row: where the board drew none there is no session 5.
-		rows = m.drawnBand
+	// The band the frame drew, and no other row (#255). `recentRows` is
+	// what the band *could* hold; the column draws what fits, oldest
+	// dropped first, and on the board it draws none at all (#43). Asking
+	// the could-hold list let a digit no row on the frame wears open the
+	// archive: at eighty the fleet-hygiene list drew four live rows and
+	// no band, and `5` to `9` each opened an archived session the frame
+	// never named, in an order it never showed. The digit is its row's:
+	// where the board drew none there is no session 5, and where the
+	// list drew three there is no session 8.
+	rows := m.drawnBand
+	if rows == nil {
+		rows = m.recentRows(9) // no frame drawn yet: what the band could hold
 	}
 	for _, r := range rows {
 		if r.num == num {
@@ -378,11 +380,5 @@ func (m *Model) openRecent(num int) bool {
 func (m *Model) strandedBand(w, avail int) []string {
 	m.onBoardBand = true
 	defer func() { m.onBoardBand = false }()
-	lines := m.recentLines(w, avail)
-	if len(lines) > 1 {
-		// What the board drew, as drawn: the digit pressed on this frame
-		// reads these rows and no others (#47).
-		m.drawnBand = m.recentRows(avail - 1)
-	}
-	return lines
+	return m.recentLines(w, avail)
 }

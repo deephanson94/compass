@@ -1906,6 +1906,10 @@ func (m *Model) trailColumn(w, h int) []string {
 		// The rows a short trail leaves are the recent band's (#47): a
 		// rule where the trail ends, then the sessions that ended last.
 		// The band is drawn into what is left over, never over a leg.
+		// What is drawn here is what a digit opens, as in the list and
+		// on the board: the count is the trail's leftovers, not nine
+		// (#255).
+		m.drawnBand = band
 		head := m.recentHeader()
 		if n := w - lipgloss.Width(head) - 1; n > 0 {
 			head += " " + strings.Repeat("─", n) // a rule to the gutter, the read-line's own form
