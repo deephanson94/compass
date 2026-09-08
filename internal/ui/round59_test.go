@@ -6813,3 +6813,521 @@ func TestTheArchiveDoesNotDenyTheLiveRowItIsDrawing(t *testing.T) {
 		t.Errorf("the hide note on the empty archive stopped naming the digit: %q", r87sdFoot(m))
 	}
 }
+
+// r88sdBFoot is the footer row of the frame as a person sees it.
+func r88sdBFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return rows[len(rows)-1]
+}
+
+// r88sdBHead is the identity header row.
+func r88sdBHead(m *Model) string {
+	return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+}
+
+// r88sdBSearchStand puts the deck where a fleet query matches nothing: the
+// list draws no row, and the selection the frame keeps drawing — header,
+// trail and `enter attach` — is the live session it was on.
+func r88sdBSearchStand(sc scene, w, h int) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{"/", "pytest", "enter"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheFleetDoesNotDenyTheDigitItsHeaderIsDrawing pins round eighty-eight's
+// second-day one thing.
+//
+// Three of the canonical walkthrough's own keys — `/`, `pytest`, `enter` —
+// leave the fleet list drawing `no session matches /pytest` while the deck
+// keeps its live session selected: the header names it `1 hello`, the trail
+// beside it draws it, and the footer offers `enter attach`. `selectIndex`
+// walks the drawn rows and finds none, so the digit fell through to the bare
+// refusal and answered `no session 1` about the digit its own header draws
+// three cells from the name.
+//
+// The deck already has the sentence for this: where the query happens to
+// match the row, the same press at the same stand answers `the session you
+// are on` (#238). It answers so here too.
+func TestTheFleetDoesNotDenyTheDigitItsHeaderIsDrawing(t *testing.T) {
+	forceASCII(t)
+	const want = "the session you are on"
+	for _, sc := range []scene{sceneSecondDay(), sceneFirstSession()} {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof) // the frame a person sees (#215, #218)
+				m := r88sdBSearchStand(sc, wh[0], wh[1])
+				if m.archiveView {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the stand is the fleet's, not the archive's", sc.name, wh[0], wh[1])
+				}
+				if len(m.viewOrder()) != 0 {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the query drew rows, so the stand is not the one", sc.name, wh[0], wh[1])
+				}
+				s, ok := m.selected()
+				if !ok || !s.Live {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the empty list is not drawing a live row", sc.name, wh[0], wh[1])
+				}
+				d := m.digits[s.Info.Key()]
+				if d < 1 || d > 9 {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the drawn live row wears no digit", sc.name, wh[0], wh[1])
+				}
+				// The frame draws the digit and the name in its header.
+				head := r88sdBHead(m)
+				if !strings.Contains(head, fmt.Sprintf("%d %s", d, sessionName(s.Info))) {
+					lipgloss.SetColorProfile(old)
+					t.Fatalf("%s %dx%d: the header does not draw %q: %q",
+						sc.name, wh[0], wh[1], fmt.Sprintf("%d %s", d, sessionName(s.Info)), head)
+				}
+				pressKey(m, fmt.Sprintf("%d", d))
+				poll(m, sc)
+				foot := r88sdBFoot(m)
+				if strings.Contains(foot, fmt.Sprintf("no session %d", d)) {
+					t.Errorf("%s %dx%d (%v): `%d` denied the digit the header draws: %q",
+						sc.name, wh[0], wh[1], prof, d, foot)
+				}
+				if !strings.Contains(foot, want) {
+					t.Errorf("%s %dx%d (%v): the note is not %q: %q", sc.name, wh[0], wh[1], prof, want, foot)
+				}
+				lifted := r88sdBSearchStand(sc, wh[0], wh[1])
+				pressKey(lifted, "7")
+				poll(lifted, sc)
+				if d != 7 && !strings.Contains(r88sdBFoot(lifted), "no session 7") {
+					t.Errorf("%s %dx%d (%v): a digit nobody wears lost its refusal: %q",
+						sc.name, wh[0], wh[1], prof, r88sdBFoot(lifted))
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+
+	// The four other sides, at 120 where each is on a frame.
+	sd := sceneSecondDay()
+
+	// Where the query matches the row the deck already said this, and
+	// still does: the very sentence this fold borrows (#238).
+	mi := sceneManyIdle()
+	m := r88sdBSearchStand(mi, 120, 34)
+	if len(m.viewOrder()) == 0 {
+		t.Fatalf("many-idle: /pytest matched nothing, so the control is not a control")
+	}
+	if s, ok := m.selected(); ok {
+		pressKey(m, fmt.Sprintf("%d", m.digits[s.Info.Key()]))
+		poll(m, mi)
+		if !strings.Contains(r88sdBFoot(m), want) {
+			t.Errorf("the drawn-row twin lost %q: %q", want, r88sdBFoot(m))
+		}
+	}
+
+	// Off the search the digit still selects rather than refusing.
+	m = sceneModel(sd, 120, 34)
+	pressKey(m, "1")
+	poll(m, sd)
+	if strings.Contains(r88sdBFoot(m), "no session 1") {
+		t.Errorf("the board's own digit wore a refusal: %q", r88sdBFoot(m))
+	}
+
+	// #57's hidden note still comes first: on a fleet where a session can
+	// be hidden, a hidden session's digit still says where it is under a
+	// query that draws no row at all. (On the second day `x` refuses —
+	// `the live one stays` — so the side needs a fleet of more than one.)
+	m = sceneModel(mi, 120, 34)
+	hidden, hd := "", 0
+	if s, ok := m.selected(); ok {
+		hidden, hd = sessionName(s.Info), m.digits[s.Info.Key()]
+	}
+	for _, k := range []string{"x", "/", "zzzznothing", "enter", fmt.Sprintf("%d", hd)} {
+		pressKey(m, k)
+		poll(m, mi)
+	}
+	if len(m.viewOrder()) != 0 {
+		t.Fatalf("many-idle: the hidden side's query drew rows")
+	}
+	if wantHidden := fmt.Sprintf("%d %s is hidden", hd, hidden); !strings.Contains(r88sdBFoot(m), wantHidden) {
+		t.Errorf("the hide note stopped naming the digit under an empty search: want %q in %q", wantHidden, r88sdBFoot(m))
+	}
+
+	// And #242's archive twin is untouched: in the archive the note is
+	// still `1 hello is live`, not this one.
+	m = sceneModel(sd, 120, 34)
+	for _, k := range []string{"/", "pytest", "enter", "A", "1"} {
+		pressKey(m, k)
+		poll(m, sd)
+	}
+	if !strings.Contains(r88sdBFoot(m), "1 hello is live") {
+		t.Errorf("the archive twin (#242) lost its note: %q", r88sdBFoot(m))
+	}
+	if strings.Contains(r88sdBFoot(m), want) {
+		t.Errorf("the fleet's note leaked into the archive: %q", r88sdBFoot(m))
+	}
+}
+
+// r88fhOnlyQuery is a query only this session answers and nothing archived
+// does: typing it and pressing `A` opens an archive with no rows at all.
+func r88fhOnlyQuery(sc scene, w, h int, key, title string) string {
+	for _, cand := range strings.Fields(strings.ToLower(title)) {
+		if len(cand) < 4 {
+			continue
+		}
+		m := sceneModel(sc, w, h)
+		m.fleetQuery = cand
+		only, archived := true, 0
+		for _, s := range m.sessions {
+			if !m.matchesQuery(s) {
+				continue
+			}
+			if s.Live {
+				if s.Info.Key() != key {
+					only = false
+				}
+			} else {
+				archived++
+			}
+		}
+		if only && archived == 0 {
+			return cand
+		}
+	}
+	return ""
+}
+
+// r88fhEmptyArchive puts the deck where the fleet search in force leaves the
+// archive with no rows: the session is selected, the query typed and kept,
+// and `A` pressed.
+func r88fhEmptyArchive(sc scene, w, h int, key, query string) *Model {
+	m := sceneModel(sc, w, h)
+	m.pointQuiet(key)
+	poll(m, sc)
+	for _, k := range []string{"/", query, "enter", "A"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r88fhTrailOwner is the session whose conversation the trail panel is
+// drawing, read off the trail the model holds.
+func r88fhTrailOwner(m *Model, sc scene) string {
+	if len(m.trail.Prompts) == 0 {
+		return "—"
+	}
+	for _, s := range m.sessions {
+		tr := sc.trails[s.Info.Key()]
+		if len(tr.Prompts) > 0 && tr.Prompts[0].Text == m.trail.Prompts[0].Text && len(tr.Legs) == len(m.trail.Legs) {
+			return sessionName(s.Info)
+		}
+	}
+	return "—"
+}
+
+// TestTheEmptyArchiveKeepsTheSessionItIsDrawing is the fold on one frame.
+//
+// On fleet-hygiene, `/watch` answers only the live `harness` at
+// `⌁ harness:1.0`, and nothing archived answers it at all. Press `A` and the
+// archive draws no row — but the panel beside it goes on drawing harness's
+// conversation, because `toggleArchive` swapped the selection for a key that
+// was never set and `clampSelection` keeps what an empty view had. With no
+// key, `selectedIndex` falls to nought, so the header and the trail's own
+// title named `porter` — the fleet's first row, a different session — over
+// harness's trail, and `enter attach` offered porter's pane.
+//
+// The frame names the session it is drawing, at every width.
+func TestTheEmptyArchiveKeepsTheSessionItIsDrawing(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	var fh scene
+	for _, sc := range allScenes() {
+		if sc.name == "fleet-hygiene" {
+			fh = sc
+		}
+	}
+	var key string
+	for _, s := range sceneModel(fh, 80, 24).sessions {
+		if s.Live && s.Info.Title == "add watch driver tests" {
+			key = s.Info.Key()
+		}
+	}
+	if key == "" {
+		t.Fatal("fleet-hygiene has no live `add watch driver tests`")
+	}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		m := r88fhEmptyArchive(fh, w, h, key, "watch")
+		if !m.archiveView {
+			t.Fatalf("%dx%d: the archive did not open", w, h)
+		}
+		if got := len(m.fleetOrder()); got != 0 {
+			t.Fatalf("%dx%d: the archive drew %d rows, not none", w, h, got)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		if owner := r88fhTrailOwner(m, fh); owner != "harness" {
+			t.Errorf("%dx%d: the panel draws %q, not harness", w, h, owner)
+		}
+		if got := selectedName(m); got != "harness" {
+			t.Errorf("%dx%d: the frame's identity is %q while the panel draws harness", w, h, got)
+		}
+		if !strings.Contains(rows[0], "harness") {
+			t.Errorf("%dx%d: the header names nobody the panel is drawing: %q", w, h, rows[0])
+		}
+		if !strings.Contains(rows[3], "TRAIL · harness") {
+			t.Errorf("%dx%d: the trail's title is not the trail's: %q", w, h, rows[3])
+		}
+		if pane, ok := m.selectedPane(); !ok || pane.Target != "harness:1.0" {
+			t.Errorf("%dx%d: `enter attach` would go to %q, not harness:1.0", w, h, pane.Target)
+		}
+		// The digit refusal (#242) names the session the frame is on.
+		pressKey(m, "2")
+		poll(m, fh)
+		if m.note != "2 harness is live" {
+			t.Errorf("%dx%d: the digit of the session on screen answered %q", w, h, m.note)
+		}
+	}
+}
+
+// TestNoEmptyArchiveNamesAnotherSession is the rule behind it, asked of
+// every scene, every width and every live session a fleet search can single
+// out: where `A` opens an archive with no rows, the session the frame names
+// is the session whose conversation the panel is drawing.
+func TestNoEmptyArchiveNamesAnotherSession(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	stands := 0
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			base := sceneModel(sc, w, h)
+			for _, i := range base.viewOrder() {
+				s := base.sessions[i]
+				q := r88fhOnlyQuery(sc, w, h, s.Info.Key(), s.Info.Title)
+				if q == "" {
+					continue
+				}
+				m := r88fhEmptyArchive(sc, w, h, s.Info.Key(), q)
+				if !m.archiveView || len(m.fleetOrder()) != 0 {
+					continue // there was an archive row to land on
+				}
+				stands++
+				owner := r88fhTrailOwner(m, sc)
+				if owner == "—" {
+					continue
+				}
+				if got := selectedName(m); got != owner {
+					t.Errorf("%s %dx%d /%s: the frame names %q while the panel draws %q",
+						sc.name, w, h, q, got, owner)
+				}
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("no empty-archive stand measured")
+	}
+	t.Logf("%d empty-archive stands", stands)
+}
+
+// The help's row for a key says what that key does where the help is
+// standing. `g` is the one key whose action changes with the level: on the
+// board, a list and the session view it grabs the oldest `▲` needs-you and
+// hands over the terminal (SPEC §3, #40), and in the Lv3 reader it is the
+// start of the conversation, the other end of `G` (#231, #241). The reader
+// never names `g` on its footer, so the help is the only place to learn it
+// — and it was promising the grab three levels deep with `▲1 4m` standing
+// in the header and no grab to be had.
+
+var r88ttPinAnsi = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// r88ttPinKeyRow is the help's row for one key, ansi stripped, or "" where
+// the help draws none. A key row is the key in a ten-cell column.
+func r88ttPinKeyRow(m *Model, key string) string {
+	for _, l := range strings.Split(m.View(), "\n") {
+		t := strings.TrimLeft(r88ttPinAnsi.ReplaceAllString(l, ""), " ")
+		if len(t) > 10 && strings.HasPrefix(t, key+" ") &&
+			strings.TrimSpace(t[len(key):10]) == "" && t[10] != ' ' {
+			return strings.TrimRight(t, " ")
+		}
+	}
+	return ""
+}
+
+// r88ttPinScene is one scene by name.
+func r88ttPinScene(t *testing.T, name string) scene {
+	t.Helper()
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc
+		}
+	}
+	t.Fatalf("no scene %q", name)
+	return scene{}
+}
+
+// r88ttPinIsGrab presses `g` and reports whether the key the deck bound
+// here is the grab — read off the frame, not off the level: the grab says
+// where it went (`→ infra · ops:0.0`) or refuses in words with nothing
+// waiting (`nothing is waiting on you`), and a refusal in words is still
+// the grab and still earns the help's row (#40). Anything else is another
+// key wearing `g`.
+func r88ttPinIsGrab(m *Model, sc scene) bool {
+	pressKey(m, "g")
+	poll(m, sc)
+	note := r88ttPinAnsi.ReplaceAllString(m.note, "")
+	return strings.HasPrefix(note, "\u2192 ") || note == "nothing is waiting on you"
+}
+
+// TestTheHelpInTheReaderSaysWhatTheGrabKeyDoes holds the row and the key to
+// each other on the two-tools reader at every width and under both colour
+// profiles: where `g` grabs the row says grab, and where it does not the row
+// says what it does instead. The board's own row is held on the same frames,
+// so the fix cannot be "stop saying grab everywhere".
+func TestTheHelpInTheReaderSaysWhatTheGrabKeyDoes(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	sc := r88ttPinScene(t, "two-tools")
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := func(what string) string {
+				return sc.name + " " + strconv.Itoa(w) + "x" + strconv.Itoa(h) + " (" + strconv.Itoa(int(prof)) + ") " + what
+			}
+
+			// The board's row is the grab's own, and stays.
+			top := sceneModel(sc, w, h)
+			pressKey(top, "?")
+			poll(top, sc)
+			if row := r88ttPinKeyRow(top, "g"); !strings.Contains(row, "grab") {
+				t.Errorf("%s: the board's help row for `g` no longer names the grab: %q", where("board"), row)
+			}
+
+			// Three keys deep, on a session that is not the one waiting.
+			m := sceneModel(sc, w, h)
+			for _, k := range []string{"j", "tab", "tab"} {
+				pressKey(m, k)
+				poll(m, sc)
+			}
+			if m.level < levelReader {
+				t.Fatalf("%s: not in the reader", where("reader"))
+			}
+			if m.needsYouCount() == 0 {
+				t.Fatalf("%s: no session is waiting on the frame", where("reader"))
+			}
+			grabs := r88ttPinIsGrab(m, sc)
+
+			help := sceneModel(sc, w, h)
+			for _, k := range []string{"j", "tab", "tab", "?"} {
+				pressKey(help, k)
+				poll(help, sc)
+			}
+			row := r88ttPinKeyRow(help, "g")
+			if row == "" {
+				t.Fatalf("%s: the reader's help draws no row for `g`", where("reader"))
+			}
+			says := strings.Contains(row, "grab the oldest")
+			if says && !grabs {
+				t.Errorf("%s: the help promises a grab `g` does not make here: %q", where("reader"), row)
+			}
+			if !says && grabs {
+				t.Errorf("%s: `g` grabs here and the row does not say so: %q", where("reader"), row)
+			}
+			if !grabs && !strings.Contains(row, "the start of the conversation") {
+				t.Errorf("%s: the row does not say what `g` does here: %q", where("reader"), row)
+			}
+		}
+	}
+}
+
+// TestNoHelpRowPromisesAGrabTheReaderWillNotMake is the rule behind it,
+// asked of every canonical stand of every scene at eighty and at 120: the
+// help's row for `g` says what `g` does from that stand. The binding is
+// pressed for, once per level a walkthrough reaches — the key is bound by
+// level, and `r88ttPinIsGrab` reads which key it is off the frame — so a
+// fold that made `g` grab in the reader instead would pass this too, with
+// the row left as it was.
+func TestNoHelpRowPromisesAGrabTheReaderWillNotMake(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {120, 34}} {
+			w, h := size[0], size[1]
+			type stand struct {
+				n, lv int
+				row   string
+			}
+			var stands []stand
+			m := sceneModel(sc, w, h)
+			for n := 0; n <= len(keys); n++ {
+				if !m.showHelp && !m.searching && !m.replying {
+					was := m.showHelp
+					m.showHelp = true
+					row := r88ttPinKeyRow(m, "g")
+					m.showHelp = was
+					if row != "" {
+						stands = append(stands, stand{n, m.level, row})
+					}
+				}
+				if n < len(keys) {
+					pressKey(m, keys[n])
+					poll(m, sc)
+				}
+			}
+			grabAt := map[int]bool{}
+			for _, st := range stands {
+				if _, seen := grabAt[st.lv]; seen {
+					continue
+				}
+				probe := sceneModel(sc, w, h)
+				for _, k := range keys[:st.n] {
+					pressKey(probe, k)
+					poll(probe, sc)
+				}
+				grabAt[st.lv] = r88ttPinIsGrab(probe, sc)
+			}
+			for _, st := range stands {
+				says := strings.Contains(st.row, "grab the oldest")
+				if says == grabAt[st.lv] {
+					continue
+				}
+				what := "promises a grab `g` does not make"
+				if grabAt[st.lv] {
+					what = "drops the grab `g` does make"
+				}
+				t.Errorf("%s %dx%d stand %d (Lv%d): the help %s here: %q",
+					sc.name, w, h, st.n, st.lv, what, st.row)
+			}
+		}
+	}
+}
+
+// ---- round 88, two-tools, second finding ----
+// In the archive the board's digit pressed on a hidden live row the
+// archive draws is #238's question, not #242's: `2 api is live` beside a
+// row the frame numbers `1` named a digit the frame does not, while `1`
+// on the same frame said `the session you are on` (#245).
+func TestTheArchivesDrawnRowIsTheSessionYouAreOn(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {120, 34}, {220, 48}} {
+		m := sceneModel(sceneTwoTools(), size[0], size[1])
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == "api" && m.digits[s.Info.Key()] == 2 {
+				m.point(s.Info.Key())
+				break
+			}
+		}
+		pressKey(m, "x")
+		pressKey(m, "A")
+		pressKey(m, "2")
+		if m.note != "the session you are on" {
+			t.Errorf("%dx%d: the archive answered %q to the board's digit of the row it draws", size[0], size[1], m.note)
+		}
+	}
+}

@@ -407,6 +407,21 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 		case "q":
 			what = ""
 		}
+		if reader {
+			switch key {
+			case "g":
+				// In the reader `g` is the start of the conversation, the
+				// other end of `G` (#231, #241) — it does not grab, and
+				// the row that said it did was the help promising an
+				// action the key does not take, three levels deep with a
+				// `▲` standing in the header. #40 gave the board's `g`
+				// row the sentence `g` acts on there; this is the same
+				// rule at the one level where the key acts differently.
+				// The grab is a level out, which the aside says where
+				// there is room for it.
+				what = "the start of the conversation, the other end of G; the grab is a level out"
+			}
+		}
 		if !board {
 			switch key {
 			case "tab":

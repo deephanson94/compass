@@ -968,7 +968,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.note += " · " + mirrorMark + " " + pane.Target // the hide note's own form (#62)
 					}
 				}
+				if s.Live && !m.archiveView && !m.hidden[s.Info.Key()] && drawn && s.Info.Key() == shown.Info.Key() && m.digits[s.Info.Key()] == i+1 {
+					// Under a fleet query that matches nothing the list
+					// draws no row, so `selectIndex` finds none — but the
+					// digit is the selected live session's own, the header
+					// draws it as `1 hello` at the same cells, and the
+					// trail beside it is that session's. That is #238's
+					// question, and its answer: the deck already gives
+					// this sentence at this stand wherever the query
+					// happens to match the row, so the note is the deck's
+					// own and repeats nothing the header says (#233).
+					m.note = "the session you are on"
+				}
 				if s.Live && m.archiveView && drawn && s.Info.Key() == shown.Info.Key() && m.digits[s.Info.Key()] == i+1 {
+					if m.archiveDrawsRow(s.Info.Key()) {
+						// The archive draws this row, under its own
+						// digit: the board's digit pressed on it is
+						// #238's question, and `2 api is live` beside a
+						// row the frame numbers `1` named a digit the
+						// frame does not (#245).
+						m.note = "the session you are on"
+						continue
+					}
 					// In the archive the digits are the archive's own
 					// (#32), so a live session's digit finds no row here
 					// — but "no session 1" denies a session this very
@@ -1797,6 +1818,18 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 	return ""
 }
 
+// archiveDrawsRow says whether the archive view draws a row for this
+// session — a hidden live session in its `hidden` group, or an archived
+// one — as against an archive a search has cut to no rows (#242, #245).
+func (m *Model) archiveDrawsRow(key string) bool {
+	for _, i := range m.viewOrder() {
+		if m.sessions[i].Info.Key() == key {
+			return true
+		}
+	}
+	return false
+}
+
 // fireHooks runs the event hook for every session whose state crossed a
 // line since the last refresh: into needs-you (an API error named as such),
 // into stuck, into circling, or lanes coming back. The first refresh sets
@@ -2191,6 +2224,18 @@ func (m *Model) toggleArchive() {
 				}
 			}
 		}
+	}
+	if m.archiveView && m.selectedKey == "" && m.restSelKey != "" && len(m.fleetOrder()) == 0 {
+		// The archive answers nothing here — a standing search cut it to
+		// no rows — so the swap had no row to land on and clampSelection
+		// keeps what an empty view had, which on the first `A` is
+		// nothing. `selectedIndex` then falls to nought for a key no
+		// session wears, so the header and the trail's title named the
+		// fleet's first row while the panel went on drawing the session
+		// the person left, and `enter attach` offered that first row's
+		// pane. The frame is still the live session's: keep it selected,
+		// as the hidden branch above already keeps the hidden one.
+		m.selectedKey = m.restSelKey
 	}
 	if m.selectedKey != "" {
 		// A remembered key is a fresh selection for everything downstream
