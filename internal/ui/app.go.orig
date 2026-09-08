@@ -2825,12 +2825,6 @@ func (m *Model) headerLine(w int) string {
 			}
 		}
 		query = fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total)
-		if m.archiveView {
-			// In the archive the chip beside it counts the search
-			// already (`archive 1 of 41`): the clause says which search,
-			// and a line answers a question once (#64).
-			query = " · /" + m.fleetQuery
-		}
 	}
 	room := w - lipgloss.Width(right) - 2 // two cells of air before the chips: their own separator's width, so `· claude ●1` never reads as one clause (#121)
 	compose := func(board, tag, query string, name string) string {
@@ -3029,13 +3023,9 @@ func (m *Model) statusChips() string {
 		parts = append(parts, dimStyle.Render(chip))
 	}
 	if m.archiveView {
-		// The list holds both, and the chip says so — so under a search
-		// it says what the search left, as the door that opened this view
-		// does (#169, #176): `archive 41 · 1 hidden` stood over one drawn
-		// row, no hidden group and no `x unhide`.
-		chip := fmt.Sprintf("archive %s", m.archiveDoorCount(m.archivedCount()))
+		chip := fmt.Sprintf("archive %d", m.archivedCount())
 		if n := m.hiddenCount(); n > 0 {
-			chip += fmt.Sprintf(" · %s hidden", m.hiddenDoorCount(n))
+			chip += fmt.Sprintf(" · %d hidden", n) // the list holds both; the chip says so
 		}
 		parts = append(parts, dimStyle.Render(chip))
 	}

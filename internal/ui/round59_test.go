@@ -1951,3 +1951,41 @@ func TestTheBoardsMirrorNoteKeepsTheBoardsKeys(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 71, fleet-hygiene ----
+// The archive's own header counts what its list holds. Under a search the
+// chip said `archive 41 · 1 hidden` over one drawn row, no hidden group and
+// no `x unhide` — the fourth site #176 did not reach — and the identity's
+// clause counted the drawn rows, hidden ones included, against the archived
+// total: `1 of 41` over a list with no archived row (#178, #169, #176).
+func TestTheArchiveHeaderCountsWhatItsListHolds(t *testing.T) {
+	for _, tc := range []struct {
+		query, chip string
+	}{
+		{"pytest", "archive 1 of 41 · 0 of 1 hidden"},
+		{"eda", "archive 0 of 41 · 1 of 1 hidden"},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+			for _, s := range m.sessions {
+				if s.Live && sessionName(s.Info) == "notebooks" {
+					m.point(s.Info.Key())
+				}
+			}
+			pressKey(m, "x") // the hidden one is the eda session, which /pytest does not match
+			pressKey(m, "/")
+			for _, r := range tc.query {
+				pressKey(m, string(r))
+			}
+			pressKey(m, "enter")
+			pressKey(m, "A")
+			head := ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+			if !strings.Contains(head, tc.chip) {
+				t.Errorf("/%s at %dx%d: the archive's header does not count what its list holds: %q", tc.query, size[0], size[1], strings.TrimSpace(head))
+			}
+			if strings.Contains(head, "/"+tc.query+" · 1 of 41") {
+				t.Errorf("/%s at %dx%d: the identity counts drawn rows against the archived total: %q", tc.query, size[0], size[1], strings.TrimSpace(head))
+			}
+		}
+	}
+}
