@@ -240,8 +240,16 @@ func TestHidingIsHonest(t *testing.T) {
 	}
 	press(m, "A")
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, `webapp · "flake in the checkout suite"`) || strings.Contains(view, "hidden · flake") {
+	// What #79 guarded: the row keeps the name its person went looking
+	// for, where "hidden · flake in the checkout suite" had lost it. The
+	// ask beside the name was the second copy of the sentence the trail's
+	// own ◉ row draws on the same frame, once each side of the rule, and
+	// the row yields it there (#111's rule, #107's compare, r97).
+	if !strings.Contains(view, "▸1 ● webapp") || strings.Contains(view, "hidden · flake") {
 		t.Errorf("the archive row keeps the name:\n%s", view)
+	}
+	if n := strings.Count(view, `"flake in the checkout suite"`); n != 1 {
+		t.Errorf("the ask stands once, on the trail's ◉ row, not %d times:\n%s", n, view)
 	}
 	if !strings.Contains(view, "⌁ dev:2.1") || !strings.Contains(view, "archive 5 · 1 hidden") {
 		t.Errorf("the archive says where it lives and counts it:\n%s", view)

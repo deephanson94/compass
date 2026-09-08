@@ -10865,3 +10865,129 @@ func TestTheArchiveBoardNamesTheLevelItsTabReaches(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 97, two-tools ----
+// ---- round 97, two-tools ----
+// TestTheArchiveRowDoesNotSayTheAskTheTrailDraws: in the archive the row a
+// name of its own keeps does not draw the ask the trail beside it draws on
+// its own ◉ row.
+//
+// The frame it was found on: `two-tools` at 220, `2`, `x`, `A` — the archive
+// list drew
+//
+//	▸1 ● api · "add rate limiting to the token endpoin…  40s │ ╷
+//
+// four cells left of
+//
+//	◉ "add rate limiting to the token endpoint"    30m ago
+//
+// one letter short of the sentence its neighbour drew whole with a hundred
+// blank cells after it. #111 is the rule for the present line — a row does
+// not say what the trail beside it says — and it is switched off in the
+// archive; #107's compare and #265's arrangement (the head yields, the ◉ row
+// keeps) are the deck's own. The row keeps the name (#79): what the person
+// went looking for, where `hidden · flake in the checkout suite` had lost it.
+//
+// It holds three ways so a blanket cut cannot pass: the ask stands once on
+// every such frame, the row still wears its name, and an archived row with no
+// trail beside it keeps its ask, which is what tells it from its neighbour
+// (#86, #266).
+func TestTheArchiveRowDoesNotSayTheAskTheTrailDraws(t *testing.T) {
+	yields, names, keeps := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {120, 34}, {220, 48}} {
+				for _, run := range [][]string{{"2", "x", "A"}, {"2", "x", "x", "A"}} {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range run {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if !m.archiveView {
+						continue
+					}
+					s, ok := m.selected()
+					if !ok || !(s.Live || s.Info.Name != "") {
+						continue
+					}
+					ask := archiveHeadline(s)
+					if ask == "" {
+						continue
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					var caret, said string
+					for _, r := range rows {
+						if said == "" {
+							for _, seg := range strings.Split(r, "│") {
+								if a := saidAsk(seg); a != "" && sameAsk(ask, a) {
+									said = a
+									break
+								}
+							}
+						}
+						if caret == "" && strings.Contains(r, "▸") && strings.Contains(r, sessionName(s.Info)) {
+							caret = r
+						}
+					}
+					where := sc.name + " " + itoa(size[0]) + "x" + itoa(size[1])
+					if said == "" || caret == "" {
+						continue // no trail row beside it: nothing to yield to
+					}
+					yields++
+					// The caret's row is the fleet column's, left of the rule.
+					left := caret
+					if i := strings.Index(left, "│"); i >= 0 {
+						left = left[:i]
+					}
+					if strings.Contains(left, `"`) {
+						t.Errorf("%s: the archive row said the ask the trail draws: %q beside %q", where, strings.TrimRight(left, " "), said)
+					}
+					if !strings.Contains(left, sessionName(s.Info)) {
+						names++
+						t.Errorf("%s: the archive row lost its name: %q", where, strings.TrimRight(left, " "))
+					} else {
+						names++
+					}
+					// A row the caret is not on has no trail beside it and
+					// keeps its ask, which is what tells it from its
+					// namesake (#80, #266): two `api` rows in one archive.
+					for _, r := range rows {
+						body := r
+						if i := strings.Index(body, "│"); i >= 0 {
+							body = body[:i]
+						}
+						if strings.Contains(body, "▸") || !strings.Contains(body, `"`) {
+							continue
+						}
+						keeps++
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if yields < 6 {
+		t.Fatalf("the pin never reached a frame that yields: %d", yields)
+	}
+	if names < 6 {
+		t.Fatalf("the pin never held a name: %d", names)
+	}
+	if keeps < 6 {
+		t.Fatalf("the pin never held an unselected row's ask: %d", keeps)
+	}
+	t.Logf("rows that yield %d, names held %d, unselected rows keeping their ask %d", yields, names, keeps)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}

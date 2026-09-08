@@ -814,7 +814,23 @@ func (m *Model) entryLinesUnder(r fleetRow, w int, tag string) []string {
 			// the name the person typed was on neither. It keeps its name
 			// before its prompt, as its header, its trail title and the
 			// band already do (#79).
-			head = sessionName(s.Info) + " · " + askQuote(head, askRelayed(s))
+			//
+			// Where the trail drawn beside this very row draws that ask
+			// on its own ◉ row, the row says it a second time on the same
+			// frame, once each side of the rule — #111's shape, and
+			// #107's: the row yields what a row beside it says, and keeps
+			// the name. At 220 the row cut the sentence one letter short
+			// of its end while the ◉ row four cells to its right stood
+			// whole with a hundred blank cells after it. The ask is the
+			// trail's own row, as #265 sent it down to the card's and
+			// #269 and #273 to the ship row's and the header's. An
+			// unselected row has no trail beside it and keeps its ask,
+			// which is what tells it from its neighbour (#196, #266).
+			if m.askBeside(s) {
+				head = sessionName(s.Info)
+			} else {
+				head = sessionName(s.Info) + " · " + askQuote(head, askRelayed(s))
+			}
 		}
 	}
 	if m.isCircling(s) && !m.archiveView {
@@ -1094,6 +1110,33 @@ func (m *Model) boxCoversRow(i int) bool {
 // row's width but not the line.
 func (m *Model) presentBesideRow(s fleet.Session, w int) bool {
 	return m.presentBeside(s, m.journeyLine(s, w))
+}
+
+// askBeside says whether the trail drawn beside this row draws the row's own
+// ask on its ◉ row. The archive's list stands beside the selected session's
+// trail, and the row's head — the name and the ask — then says that sentence
+// twice on one physical row, once each side of the rule: #111's rule for the
+// present line, on the archive's half of the same list. The compare is the
+// card's (#107): whole, or one clipped where the other is whole, two words
+// the floor (#110), and a row the reply box covers is not on the frame
+// (#108).
+func (m *Model) askBeside(s fleet.Session) bool {
+	if !m.archiveView || s.Info.Key() != m.selectedKey || len(m.trailRows) == 0 {
+		return false
+	}
+	ask := archiveHeadline(s)
+	for i, r := range m.trailRows {
+		if m.boxCoversRow(i) {
+			continue
+		}
+		// The trail's cursor stands between the glyph and the sentence on
+		// its own row at Lv2 — `◉▸"fix the 401 on token refresh"` — and
+		// the mark is not part of what the row says (#104, #127).
+		if sameAsk(ask, saidAsk(strings.Replace(ansi.Strip(r), "▸", " ", 1))) {
+			return true
+		}
+	}
+	return false
 }
 
 // secondLine is what the session is actually doing, in the trail's own words:
