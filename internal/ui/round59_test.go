@@ -4956,3 +4956,117 @@ func TestTheHideKeyYieldsWhereItCannotHide(t *testing.T) {
 		}
 	}
 }
+
+// r83Lv2Prefix replays the walkthrough's first n keys and then walks the
+// Lv2 cursor to the bottom of the trail, the stand both keys under test
+// are asked from.
+func r83Lv2Prefix(sc scene, w, h, n int) *Model {
+	m := sceneModel(sc, w, h)
+	keys := append(append([]string{}, canonicalKeys...), "esc")
+	keys = append(keys, sc.extra...)
+	for _, k := range keys[:n] {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if m.level == levelWaypoints {
+		m.cursorToPresent() // the stand both keys under test are asked from
+	}
+	m.note = ""
+	return m
+}
+
+// TestTheTrailsEndIsTheLastRowTheDeckDraws pins round eighty-three's one
+// thing. At Lv2 `j` and `G` decided they had nothing to do by comparing the
+// cursor against `len(TrailRows(...))` — a list that counts rows the panel
+// does not draw. Where the trail's last row is a waypoint the leg's own row
+// already carries, the cursor's last stand is a row short of that count:
+// the index test read "not at the end", `cursorMove` stepped onto the
+// undrawn row and back, and the key drew nothing and said nothing at all —
+// the dead key the branch's own comment forbids ("a key that moves nothing
+// says why"). On many-idle at 220 the two `test_checkout_total` waypoints
+// ride on their legs' rows, so seven counted rows are six drawn ones.
+//
+// The question is the cursor's own — did the move move — which is the
+// device `ctrl+d` two cases below already uses.
+func TestTheTrailsEndIsTheLastRowTheDeckDraws(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name string
+		sc   scene
+		n    int
+	}{
+		{"many-idle", sceneManyIdle(), 30},
+		{"many-idle", sceneManyIdle(), 36},
+	} {
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			for _, key := range []string{"j", "G"} {
+				m := r83Lv2Prefix(c.sc, w, h, c.n)
+				if m.level != levelWaypoints {
+					t.Fatalf("%s %dx%d prefix %d: not at Lv2", c.name, w, h, c.n)
+				}
+				before := m.View()
+				pressKey(m, key)
+				poll(m, c.sc)
+				if m.View() == before {
+					t.Errorf("%s %dx%d prefix %d: %q at the end of the trail drew nothing and said nothing (cursor %d of %d rows)",
+						c.name, w, h, c.n, key, m.cursor, len(TrailRows(m.trail, m.level)))
+					continue
+				}
+				if !strings.Contains(m.note, "at the present") {
+					t.Errorf("%s %dx%d prefix %d: %q said %q, not the present", c.name, w, h, c.n, key, m.note)
+				}
+			}
+		}
+	}
+}
+
+// TestNoLv2MoveKeyIsSilentlyDead is the rule behind it, asked of the whole
+// walkthrough: from the bottom of the trail at every canonical Lv2 stand,
+// of every scene and width, `j` and `G` must change the frame — a note is a
+// drawn cell, and a key that changes nothing at all is the dead key.
+func TestNoLv2MoveKeyIsSilentlyDead(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		// A waypoint rides on its leg's own row only where the column is
+		// wide enough to carry it; below 120 it always gets a row of its
+		// own, so the wide decks are where the count and the drawing can
+		// part.
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			// One walk finds the Lv2 stands; only those are replayed.
+			var stands []int
+			m := sceneModel(sc, w, h)
+			for n := range keys {
+				if m.level == levelWaypoints && !m.showHelp && !m.searching && !m.replying {
+					stands = append(stands, n)
+				}
+				pressKey(m, keys[n])
+				poll(m, sc)
+			}
+			if m.level == levelWaypoints && !m.showHelp && !m.searching && !m.replying {
+				stands = append(stands, len(keys))
+			}
+			for _, n := range stands {
+				m := r83Lv2Prefix(sc, w, h, n)
+				for _, key := range []string{"j", "G"} {
+					m.cursorToPresent() // back to the stand, without a key
+					m.note = ""
+					before := m.View()
+					pressKey(m, key)
+					poll(m, sc)
+					if m.View() == before {
+						t.Errorf("%s %dx%d after %d keys: %q at the end of the trail drew nothing and said nothing (cursor %d of %d rows)",
+							sc.name, w, h, n, key, m.cursor, len(TrailRows(m.trail, m.level)))
+					}
+				}
+			}
+		}
+	}
+}

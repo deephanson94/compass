@@ -973,14 +973,23 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// A key that moves nothing says why: two identical frames
 			// after `j` read as a dead key, and the cursor opens on the
 			// newest row, so the first `j` of every visit was that.
-			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 {
+			// The question is the cursor's own, not an index compare.
+			// `TrailRows` counts rows the panel does not draw — a
+			// waypoint the leg's own row already carries — and
+			// `cursorMove` steps over them; where the trail's last row is
+			// one of those the cursor's last stand is a row short of the
+			// count, the index test read "not at the end", the move
+			// stepped onto the undrawn row and back, and the key drew
+			// nothing and said nothing. Ask the move whether it moved, as
+			// `ctrl+d` below already does (#24, #213, #221).
+			was := m.cursor
+			m.cursorMove(1)
+			if m.cursor == was {
 				m.note = "at the present · k goes back"
-				if n <= 1 {
+				if len(TrailRows(m.trail, m.level)) <= 1 {
 					m.note = "no leg to move to" // no key goes anywhere
 				}
-				return m, nil
 			}
-			m.cursorMove(1)
 			return m, nil
 		case "k", "up":
 			if m.cursor == 0 {
@@ -1015,14 +1024,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// G means the same thing at every depth: back to the present. At
 			// Lv2 the cursor is what the viewport follows, so it is the cursor
 			// that travels — and landing on the newest row re-pins the panel.
-			if n := len(TrailRows(m.trail, m.level)); m.cursor >= n-1 && m.trailPinned {
+			// The same question as `j` above: the journey's end is the
+			// last row the panel draws, not the last row the list counts.
+			was, pinned := m.cursor, m.trailPinned
+			m.cursorToPresent()
+			if m.cursor == was && pinned {
 				m.note = "at the present"
-				if n <= 1 {
+				if len(TrailRows(m.trail, m.level)) <= 1 {
 					m.note = "no leg to move to"
 				}
-				return m, nil
 			}
-			m.cursorToPresent()
 			return m, nil
 		case "[", "]":
 			m.chapter(key)
