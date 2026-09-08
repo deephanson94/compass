@@ -9266,3 +9266,135 @@ func sessionNameFor(m *Model, key string) string {
 	}
 	return key
 }
+
+// ---- round 92, two-tools ----
+// r92ttStand plays keys into a fresh scene and returns the deck.
+func r92ttStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r92ttCells splits one drawn row into the board's columns, in order.
+func r92ttCells(line string) []string {
+	return strings.Split(line, "│")
+}
+
+// r92ttTools are the tool words a row can wear (#50, #80).
+var r92ttTools = []string{"claude", "opencode", "codex"}
+
+// r92ttSaysToolTwice walks a frame and reports every column where a row
+// and the row directly under it, in the same column, both name the same
+// tool word as one of their own clauses.
+func r92ttSaysToolTwice(view string) []string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	var bad []string
+	for i := 1; i < len(rows); i++ {
+		above, below := r92ttCells(rows[i-1]), r92ttCells(rows[i])
+		if len(above) != len(below) {
+			continue
+		}
+		for k := range below {
+			up, down := strings.TrimSpace(above[k]), strings.TrimSpace(below[k])
+			if up == "" || down == "" {
+				continue
+			}
+			for _, tool := range r92ttTools {
+				if hasClause(up, tool) && hasClause(down, tool) {
+					bad = append(bad, fmt.Sprintf("row %d: %q over %q", i, up, down))
+				}
+			}
+		}
+	}
+	return bad
+}
+
+// hasClause says whether one of the row's " · "-separated clauses is word.
+func hasClause(row, word string) bool {
+	for _, c := range strings.Split(row, " · ") {
+		if strings.TrimSpace(c) == word {
+			return true
+		}
+	}
+	return false
+}
+
+// TestTheArchiveBoardSaysItsToolOnce pins the archive board's card. The
+// card's third row is the tag row, always (#107, #112): the tool word and
+// its model stand there. The row above it is the archive list's own second
+// line, which names the tool where the archive holds two (#80) — so the
+// card drew `claude · main` over `claude · opus-4-1 · ⌁ dev:1.0`, and
+// where the archived session has neither model nor pane a whole row that
+// was the word and nothing else. #53 already took the pane off that row
+// because the tag row below draws it, on the reason §4 states and #64
+// names: a line answers a question once. The word goes the same way, and
+// the branch and the verdict — which the tag row cannot say — take the
+// cells back.
+func TestTheArchiveBoardSaysItsToolOnce(t *testing.T) {
+	forceASCII(t)
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			where := fmt.Sprintf("%dx%d %v", w, h, prof)
+
+			// Two live `api` sessions hidden, the archive drawing both,
+			// `⇧tab board` — the key that footer names — on the board.
+			m := r92ttStand(sceneTwoTools(), w, h, "2", "x", "x", "A", "shift+tab")
+			if !m.archiveView || !m.boardShown() || len(m.viewOrder()) != 2 {
+				t.Fatalf("%s: the run did not reach an archive board of two rows", where)
+			}
+			view := ansi.Strip(m.View())
+			for _, bad := range r92ttSaysToolTwice(view) {
+				t.Errorf("%s: the archive board's card says its tool twice — %s", where, bad)
+			}
+			// The word is on the tag row, which is where the model and
+			// the pane are: the card still answers which tool.
+			for _, want := range []string{
+				"opencode · sonnet-4-5 · " + mirrorMark + " dev:2.0",
+				"claude · opus-4-1 · " + mirrorMark + " dev:1.0",
+			} {
+				if !strings.Contains(view, want) {
+					t.Errorf("%s: the card's tag row lost its identity %q", where, want)
+				}
+			}
+			// And the row above it keeps the branch, which the tag cannot say.
+			for _, line := range strings.Split(view, "\n") {
+				for _, c := range r92ttCells(line) {
+					if strings.TrimSpace(c) == "opencode · main" || strings.TrimSpace(c) == "claude · main" {
+						t.Errorf("%s: the card's row still names the tag row's word: %q", where, strings.TrimSpace(c))
+					}
+				}
+			}
+
+			// The archive of finished sessions, where the tag row is the
+			// word alone: the same rule, and the row spends the cells it
+			// gets back on the verdict the archive row exists for (#47).
+			m = r92ttStand(sceneSecondDay(), w, h, "A", "shift+tab")
+			if !m.archiveView || !m.boardShown() {
+				t.Fatalf("%s: the run did not reach second-day's archive board", where)
+			}
+			view = ansi.Strip(m.View())
+			for _, bad := range r92ttSaysToolTwice(view) {
+				t.Errorf("%s: second-day's archive board says its tool twice — %s", where, bad)
+			}
+			if !strings.Contains(view, "feat/etl-v2 · ✓ green 212✓") {
+				t.Errorf("%s: the row did not spend the cells on the verdict it could not fit", where)
+			}
+
+			// Held at HEAD: the archive *list* keeps its word, which is
+			// what tells a row from its namesake where no tag row is
+			// drawn (#80, #196).
+			m = r92ttStand(sceneTwoTools(), w, h, "2", "x", "x", "A")
+			list := ansi.Strip(m.View())
+			if !strings.Contains(list, "claude · "+mirrorMark+" dev:1.0 · main") {
+				t.Errorf("%s: the archive list lost the word that tells its two api rows apart", where)
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+}

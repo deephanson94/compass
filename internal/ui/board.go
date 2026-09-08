@@ -1075,7 +1075,7 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	// tag row is the invariant here ("always", below); the row yields the
 	// address to it and keeps the branch, which the tag cannot say.
 	tag := m.columnTag(key, s, w)
-	entry := m.entryLinesTagged(r, w, strings.Contains(tag, mirrorMark))
+	entry := m.entryLinesUnder(r, w, tag)
 	second := entry[1]
 	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
 		// A working column shows its HEAD row anyway — pinned, it is always

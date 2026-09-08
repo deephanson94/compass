@@ -740,13 +740,15 @@ func echoWidth(echo string) int {
 // entryLines renders one session: "N ● name  activity  age" over a dim line
 // saying where it lives.
 func (m *Model) entryLines(r fleetRow, w int) []string {
-	return m.entryLinesTagged(r, w, false)
+	return m.entryLinesUnder(r, w, "")
 }
 
-// entryLinesTagged is entryLines with the caller's answer to whether it
-// draws the row's pane itself, beneath it: the board's column does (the
-// tag row), the fleet list and the archive list do not.
-func (m *Model) entryLinesTagged(r fleetRow, w int, tagged bool) []string {
+// entryLinesUnder is entryLines under the tag the caller draws beneath it:
+// the board's column draws one on its third row, the fleet list and the
+// archive list draw none. What that tag already says, the row does not say
+// again (#64) — the pane it took off the row from the first (#53), and the
+// tool word beside it.
+func (m *Model) entryLinesUnder(r fleetRow, w int, tag string) []string {
 	s := m.sessions[r.sess]
 	selected := s.Info.Key() == m.selectedKey
 	st := s.Snap.State
@@ -862,7 +864,7 @@ func (m *Model) entryLinesTagged(r fleetRow, w int, tagged bool) []string {
 	first := marker + indexStyled + " " + accent.Render(glyph) + " " +
 		body + " " + dimStyle.Render(age)
 
-	lines := []string{first, strings.Repeat(" ", 4) + m.secondLineTagged(s, w-4, tagged)}
+	lines := []string{first, strings.Repeat(" ", 4) + m.secondLineUnder(s, w-4, tag)}
 	if strings.TrimSpace(ansi.Strip(lines[1])) == "" {
 		lines = lines[:1] // the trail beside says the present; the trace moves up (#111)
 	}
@@ -1090,12 +1092,12 @@ func (m *Model) presentBesideRow(s fleet.Session, w int) bool {
 // own header, and `compass panes` has them all. A branch reading "HEAD" three
 // times in a fleet says less than nothing.
 func (m *Model) secondLine(s fleet.Session, w int) string {
-	return m.secondLineTagged(s, w, false)
+	return m.secondLineUnder(s, w, "")
 }
 
-// secondLineTagged is secondLine with the caller's answer to whether the
-// pane is drawn beside this row already.
-func (m *Model) secondLineTagged(s fleet.Session, w int, tagged bool) string {
+// secondLineUnder is secondLine under the tag the card draws two rows down.
+func (m *Model) secondLineUnder(s fleet.Session, w int, tag string) string {
+	tagged := strings.Contains(tag, mirrorMark)
 	if m.archiveView {
 		// A hidden live session: where it lives, and the tool where the
 		// fleet runs two — that is how its namesake on the board is told
@@ -1103,6 +1105,21 @@ func (m *Model) secondLineTagged(s fleet.Session, w int, tagged bool) string {
 		word := ""
 		if tool := m.toolTag(s); tool != "" && strings.SplitN(tool, " · ", 2)[0] != shortModel(s.Info.Model) {
 			word = " · " + strings.SplitN(tool, " · ", 2)[0]
+		}
+		// The tag row two rows down draws this very word. #53 put the
+		// word on the row so a hidden session is told from its namesake
+		// on the board; on the board the card's own tag row says it, and
+		// the archive's card drew `claude · main` over
+		// `claude · opus-4-1 · ⌁ dev:1.0`, and where the archived row has
+		// no model and no pane a whole row that was the word and nothing
+		// else. The row yields the word to the tag exactly as it yields
+		// the address (#64: a line answers a question once), and keeps
+		// the branch and the verdict, which the tag cannot say.
+		for _, c := range strings.Split(tag, " · ") {
+			if word != "" && c == strings.TrimPrefix(word, " · ") {
+				word = ""
+				break
+			}
 		}
 		if pane, ok := m.panes[s.Info.Key()]; ok && s.Live && pane.Target != "" {
 			addr := mirrorMark + " " + pane.Target
