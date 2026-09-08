@@ -1910,7 +1910,16 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 	name := sessionName(s.Info)
 	switch {
 	case !s.Live:
-		return "the archive is already off the board"
+		// The subject is the row the caret is on, not the view: it is the
+		// session that is off the board, and the archive is where it is
+		// read. The long form spent thirty-six cells and the footer paid
+		// for them — at eighty `tab deeper`, `a ask` and `/ search`, three
+		// keys that act on this very row, and `/ search` again at 100 and
+		// 120 — for a sentence about a key the footer does not offer
+		// (#24, #52, #210: the note is one sentence for the key and for
+		// the footer that offers it, and a refusal never costs a key that
+		// acts).
+		return "it is off the board"
 	case m.liveCount() <= 1:
 		// The rule is the fleet's, not the view's: `liveCount` counts
 		// what is `onBoard`, the same number in the archive as on the
@@ -4270,7 +4279,7 @@ func (m *Model) hideNote() bool {
 		strings.HasSuffix(m.note, " is back on the board") ||
 		strings.Contains(m.note, " stays · ") ||
 		m.note == "the live one stays" ||
-		m.note == "the archive is already off the board"
+		m.note == "it is off the board"
 }
 
 // hideKeyMoves reports whether `x` acts from where the row stands: a

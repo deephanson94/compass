@@ -9482,3 +9482,204 @@ func TestTheSentRowInTheArchiveDoesNotKeepAMoveThatCannotMove(t *testing.T) {
 		t.Fatal("nothing checked")
 	}
 }
+
+// ---- round 93, second-day ----
+// ---- round 93, second-day, the one thing ----
+// The archive's hide refusal keeps the way deeper. `x` on an archived row
+// answered `the archive is already off the board` — 36 cells, the longest
+// note the deck writes, against the 21 the eighty-column archive footer
+// leaves — and the row it left named `j/k move · A fleet · ? help · q
+// quit`: `tab deeper` gone, the frame's only naming of the way deeper,
+// and `a ask` and `/ search` with it. That is the harm #175, #187, #190,
+// #194 and #198 each folded, on the one refusal with no yield. Its
+// subject is the word the frame supplies twice — the column's own title
+// `▌FLEET · archive` and the header's `archive 12` chip — so it yields,
+// leaving `it is off the board` (19 cells), and only where a key naming a
+// level comes back for it.
+func TestTheArchivesHideRefusalKeepsTheWayDeeper(t *testing.T) {
+	forceASCII(t)
+	levelKey := func(foot string) bool {
+		for _, k := range []string{"tab deeper", "enter attach", "tab session", "tab reader"} {
+			if strings.Contains(foot, k) {
+				return true
+			}
+		}
+		return false
+	}
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// The frame it was found on: the second day's archive at eighty, one
+	// `A` and one `x` from the opening board.
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"A", "x"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if got, want := foot(m), " j/k move · tab deeper · a ask · A fleet · ? help · q quit  it is off the board"; got != want {
+		t.Errorf("second-day 80x24 A x:\n got  %q\n want %q", got, want)
+	}
+	// The rule, over every scene at every width under both colour
+	// profiles: where `x` in the archive is refused, the row it draws
+	// keeps a key naming a level if the row one keypress earlier had one.
+	routes := [][]string{{"A"}, {"A", "j"}, {"A", "j", "j"}, {"/", "pytest", "enter", "A"}}
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				for _, route := range routes {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					before := foot(m)
+					pressKey(m, "x")
+					poll(m, sc)
+					after := foot(m)
+					if !strings.HasSuffix(after, "off the board") || strings.Contains(after, "is hidden") {
+						continue // the key acted, or answered something else
+					}
+					if levelKey(before) && !levelKey(after) {
+						t.Errorf("%s %dx%d %v %v then x: the archive's hide refusal costs the frame its only naming of the way deeper:\n before %q\n after  %q",
+							sc.name, size[0], size[1], prof, route, strings.TrimSpace(before), strings.TrimSpace(after))
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+}
+
+// ---- round 93, fleet-hygiene ----
+// The archive's `x` refusal names the row, not the view, and pays for
+// itself out of no key that acts (#24, #52, #210, and #263's own record).
+//
+// On an archived row `x` cannot take a session off a board it left long
+// ago, and it answers. The answer was "the archive is already off the
+// board" — thirty-six cells about the view, under a caret standing on one
+// session — and at eighty the footer beside it shed `tab deeper`, `a ask`
+// and `/ search`, three keys that act on that very row, for a sentence
+// about a key the footer does not offer; at 100 and 120 it shed
+// `/ search` too. The nineteen-cell form names the row the caret is on and
+// buys them back.
+//
+// Both stands are measured with colour on as well as under `forceASCII`
+// (#215, #218): the footer is read through `ansi.Strip`, so a styled
+// clause must be found either way.
+
+// r93fhArchiveRefusal presses `A`, `j`, `x` and hands back the footer
+// before the press and the footer after it, or ok=false where that scene's
+// archive has no archived row for `x` to refuse.
+func r93fhArchiveRefusal(sc scene, w, h int) (before, after string, ok bool) {
+	m := sceneModel(sc, w, h)
+	for _, k := range []string{"A", "j"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	rows := strings.Split(m.View(), "\n")
+	before = ansi.Strip(rows[len(rows)-1])
+	pressKey(m, "x")
+	poll(m, sc)
+	rows = strings.Split(m.View(), "\n")
+	after = ansi.Strip(rows[len(rows)-1])
+	if !strings.Contains(after, "off the board") || strings.Contains(after, "is back on the board") {
+		return "", "", false
+	}
+	return before, after, true
+}
+
+// r93fhNoteOf is the note the footer carries — what stands after the wide
+// gap that separates the keys from the sentence.
+func r93fhNoteOf(footer string) string {
+	f := strings.TrimRight(footer, " ")
+	if i := strings.LastIndex(f, "  "); i >= 0 {
+		return strings.TrimSpace(f[i:])
+	}
+	return ""
+}
+
+var r93fhSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+var r93fhProfiles = []struct {
+	name string
+	prof termenv.Profile
+}{{"ascii", termenv.Ascii}, {"colour", termenv.TrueColor}}
+
+// TestTheArchivesOffTheBoardNoteNamesTheRowNotTheView is the frame: the
+// note is about the session the caret stands on and fits in nineteen
+// cells, at every width and both profiles.
+func TestTheArchivesOffTheBoardNoteNamesTheRowNotTheView(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	stands := 0
+	for _, p := range r93fhProfiles {
+		for _, sc := range allScenes() {
+			for _, size := range r93fhSizes {
+				lipgloss.SetColorProfile(p.prof)
+				_, after, ok := r93fhArchiveRefusal(sc, size[0], size[1])
+				if !ok {
+					continue
+				}
+				stands++
+				note := r93fhNoteOf(after)
+				if strings.Contains(note, "archive") {
+					t.Errorf("%s %s %dx%d: the note about the row names the view instead: %q",
+						p.name, sc.name, size[0], size[1], note)
+				}
+				if n := lipgloss.Width(note); n > 19 {
+					t.Errorf("%s %s %dx%d: the note is %d cells, nineteen is the room the footer can spare: %q",
+						p.name, sc.name, size[0], size[1], n, note)
+				}
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("no scene reached the archive's off-the-board refusal")
+	}
+	t.Logf("off-the-board notes checked: %d", stands)
+}
+
+// TestTheArchivesOffTheBoardNoteCostsNoKeyThatActs is the rule: the keys
+// the frame named one press earlier and that act on the row it stands on
+// are still named beside the note.
+func TestTheArchivesOffTheBoardNoteCostsNoKeyThatActs(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	stands := 0
+	for _, p := range r93fhProfiles {
+		for _, sc := range allScenes() {
+			for _, size := range r93fhSizes {
+				lipgloss.SetColorProfile(p.prof)
+				before, after, ok := r93fhArchiveRefusal(sc, size[0], size[1])
+				if !ok {
+					continue
+				}
+				stands++
+				// `tab deeper` and `a ask` at every width; `/ search`
+				// from a hundred columns up. At eighty the keys alone
+				// fill sixty-nine of the eighty cells, so no sentence
+				// that says anything can keep `/ search` there — the
+				// nineteen-cell form buys back the two that fit.
+				keys := []string{"tab deeper", "a ask"}
+				if size[0] >= 100 {
+					keys = append(keys, "/ search")
+				}
+				for _, key := range keys {
+					if strings.Contains(before, key) && !strings.Contains(after, key) {
+						t.Errorf("%s %s %dx%d: the refusal spent %q, a key that acts on the row it stands on\n  before: %q\n  after : %q",
+							p.name, sc.name, size[0], size[1], key,
+							strings.TrimRight(before, " "), strings.TrimRight(after, " "))
+					}
+				}
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("no scene reached the archive's off-the-board refusal")
+	}
+	t.Logf("off-the-board footers checked: %d", stands)
+}
