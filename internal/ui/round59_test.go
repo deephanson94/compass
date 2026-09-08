@@ -4795,3 +4795,164 @@ func TestAStuckKeyIsTriedAgainOnceAnotherHasYielded(t *testing.T) {
 		}
 	}
 }
+
+// TestThePageKeyBuysAStuckKeysCells pins round eighty-three's second
+// finding: a row that keeps a key which refuses and sheds the key that
+// just moved its cursor. `keysActGained` refuses the page key as the gain
+// that buys a trade — #42 and #51 rank it lowest, a shortcut for a
+// distance `j` covers — but every level now drops it where it cannot move
+// (#83 at Lv1, #221 at Lv2, #200 in the reader), so a page key still on
+// the row is a key that acts. Two presses into the walkthrough at 152 the
+// trail's footer named `[ ] chapters`, which answers `no earlier prompt`
+// and `no later prompt` on a trail of one prompt, under the note `at the
+// start` — which `ctrl+u` had just written by walking the cursor.
+//
+// Both sides. The rank is unchanged: the page key is still the first
+// fragment a row sheds for width, and it never comes back for cells the
+// row did not free by shedding a key that refuses. Where the chapter key
+// acts it stays.
+func TestThePageKeyBuysAStuckKeysCells(t *testing.T) {
+	forceASCII(t)
+	at := func(sc scene, w, h, n int, extra ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for i := 0; i < n; i++ {
+			pressKey(m, canonicalKeys[i])
+			poll(m, sc)
+		}
+		for _, k := range extra {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	body := func(m *Model) []string {
+		rows := strings.Split(m.View(), "\n")
+		return rows[:len(rows)-1]
+	}
+	moves := func(sc scene, w, h, n int, k string) bool {
+		a, b := body(at(sc, w, h, n, k)), body(at(sc, w, h, n))
+		for i := range a {
+			if i < len(b) && a[i] != b[i] {
+				return true
+			}
+		}
+		return false
+	}
+	for _, c := range []struct {
+		name    string
+		scene   func() scene
+		w, h, n int
+	}{
+		{"two-tools", sceneTwoTools, 152, 40, 9},
+		{"fleet-hygiene", sceneFleetHygiene, 152, 40, 9},
+	} {
+		sc := c.scene()
+		// The chapter key refuses on both halves, at this stand.
+		for k, want := range map[string]string{"[": "no earlier prompt", "]": "no later prompt"} {
+			if note := at(c.scene(), c.w, c.h, c.n, k).note; note != want {
+				t.Fatalf("%s %dx%d: %q was expected to answer %q, it said %q", c.name, c.w, c.h, k, want, note)
+			}
+		}
+		// The page key walks the cursor: a drawn row moves.
+		if !moves(sc, c.w, c.h, c.n, "ctrl+d") {
+			t.Fatalf("%s %dx%d: `ctrl+d` moved no drawn row", c.name, c.w, c.h)
+		}
+		f := foot(at(c.scene(), c.w, c.h, c.n))
+		if strings.Contains(f, "[ ] chapters") {
+			t.Errorf("%s %dx%d: the row keeps a chapter key that refuses: %q", c.name, c.w, c.h, f)
+		}
+		if !strings.Contains(f, "ctrl+d/u half page") {
+			t.Errorf("%s %dx%d: the freed cells were expected to name the page key, the row is %q", c.name, c.w, c.h, f)
+		}
+	}
+	// The rank is unchanged: on a row that sheds only for width the page
+	// key is still the first fragment to go (#42, #51). One `tab` in at
+	// 120 the trail's footer names the chapter key, which acts there, and
+	// not the page key.
+	f := foot(at(sceneTwoTools(), 120, 34, 7))
+	if !strings.Contains(f, "[ ] chapters") || strings.Contains(f, "ctrl+d/u half page") {
+		t.Errorf("two-tools 120x34: the page key outranked a chapter key that acts: %q", f)
+	}
+}
+
+// TestTheHideKeyYieldsWhereItCannotHide pins round eighty-three's one
+// thing: `x hide` on a selection the key refuses to take off the board.
+// `toggleHidden` keeps what owes you an alarm and says so — `infra stays ·
+// it is asking`, `· it hangs`, `· it is looping`, `· dead on the API` —
+// the same answer at every width and however many times it is pressed, so
+// the nine cells the key spends buy a promise the next keypress refuses.
+// The keymap already drops the key outright where the fleet is one
+// session ("the keys that move between sessions answer no question"),
+// which is this rule one rung up, asked of the fleet rather than of the
+// selection; this is #210's, #211's, #213's, #219's, #222's and #223's
+// rule at the one board key they did not reach.
+//
+// Both sides. Where `x` can hide the selection the key stays; under its
+// own refusal the key stays where it is (#24, #57); and where nothing is
+// shed the key stands however stuck it is (#193).
+func TestTheHideKeyYieldsWhereItCannotHide(t *testing.T) {
+	forceASCII(t)
+	at := func(sc scene, w, h, n int, extra ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for i := 0; i < n; i++ {
+			pressKey(m, canonicalKeys[i])
+			poll(m, sc)
+		}
+		for _, k := range extra {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	for _, c := range []struct {
+		name    string
+		scene   func() scene
+		w, h, n int
+		refusal string
+		gained  string
+	}{
+		{"two-tools", sceneTwoTools, 80, 24, 0, "infra stays · it is asking", "g grab"},
+		{"two-tools", sceneTwoTools, 100, 30, 0, "infra stays · it is asking", "a ask"},
+		{"two-tools", sceneTwoTools, 120, 34, 2, "infra stays · it is asking", "/ search"},
+		{"alarm-storm", sceneAlarmStorm, 120, 34, 2, "infra stays · it is asking", "/ search"},
+	} {
+		if note := at(c.scene(), c.w, c.h, c.n, "x").note; note != c.refusal {
+			t.Fatalf("%s %dx%d: `x` was expected to refuse with %q, it said %q", c.name, c.w, c.h, c.refusal, note)
+		}
+		f := foot(at(c.scene(), c.w, c.h, c.n))
+		if strings.Contains(f, "x hide") {
+			t.Errorf("%s %dx%d: the row spends nine cells on a key that answers %q: %q", c.name, c.w, c.h, c.refusal, f)
+		}
+		if !strings.Contains(f, c.gained) {
+			t.Errorf("%s %dx%d: the freed cells were expected to name %q, the row is %q", c.name, c.w, c.h, c.gained, f)
+		}
+	}
+	// Where `x` can hide the selection the key stays: `2 api` is running,
+	// not asking, and the same frame one jump over keeps the key.
+	if f := foot(at(sceneTwoTools(), 120, 34, 2, "2")); !strings.Contains(f, "x hide") {
+		t.Errorf("two-tools 120x34 on a session `x` can hide: the row sheds the key: %q", f)
+	}
+	// Under its own refusal the key stays where the width leaves it room
+	// (#24, #57): the row refusing `x` names `x hide`.
+	for _, w := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		g := foot(at(sceneTwoTools(), w[0], w[1], 2, "x"))
+		if !strings.Contains(g, "x hide") {
+			t.Errorf("two-tools %dx%d: the row refusing `x` does not name it: %q", w[0], w[1], g)
+		}
+	}
+	// Where nothing is shed the key stands however stuck it is (#193).
+	for _, w := range [][2]int{{152, 40}, {220, 48}} {
+		f := foot(at(sceneTwoTools(), w[0], w[1], 2))
+		if !strings.Contains(f, "x hide") {
+			t.Errorf("two-tools %dx%d: a row that sheds nothing must still name `x`: %q", w[0], w[1], f)
+		}
+	}
+}

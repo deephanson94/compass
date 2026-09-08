@@ -1671,31 +1671,11 @@ func (m *Model) toggleHidden() {
 		m.note = sessionName(s.Info) + " is back on the board"
 		return
 	}
-	if !s.Live {
-		m.note = "the archive is already off the board"
+	if refusal := m.hideRefusal(s); refusal != "" {
+		m.note = refusal
 		return
 	}
-	if m.liveCount() <= 1 && !m.archiveView {
-		m.note = "the live one stays"
-		return
-	}
-	// What owes you an alarm stays, and says so: a note that reported a
-	// hide while the column stood was the screen lying.
 	name := sessionName(s.Info)
-	switch {
-	case s.Snap.APIError:
-		m.note = name + " stays · dead on the API"
-		return
-	case s.Snap.State == state.NeedsYou:
-		m.note = name + " stays · it is asking"
-		return
-	case s.Snap.State == state.Stuck:
-		m.note = name + " stays · it hangs"
-		return
-	case m.isCircling(s):
-		m.note = name + " stays · it is looping"
-		return
-	}
 	// Where the selection goes: the neighbour as drawn — the next column,
 	// or the next row of the list — not the first column.
 	drawn := func() []int {
@@ -1729,6 +1709,30 @@ func (m *Model) toggleHidden() {
 		}
 		m.clampSelection()
 	}
+}
+
+// hideRefusal is what `x` answers about this session instead of taking it
+// off the board, or "" when the key acts. What owes you an alarm stays,
+// and says so: a note that reported a hide while the column stood was the
+// screen lying. It is one sentence for the key and for the footer that
+// offers it (#24, #210).
+func (m *Model) hideRefusal(s fleet.Session) string {
+	name := sessionName(s.Info)
+	switch {
+	case !s.Live:
+		return "the archive is already off the board"
+	case m.liveCount() <= 1 && !m.archiveView:
+		return "the live one stays"
+	case s.Snap.APIError:
+		return name + " stays · dead on the API"
+	case s.Snap.State == state.NeedsYou:
+		return name + " stays · it is asking"
+	case s.Snap.State == state.Stuck:
+		return name + " stays · it hangs"
+	case m.isCircling(s):
+		return name + " stays · it is looping"
+	}
+	return ""
 }
 
 // fireHooks runs the event hook for every session whose state crossed a
@@ -3871,7 +3875,56 @@ func (m *Model) stuckKeys(whole string) []string {
 	if k := m.walkKeyStuck(whole); k != "" {
 		stuck = append(stuck, k)
 	}
+	if k := m.hideKeyStuck(whole); k != "" {
+		stuck = append(stuck, k)
+	}
 	return stuck
+}
+
+// hideKeyStuck is the board's or the list's `x hide` on a selection it
+// cannot take off the board — or "" when the row does not offer it or the
+// key acts. `toggleHidden` refuses what owes you an alarm (`infra stays ·
+// it is asking`, `· it hangs`, `· it is looping`, `· dead on the API`),
+// the same answer at every width and however many times it is pressed,
+// and the keymap already drops the key outright where the fleet is one
+// session — "the keys that move between sessions answer no question" —
+// which is this rule one rung up, asked of the fleet rather than of the
+// selection. The same rule as the chapter key, the movement key, the
+// unfold key and the walk key at the one board key they did not reach
+// (#210, #211, #213, #219, #222, #223). Under its own note the key stays
+// (#24, #57): the row refusing `x` must name `x`.
+func (m *Model) hideKeyStuck(whole string) string {
+	if m.hideNote() || m.hideKeyMoves() {
+		return ""
+	}
+	const hide = " · x hide"
+	if strings.Contains(whole, hide) {
+		return hide
+	}
+	return ""
+}
+
+// hideNote says whether the note is the hide key's own: a session taken
+// off the board, one brought back, or any of `x`'s refusals (#24).
+func (m *Model) hideNote() bool {
+	return strings.Contains(m.note, " is hidden · A, then x") ||
+		strings.HasSuffix(m.note, " is back on the board") ||
+		strings.Contains(m.note, " stays · ") ||
+		m.note == "the live one stays" ||
+		m.note == "the archive is already off the board"
+}
+
+// hideKeyMoves reports whether `x` acts from where the row stands: a
+// hidden session it brings back, or a live one `hideRefusal` lets go.
+func (m *Model) hideKeyMoves() bool {
+	s, ok := m.selected()
+	if !ok {
+		return false
+	}
+	if m.hidden[s.Info.Key()] {
+		return true // the key brings it back
+	}
+	return m.hideRefusal(s) == ""
 }
 
 // unfoldKeyStuck is the reader's `space unfold` on a page where no row can
@@ -4034,7 +4087,7 @@ func keysActGained(was, now string, drops []string, yield string, stuck map[stri
 		if had && !in && d != yield {
 			return "" // something the row drew is gone
 		}
-		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" && d != "ctrl+d/u half page · " && !stuck[d] {
+		if in && !had && d != " · enter · no pane" && d != attachHint && !stuck[d] {
 			return d
 		}
 	}
