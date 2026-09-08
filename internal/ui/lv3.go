@@ -735,18 +735,26 @@ func (m *Model) turnStand() ([]readerLine, []int, int, int) {
 }
 
 // turnKeysMove reports whether `[` or `]` moves the reader from where it
-// stands: another turn of yours to land on. Standing on the only turn,
-// both keys refuse; off any turn, one of them lands on it, since every
-// turn is either after the anchored line or on or before it.
+// stands: another turn of yours to land on, and a landing that moves the
+// page. Standing on the only turn, both keys refuse. Off the only turn,
+// `[` lands on it — but the reader draws no cursor on the turn it stands
+// on, so that landing is a move only where the page moves under it: on a
+// conversation the reader draws whole, the turn is already in plain sight
+// and the press writes its note and changes no drawn cell. The same page
+// two presses later already sheds the key (#200, #211).
 func (m *Model) turnKeysMove() bool {
-	_, turns, cur, _ := m.turnStand()
+	doc, turns, cur, _ := m.turnStand()
 	if len(turns) == 0 {
 		return false
 	}
-	if cur < 0 {
+	if len(turns) > 1 {
 		return true
 	}
-	return len(turns) > 1
+	if cur >= 0 {
+		return false
+	}
+	h := m.readerHeight()
+	return readerTopIn(doc, clampScroll(turns[0], len(doc), h), h) != m.readerTop(doc)
 }
 
 // readerChapter is `[` / `]` in the reader: the previous or next turn of
