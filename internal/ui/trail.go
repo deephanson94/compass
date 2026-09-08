@@ -1133,20 +1133,22 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 	// keypress used to be the only way to it. Only at Lv1: at Lv2 the
 	// details hang beneath the leg already.
 	shown := clip(label, labelWidth)
-	// Where the label will not fit and what survives the cut is the ask
-	// the panel already draws whole — the ◉ row above it, and on an
-	// archived session the identity header too — the row is a clipped
-	// second copy of it, and the one thing it alone carries is the
-	// bracket: "◆ ship   commit", not "◆ ship   fix the 401 on token
-	// refresh…", which spends the row on the ask and throws away the
-	// only word that says how the day ended. #64's device on the
-	// reader's title, at the row that shipped (#189). A ship label whose
+	// Where the label is the ask the panel already draws whole — the ◉
+	// row above it, and on an archived session the identity header too —
+	// the row is a second copy of it, and the one thing it alone carries
+	// is the bracket: "◆ ship   commit", not "◆ ship   fix the 401 on
+	// token refresh (commit)", which spends the row on a sentence the
+	// frame has already said and adds only the word in brackets. #64's
+	// device on the reader's title, at the row that shipped (#189). #192
+	// and #267 drew it only where the label would not fit, so at 120 and
+	// wider the copy stood whole — the fourth on its frame — while the
+	// same row eighty columns narrower said `commit`; a card says its
+	// sentence once at every width (#107, #110, #265). A ship label whose
 	// subject is the session's own words — "auth: drop the legacy path" —
 	// carries no bracket and is untouched.
-	if shown != label {
-		if inner, ok := askBracket(l, label, o); ok && lipgloss.Width(inner) <= labelWidth {
-			shown = inner
-		}
+	if inner, ok := askBracket(l, label, o); ok && lipgloss.Width(inner) <= labelWidth {
+		shown = inner
+		label = inner
 	}
 	if i := strings.LastIndex(shown, "("); i >= 0 && !strings.Contains(shown[i:], ")") && strings.HasSuffix(shown, "…") {
 		// The bracket goes with what it opened: "…(c…" promises a clause

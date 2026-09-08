@@ -10197,3 +10197,85 @@ func TestTheEmptyArchiveIsNotABoard(t *testing.T) {
 		lipgloss.SetColorProfile(old)
 	}
 }
+
+// ---- round 95, second-day ----
+// ---- round 95, second-day, the one thing ----
+// The row that shipped says the ask once, at every width. #192 and #267
+// drew the bracket's word only where the whole label would not fit, so
+// the copy the fold was about stood untouched twenty columns wider: at 120
+// `A` on the second-day scene draws
+// `◆ ship   fix the 401 on token refresh (commit)` three rows under
+// `◉ "fix the 401 on token refresh"`, beside `▸1 ○ fix the 401 on token
+// refresh` and under an identity header saying it again — four whole
+// copies of one sentence on one 34-row frame, where the same row eighty
+// columns narrower says `◆ ship   commit`. Where the ship label is the
+// ask the frame already draws (askBracket's own two arms), the row draws
+// the bracket's word at every width: a card says its sentence once
+// (#64, #107, #110, #265), and the bracket is the half the ask does not
+// say (#189, #192, #267).
+func TestTheShipRowSaysTheAskOnceAtEveryWidth(t *testing.T) {
+	forceASCII(t)
+
+	// The frame it was found on: one keypress from the opening, canonical
+	// (scenes/second-day-120x34.txt:1422).
+	m := sceneModel(sceneSecondDay(), 120, 34)
+	pressKey(m, "A")
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	var ship string
+	for _, l := range rows {
+		for _, seg := range strings.Split(l, "│") {
+			if strings.Contains(seg, "◆ ship") {
+				ship = strings.TrimSpace(seg)
+			}
+		}
+	}
+	if ship == "" {
+		t.Fatalf("120x34 A: no ship row on the frame:\n%s", strings.Join(rows, "\n"))
+	}
+	if !strings.HasPrefix(ship, "◆ ship   commit") {
+		t.Errorf("120x34 A: the ship row draws the ask the frame already says: %q", ship)
+	}
+
+	// The rule, over every scene, five widths, both colour profiles and
+	// four routes: a ship row's whole label is never a sentence the same
+	// frame draws somewhere else.
+	whole := regexp.MustCompile(`ship\s+(\S[^│]*?) \(([a-z]+)\)`)
+	routes := [][]string{nil, {"A"}, {"A", "2"}, {"A", "2", "tab"}, {"A", "shift+tab"}}
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				for _, route := range routes {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(m, k)
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					for _, l := range rows {
+						for _, seg := range strings.Split(l, "│") {
+							mt := whole.FindStringSubmatch(seg)
+							if mt == nil {
+								continue
+							}
+							clause := strings.TrimSpace(mt[1])
+							if len([]rune(clause)) < 10 {
+								continue
+							}
+							for _, other := range rows {
+								if other == l || !strings.Contains(other, clause) {
+									continue
+								}
+								t.Errorf("%s %dx%d %v %v: the ship row says a sentence the frame already draws: %q beside %q",
+									sc.name, size[0], size[1], prof, route,
+									strings.TrimSpace(seg), strings.TrimSpace(other))
+								break
+							}
+						}
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+}
