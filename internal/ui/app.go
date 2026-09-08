@@ -3253,6 +3253,17 @@ func (m *Model) keymap() string {
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
 		}
 	}
+	if m.level == levelWaypoints && !m.showHelp && !m.searching && !m.replying {
+		// #83 at the level the page keys page: on a trail the panel draws
+		// whole, `ctrl+d/u` moves nothing, and the row spent 21 cells
+		// naming it on a two-row trail (#220).
+		if w, h := m.trailBox(); h > 0 {
+			if doc, _ := trailDoc(m.trail, m.trailOpts(w, h)); len(doc) <= h {
+				keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
+				keys = strings.Replace(keys, " · ctrl+d/u half page", "", 1)
+			}
+		}
+	}
 	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying {
 		// #83 one level down: on a page that is all on screen the keys
 		// that move the viewport move nothing, and the app says so itself
@@ -3926,7 +3937,7 @@ func keysActGained(was, now string, drops []string, yield string) string {
 		if had && !in && d != yield {
 			return "" // something the row drew is gone
 		}
-		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" {
+		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · ctrl+d/u half page" && d != "ctrl+d/u half page · " {
 			return d
 		}
 	}
@@ -3991,7 +4002,12 @@ func (m *Model) shedOrder(chapter bool) []string {
 	}
 	// The attach aside goes first, then the page key — a shortcut for a
 	// distance `j` covers, which the help teaches (#42, #51).
-	order := []string{attachHint, " · ctrl+d/u half page", mirror, " · h/l session"}
+	// The page key sheds at its own rank wherever it lands on the row:
+	// where the movement key that leads the row has yielded (#213), the
+	// page key becomes the row's head and the separator-led fragment
+	// above matches nothing — the head form #56 gave the attach key and
+	// #200 gave `space unfold`.
+	order := []string{attachHint, " · ctrl+d/u half page", "ctrl+d/u half page · ", mirror, " · h/l session"}
 	homeKey := m.level >= levelWaypoints && m.archiveView
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave

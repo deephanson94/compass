@@ -4216,3 +4216,147 @@ func TestTheBoardSaysTheSameWordsWithColourOn(t *testing.T) {
 		}
 	}
 }
+
+// TestThePageKeyShedsAtItsOwnRankWhereverItLeadsTheRow pins round
+// eighty-two's one thing. #213 taught the footer to give up a movement key
+// that cannot move, and #193's rule takes that yield only where a key that
+// acts comes back for it. On the trail — the level the second day opens
+// one `tab` in — the yield never came back with anything, because
+// `shedOrder` names the page key only in its separator-led form
+// (` · ctrl+d/u half page`). The movement key is the row's head, so the
+// moment it goes the page key becomes the head and that fragment matches
+// nothing: the eleven cells bought back the twenty-two-cell key #83 and
+// #200 both call the first fragment to go, `keysActGained` read the gain
+// as nothing (a page key is not a key that acts) and the row kept a `j`
+// that answers `no leg to move to`, whichever of `j` and `k` is pressed
+// and at every width, while `a ask` stayed off it.
+//
+// The page key sheds at its own rank wherever it lands on the row — the
+// head form #56 gave the attach key and #200 gave `space unfold`.
+//
+// Both other sides: under the movement key's own note the key the note is
+// about stays (#24, #57); where the yield still buys nothing the key
+// stands (#193, at 120, 152 and 220); and where `j` moves it stays.
+func TestThePageKeyShedsAtItsOwnRankWhereverItLeadsTheRow(t *testing.T) {
+	forceASCII(t)
+	footer := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	stand := func(sc scene, w, h int, keys ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	for _, c := range []struct {
+		name  string
+		scene func() scene
+		w, h  int
+		keys  []string
+		gains []string
+	}{
+		{"second-day", sceneSecondDay, 80, 24, []string{"tab"}, []string{"a ask"}},
+		{"first-session", sceneFirstSession, 80, 24, []string{"tab"}, []string{"a ask"}},
+		{"second-day", sceneSecondDay, 80, 24, []string{"tab", "["}, []string{"tab deeper", "[ ] chapters"}},
+		{"first-session", sceneFirstSession, 80, 24, []string{"tab", "]"}, []string{"tab deeper", "[ ] chapters"}},
+		{"second-day", sceneSecondDay, 100, 30, []string{"tab", "["}, []string{"enter attach", "[ ] chapters"}},
+		{"first-session", sceneFirstSession, 100, 30, []string{"tab", "]"}, []string{"enter attach", "[ ] chapters"}},
+	} {
+		// The key cannot move: both movement keys refuse from this stand.
+		for _, key := range []string{"j", "k"} {
+			sc := c.scene()
+			m := stand(sc, c.w, c.h, append(append([]string(nil), c.keys...), key)...)
+			if m.note != "no leg to move to" {
+				t.Fatalf("%s %dx%d after %v: `%s` moves from this stand: %q",
+					c.name, c.w, c.h, c.keys, key, m.note)
+			}
+			// #24 still holds: the key the note is about stays on the row.
+			if foot := footer(m); !strings.Contains(foot, "j/k ") {
+				t.Errorf("%s %dx%d after %v: the movement key's own note sheds the key it is about: %q",
+					c.name, c.w, c.h, c.keys, foot)
+			}
+		}
+		foot := footer(stand(c.scene(), c.w, c.h, c.keys...))
+		if strings.Contains(foot, "j/k ") {
+			t.Errorf("%s %dx%d after %v: the trail's row offers a movement key that refuses on both sides: %q",
+				c.name, c.w, c.h, c.keys, foot)
+		}
+		if strings.Contains(foot, "ctrl+d/u") {
+			t.Errorf("%s %dx%d after %v: the cells the movement key spends bought the page key back: %q",
+				c.name, c.w, c.h, c.keys, foot)
+		}
+		for _, gain := range c.gains {
+			if !strings.Contains(foot, gain) {
+				t.Errorf("%s %dx%d after %v: the cells the movement key spends buy no `%s`: %q",
+					c.name, c.w, c.h, c.keys, gain, foot)
+			}
+		}
+	}
+	// A yield that buys nothing is not taken: at 120, 152 and 220 the row
+	// draws every key it has, so the trail still names what `j` and `k`
+	// are (#193) — and still refuses them.
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneSecondDay()
+		if foot := footer(stand(sc, size[0], size[1])); !strings.Contains(foot, "j/k legs") {
+			t.Errorf("second-day %dx%d: a yield that buys nothing took the trail's movement key: %q",
+				size[0], size[1], foot)
+		}
+		if m := stand(sc, size[0], size[1], "j"); m.note != "no leg to move to" {
+			t.Errorf("second-day %dx%d: the trail of one leg was expected to refuse `j`, answered %q",
+				size[0], size[1], m.note)
+		}
+	}
+	// And where the movement key does move, it stays — many-idle's trail
+	// walks its legs, and its footer still names the page key.
+	sc := sceneManyIdle()
+	m := stand(sc, 80, 24, "tab")
+	if foot := footer(m); !strings.Contains(foot, "j/k rows") {
+		t.Errorf("many-idle 80x24: a trail whose movement key moves lost it: %q", foot)
+	}
+	was := ansi.Strip(m.View())
+	pressKey(m, "j")
+	poll(m, sc)
+	if ansi.Strip(m.View()) == was {
+		t.Errorf("many-idle 80x24: `j` was expected to move on the trail, drew the same frame")
+	}
+}
+
+// ---- round 82, second-day, second finding ----
+// The page key sheds from a trail the panel draws whole. #83 shed
+// `ctrl+d/u half page` at Lv1 on a trail that fits and #200 in the reader
+// on a page all on screen; Lv2, the level the keys actually page, was the
+// gap: at 152 the session view spent 21 of 142 cells naming it over a
+// two-row trail. Where the trail's document fits its box the key goes;
+// where it does not, it stays (#220).
+func TestThePageKeyShedsFromATrailDrawnWhole(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		// A fleet of one opens on its session view at the board's width.
+		m := sceneModel(sceneSecondDay(), size[0], size[1])
+		if m.level != levelWaypoints {
+			pressKey(m, "tab")
+		}
+		if m.level != levelWaypoints {
+			t.Fatalf("%dx%d: the route does not reach the session view (Lv%d)", size[0], size[1], m.level)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := strings.TrimSpace(rows[len(rows)-1])
+		if strings.Contains(foot, "ctrl+d/u half page") {
+			t.Errorf("%dx%d: the footer names the page key over a trail it draws whole: %q", size[0], size[1], foot)
+		}
+	}
+	// The other side: a trail longer than its box keeps the key.
+	m := sceneModel(sceneVeryLong(), 220, 48)
+	pressKey(m, "tab")
+	w, h := m.trailBox()
+	if doc, _ := trailDoc(m.trail, m.trailOpts(w, h)); len(doc) <= h {
+		t.Skip("the very-long trail fits its box here; not this side's case")
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	if foot := strings.TrimSpace(rows[len(rows)-1]); !strings.Contains(foot, "ctrl+d/u half page") {
+		t.Errorf("220x48: a trail longer than its box lost the page key: %q", foot)
+	}
+}

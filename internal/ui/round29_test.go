@@ -109,7 +109,12 @@ func TestThePageKeyOutlastsTheAttachAside(t *testing.T) {
 	}
 	m.inTmux = false
 	m.View() // the footer is composed against the rows the frame drew (#199)
-	if foot := ansi.Strip(m.footerLine(150)); !strings.Contains(foot, "ctrl+d/u half page") || strings.Contains(foot, "(prefix d returns)") {
-		t.Errorf("the 152 legs footer should carry the page key and shed the aside: %q", foot)
+	foot := ansi.Strip(m.footerLine(150))
+	// The page key stands only where the trail is longer than its box;
+	// on a trail the panel draws whole it moves nothing and goes (#220).
+	w, h := m.trailBox()
+	doc, _ := trailDoc(m.trail, m.trailOpts(w, h))
+	if pages := len(doc) > h; pages != strings.Contains(foot, "ctrl+d/u half page") {
+		t.Errorf("the 152 legs footer names the page key %v while the trail pages %v: %q", !pages, pages, foot)
 	}
 }
