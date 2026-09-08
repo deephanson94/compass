@@ -211,12 +211,14 @@ func TestClosingTheSessionCommitsTheLook(t *testing.T) {
 }
 
 // A footer sheds the attach parenthetical before its keys or its note.
+// The way back is the one clause that yields after it, and only to a key
+// naming a level (#175): the note keeps its news beside `tab deeper`.
 func TestTheFooterShedsTheParentheticalFirst(t *testing.T) {
 	forceASCII(t)
 	m := groupedModel(80, 24)
 	m.note = "webapp hidden · A, then x"
 	foot := ansi.Strip(m.footerLine(76))
-	if strings.Contains(foot, "prefix d") || !strings.Contains(foot, "A, then x") {
+	if strings.Contains(foot, "prefix d") || !strings.Contains(foot, "webapp hidden") || !strings.Contains(foot, "tab deeper") {
 		t.Errorf("the parenthetical should go before the note is cut: %q", foot)
 	}
 }

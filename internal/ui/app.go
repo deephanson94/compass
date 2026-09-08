@@ -3290,6 +3290,22 @@ func (m *Model) footerWith(keys string, w int) string {
 			keys = shed(minimal, "")
 		}
 	}
+	if wayBack := " · A, then x"; strings.Contains(minimal, wayBack) {
+		// The way back is the one clause of a note that yields to a key
+		// naming a level — `enter attach`, `tab deeper`, `tab session`,
+		// `tab reader` — and only then: on the fleets whose strip draws
+		// the hidden count beside the archive door the strip has no room
+		// for the clause (#173), and `3 notebooks is hidden · A, then x`
+		// cost the eighty-column footer `tab deeper`, the frame's only
+		// naming of the way deeper; `A` stands on the strip and the help
+		// says what `x` does there (#175).
+		short := strings.Replace(minimal, wayBack, "", 1)
+		if k, base := shed(short, " · ? help"), shed("", ""); levelKeyLost(base, keys) && !levelKeyLost(base, k) {
+			keys, minimal = k, short
+			note = strings.Replace(note, wayBack, "", 1)
+			forms = noteForms(note)
+		}
+	}
 	if pane != "" {
 		// The pane clause goes before a key — not before the attach
 		// hint, which #31 ranks beneath a key or a note: the parenthetical
@@ -3932,6 +3948,17 @@ func (m *Model) noteLeavesTheWayBackToTheRow(note string) string {
 		}
 	}
 	return note
+}
+
+// levelKeyLost says whether keys, shed for a note, lost a key naming a
+// level that base — the keys shed for the note floor alone — kept (#175).
+func levelKeyLost(base, keys string) bool {
+	for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
+		if strings.Contains(base, k) && !strings.Contains(keys, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {

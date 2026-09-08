@@ -81,8 +81,34 @@ func (m *Model) fleetColumn(w, h int) []string {
 // the one that stands down (#64 the other way round): the strip has the
 // cells and the footer has none (#173).
 func (m *Model) hiddenClause(n int) string {
-	return fmt.Sprintf("%d hidden · A, then x", n)
+	return fmt.Sprintf("%s hidden · A, then x", m.hiddenDoorCount(n))
 }
+
+// hiddenDoorCount is the strip's hidden count: the whole, or what the
+// search left of it in the door's own form (`0 of 1`), as archiveDoorCount
+// beside it — `1 of 41 archived · 1 hidden` promised a hidden session the
+// archive under `/pytest` did not list (#176, #169).
+func (m *Model) hiddenDoorCount(n int) string {
+	if m.fleetQuery == "" {
+		return strconv.Itoa(n)
+	}
+	matched := 0
+	for _, s := range m.sessions {
+		if s.Live && !m.onBoard(s) && m.matchesQuery(s) {
+			matched++
+		}
+	}
+	return strconv.Itoa(matched) + " of " + strconv.Itoa(n)
+}
+
+// shedHiddenSearch is the door's rung under the key: at eighty
+// `1 of 41 archived · 0 of 1 hidden · A` is 34 cells in a 32-cell column,
+// and the hidden count's search clause goes before the key does (#176).
+func shedHiddenSearch(line string) string {
+	return hiddenSearchRe.ReplaceAllString(line, "$1 hidden")
+}
+
+var hiddenSearchRe = regexp.MustCompile(`(\d+) of \d+ hidden`)
 
 // fleetLines renders the fleet: grouped the way the user thinks of it, scrolled
 // so the selection is always whole on screen, and — in the live view — closed
@@ -118,7 +144,7 @@ func (m *Model) fleetLines(w, h int) []string {
 		last := ""
 		switch {
 		case archived > 0 && hidden > 0:
-			last = fmt.Sprintf("%s archived · %d hidden · A browses", count, hidden)
+			last = fmt.Sprintf("%s archived · %s hidden · A browses", count, m.hiddenDoorCount(hidden))
 		case archived > 0:
 			last = fmt.Sprintf("%s archived · A browses", count)
 		case hidden > 0:
@@ -128,6 +154,9 @@ func (m *Model) fleetLines(w, h int) []string {
 		}
 		if lipgloss.Width(last) > w {
 			last = strings.Replace(last, " · A browses", " · A", 1) // the key survives whole
+		}
+		if lipgloss.Width(last) > w {
+			last = shedHiddenSearch(last) // the hidden count's search clause goes before the key is clipped (#176)
 		}
 		if last != "" {
 			tail = []string{"", dimStyle.Render(clip(last, w))}

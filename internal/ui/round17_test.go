@@ -150,7 +150,9 @@ func TestTheTraceKeepsItsDestinationOverTheOptionalKeys(t *testing.T) {
 	}
 	m.note = "2 harness hidden · A, then x · ⌁ harness:1.0"
 	hide := ansi.Strip(m.footerLine(78))
-	if strings.Contains(hide, "⌁ harness") || !strings.Contains(hide, "A, then x") || !strings.Contains(hide, "? help") {
+	if strings.Contains(hide, "⌁ harness") || !strings.Contains(hide, "2 harness hidden") || !strings.Contains(hide, "? help") || !strings.Contains(hide, "tab deeper") {
+		// The way back yields after the pane tail, and only to a key
+		// naming a level (#175).
 		t.Errorf("a bare pane tail goes before any key: %q", hide)
 	}
 }

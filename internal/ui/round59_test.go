@@ -1830,3 +1830,85 @@ func TestTheTopOfTrailRefusalKeepsTheChapterKeys(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 70, fleet-hygiene ----
+// The hide note does not cost the eighty-column footer the way deeper,
+// on the fleets whose strip draws the hidden count beside the archive door.
+// `3 notebooks is hidden · A, then x` is 33 cells; beside it the footer
+// sheds `tab deeper`, the frame's only naming of the way deeper — the
+// harm #57 named in the same round it wrote this note, and #156, #159,
+// #165 and #166 have each folded since. The way back is the strip's own
+// clause, and the strip takes it up again when the note lets go (#64).
+func TestTheHideNoteKeepsTheWayDeeperBesideTheArchiveDoor(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sc   scene
+		sess string
+	}{
+		{"fleet-hygiene", sceneFleetHygiene(), "notebooks"},
+		{"many-idle", sceneManyIdle(), "webapp"},
+		{"few-ongoing", sceneFewOngoing(), "billing"},
+	} {
+		m := sceneModel(tc.sc, 80, 24)
+		hid := ""
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == tc.sess {
+				hid = s.Info.Key()
+			}
+		}
+		if hid == "" {
+			t.Fatalf("%s: no live session named %s", tc.name, tc.sess)
+		}
+		m.point(hid)
+		pressKey(m, "x")
+		view := ansi.Strip(m.View())
+		foot := ""
+		for _, l := range strings.Split(view, "\n") {
+			if strings.Contains(l, "? help · q quit") {
+				foot = l
+			}
+		}
+		if !strings.Contains(foot, "is hidden") {
+			t.Fatalf("%s: no hide note on the footer: %q", tc.name, strings.TrimSpace(foot))
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("%s at 80x24: the hide note cost the footer the way deeper: %q",
+				tc.name, strings.TrimSpace(foot))
+		}
+		if !strings.Contains(view, "A, then x") && !strings.Contains(view, "hidden · A") {
+			t.Errorf("%s at 80x24: no row of the frame names the way to the hidden session:\n%s", tc.name, view)
+		}
+	}
+}
+
+// ---- round 70, fleet-hygiene ----
+// The hidden count on the strip counts what the search left, as the
+// archive door beside it does (#164, #168, #169). Under `/pytest` the
+// strip said `1 of 41 archived · 1 hidden · A browses` while `A` on that
+// search listed one archived row and no hidden group at all: the hidden
+// session is a docs session the query does not match.
+func TestTheHiddenCountCountsTheSearchToo(t *testing.T) {
+	door := regexp.MustCompile(`(\d+(?: of \d+)?) hidden`)
+	for _, w := range []int{100, 120, 152, 220} {
+		m := sceneModel(sceneFleetHygiene(), w, 34)
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == "notebooks" {
+				m.point(s.Info.Key())
+			}
+		}
+		pressKey(m, "x") // the hidden one is the session /pytest does not match
+		pressKey(m, "/")
+		for _, r := range "pytest" {
+			pressKey(m, string(r))
+		}
+		pressKey(m, "enter")
+		view := ansi.Strip(m.View())
+		g := door.FindStringSubmatch(view)
+		if g == nil {
+			t.Fatalf("at %d: no hidden count on the frame:\n%s", w, view)
+		}
+		if !strings.Contains(g[1], " of ") {
+			t.Errorf("at %d: the strip counts every hidden session under a search: %q", w, g[0])
+		}
+	}
+}

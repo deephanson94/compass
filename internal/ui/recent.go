@@ -85,21 +85,13 @@ func (m *Model) recentRows(n int) []recentRow {
 func (m *Model) recentHeader() string {
 	// Under a search the band holds the rows that match (#98): the count
 	// is of what matched, in the header's own form (`2 of 4`), or the
-	// line said forty-one over the one row the query left.
-	archived := strconv.Itoa(m.archivedCount())
-	if m.fleetQuery != "" {
-		matched := 0
-		for _, s := range m.sessions {
-			if !s.Live && archiveHeadline(s) != "" && m.matchesQuery(s) {
-				matched++
-			}
-		}
-		archived = strconv.Itoa(matched) + " of " + archived
-	}
+	// line said forty-one over the one row the query left — the door's
+	// own count (#169), and the hidden count's beside it (#176).
+	archived := m.archiveDoorCount(m.archivedCount())
 	if n := m.hiddenCount(); n > 0 {
 		// The line the band folds in carried the hidden count: at a
 		// hundred columns a hide left no trace on the screen (#86).
-		return fmt.Sprintf("recent · %s archived · %d hidden · A browses", archived, n)
+		return fmt.Sprintf("recent · %s archived · %s hidden · A browses", archived, m.hiddenDoorCount(n))
 	}
 	return fmt.Sprintf("recent · %s archived · A browses", archived)
 }
@@ -121,6 +113,9 @@ func (m *Model) recentLines(w, avail int) []string {
 		// the archive's own line, "41 archived · 1 hidden · A", the shed
 		// that line makes for itself two rows up (#92).
 		head = strings.TrimPrefix(head, "recent · ")
+	}
+	if lipgloss.Width(head) > w {
+		head = shedHiddenSearch(head) // the hidden count's search clause goes before the key is clipped (#176)
 	}
 	return append([]string{dimStyle.Render(clip(head, w))}, m.bandRows(rows, w)...)
 }
