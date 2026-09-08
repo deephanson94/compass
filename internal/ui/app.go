@@ -4558,16 +4558,39 @@ func (m *Model) shedOrder(chapter bool) []string {
 			" · enter · no pane", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns",
 			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters", " · A archive"}
 	default:
+		// A row whose movement key has yielded (#213, #216, #259) leads
+		// with the attach key, and the separator-led fragment above then
+		// matches nothing — the head forms the reader's own list has
+		// carried since #56 and #200, at the level that never had them:
+		// at eighty a line sent from an archive a search had emptied
+		// could not shed `enter attach` once `j/k move` had left the
+		// row's head, so the yielded row did not fit, the yield #259
+		// folded was refused for width, and the sent row kept a move
+		// that cannot move beside `↪ sent "please continue" · to
+		// ⌁ main:0.0`. The head form sheds at the key's own rank.
+		heads := func(own []string) []string {
+			out := make([]string, 0, len(own)+3)
+			for _, k := range own {
+				out = append(out, k)
+				switch k {
+				case " · enter attach":
+					out = append(out, "enter attach (prefix d returns) · ", "enter attach · ")
+				case " · enter · no pane":
+					out = append(out, "enter · no pane · ")
+				}
+			}
+			return out
+		}
 		// The board and the list: the chapters belong to a trail that is
 		// not open, and the way in outlasts the keys that act on a row.
 		// In the archive `a` is the reason to be there — a claude on a
 		// session you can no longer attach to — so it stands with the
 		// archive's own keys; on the live list it is the trail's.
-		own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · x unhide"}
+		own = heads([]string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · x unhide"})
 		if m.archiveView {
 			// "enter · no pane" is a refusal, and a refusal goes before
 			// the way in: the archive's `tab deeper` outlasts it (#52).
-			own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · a ask", " · x unhide"}
+			own = heads([]string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · a ask", " · x unhide"})
 			if m.enterKeymap() != "enter · no pane" {
 				// #52 ranks `a` with the archive's own keys because in
 				// the archive it is "the reason to be there — a claude
@@ -4576,7 +4599,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 				// not this frame's: the session is still there to
 				// attach to, and `a ask` is a key that acts on a row,
 				// which the way in outlasts (#39).
-				own = []string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · x unhide"}
+				own = heads([]string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · x unhide"})
 			}
 		}
 	}

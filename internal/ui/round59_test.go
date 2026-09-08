@@ -9398,3 +9398,87 @@ func TestTheArchiveBoardSaysItsToolOnce(t *testing.T) {
 		lipgloss.SetColorProfile(old)
 	}
 }
+
+// ---- round 92, second-day ----
+// Round ninety-two, the second-day operator.
+//
+// #259 folded the rule that a line sent from a list a search had emptied
+// does not leave a footer whose only session key cannot move. In the
+// archive the same search, the same reply and the same trace left
+// ` j/k move · A fleet · ? help · q quit  ↪ sent "please continue" · to
+// ⌁ main:0.0` — `j` there answers `no row to move to`, and one keypress
+// later, under the shorter note, `enter attach` came back. #259's yield
+// was taken and refused for width: once `j/k move · ` had left the row's
+// head the separator-led ` · enter attach` matched nothing, so the
+// yielded row could not shed the attach key and did not fit. The board
+// and the list carry the attach key's head forms now, as the reader's own
+// list has since #56 and #200.
+func TestTheSentRowInTheArchiveDoesNotKeepAMoveThatCannotMove(t *testing.T) {
+	forceASCII(t)
+	acts := []string{"enter attach", "tab deeper", "tab reader", "tab session", "r reply", "a ask", "/ search", "g grab", "x hide", "space unfold"}
+	checked := 0
+	for _, sc := range []scene{sceneSecondDay(), sceneFirstSession(), sceneManyIdle(), sceneVeryLong()} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				m := sceneModel(sc, w, h)
+				for _, k := range []string{"/", "zzqqnothing", "enter", "A", "r", "1"} {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				rows := strings.Split(ansi.Strip(m.View()), "\n")
+				foot := rows[len(rows)-1]
+				lipgloss.SetColorProfile(old)
+				if !strings.Contains(foot, "↪ ") {
+					t.Fatalf("%s %dx%d %v: no trace note on the sent row: %q", sc.name, w, h, prof, foot)
+				}
+				if !strings.Contains(foot, mirrorMark) {
+					t.Errorf("%s %dx%d %v: the trace lost its destination: %q", sc.name, w, h, prof, foot)
+				}
+				checked++
+				if !strings.Contains(foot, "j/k ") {
+					continue
+				}
+				// The archive this frame draws holds no row, so the
+				// movement key cannot move: it may stand only beside a
+				// key that acts (#210, #213, #216, #259).
+				if len(m.viewOrder()) > 1 {
+					continue
+				}
+				named := false
+				for _, a := range acts {
+					if strings.Contains(foot, a) {
+						named = true
+					}
+				}
+				if !named {
+					t.Errorf("%s %dx%d %v: the archive's sent row kept a move that cannot move and named no key that acts: %q", sc.name, w, h, prof, foot)
+				}
+			}
+		}
+	}
+	// The frame the rule was found on: second-day at eighty, the archive
+	// a search has emptied, one canned reply sent into hello's pane.
+	lipgloss.SetColorProfile(termenv.Ascii)
+	m := sceneModel(sceneSecondDay(), 80, 24)
+	for _, k := range []string{"/", "pytest", "enter", "A", "1", "2", "3", "9", "r", "1"} {
+		pressKey(m, k)
+		poll(m, sceneSecondDay())
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	foot := rows[len(rows)-1]
+	if strings.Contains(foot, "j/k ") {
+		t.Errorf("second-day 80x24 archive sent row keeps a move that cannot move: %q", foot)
+	}
+	if !strings.Contains(foot, `↪ sent "please continue" · to `+mirrorMark+" main:0.0") {
+		t.Errorf("second-day 80x24 archive sent row lost its trace: %q", foot)
+	}
+	if !strings.Contains(foot, "A fleet") {
+		t.Errorf("second-day 80x24 archive sent row lost the way home: %q", foot)
+	}
+	if checked == 0 {
+		t.Fatal("nothing checked")
+	}
+}
