@@ -2030,3 +2030,39 @@ func TestTheArchiveReaderTitleLeavesTheAskToItsTurnRow(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 72, two-tools ----
+// A note shorter than the footer's twelve-cell reserve costs no key. The
+// board's `m` note is `mirror on`, nine cells with no longer form to grow
+// into, and the reserve held three cells back from the keymap that nothing
+// could ever fill: at 120 the frame after `m` shed ` · a ask` — eight cells
+// — and stood on twelve blank ones, so pressing the mirror key cost the
+// board the ask key (#177's own reason, #159, #168).
+func TestAShortNoteCostsTheFooterNoKey(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneTwoTools(), 120, 34)
+	pressKey(m, "m")
+	foot := ""
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(l, "? help · q quit") {
+			foot = l
+		}
+	}
+	if !strings.Contains(foot, "mirror on") {
+		t.Fatalf("not the board's mirror note: %q", strings.TrimSpace(foot))
+	}
+	if !strings.Contains(foot, " · a ask") {
+		t.Errorf("the nine-cell note sheds `a ask`: %q", strings.TrimSpace(foot))
+	}
+	// The keys the note-free board names are the keys this frame names.
+	bare := sceneModel(sceneTwoTools(), 120, 34)
+	want := ""
+	for _, l := range strings.Split(ansi.Strip(bare.View()), "\n") {
+		if strings.Contains(l, "? help · q quit") {
+			want = strings.TrimSpace(l)
+		}
+	}
+	if got := strings.TrimSpace(strings.Split(foot, "  ")[0]); got != want {
+		t.Errorf("the mirror note costs the board keys:\n note-free %q\n with note %q", want, got)
+	}
+}

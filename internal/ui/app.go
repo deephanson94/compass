@@ -3239,7 +3239,11 @@ func (m *Model) footerWith(keys string, w int) string {
 		note = short
 	}
 	note = m.noteLeavesTheWayBackToTheRow(note)
-	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(12, lipgloss.Width(n)) <= w }
+	// The note's reserve is twelve cells, or the note itself where it is
+	// shorter: a note with no longer form to grow into buys nothing with
+	// the cells it holds back from the keys.
+	noteFloor := func() int { return min(12, lipgloss.Width(note)) }
+	fitsWith := func(k, n string) bool { return lipgloss.Width(k)+2+max(noteFloor(), lipgloss.Width(n)) <= w }
 	fits := func(n string) bool { return fitsWith(keys, n) }
 	// shed is the keys with their optional fragments gone, in order, until
 	// the note fits — stopping short of `upto` when one is named. It
@@ -3339,7 +3343,7 @@ func (m *Model) footerWith(keys string, w int) string {
 	}
 	left = dimStyle.Render(clip(keys, w))
 	room := w - lipgloss.Width(left) - 2
-	if room < 12 {
+	if room < noteFloor() {
 		return dimStyle.Render(shedClauses(note, w)) // no keymap fits beside it
 	}
 	shown := ""
