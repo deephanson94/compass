@@ -2817,19 +2817,24 @@ func (m *Model) headerLine(w int) string {
 	}
 	query := ""
 	if m.fleetQuery != "" {
-		// The search in force, and how much of the fleet answers it.
-		total := 0
-		for _, s := range m.sessions {
-			if s.Live != m.archiveView {
-				total++
-			}
-		}
-		query = fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total)
 		if m.archiveView {
 			// In the archive the chip beside it counts the search
 			// already (`archive 1 of 41`): the clause says which search,
 			// and a line answers a question once (#64).
 			query = " · /" + m.fleetQuery
+		} else {
+			// The search in force, and how much of the fleet answers it —
+			// the fleet this list can draw. A hidden session is not a row
+			// the numerator can ever reach, and the door beside it counts
+			// the hidden half itself (`1 of 1 hidden`, #176), so counting
+			// it here said `3 of 4` where four of four answered (#178).
+			total := 0
+			for _, s := range m.sessions {
+				if m.onBoard(s) {
+					total++
+				}
+			}
+			query = fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, len(m.viewOrder()), total)
 		}
 	}
 	room := w - lipgloss.Width(right) - 2 // two cells of air before the chips: their own separator's width, so `· claude ●1` never reads as one clause (#121)

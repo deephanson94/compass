@@ -2103,3 +2103,60 @@ func TestTheArchiveReaderTitleClockGoesWithItsClause(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 72, fleet-hygiene ----
+// The board's miss keeps the doors beside it. A search nothing on the
+// board answers drew `no session matches /eda · esc clears it` and
+// nothing else — no hidden count, no archive door, no `A` — while the
+// same fleet and the same search twenty columns narrower drew
+// `0 of 41 archived · 1 of 1 hidden · A` from the list's own tail. On
+// that frame a live session did answer the search: the hidden one, whose
+// only way back is the `A` the frame does not name (#168, #169, #176, #178).
+func TestTheBoardsMissKeepsTheDoorsBesideIt(t *testing.T) {
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == "notebooks" {
+				m.point(s.Info.Key())
+			}
+		}
+		pressKey(m, "x") // the eda session leaves the board
+		pressKey(m, "/")
+		for _, r := range "eda" {
+			pressKey(m, string(r))
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "no session matches /eda") {
+			t.Fatalf("%dx%d: not the board's miss:\n%s", size[0], size[1], view)
+		}
+		if !strings.Contains(view, "hidden") {
+			t.Errorf("%dx%d: the board's miss names no hidden session, over a hidden one the search matched:\n%s", size[0], size[1], view)
+		}
+		if !strings.Contains(view, "archived") {
+			t.Errorf("%dx%d: the board's miss names no archive door:\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+// ---- round 72, fleet-hygiene, second finding ----
+// The fleet's search counts what the board can draw. `· /p · 3 of 4`
+// stood over three columns that all answered the search and a strip
+// saying `1 of 1 hidden` — four of four answered, three were drawn, and
+// the fourth is a row the numerator can never reach (#164, #176, #178).
+func TestTheFleetsSearchCountsWhatTheBoardCanDraw(t *testing.T) {
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneFleetHygiene(), size[0], size[1])
+		for _, s := range m.sessions {
+			if s.Live && sessionName(s.Info) == "notebooks" {
+				m.point(s.Info.Key())
+			}
+		}
+		pressKey(m, "x")
+		pressKey(m, "/")
+		pressKey(m, "p")
+		head := ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+		if !strings.Contains(head, "/p · 3 of 3") {
+			t.Errorf("%dx%d: the search's clause counts a row the list cannot hold: %q", size[0], size[1], strings.TrimSpace(head))
+		}
+	}
+}

@@ -253,6 +253,15 @@ func (m *Model) boardLines(w, h int) []string {
 				return fit(append(append(miss, ""), band...), h)
 			}
 		}
+		// The strip's clauses carry keys — the hidden count and the
+		// archive door — and a miss is where they are needed most: the
+		// board drew `no session matches /eda` over a hidden live
+		// session that search did find, and named no way to it, while
+		// the list twenty columns narrower drew the door under the same
+		// words (#168, #169, #176).
+		if strip := m.boardStrip(nil, rowOf, w); strings.TrimSpace(ansi.Strip(strip)) != "" {
+			return fit(append(miss, "", strip), h)
+		}
 		return fit(miss, h)
 	}
 	var lines []string
