@@ -106,6 +106,12 @@ type TrailOpts struct {
 	// fresher reading's clock beside the lane file's own (#68).
 	LaneWrote map[string]time.Time
 
+	// Ask is the prompt the leg being drawn belongs to — the trail's own
+	// question, which its ◉ row and the archive's identity header draw
+	// whole. A ship leg named "<the ask> (commit)" is the one label that
+	// can be a second copy of it, and legRow reads this to know (#64).
+	Ask string
+
 	// NoInline keeps a leg's detail off its row whatever the width: for
 	// asking what Lv2 would hang beneath the legs, not for drawing.
 	NoInline bool
@@ -701,7 +707,9 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		if n.leg >= 0 {
 			leg := tr.Legs[n.leg]
 			label, narrated := legLabel(leg, o)
-			b.selNode(b.pick(), legRow(leg, label, narrated, o))
+			lo := o
+			lo.Ask = askBefore(tr, leg.Start)
+			b.selNode(b.pick(), legRow(leg, label, narrated, lo))
 			// A question that did not fit on HEAD's row is spelled out
 			// beneath it, options and all, at every level: it is the one
 			// line the deck exists to deliver, and clipping it at "the
@@ -1018,6 +1026,28 @@ func headLabelRoom(o TrailOpts) int {
 	return o.Width - trailPrefixWidth - 1 - len([]rune("waiting "+relAge(o.Now, o.HeadSince)))
 }
 
+// askBefore is the prompt a leg belongs to: the newest one asked at or
+// before it began, and the trail's first otherwise.
+func askBefore(tr journey.Trail, at time.Time) string {
+	ask := ""
+	for _, p := range tr.Prompts {
+		if ask == "" || !p.At.After(at) {
+			ask = p.Text
+		}
+	}
+	return ask
+}
+
+// askBracket is a ship label that is the trail's own ask with only a
+// bracket after it — "fix the 401 on token refresh (commit)" — and the
+// bracket's word, which is the half the ask does not already say.
+func askBracket(l journey.Leg, label string, o TrailOpts) (string, bool) {
+	if l.Class != journey.Ship || o.Ask == "" || !nameAndBracket(o.Ask, label) {
+		return "", false
+	}
+	return strings.TrimSuffix(label[len(o.Ask)+2:], ")"), true
+}
+
 // legRow: glyph, class verb, label, and the age held at the right margin. HEAD
 // points at itself — `← 3m` — because it is the only line that is still moving.
 // The arrow is a "you are here", not a direction of travel: it means the same
@@ -1083,6 +1113,21 @@ func legRow(l journey.Leg, label string, narrated bool, o TrailOpts) string {
 	// keypress used to be the only way to it. Only at Lv1: at Lv2 the
 	// details hang beneath the leg already.
 	shown := clip(label, labelWidth)
+	// Where the label will not fit and what survives the cut is the ask
+	// the panel already draws whole — the ◉ row above it, and on an
+	// archived session the identity header too — the row is a clipped
+	// second copy of it, and the one thing it alone carries is the
+	// bracket: "◆ ship   commit", not "◆ ship   fix the 401 on token
+	// refresh…", which spends the row on the ask and throws away the
+	// only word that says how the day ended. #64's device on the
+	// reader's title, at the row that shipped (#189). A ship label whose
+	// subject is the session's own words — "auth: drop the legacy path" —
+	// carries no bracket and is untouched.
+	if shown != label {
+		if inner, ok := askBracket(l, label, o); ok && lipgloss.Width(inner) <= labelWidth {
+			shown = inner
+		}
+	}
 	if i := strings.LastIndex(shown, "("); i >= 0 && !strings.Contains(shown[i:], ")") && strings.HasSuffix(shown, "…") {
 		// The bracket goes with what it opened: "…(c…" promises a clause
 		// the row never draws (#87's rule, at this call site, #90).

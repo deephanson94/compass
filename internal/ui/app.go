@@ -3092,8 +3092,10 @@ func (m *Model) keymap() string {
 	if m.archiveView {
 		// In the archive `g` has nothing to grab and `A` is the way home, so the
 		// keymap says that instead. In the live view the archive announces itself
-		// on the fleet's own last row: "N archived · A browses".
-		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · A fleet · ? help · q quit"
+		// on the fleet's own last row: "N archived · A browses". The chapter
+		// keys act here as they do on the live list, and answered
+		// `no earlier prompt` on a row that did not name them (#193).
+		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · a ask · / search · x unhide · A fleet · ? help · q quit"
 	}
 	switch {
 	case m.showHelp:
@@ -3114,7 +3116,7 @@ func (m *Model) keymap() string {
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
+			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit" // the chapter keys act here too (#193)
 		}
 	case m.level >= levelReader && m.sessionView():
 		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"

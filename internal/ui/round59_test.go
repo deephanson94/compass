@@ -2493,3 +2493,85 @@ func TestTheReserveIsWhatTheNoteDraws(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 75, second-day, the one thing ----
+// The row that shipped says what the frame does not. At eighty the
+// archive's ship row drew `◆ ship   fix the 401 on token refresh…` — a
+// clipped third copy of the ask the identity header and the ◉ prompt row
+// both draw whole on the same frame — and the cut threw away `(commit)`,
+// the only word on the row that says how the day ended. Where the label
+// is the ask with only a bracket after it and will not fit, the row draws
+// the bracket's word (#64's device on the reader's title, #189).
+func TestTheShipRowIsNotAClippedCopyOfTheAsk(t *testing.T) {
+	forceASCII(t)
+	ship := regexp.MustCompile(`ship\s+(\S[^│]*?)…`)
+	routes := [][]string{{"A"}, {"2", "tab"}} // the archive board, and the trail of the session that shipped
+	for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}} {
+		for _, route := range routes {
+			m := sceneModel(sceneSecondDay(), size[0], size[1])
+			for _, k := range route {
+				pressKey(m, k)
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			seen := false
+			for _, l := range rows {
+				for _, seg := range strings.Split(l, "│") {
+					if !strings.Contains(seg, "ship") {
+						continue
+					}
+					mt := ship.FindStringSubmatch(seg)
+					if mt == nil {
+						seen = true
+						continue
+					}
+					seen = true
+					clause := strings.TrimSpace(mt[1])
+					if len([]rune(clause)) < 10 {
+						continue
+					}
+					for _, other := range rows {
+						if other == l {
+							continue
+						}
+						for i := strings.Index(other, clause); i >= 0; i = strings.Index(other[i+1:], clause) + i + 1 {
+							rest := other[i+len(clause):]
+							if !strings.HasPrefix(rest, "…") {
+								t.Errorf("%dx%d %v: the ship row is a clipped copy of a clause the frame draws whole: %q under %q",
+									size[0], size[1], route, strings.TrimSpace(seg), strings.TrimSpace(other))
+								break
+							}
+							if i+1 >= len(other) {
+								break
+							}
+						}
+					}
+				}
+			}
+			if !seen {
+				t.Fatalf("%dx%d %v: no ship row on the frame:\n%s", size[0], size[1], route, strings.Join(rows, "\n"))
+			}
+		}
+	}
+}
+
+// ---- round 75, second-day, second finding ----
+// The archive board's footer names the chapter keys it answers to. `[`
+// and `]` act on the archive's Lv1 list as on the live one and refuse
+// with `no earlier prompt` there, but the archive keymap was written out
+// without them: 133 idle cells at 220 and no `[ ] chapters`, while one
+// `tab` deeper the footer named it with four cells to spare (#193).
+func TestTheArchiveFooterNamesTheChapterKeys(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sceneSecondDay(), size[0], size[1])
+		pressKey(m, "A")
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		foot := strings.TrimSpace(rows[len(rows)-1])
+		if !strings.Contains(foot, "A fleet") {
+			t.Fatalf("%dx%d: not the archive footer: %q", size[0], size[1], foot)
+		}
+		if !strings.Contains(foot, "[ ] chapters") {
+			t.Errorf("%dx%d: the archive footer does not name the chapter keys it answers to: %q", size[0], size[1], foot)
+		}
+	}
+}
