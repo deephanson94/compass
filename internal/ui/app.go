@@ -1928,6 +1928,20 @@ const hookCoolOff = 10 * time.Minute
 // onlyOrLast is what a move that moved nothing says: the fleet has one
 // session, or the selection is at its end.
 func (m *Model) onlyOrLast(delta int) string {
+	if len(m.viewOrder()) == 0 {
+		// A standing query this view answers with nothing: the column
+		// draws `no session matches /q` and the header counts `0 of 4`,
+		// so every fleet-of-one sentence (#152) counts a row the frame
+		// does not draw. The move says what it could not do, in the
+		// object the frame's own footer names — the list's row, the
+		// board's column (`h/l columns`), the trail's `no leg to move
+		// to` one level down. The band under a board miss (#163) is not
+		// a cursor's (#51), so it is no row to move to either.
+		if m.level == levelBoard && m.boardShown() {
+			return "no column to move to"
+		}
+		return "no row to move to"
+	}
 	if len(m.viewOrder()) <= 1 {
 		if m.archiveView {
 			return "the only session"
@@ -4186,7 +4200,7 @@ func (m *Model) moveKeyStuck(whole string) string {
 // moved nothing, at either end or with nowhere to go (#24).
 func (m *Model) moveNote() bool {
 	switch m.note {
-	case "no leg to move to", "at the start", "at the present", "at the present · k goes back",
+	case "no leg to move to", "no row to move to", "no column to move to", "at the start", "at the present", "at the present · k goes back",
 		"the only live one", "the only session", "the last session", "the first session":
 		return true
 	}

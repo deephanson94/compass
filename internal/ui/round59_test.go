@@ -7331,3 +7331,172 @@ func TestTheArchivesDrawnRowIsTheSessionYouAreOn(t *testing.T) {
 		}
 	}
 }
+
+// A move that moves nothing says why (#24, #152, #213). Its sentences all
+// count the fleet: `the only live one`, `the only session`, `the last
+// session`, `the first session`. Under a standing query the view answers
+// with nothing they are all false — the column draws `no session matches
+// /q`, the header counts `0 of 4`, and `j` answered `the only live one`
+// over a list with no rows at all. Where nothing is drawn the move says so
+// in the object the frame's own footer names: `no row to move to` on a
+// list, `no column to move to` on a board that runs sideways (`h/l
+// columns`), the trail's `no leg to move to` one level down.
+
+// r89fhOneCount is the move refusals that count the fleet.
+var r89fhOneCount = map[string]bool{
+	"the only session": true, "the only live one": true,
+	"the last session": true, "the first session": true,
+}
+
+// r89fhStand puts the deck on a stand and presses one key.
+func r89fhStand(sc scene, w, h int, keys ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r89fhOnlyQuery is a query only this live session answers, which no
+// archived session answers at all — the search that leaves the archive
+// with no rows.
+func r89fhOnlyQuery(sc scene, w, h int, key, title string) string {
+	for _, cand := range strings.Fields(strings.ToLower(title)) {
+		if len(cand) < 4 {
+			continue
+		}
+		m := sceneModel(sc, w, h)
+		m.fleetQuery = cand
+		only, archived := true, 0
+		for _, s := range m.sessions {
+			if !m.matchesQuery(s) {
+				continue
+			}
+			if s.Live {
+				if s.Info.Key() != key {
+					only = false
+				}
+			} else {
+				archived++
+			}
+		}
+		if only && archived == 0 {
+			return cand
+		}
+	}
+	return ""
+}
+
+// TestTheMoveOnAListWithNoRowsSaysSo is the fold on its frames: the
+// fleet-hygiene scene at every width, live and archive.
+func TestTheMoveOnAListWithNoRowsSaysSo(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	var fh scene
+	for _, sc := range allScenes() {
+		if sc.name == "fleet-hygiene" {
+			fh = sc
+		}
+	}
+	if fh.name == "" {
+		t.Fatal("no fleet-hygiene scene")
+	}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		for _, k := range []string{"j", "k"} {
+			// The live fleet answers nothing.
+			m := r89fhStand(fh, w, h, "/", "zzqq", "enter", k)
+			if got := len(m.fleetOrder()); got != 0 {
+				t.Fatalf("%dx%d: /zzqq drew %d rows, not none", w, h, got)
+			}
+			want := "no row to move to"
+			if m.level == levelBoard && m.boardShown() {
+				want = "no column to move to"
+			}
+			if got := ansi.Strip(m.note); got != want {
+				t.Errorf("%dx%d live %q: the move over a list with no rows says %q, not %q", w, h, k, got, want)
+			}
+			rows := strings.Split(ansi.Strip(m.View()), "\n")
+			miss := false
+			for _, r := range rows {
+				if strings.Contains(r, "matches /zzqq") {
+					miss = true
+				}
+			}
+			if !miss {
+				t.Errorf("%dx%d live %q: no miss row on the frame the note answers", w, h, k)
+			}
+			// The archive answers nothing: `/watch` singles out the live
+			// harness and nothing archived answers it.
+			a := r89fhStand(fh, w, h, "/", "watch", "enter", "A", k)
+			if !a.archiveView {
+				t.Fatalf("%dx%d: the archive did not open", w, h)
+			}
+			if got := len(a.fleetOrder()); got != 0 {
+				t.Fatalf("%dx%d: the archive drew %d rows, not none", w, h, got)
+			}
+			if got := ansi.Strip(a.note); got != "no row to move to" {
+				t.Errorf("%dx%d archive %q: the move over an archive with no rows says %q", w, h, k, got)
+			}
+		}
+	}
+}
+
+// TestNoMoveOnAnEmptyViewCountsASession is the rule behind it, asked of
+// every scene, every width and every stand a fleet search can leave with
+// no rows — live list, board and archive: a move that moved nothing never
+// counts a session the frame does not draw.
+func TestNoMoveOnAnEmptyViewCountsASession(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	stands := 0
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			check := func(m *Model, what, k string) {
+				if len(m.fleetOrder()) != 0 || len(m.viewOrder()) != 0 {
+					return
+				}
+				stands++
+				if note := ansi.Strip(m.note); r89fhOneCount[note] {
+					t.Errorf("%s %dx%d %s %q: %q over a view drawing no row", sc.name, w, h, what, k, note)
+				}
+			}
+			for _, k := range []string{"j", "k"} {
+				for _, q := range []string{"zzqq", "reconcile", "watch"} {
+					m := r89fhStand(sc, w, h, "/", q, "enter", k)
+					if m.archiveView {
+						continue
+					}
+					check(m, "live/"+q, k)
+				}
+				base := sceneModel(sc, w, h)
+				for _, i := range base.viewOrder() {
+					s := base.sessions[i]
+					q := r89fhOnlyQuery(sc, w, h, s.Info.Key(), s.Info.Title)
+					if q == "" {
+						continue
+					}
+					m := sceneModel(sc, w, h)
+					m.pointQuiet(s.Info.Key())
+					poll(m, sc)
+					for _, p := range []string{"/", q, "enter", "A", k} {
+						pressKey(m, p)
+						poll(m, sc)
+					}
+					if !m.archiveView {
+						continue
+					}
+					check(m, "archive/"+q, k)
+				}
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("no empty-view stand measured")
+	}
+	t.Logf("%d empty-view stands", stands)
+}
