@@ -10770,3 +10770,98 @@ func TestTheRelayedCardsHeadYieldsItsAskLikeAnyOther(t *testing.T) {
 	}
 	t.Logf("relayed heads yielded: %d · titles kept: %d · asks still drawn: %d", yielded, kept, asks)
 }
+
+// ---- round 97, second-day ----
+// ---- round 97, second-day ----
+// TestTheArchiveBoardNamesTheLevelItsTabReaches: a board footer's word for
+// `tab` is the level the key reaches.
+//
+// The frame it was found on: `second-day` at 120, `A` then `⇧tab` — the
+// archive's board drew `h/l columns · enter · no pane · tab session · …`,
+// and `tab` there landed on `levelTrail`, the archive's list, whose own
+// panel is chipped `[fleet]` and whose own footer then names `tab deeper`
+// for the step that is left. `zoomIn` takes the board straight to the
+// session view only off the live board (#18); wherever the archive is open
+// it stops at the list, so the live board's word — true there, where the
+// key lands on the panel chipped `[session]` — named a level this key does
+// not reach (#40, #246). Then the rule over every scene, both profiles and
+// every width a board fits at: no board footer says `tab session` unless
+// `tab` pressed on that very frame lands at `levelWaypoints`, and none says
+// `tab deeper` unless it lands at `levelTrail`.
+func TestTheArchiveBoardNamesTheLevelItsTabReaches(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	// 1 — the frame it was found on.
+	lipgloss.SetColorProfile(termenv.Ascii)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 120, 34)
+	for _, k := range []string{"A", "shift+tab"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	foot := rows[len(rows)-1]
+	if m.level != levelBoard {
+		t.Fatalf("120x34 A,⇧tab: the archive's board is the frame under test, got Lv%d", m.level)
+	}
+	if strings.Contains(foot, "tab session") {
+		t.Errorf("120x34 A,⇧tab: the archive's board names a level its tab does not reach: %q", foot)
+	}
+	if !strings.Contains(foot, "tab deeper") {
+		t.Errorf("120x34 A,⇧tab: the archive's board should name the step it takes: %q", foot)
+	}
+	pressKey(m, "tab")
+	poll(m, sc)
+	if m.level != levelTrail {
+		t.Errorf("120x34 A,⇧tab,tab: the archive's board goes to the list, got Lv%d", m.level)
+	}
+
+	// 2 — the rule: a board footer's tab word is the level its tab reaches.
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"ascii", termenv.Ascii}, {"truecolor", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range [][]string{{"shift+tab"}, {"A", "shift+tab"}, {"A", "shift+tab", "j"}} {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.level != levelBoard {
+						continue
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					foot := rows[len(rows)-1]
+					says := ""
+					switch {
+					case strings.Contains(foot, "tab session"):
+						says = "tab session"
+					case strings.Contains(foot, "tab deeper"):
+						says = "tab deeper"
+					default:
+						continue
+					}
+					n := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(n, k)
+						poll(n, sc)
+					}
+					pressKey(n, "tab")
+					poll(n, sc)
+					want := "tab deeper"
+					if n.level == levelWaypoints {
+						want = "tab session"
+					}
+					if says != want {
+						t.Errorf("%s %s %dx%d %v: the footer says %q and tab lands at Lv%d: %q",
+							prof.name, sc.name, size[0], size[1], route, says, n.level, foot)
+					}
+				}
+			}
+		}
+	}
+}

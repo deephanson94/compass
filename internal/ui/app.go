@@ -3583,7 +3583,16 @@ func (m *Model) keymap() string {
 	case m.level == levelBoard && m.boardShown():
 		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit"
 		if m.archiveView {
-			keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · / search · x unhide · A fleet · ? help · q quit"
+			// The archive's board goes one level to the archive's list,
+			// not to the session view: `zoomIn` stops at `levelTrail`
+			// wherever the archive is open (#18's three levels are the
+			// live board's), so the live board's `tab session` — true
+			// there, where the key lands on the panel chipped
+			// `[session]` — named a level this key does not reach, and
+			// landed on the one chipped `[fleet]`, whose own footer then
+			// names `tab deeper` for the step that is left. The word is
+			// the archive's own at every other level (#40, #246).
+			keys = "h/l columns · " + m.enterKeymap() + " · tab deeper · r reply · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
