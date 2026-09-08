@@ -286,6 +286,19 @@ func (m *Model) readerColumn(w, h int) []string {
 						break
 					}
 				}
+				if !drawn {
+					// Or the header row draws it. #105 kept the ask on the
+					// title only where the page has scrolled past the turn
+					// row — "the one case where it is the only copy" — and
+					// at eighty it is not the only copy: the identity
+					// header two rows above titles the archived row by its
+					// ask (#56, #59), whole. Where the header says the
+					// clause the row sheds it (#167), and the title spends
+					// its cells on the session and the day, as the same
+					// route draws them twenty columns wider (#120).
+					head := oneSpace(ansi.Strip(m.headerLine(max(m.width-2*edgePad, 10))))
+					drawn = strings.Contains(head, oneSpace(archiveHeadline(s)))
+				}
 				if drawn {
 					// The title names the session wherever the turn row
 					// draws the ask. #122 kept the ask at 120 and up

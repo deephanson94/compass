@@ -2372,3 +2372,49 @@ func TestTheRefusalKeepsTheWayDeeper(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 74, second-day ----
+// The archive reader's title says what the header does not. #105 kept the
+// ask on the title where the page has scrolled past the turn row, "the one
+// case where it is the only copy" — and at eighty it is not the only copy:
+// the identity header two rows above titles the archived row by its ask,
+// so `READER · fix the 401 on token refresh` stood under
+// `⌂ compass · 1 fix the 401 on token refresh · claude` and the frame said
+// neither which session it was, nor when it ran, nor how it ended, all of
+// which the same route draws twenty columns wider as
+// `READER · api · 3h · 1 ship · 1 red`.
+func TestTheArchiveReaderTitleSaysWhatTheHeaderDoesNot(t *testing.T) {
+	forceASCII(t)
+	title := regexp.MustCompile(`READER · (.+?)\s*(?:\[reader\])?\s*$`)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		sc := sceneSecondDay()
+		m := sceneModel(sc, size[0], size[1])
+		for _, k := range []string{"2", "tab", "tab"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		if len(rows) == 0 {
+			t.Fatalf("%dx%d: no frame", size[0], size[1])
+		}
+		head := oneSpace(rows[0])
+		hit := false
+		for _, l := range rows {
+			for _, seg := range strings.Split(l, "│") {
+				mt := title.FindStringSubmatch(seg)
+				if mt == nil {
+					continue
+				}
+				hit = true
+				clause := strings.TrimSpace(mt[1])
+				if len(clause) >= 10 && strings.Contains(head, clause) {
+					t.Errorf("%dx%d: the reader's title repeats the header: %q under %q",
+						size[0], size[1], clause, strings.TrimSpace(head))
+				}
+			}
+		}
+		if !hit {
+			t.Fatalf("%dx%d: the route draws no reader title:\n%s", size[0], size[1], strings.Join(rows, "\n"))
+		}
+	}
+}
