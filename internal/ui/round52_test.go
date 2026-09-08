@@ -155,7 +155,10 @@ func TestASessionWearsTheNameItsPersonGaveIt(t *testing.T) {
 	}
 	pressTab(m)
 	press(m, "3")
-	if head := ansi.Strip(m.headerLine(118)); !strings.Contains(head, `checkout-flake-hunt · "the checkout suite flakes on CI"`) {
+	// The header names it by the name its person typed, not by its
+	// directory and not by what it asked — the ask is the trail's own `◉`
+	// row three lines below (#269's rule at the header, r96).
+	if head := ansi.Strip(m.headerLine(118)); !strings.Contains(head, "3 checkout-flake-hunt · claude") || strings.Contains(head, "webapp") {
 		t.Errorf("the header should carry the name: %q", head)
 	}
 }

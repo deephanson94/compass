@@ -3348,11 +3348,21 @@ func (m *Model) headerName() (digit, name, tag string) {
 		return "", "", ""
 	}
 	name = sessionName(s.Info)
-	if m.archiveView && !s.Live {
-		name = archiveHeadline(s) // the archive's rows are titled by what they asked for (#56, #59)
-		if s.Info.Name != "" {
-			name = sessionName(s.Info) + " · " + askQuote(archiveHeadline(s), askRelayed(s)) // a renamed session keeps its name first (#79)
-		}
+	if m.archiveView && !s.Live && s.Info.Name == "" {
+		// The archive's rows are titled by what they asked for (#56,
+		// #59) — where the session has no name of its own. A session its
+		// person named is told apart by that name (#79, #234), and the
+		// ask the header used to hang beside it is the trail's own `◉`
+		// row, three rows below it on every frame that draws one: the
+		// second whole copy #265 took off the archive board's card head
+		// and #269 off the ship row, on the one row that is drawn at
+		// every level. At eighty it was worse than a copy — the header
+		// clipped it, `"the checkout suite flake…`, and paid for the
+		// fragment with `· claude`, the word an archive holding two
+		// tools says (#79, #80), which every other archive header at
+		// that width keeps. #86's reason for the ask on a head is "where
+		// nothing else says it"; here the trail says it whole.
+		name = archiveHeadline(s)
 	}
 	if r, ok := m.boardRows()[s.Info.Key()]; ok && r.num > 0 {
 		digit = strconv.Itoa(r.num)

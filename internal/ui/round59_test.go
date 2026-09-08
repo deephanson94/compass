@@ -10588,3 +10588,80 @@ func TestTheArchiveRefusesADigitNoRowWears(t *testing.T) {
 	}
 	t.Logf("refusals held %d, drawn digits held %d, live-digit collisions %d", refusals, wearers, triggers)
 }
+
+// ---- round 96, second-day ----
+// TestTheHeaderSaysTheAskOnceAndKeepsTheToolWord: the identity header of a
+// session its person named draws the name, not the name and a second copy
+// of what it asked.
+//
+// The frame it was found on: `second-day` at eighty, `A` then `3` — the
+// header drew ` ⌂ compass · 3 checkout-flake-hunt · "the checkout suite
+// flake…`, a clipped copy of a sentence the trail's `◉` row three rows
+// below drew whole, and paid for the fragment with `· claude`, the word
+// every other archive header at that width keeps on a fleet holding two
+// tools (#79, #80). Then the rule over every scene, every width and both
+// profiles: where the header names a session by `name · "ask"`, the ask is
+// drawn on a `◉` row of the same frame, so the header's copy is the second
+// one — #265's cut at the archive board's card head and #269's at the ship
+// row, on the row that is drawn at every level.
+func TestTheHeaderSaysTheAskOnceAndKeepsTheToolWord(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	// 1 — the frame it was found on.
+	lipgloss.SetColorProfile(termenv.Ascii)
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"A", "3"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	head := ansi.Strip(strings.Split(m.View(), "\n")[0])
+	if strings.Contains(head, `"the checkout suite`) {
+		t.Errorf("80x24 A,3: the header draws the ask the trail draws whole: %q", head)
+	}
+	if !strings.Contains(head, "3 checkout-flake-hunt") || !strings.Contains(head, "claude") {
+		t.Errorf("80x24 A,3: the header should name the session and its tool: %q", head)
+	}
+
+	// 2 — the rule: no header names a session `name · "ask"` while a row of
+	// the same frame draws that ask.
+	routes := [][]string{
+		{"A"}, {"A", "3"}, {"A", "j", "j"}, {"A", "j", "j", "tab"},
+		{"A", "shift+tab"}, {"A", "shift+tab", "3"}, {"A", "3", "tab", "tab"},
+	}
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"ascii", termenv.Ascii}, {"truecolor", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range routes {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					rows := strings.Split(m.View(), "\n")
+					h := ansi.Strip(rows[0])
+					i := strings.Index(h, ` · "`)
+					if !strings.HasPrefix(h, " ⌂ compass · ") || i < 0 {
+						continue
+					}
+					rest := h[i+len(` · "`):]
+					j := strings.Index(rest, `"`)
+					if j < 0 {
+						continue
+					}
+					ask := strings.TrimSuffix(rest[:j], "…")
+					if len(ask) < 8 {
+						continue
+					}
+					t.Errorf("%s %s %dx%d %v: the header quotes the ask beside the name: %q",
+						prof.name, sc.name, size[0], size[1], route, h)
+				}
+			}
+		}
+	}
+}
