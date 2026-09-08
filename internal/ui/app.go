@@ -4368,7 +4368,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 // `N` give where the match they were going to is already drawn. Under it
 // the pair stays, as the chapter keys stay under a chapter key's note (#24).
 func (m *Model) walkNote() bool {
-	return m.note == "the match is on screen"
+	return m.note == "the match is on screen" || strings.HasPrefix(m.note, "match ")
 }
 
 // fitQuote is form with its quoted clause clipped so the whole fits room,

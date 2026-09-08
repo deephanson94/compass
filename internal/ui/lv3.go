@@ -877,31 +877,49 @@ func (m *Model) jumpMatch(dir int) {
 		return
 	}
 	was := m.readerTop(doc)
-	m.walkTo(doc, matches, dir)
+	at := m.walkTo(doc, matches, dir)
 	if m.readerTop(doc) == was {
 		m.note = "the match is on screen"
-	}
-}
-
-// walkTo scrolls to the next (or previous) match, wrapping at the ends.
-func (m *Model) walkTo(doc []readerLine, matches []int, dir int) {
-	if dir > 0 {
-		for _, line := range matches {
-			if line > m.scroll {
-				m.scroll = clampScroll(line, len(doc), m.readerHeight())
-				return
-			}
-		}
-		m.scroll = clampScroll(matches[0], len(doc), m.readerHeight()) // wrap
 		return
 	}
-	for i := len(matches) - 1; i >= 0; i-- {
-		if matches[i] < m.scroll {
-			m.scroll = clampScroll(matches[i], len(doc), m.readerHeight())
-			return
+	// And the walk that did move says what it moved to, as `[` and `]`
+	// do (#20): the page went somewhere the person did not choose by
+	// hand and nothing on it named the match — the harm `landOnTurn` was
+	// written for, at the other key that jumps. The count is the turn
+	// note's own form, without a quote: the row the page opens on is the
+	// match itself.
+	m.note = fmt.Sprintf("match %d/%d", at+1, len(matches))
+}
+
+// walkTo scrolls to the next (or previous) match, wrapping at the ends,
+// and reports which of them it went to.
+func (m *Model) walkTo(doc []readerLine, matches []int, dir int) int {
+	at := 0
+	if dir > 0 {
+		at = len(matches) - 1
+		for i, line := range matches {
+			if line > m.scroll {
+				at = i
+				break
+			}
+		}
+		if matches[at] <= m.scroll {
+			at = 0 // wrap
+		}
+	} else {
+		at = 0
+		for i := len(matches) - 1; i >= 0; i-- {
+			if matches[i] < m.scroll {
+				at = i
+				break
+			}
+		}
+		if matches[at] >= m.scroll {
+			at = len(matches) - 1 // wrap
 		}
 	}
-	m.scroll = clampScroll(matches[len(matches)-1], len(doc), m.readerHeight())
+	m.scroll = clampScroll(matches[at], len(doc), m.readerHeight())
+	return at
 }
 
 // searchKey handles a keypress while the query is being typed.

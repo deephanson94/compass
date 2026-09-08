@@ -5783,7 +5783,7 @@ func TestTheSearchWalkSaysWhereItLanded(t *testing.T) {
 						c.name, w, h, c.n, k)
 					continue
 				}
-				if m.note != "" && m.note != "the match is on screen" {
+				if m.note != "" && m.note != "the match is on screen" && !strings.HasPrefix(m.note, "match ") {
 					t.Errorf("%s %dx%d prefix %d: %q on a running search said %q",
 						c.name, w, h, c.n, k, m.note)
 				}
@@ -5865,4 +5865,104 @@ func r85fhReaderSearch(sc scene, w, h, n int, query string) *Model {
 		return nil
 	}
 	return m
+}
+
+// TestTheSearchWalkNamesTheMatchItLandedOn is the other half of #235.
+// #235 gave `n` and `N` the question `ctrl+d` and `G` already ask — did
+// the page move — and the answer for where it did not. Where it *does*
+// move, the page still goes somewhere the person did not choose by hand
+// and nothing on it names the match: over every canonical reader stand of
+// every scene at every width, after the row's own `/` search, 675 presses
+// moved the page with an empty note. That is the harm `landOnTurn` was
+// written for at the other key that jumps — "`[` and `]` moved the page
+// before, and nothing on the page said what they had moved to" (#20) —
+// whose remedy there is the count `❯ 1/1 · "…"`. The walk's own form is
+// `match 2/7`: no quote, because the row the page opens on is the match.
+func TestTheSearchWalkNamesTheMatchItLandedOn(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // the frame is the one a person sees (#215, #218)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, c := range []struct {
+		name string
+		sc   scene
+		n    int
+	}{
+		{"many-idle", sceneManyIdle(), 13},
+		{"many-idle", sceneManyIdle(), 33},
+		{"very-long", sceneVeryLong(), 13},
+	} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+			w, h := size[0], size[1]
+			m := r85fhReaderSearch(c.sc, w, h, c.n, "pytest")
+			if m == nil {
+				continue
+			}
+			for _, k := range []string{"n", "n", "N"} {
+				before := r85fhReaderPage(m)
+				m.note = ""
+				pressKey(m, k)
+				poll(m, c.sc)
+				if r85fhReaderPage(m) == before {
+					continue // #235's own case: the match is on screen
+				}
+				if !strings.HasPrefix(m.note, "match ") {
+					t.Errorf("%s %dx%d prefix %d: %q moved the page and said %q",
+						c.name, w, h, c.n, k, m.note)
+				}
+			}
+		}
+	}
+}
+
+// TestNoReaderWalkKeyMovesInSilence is the rule behind it, asked of every
+// canonical reader stand of every scene at every width: a walk that moves
+// the page says which match of how many it went to.
+func TestNoReaderWalkKeyMovesInSilence(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, sc := range allScenes() {
+		keys := append(append([]string{}, canonicalKeys...), "esc")
+		keys = append(keys, sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			var stands []int
+			m := sceneModel(sc, w, h)
+			for n := range keys {
+				if m.level == levelReader && !m.showHelp && !m.searching && !m.replying {
+					stands = append(stands, n)
+				}
+				pressKey(m, keys[n])
+				poll(m, sc)
+			}
+			for _, n := range stands {
+				mm := r85fhReaderSearch(sc, w, h, n, "pytest")
+				if mm == nil {
+					continue
+				}
+				for _, k := range []string{"n", "N"} {
+					before := r85fhReaderPage(mm)
+					mm.note = ""
+					pressKey(mm, k)
+					poll(mm, sc)
+					if r85fhReaderPage(mm) != before && mm.note == "" {
+						t.Errorf("%s %dx%d after %d keys: %q moved the page and said nothing",
+							sc.name, w, h, n, k)
+					}
+				}
+			}
+		}
+	}
+}
+
+// r85fhReaderPage is the frame without its footer: the note is a drawn
+// cell, so a frame compare would call a note the page moving.
+func r85fhReaderPage(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.TrimSpace(rows[i]) != "" {
+			return strings.Join(rows[:i], "\n")
+		}
+	}
+	return ""
 }
