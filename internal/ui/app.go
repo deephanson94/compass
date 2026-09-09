@@ -3969,7 +3969,15 @@ func (m *Model) keymap() string {
 		// and #78's and #36's gates below still take it off a fleet with
 		// nothing amber and off a fleet of one. It stands after the hide
 		// key, where the board and the list already stand it (#52).
-		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		// The pair is `j/k rows`, not `j/k legs`: the cursor steps
+		// `TrailRows`, whose kinds are `prompt`, `leg`, `waypoint` and
+		// `branch`, and whose prompt row carries `Leg: -1` — "a boundary
+		// rather than a span of work" in the trail's own words, `◉` and
+		// not a leg in SPEC §2.1's. The fleet-and-trail layout of this
+		// very level has said `rows` all along, so one key, one act, one
+		// level now wears one name (#220, #307). The two words are the
+		// same width: no row's keys move.
+		keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
@@ -5034,7 +5042,7 @@ func (m *Model) walkKeyStuck(whole string) string {
 
 // moveKeyStuck is the movement key this row leads with that cannot move
 // from where it stands — `j/k move` on the list and the board, `j/k rows`
-// and `j/k legs` on a trail — or "" when the row leads with none or the
+// on a trail and in the reader — or "" when the row leads with none or the
 // key acts. A fleet of one has nowhere to move to and answers `the only
 // live one`; a trail whose one row the cursor is on answers `no leg to
 // move to`, whichever of `j` and `k` is pressed and at every width. Under

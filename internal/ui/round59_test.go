@@ -3903,7 +3903,7 @@ func TestTheMovementKeyYieldsWhereItCannotMove(t *testing.T) {
 	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
 		sc := sceneSecondDay()
 		m := stand(sc, size[0], size[1])
-		if foot := footer(m); !strings.Contains(foot, "j/k legs") {
+		if foot := footer(m); !strings.Contains(foot, "j/k rows") {
 			t.Errorf("%dx%d: a yield that buys nothing took the trail's movement key: %q",
 				size[0], size[1], foot)
 		}
@@ -4328,7 +4328,7 @@ func TestThePageKeyShedsAtItsOwnRankWhereverItLeadsTheRow(t *testing.T) {
 	// are (#193) — and still refuses them.
 	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
 		sc := sceneSecondDay()
-		if foot := footer(stand(sc, size[0], size[1])); !strings.Contains(foot, "j/k legs") {
+		if foot := footer(stand(sc, size[0], size[1])); !strings.Contains(foot, "j/k rows") {
 			t.Errorf("second-day %dx%d: a yield that buys nothing took the trail's movement key: %q",
 				size[0], size[1], foot)
 		}
@@ -12592,7 +12592,7 @@ func TestTheSessionViewNamesTheSearchKey(t *testing.T) {
 				if !strings.Contains(keys, "/ search") {
 					t.Errorf("%s: `/` opens the fleet search on the frame this scene opens at and the row names it nowhere: %q", tag, keys)
 				}
-				for _, k := range []string{"j/k legs", "m live pane", "r reply", "a ask", "tab reader", "? help", "q quit"} {
+				for _, k := range []string{"j/k rows", "m live pane", "r reply", "a ask", "tab reader", "? help", "q quit"} {
 					if !strings.Contains(keys, k) {
 						t.Errorf("%s: the search key cost the row %q: %q", tag, k, keys)
 					}
@@ -15714,4 +15714,148 @@ func TestTheHelpNamesTheCursorMark(t *testing.T) {
 	if named < 70 {
 		t.Errorf("only %d of %d help stands name `▸`, want at least 70", named, stands)
 	}
+}
+
+// ---- round 109, two-tools ----
+// TestTheTrailsMoveKeyIsNamedForWhatItStandsOn pins the trail cursor's
+// movement pair, at Lv2, to the one thing it does.
+//
+// At Lv2 the keymap has two forms of one row: the session view (the board
+// fits, 120 and up) opened `j/k legs`, the fleet-and-trail layout of the
+// very same level (80 and 100) `j/k rows`. One key, one act, one level,
+// two names — the shape #307 folded in the reader a round ago and #220
+// settled one level out.
+//
+// `legs` is the false one. The cursor steps `TrailRows`, whose rows come
+// in four kinds — `prompt`, `leg`, `waypoint` and `branch` — and whose
+// prompt row carries `Leg: -1` because, in the trail's own words, it "is a
+// boundary rather than a span of work". SPEC §2.1 keeps `◉` out of the
+// legs the same way ("journey start — the user's prompt, quoted"), and
+// §2.2 builds legs out of activity. The mark stands on that row on the
+// canonical walk at every width.
+//
+// Three sides, so the word cannot simply be swapped and the row left
+// worse:
+//   - no Lv2 row says `j/k legs`, at any width, in either layout;
+//   - the word is earned: the mark stands on rows that are not legs, and
+//     the row that draws it says `j/k rows`;
+//   - it costs nothing: the same stand drawn with the old word names no
+//     key the drawn row lacks and no key more, and no row runs past its
+//     terminal.
+func TestTheTrailsMoveKeyIsNamedForWhatItStandsOn(t *testing.T) {
+	forceASCII(t)
+	stands, split, notLeg := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r109ttLegSizes {
+				w, h := size[0], size[1]
+				inner := w - 2
+				for _, route := range r109ttLegRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.showHelp || m.searching || m.replying || m.level != levelWaypoints {
+						continue
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					if len(rows) == 0 {
+						continue
+					}
+					foot := rows[len(rows)-1]
+					where := fmt.Sprintf("%s %v %dx%d", sc.name, route, w, h)
+					stands++
+					if m.sessionView() {
+						split++
+					}
+
+					// One name for one act, in either layout of Lv2.
+					if strings.Contains(foot, "j/k legs") {
+						t.Errorf("%s: the trail's row calls the cursor pair %q; it steps TrailRows, and a prompt row is no leg\n  foot=%q",
+							where, "j/k legs", strings.TrimRight(foot, " "))
+					}
+					for _, r := range rows {
+						if lipgloss.Width(r) > w {
+							t.Errorf("%s: a row runs past the terminal (%d of %d): %q", where, lipgloss.Width(r), w, r)
+						}
+					}
+
+					// Earned: the stand the row is drawn over is often
+					// not a leg at all.
+					if kind := r109ttLegKind(m); kind != "" && kind != "leg" {
+						notLeg++
+						if !strings.Contains(foot, "j/k rows") && r109ttLegNames(foot) {
+							t.Errorf("%s: the mark stands on a %s row and the row names neither movement key\n  foot=%q",
+								where, kind, strings.TrimRight(foot, " "))
+						}
+					}
+
+					// Costs nothing: the two words are the same width, so
+					// the finished row must name exactly what it named
+					// under the old one (#281, #284).
+					whole := m.keymap()
+					if longer := strings.Replace(whole, "j/k rows · ", "j/k legs · ", 1); longer != whole && m.sessionView() {
+						was := strings.Replace(m.footerMirrorTraded(longer, inner), "j/k legs · ", "j/k rows · ", 1)
+						if !footerNamesAll(was, foot) {
+							t.Errorf("%s: the new word cost the row a key\n  now=%q\n  was=%q", where, r109ttLegKeys(foot), r109ttLegKeys(was))
+						}
+						if !footerNamesAll(foot, was) {
+							t.Errorf("%s: the new word bought the row a key it had not earned\n  now=%q\n  was=%q", where, r109ttLegKeys(foot), r109ttLegKeys(was))
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 20 {
+		t.Errorf("only %d Lv2 stands walked; the renamed side is unmeasured", stands)
+	}
+	if split < 20 {
+		t.Errorf("only %d Lv2 stands in the session view; the layout the rename touches is unmeasured", split)
+	}
+	if notLeg < 20 {
+		t.Errorf("only %d Lv2 stands whose marked row is not a leg; the word's own refutation is unmeasured", notLeg)
+	}
+	t.Logf("Lv2 stands: %d · session view: %d · marked row not a leg: %d", stands, split, notLeg)
+}
+
+var r109ttLegSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r109ttLegRoutes are ways onto a trail at Lv2: straight in, in on another
+// row, and the cursor and chapter keys pressed once there, so the mark
+// stands on legs and on rows that are not legs.
+var r109ttLegRoutes = [][]string{
+	{"tab"},
+	{"tab", "ctrl+u"},
+	{"tab", "j"},
+	{"2", "tab", "ctrl+u"},
+}
+
+// r109ttLegKind is the kind of trail row the cursor stands on — the
+// trail's own word for it, not the footer's.
+func r109ttLegKind(m *Model) string {
+	rows := TrailRows(m.trail, m.level)
+	if m.cursor < 0 || m.cursor >= len(rows) {
+		return ""
+	}
+	return rows[m.cursor].Kind
+}
+
+// r109ttLegNames reports whether the row names a movement pair at all: a
+// row too narrow to name one is #39's shed, not this word's business.
+func r109ttLegNames(foot string) bool {
+	return strings.Contains(foot, "j/k rows") || strings.Contains(foot, "j/k legs")
+}
+
+// r109ttLegKeys is the keymap half of a footer, for a message.
+func r109ttLegKeys(foot string) string {
+	s := strings.TrimSpace(ansi.Strip(foot))
+	if i := strings.Index(s, "  "); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
