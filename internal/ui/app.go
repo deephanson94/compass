@@ -3639,6 +3639,64 @@ func (m *Model) statusChips() string {
 // because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
+	// The clause the reply refusal already says goes before any trade is
+	// measured. #165 gave both no-pane refusals their naming form
+	// "precisely so that naming the key would buy a key back", and the
+	// harm it folded was the refusal saying `no pane` a few cells from the
+	// footer's own `enter · no pane` on the same row — which the reply
+	// refusal still did, on the paneless session at eighty, where it cost
+	// `/ search` and `x hide`, two keys that act on that row. Beside
+	// either no-pane note the clause is the same fact twice — this session
+	// has no pane, which is why neither key can work (#95, #96) — and the
+	// attach refusal's own half of it is #232's and #299's. The clause is
+	// a stuck key besides: the attach it names cannot work either, so it
+	// yields where a key that acts comes back (#210, #216). Like every
+	// clause this row trades, it goes only where the row without it still
+	// names every key the row with it named (#281, #284, #289).
+	if clause := m.replyRefusalSaid(keys); clause != "" {
+		bare := strings.Replace(keys, clause, "", 1)
+		with, without := m.footerTraded(keys, w), m.footerTraded(bare, w)
+		if footerNamesAll(noPaneClauseGone(ansi.Strip(with)), without) {
+			return without
+		}
+		return with
+	}
+	return m.footerTraded(keys, w)
+}
+
+// noPaneClauseGone is a drawn row with the keymap's own `enter · no pane`
+// taken out, in whichever form the row drew it, so the row under the
+// refusal can be read against the row beside it key for key.
+func noPaneClauseGone(row string) string {
+	for _, f := range []string{" · enter · no pane", "enter · no pane · ", "enter · no pane"} {
+		if strings.Contains(row, f) {
+			return strings.Replace(row, f, "", 1)
+		}
+	}
+	return row
+}
+
+// replyRefusalSaid is the keymap's own `enter · no pane` under the reply
+// refusal — the note that already says it — or "" anywhere else. The attach
+// refusal's clause is taken one layer in (attachRefusalSaid, #299). Every
+// other stuck key stays under its own note, because its note does not say
+// what the clause says: `infra stays · it is asking` never mentions the
+// pane, so the row refusing `x` must (#24, #57).
+func (m *Model) replyRefusalSaid(whole string) string {
+	if m.note != "reply needs a pane" {
+		return ""
+	}
+	for _, k := range []string{" · enter · no pane", "enter · no pane · "} {
+		if strings.Contains(whole, k) {
+			return k
+		}
+	}
+	return ""
+}
+
+// footerTraded draws the row for this keymap with the trades the mirror,
+// grab and search clauses each pay for their place on it.
+func (m *Model) footerTraded(keys string, w int) string {
 	// The reader's mirror key is new to its row for the same reason as
 	// the hide key and the search key one level out, and pays the same
 	// price: it is taken only where the finished row still names every

@@ -5492,9 +5492,13 @@ func TestTheAttachRefusalYieldsToTheNoteThatSaysIt(t *testing.T) {
 
 // TestTheAttachRefusalStandsWithNoNoteToSayIt is the other side of the same
 // rule, and the reason the clause exists: with no note on the row — and
-// under a note about another key — the paneless session's footer still
-// says what Enter does. Only the note that speaks the refusal takes its
-// cells.
+// under a note about another key that says nothing about the pane — the
+// paneless session's footer still says what Enter does. Only a note that
+// says what the clause says takes its cells, and the reply refusal is the
+// other note that does (#165, #232, #299): `reply needs a pane` and `enter
+// · no pane` are one fact — this session has no pane — so the clause goes
+// there too, and a chapter key's refusal, which never mentions the pane,
+// leaves it standing.
 func TestTheAttachRefusalStandsWithNoNoteToSayIt(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -5509,13 +5513,22 @@ func TestTheAttachRefusalStandsWithNoNoteToSayIt(t *testing.T) {
 		if !strings.Contains(r84fhFooterRow(m), "enter · no pane") {
 			t.Errorf("%dx%d: with no note the paneless row does not say what enter does:\n%s", w, h, r84fhFooterRow(m))
 		}
-		pressKey(m, "r") // another key's refusal: `reply needs a pane`
+		stand := r84fhListStand(sc, w, h, 28)
+		pressKey(stand, "[") // another key's refusal, and not about the pane
+		poll(stand, sc)
+		if !strings.HasPrefix(stand.note, "no earlier") {
+			t.Fatalf("%dx%d: [ said %q", w, h, stand.note)
+		}
+		if !strings.Contains(r84fhFooterRow(stand), "enter · no pane") {
+			t.Errorf("%dx%d: another key's note took the attach refusal's cells:\n%s", w, h, r84fhFooterRow(stand))
+		}
+		pressKey(m, "r") // the other no-pane refusal: it says what the clause says
 		poll(m, sc)
 		if m.note != "reply needs a pane" {
 			t.Fatalf("%dx%d: r said %q", w, h, m.note)
 		}
-		if !strings.Contains(r84fhFooterRow(m), "enter · no pane") {
-			t.Errorf("%dx%d: another key's note took the attach refusal's cells:\n%s", w, h, r84fhFooterRow(m))
+		if strings.Contains(r84fhFooterRow(m), "enter · no pane") {
+			t.Errorf("%dx%d: the row says the same fact twice — %q beside `enter · no pane`:\n%s", w, h, m.note, r84fhFooterRow(m))
 		}
 	}
 }
@@ -14381,4 +14394,117 @@ func TestThePresentNoteKeepsTheWayDeeper(t *testing.T) {
 		t.Errorf("second-day 120x34 [A tab j]: the row no longer says the way back: %q — the clause yielded where it cost no key",
 			strings.TrimRight(rows[len(rows)-1], " "))
 	}
+}
+
+// ---- round 106, fleet-hygiene ----
+// r106fhReplyNote is the refusal `r` draws where the selected session has no
+// pane (#165), and r106fhClause is the keymap's own clause for the same
+// fact: the session has no pane, which is why neither key can work. A row
+// drawing both says it twice, and #232 and #299 took the attach half of it.
+const (
+	r106fhReplyNote = "reply needs a pane"
+	r106fhClause    = "enter · no pane"
+	r106fhSearch    = "/ search"
+	r106fhTyping    = "esc cancels"
+)
+
+// r106fhWalk is one way to a row with no pane and what to call it.
+type r106fhWalk struct {
+	keys []string
+	what string
+}
+
+// r106fhWalks are the ways to a paneless row: the archive at its list, its
+// board and its own session view, and the live list's third session — the
+// fleet-hygiene fleet's session with no pane. They are #299's four, one
+// level out from the session view, whose own row keeps every key it names
+// and says the fact twice for them (recorded, not folded).
+var r106fhWalks = []r106fhWalk{
+	{[]string{"A"}, "archive list"},
+	{[]string{"A", "shift+tab"}, "archive board"},
+	{[]string{"A", "tab"}, "archive session view"},
+	{[]string{"3"}, "live list, the third session"},
+}
+
+// r106fhRow is the last drawn row of a frame, colour stripped.
+func r106fhRow(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.TrimSpace(rows[len(rows)-1])
+}
+
+// r106fhNamed is the keys a drawn footer names: the row up to the gap the
+// keymap never contains, split on its own separator.
+func r106fhNamed(row string) map[string]bool {
+	if i := strings.Index(row, "  "); i >= 0 {
+		row = row[:i]
+	}
+	out := map[string]bool{}
+	for _, frag := range strings.Split(row, " · ") {
+		if f := strings.TrimSpace(frag); f != "" {
+			out[f] = true
+		}
+	}
+	return out
+}
+
+// TestTheReplyRefusalSaysTheNoPaneOnce holds three sides of the reply
+// refusal on a row with no pane, at four widths under both colour profiles
+// (#215, #218): the row under the note does not also draw the keymap's own
+// `enter · no pane`, since the note says the same fact (#95, #96, #165,
+// #232, #299); at 152 and wider the refusal does not cost the row the search
+// key it named one keypress earlier (#264); and the walk reaches the refusal
+// at all, so a yield that stopped drawing the note fails too.
+func TestTheReplyRefusalSaysTheNoPaneOnce(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	reached := 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, walk := range r106fhWalks {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range walk.keys {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					before := r106fhRow(m)
+					if strings.Contains(before, r106fhTyping) {
+						continue // a line has the keyboard, not the deck
+					}
+					pressKey(m, "r")
+					poll(m, sc)
+					row := r106fhRow(m)
+					if !strings.Contains(row, r106fhReplyNote) {
+						continue // this row could be replied to
+					}
+					reached++
+					if strings.Contains(row, r106fhClause) {
+						t.Errorf("%s %s %dx%d %s: the row says the same fact twice — %q beside %q\n   row=%q",
+							prof.name, sc.name, size[0], size[1], walk.what,
+							r106fhClause, r106fhReplyNote, row)
+					}
+					// At 152 and wider the clause's own cells are the
+					// search key's twice over, so the refusal never costs
+					// the key the row named one keypress earlier (#264).
+					// Narrower the row is full and the note pays (#175).
+					if size[0] < 152 {
+						continue
+					}
+					was, now := r106fhNamed(before), r106fhNamed(row)
+					if was[r106fhSearch] && !now[r106fhSearch] {
+						t.Errorf("%s %s %dx%d %s: the refusal cost the row %q, which the row named one keypress earlier\n   was=%q\n   now=%q",
+							prof.name, sc.name, size[0], size[1], walk.what, r106fhSearch, before, row)
+					}
+				}
+			}
+		}
+	}
+	if reached == 0 {
+		t.Fatalf("the walk reached no frame drawing %q", r106fhReplyNote)
+	}
+	t.Logf("frames drawing the reply refusal: %d", reached)
 }
