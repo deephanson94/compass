@@ -224,10 +224,17 @@ func (m *Model) fleetLines(w, h int) []string {
 			note = "no archived sessions"
 		}
 		if m.fleetQuery != "" {
-			// Two rows, so the way out is never the clipped half. Under
-			// them, the band holds what the search found among the
-			// finished (#98): the miss is the live list's, and says so.
-			miss := []string{dimStyle.Render(clip("no session matches /"+m.fleetQuery, w)), dimStyle.Render("esc clears it")}
+			// The sentence, then the way out on its own row so it is
+			// never the clipped half. Under them, the band holds what
+			// the search found among the finished (#98): the miss is
+			// the live list's, and says so. The second row is the key's
+			// own promise, so it is drawn only where the key keeps it:
+			// beside a session view Esc is one level out, and the query
+			// stands unless that step lands on the board (#282, #285).
+			miss := []string{dimStyle.Render(clip("no session matches /"+m.fleetQuery, w))}
+			if m.escClearsQuery() {
+				miss = append(miss, dimStyle.Render("esc clears it"))
+			}
 			if band := m.recentLines(w, h-len(miss)-1); len(band) > 1 && !m.archiveView {
 				miss[0] = dimStyle.Render(clip("no live session matches /"+m.fleetQuery, w))
 				return append(append(miss, ""), band...)

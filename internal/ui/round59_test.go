@@ -12918,3 +12918,146 @@ func TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped(t *testing.T) 
 		t.Fatalf("the archive's hidden header kept its key on only %d rows — the yield took too many", kept)
 	}
 }
+
+// ---- round 103, second-day ----
+// TestTheFleetsMissNamesEscOnlyWhereEscClearsIt pins both sides of the second
+// row of the fleet list's miss.
+//
+// The row is a promise about a key: `esc clears it`. On the board and on a
+// list Esc does clear a standing search first (SPEC §3), and there the row is
+// true. Beside a session view Esc is one level out instead, and the query goes
+// only where that step lands on the board: on a narrow deck (no board to land
+// on) and in the archive it does not, so the frame said the key clears the
+// search while the key pressed on that very frame walked out with the search
+// still standing. A row may name a key only where the key keeps its word
+// (#24, #175, #187, #277, #282, #285).
+//
+// Held side: wherever Esc on the frame does clear the query, the miss still
+// names it — the fold takes the clause away nowhere else.
+func TestTheFleetsMissNamesEscOnlyWhereEscClearsIt(t *testing.T) {
+	forceASCII(t)
+
+	run := func(sc scene, w, h int, keys ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	named := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+	drawn := func(m *Model, s string) bool { return strings.Contains(m.View(), s) }
+
+	// 1. The frames it was found on: the second day's own fleet of one, at
+	//    the two widths that have no board, and the archive at the widest.
+	sd := named("second-day")
+	found := []struct {
+		what  string
+		w, h  int
+		keys  []string
+		miss  string
+		outLv int
+		outQ  string
+	}{
+		{"the session view on a deck too narrow for a board", 80, 24,
+			[]string{"tab", "/", "api", "enter"}, "no live session matches /api", levelTrail, "api"},
+		{"the same at a hundred", 100, 30,
+			[]string{"tab", "/", "api", "enter"}, "no live session matches /api", levelTrail, "api"},
+		{"the archive one Tab deep, where the board fits", 220, 48,
+			[]string{"A", "tab", "/", "zz", "enter"}, "no session matches /zz", levelTrail, "zz"},
+	}
+	for _, f := range found {
+		m := run(sd, f.w, f.h, f.keys...)
+		if !drawn(m, f.miss) {
+			t.Fatalf("%s (%dx%d): the miss is not on the frame", f.what, f.w, f.h)
+		}
+		if m.level != levelWaypoints {
+			t.Fatalf("%s (%dx%d): the stand is Lv%d, not the session view", f.what, f.w, f.h, m.level)
+		}
+		if drawn(m, "esc clears it") {
+			t.Errorf("%s (%dx%d): the miss promises `esc clears it` here", f.what, f.w, f.h)
+		}
+		pressKey(m, "esc")
+		poll(m, sd)
+		if m.level != f.outLv || m.fleetQuery != f.outQ {
+			t.Errorf("%s (%dx%d): esc went to Lv%d with query %q, wanted Lv%d and %q — the reason the clause is not drawn",
+				f.what, f.w, f.h, m.level, m.fleetQuery, f.outLv, f.outQ)
+		}
+	}
+
+	// 2. The held side on the same scene: one level out, where Esc is the
+	//    list's own key, the row keeps its promise and the key keeps it too.
+	for _, keep := range []struct {
+		what string
+		w, h int
+		keys []string
+	}{
+		{"the fleet list at eighty", 80, 24, []string{"/", "api", "enter"}},
+		{"the archive list at 220", 220, 48, []string{"A", "/", "zz", "enter"}},
+	} {
+		m := run(sd, keep.w, keep.h, keep.keys...)
+		if !drawn(m, "esc clears it") {
+			t.Errorf("%s: the miss no longer names the key that clears it:\n%s", keep.what, m.View())
+			continue
+		}
+		pressKey(m, "esc")
+		poll(m, sd)
+		if m.fleetQuery != "" {
+			t.Errorf("%s: `esc clears it` was drawn and esc left the query %q standing", keep.what, m.fleetQuery)
+		}
+	}
+
+	// 3. The rule, over every scene, five widths and both profiles: wherever
+	//    the clause is drawn the key clears, and wherever the key clears on a
+	//    frame drawing the miss the clause is drawn.
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	prefixes := [][]string{{}, {"tab"}, {"A", "tab"}}
+	stands, clause := 0, 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, pre := range prefixes {
+					keys := append(append([]string{}, pre...), "/", "zz", "enter")
+					m := run(sc, size[0], size[1], keys...)
+					frame := m.View()
+					if !strings.Contains(frame, "matches /zz") {
+						continue
+					}
+					stands++
+					says := strings.Contains(frame, "esc clears it")
+					if says {
+						clause++
+					}
+					where := fmt.Sprintf("%s %s %dx%d %v Lv%d", prof.name, sc.name, size[0], size[1], pre, m.level)
+					pressKey(m, "esc")
+					poll(m, sc)
+					clears := m.fleetQuery == ""
+					if says && !clears {
+						t.Errorf("%s: the miss says `esc clears it` and esc left %q standing at Lv%d", where, m.fleetQuery, m.level)
+					}
+					if !says && clears {
+						t.Errorf("%s: esc cleared the search and no row on the frame said so", where)
+					}
+				}
+			}
+		}
+	}
+	lipgloss.SetColorProfile(prev)
+	if stands < 60 || clause < 20 {
+		t.Fatalf("only %d stands drew the miss (%d naming the key); the sweep is not measuring the row", stands, clause)
+	}
+	t.Logf("stands drawing the miss: %d · naming `esc clears it`: %d", stands, clause)
+}

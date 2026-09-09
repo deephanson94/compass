@@ -1705,6 +1705,27 @@ func (m *Model) zoomOut() {
 	}
 }
 
+// escClearsQuery answers whether Esc, pressed on this very frame, drops the
+// standing fleet search — the promise the miss's second row makes. On the
+// board or a list the key clears first, which is the branch `esc` takes
+// above; deeper, Esc is one level out, and the query goes only where that
+// step lands on the board and the selected session fails the search
+// (zoomOut). On a narrow deck, in the archive or from the reader it does
+// not, and no row may say it does.
+func (m *Model) escClearsQuery() bool {
+	if m.fleetQuery == "" {
+		return false
+	}
+	if m.level <= levelTrail {
+		return true
+	}
+	if m.level > levelWaypoints || m.archiveView || !m.boardFits() {
+		return false
+	}
+	s, ok := m.selected()
+	return ok && !m.matchesQuery(s)
+}
+
 // clearQuery drops the fleet search and puts the selection back where it
 // was before the search began, if that session is still on the board.
 func (m *Model) clearQuery() {
