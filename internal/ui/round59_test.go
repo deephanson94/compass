@@ -11103,3 +11103,238 @@ func r98fhKeyWords(foot string) map[string]bool {
 	}
 	return out
 }
+
+// ---- round 98, second-day ----
+// TestAChapterNoteOfOneChapterIsTheCountAlone: on a trail of one chapter the
+// `[ ]` note is `❯ 1/1` — the count names the turn the key landed on by
+// itself, because there is no other turn it could have been — and the quote
+// beside it is the sentence the turn's own row draws whole on the same
+// frame, under the same glyph.
+//
+// The frame it was found on: `second-day`, `A`,`1`,`tab`,`tab`,`[` at 220 —
+// the archived session the person walked away from two hours ago, opened in
+// the reader. The footer drew
+//
+//	space unfold · / search · n/N · [ ] turns · a ask · enter · no pane · esc back · A fleet · ? help · q quit   ❯ 1/1 · "fix the 401 on token refresh"
+//
+// on a frame that already drew that sentence whole four times: on the
+// identity header, on the archive's selected row, on the trail's `◉` row,
+// and on the reader's own `❯` row — the very row the note names, wearing
+// the very glyph the note wears. #20 gave the note the quote to say which
+// turn `[ ]` moved to; #128 took the clock off it because the row it landed
+// on carries the clock at every width, and that reason reaches the quote
+// where the count already names the turn; #134 took the cut quote off for
+// saying less than the count alone.
+//
+// Then the rule, over every scene, five widths and both profiles: no footer
+// draws a `1/1` chapter note with a quote, and on every frame that draws a
+// `1/1` note the sentence it would have quoted stands on a row of the frame,
+// so the count is never the only copy. And the other side: a note counting
+// more than one chapter keeps its quote.
+func TestAChapterNoteOfOneChapterIsTheCountAlone(t *testing.T) {
+	chapterOneRoutes := [][]string{
+		{"A", "1", "tab", "tab", "["},
+		{"tab", "tab", "["},
+		{"tab", "tab", "]"},
+		{"tab", "tab", "G", "["},
+		{"1", "tab", "tab", "["},
+		{"tab", "j", "tab", "["},
+	}
+	chapterOneFooter := func(view string) string {
+		rows := strings.Split(ansi.Strip(view), "\n")
+		for i := len(rows) - 1; i >= 0; i-- {
+			if strings.TrimSpace(rows[i]) != "" {
+				return rows[i]
+			}
+		}
+		return ""
+	}
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	// The frame it was found on.
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, w := range []int{152, 220} {
+			sd := sceneSecondDay()
+			m := sceneModel(sd, w, 40)
+			for _, k := range []string{"A", "1", "tab", "tab", "["} {
+				pressKey(m, k)
+				poll(m, sd)
+			}
+			foot := chapterOneFooter(m.View())
+			if !strings.Contains(foot, "❯ 1/1") {
+				t.Fatalf("%s %d: the chapter note is gone: %q", prof.name, w, foot)
+			}
+			if strings.Contains(foot, `❯ 1/1 · "`) {
+				t.Errorf("%s %d: the one chapter's note quotes the sentence its own ❯ row draws: %q", prof.name, w, foot)
+			}
+			if !strings.Contains(ansi.Strip(m.View()), "❯ fix the 401 on token refresh") {
+				t.Errorf("%s %d: the turn the note names is not drawn", prof.name, w)
+			}
+		}
+	}
+
+	// The rule.
+	quoted := 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range chapterOneRoutes {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					view := m.View()
+					foot := chapterOneFooter(view)
+					for _, g := range []string{glyphSaid, glyphBranch} {
+						if strings.Contains(foot, g+` 1/1 · "`) {
+							t.Errorf("%s %s %dx%d %v: the one chapter's note quotes a sentence its own row draws: %q",
+								prof.name, sc.name, size[0], size[1], route, foot)
+						}
+					}
+					if !strings.Contains(foot, glyphSaid+" 1/1") && !strings.Contains(foot, glyphBranch+" 1/1") {
+						if i := strings.Index(foot, ` · "`); i > 0 &&
+							(strings.Contains(foot, glyphSaid+" ") || strings.Contains(foot, glyphBranch+" ")) {
+							// A note counting more than one chapter: the
+							// quote goes where the row draws its sentence
+							// (#279's rule over #278's); the count stays.
+							quoted++
+						}
+						continue
+					}
+					// The count is not the only copy: the sentence the
+					// note dropped stands on a row of the frame.
+					want := strings.TrimSuffix(strings.TrimSpace(m.anchorText), "…")
+					if want == "" {
+						continue
+					}
+					found := false
+					for _, r := range strings.Split(ansi.Strip(view), "\n") {
+						if r != foot && strings.Contains(r, want) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("%s %s %dx%d %v: the note is the count alone and %q is on no row of the frame",
+							prof.name, sc.name, size[0], size[1], route, want)
+					}
+				}
+			}
+		}
+	}
+	_ = quoted // the wider rule (#279) decides the quote on every count; the one-chapter note's is the count alone either way
+}
+
+// ---- round 98, two-tools ----
+// r98ttQuoted is the sentence a chapter note quotes, and the note's glyph.
+// A chapter note is `◉ 2/2 · "…" · 15:47`, `❯ 9/9 · "…"` or `◈ 1/1 · "…"`:
+// one clause of it is a quoted sentence, and the rest — the count and the
+// clock — is what no row of the frame draws.
+func r98ttQuoted(note string) (glyph, said string) {
+	for _, g := range []string{glyphPrompt, glyphSaid, glyphBranch} {
+		if !strings.HasPrefix(note, g+" ") {
+			continue
+		}
+		for _, c := range strings.Split(note, " · ") {
+			if len(c) > 1 && strings.HasPrefix(c, `"`) && strings.HasSuffix(c, `"`) {
+				return g, strings.Trim(c, `"`)
+			}
+		}
+	}
+	return "", ""
+}
+
+// TestTheChapterNoteLeavesItsQuoteToTheRow: `[` and `]` land the frame on the
+// very turn they count — the viewport opens on the prompt at Lv1, the cursor
+// stands on it at Lv2, the reader is on its page at Lv3 — so the row drawing
+// that sentence is under the note. Where it is, the footer does not say it
+// again: at 220 `❯ 1/1 · "add rate limiting to the token endpoint"` stood
+// under a row drawing that sentence twice, once each side of the rule. The
+// note keeps its count and its clock, which no row draws (#128, #134, #276).
+func TestTheChapterNoteLeavesItsQuoteToTheRow(t *testing.T) {
+	forceASCII(t)
+	runs := [][]string{
+		{"tab", "]", "]", "["},
+		{"tab", "tab", "tab", "[", "]"},
+		{"G", "[", "["},
+	}
+	seen, yielded, rowsWithQuotes := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {120, 34}, {220, 48}} {
+				for _, run := range runs {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range run {
+						pressKey(m, k)
+						poll(m, sc)
+						rows := strings.Split(ansi.Strip(m.View()), "\n")
+						body, foot := rows[1:len(rows)-1], rows[len(rows)-1]
+						for _, r := range body {
+							if strings.Count(r, `"`) >= 2 {
+								rowsWithQuotes++
+							}
+						}
+						glyph, said := r98ttQuoted(m.note)
+						if glyph == "" {
+							continue
+						}
+						seen++
+						drawn := ""
+						for _, r := range body {
+							if saysSame(said, r) {
+								drawn = strings.TrimSpace(r)
+							}
+						}
+						if drawn == "" {
+							continue // nothing else says it: the note keeps its quote
+						}
+						yielded++
+						if i := strings.Index(foot, glyph+" "); i >= 0 {
+							note := strings.TrimSpace(foot[i:])
+							if strings.Contains(note, `"`) {
+								t.Errorf("%s %dx%d %v: the chapter note said the sentence the row draws: %q under %q",
+									sc.name, size[0], size[1], prof, note, drawn)
+							}
+							// What no row draws stays: the chapter's own
+							// number, and the prompt note's wall clock.
+							if !strings.HasPrefix(note, glyph+" ") || !strings.Contains(note, "/") {
+								t.Errorf("%s %dx%d %v: the chapter note lost its count: %q", sc.name, size[0], size[1], prof, note)
+							}
+							if glyph == glyphPrompt && !strings.Contains(m.note, `"`) {
+								t.Errorf("%s %dx%d %v: the prompt note lost its clock: %q", sc.name, size[0], size[1], prof, note)
+							}
+						} else {
+							t.Errorf("%s %dx%d %v: the chapter note went off the footer: %q", sc.name, size[0], size[1], prof, foot)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	// Not vacuous three ways: the walk reaches chapter notes with a quote,
+	// the rule fires on frames whose row draws that sentence, and the rows
+	// themselves still carry their quoted sentences — a deck that stripped
+	// every quote everywhere would pass the assertion above and fail here.
+	if seen < 40 {
+		t.Fatalf("the walk saw %d chapter notes with a quote, expected at least 40", seen)
+	}
+	if yielded < 20 {
+		t.Fatalf("the rule fired on %d frames, expected at least 20", yielded)
+	}
+	if rowsWithQuotes < 500 {
+		t.Fatalf("the frames drew %d quoted rows, expected at least 500", rowsWithQuotes)
+	}
+}

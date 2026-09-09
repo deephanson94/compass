@@ -3775,6 +3775,17 @@ func (m *Model) footerWith(keys string, w int) string {
 	if short, ok := m.noteLeavesTheQuoteToTheRow(note); ok {
 		note = short
 	}
+	// The chapter note's quote is the row's too: `[` and `]` land the frame
+	// on the very turn they count — the viewport opens on it at Lv1, the
+	// cursor stands on it at Lv2, the reader is on its page at Lv3 — so the
+	// row drawing that sentence is under the note, and the footer said it
+	// again. #128's rule, and #134's reason for dropping a cut one ("the
+	// turn the note landed on is drawn with it"), which holds whether the
+	// copy would be cut or not. The count and the clock, which no row
+	// draws, stay.
+	if short, ok := m.noteLeavesTheChapterQuoteToTheRow(note); ok {
+		note = short
+	}
 	note = m.noteLeavesTheWayBackToTheRow(note)
 	// The note's reserve is twelve cells, or the note itself where it is
 	// shorter: a note with no longer form to grow into buys nothing with
@@ -5263,6 +5274,42 @@ func (m *Model) rowCarriesTrace(head string) bool {
 		}
 	}
 	return false
+}
+
+// noteLeavesTheChapterQuoteToTheRow is #128's rule for a chapter note — the
+// prompt's, the turn's and the lane's alike. Where a drawn row of this frame
+// says the sentence the note quotes, the note keeps what no row draws — its
+// count and its clock — and leaves the sentence to the row. The row is on the
+// frame by construction, `chapter` having moved the panel onto it, but it is
+// compared for, not assumed: a row the reply box covers is not on the frame
+// (#108), and where nothing draws the sentence the note keeps its quote and
+// the footer clips it to its room as before (#36).
+func (m *Model) noteLeavesTheChapterQuoteToTheRow(note string) (string, bool) {
+	if !m.chapterNote() {
+		return note, false
+	}
+	if !strings.HasPrefix(note, glyphPrompt+" ") && !strings.HasPrefix(note, glyphSaid+" ") && !strings.HasPrefix(note, glyphBranch+" ") {
+		return note, false
+	}
+	clauses := strings.Split(note, " · ")
+	said, at := "", -1
+	for i, c := range clauses {
+		if len(c) > 1 && strings.HasPrefix(c, `"`) && strings.HasSuffix(c, `"`) {
+			said, at = strings.Trim(c, `"`), i
+		}
+	}
+	if at < 0 {
+		return note, false
+	}
+	for _, row := range m.bodyRows {
+		// saysSame is the deck's own compare (#110, #116): two words the
+		// floor, and the sentence looked for anywhere in the row, which is
+		// where it stands — behind the trail's glyph, behind the reader's.
+		if saysSame(said, ansi.Strip(row)) {
+			return strings.Join(append(clauses[:at:at], clauses[at+1:]...), " · "), true
+		}
+	}
+	return note, false
 }
 
 func (m *Model) noteLeavesTheQuoteToTheRow(note string) (string, bool) {
