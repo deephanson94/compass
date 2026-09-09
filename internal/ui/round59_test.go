@@ -15093,3 +15093,145 @@ func TestTheReaderMovementKeyNamesRows(t *testing.T) {
 		t.Errorf("second-day 220x48 [tab tab]: the fitting page no longer names the cursor key: %q", r108sdFoot(rows))
 	}
 }
+
+// ---- round 108, two-tools ----
+// TestTheReadersMoveKeyIsNamedForWhatItMoves pins the reader's movement
+// pair to the one thing it does.
+//
+// #83 named the pair `j/k scroll` because in the reader it moved the
+// viewport; #300 gave the reader a cursor and `j`, `k`, `ctrl+d` and
+// `ctrl+u` have stepped that cursor ever since (readerCursorMove), the
+// viewport following only far enough to keep the mark on screen. #306 put
+// the cursor's word on a page that fits and left `j/k scroll` on a page
+// that scrolls, on the ground that "there the key does move the viewport"
+// — which the frame refutes: on `two-tools` at eighty the reader opens
+// with the mark five rows above the last drawn row, and three `j`s walk
+// the mark while `↑ 4 lines above` and every row above the mark stand
+// unmoved. One key, one act, one name: `j/k rows`, the word the same deck
+// already uses for a cursor that walks rows one level out (#220).
+//
+// Three sides, so the word cannot simply be swapped everywhere and the
+// row left worse:
+//   - no reader row says `j/k scroll`, at any width, on either kind of
+//     page;
+//   - the word is earned: on a page that scrolls, `j` pressed where the
+//     mark is not on the last drawn row moves the mark and leaves the
+//     page's top where it was;
+//   - it costs nothing: the same stand drawn with the old, longer word
+//     names no key the drawn row lacks, and no row runs past its
+//     terminal.
+func TestTheReadersMoveKeyIsNamedForWhatItMoves(t *testing.T) {
+	forceASCII(t)
+	scrolls, fits, walked := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r108ttWordSizes {
+				w, h := size[0], size[1]
+				inner := w - 2
+				for _, route := range r108ttWordRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.showHelp || m.searching || m.replying || m.level < levelReader {
+						continue
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					if len(rows) == 0 {
+						continue
+					}
+					foot := rows[len(rows)-1]
+					where := fmt.Sprintf("%s %v %dx%d", sc.name, route, w, h)
+
+					// One name for one act, on either kind of page.
+					if strings.Contains(foot, "j/k scroll") {
+						t.Errorf("%s: the reader's row calls the cursor pair %q; `j` there steps the mark (#300)\n  foot=%q",
+							where, "j/k scroll", strings.TrimRight(foot, " "))
+					}
+					for _, r := range rows {
+						if lipgloss.Width(r) > w {
+							t.Errorf("%s: a row runs past the terminal (%d of %d): %q", where, lipgloss.Width(r), w, r)
+						}
+					}
+					if m.readerPageFits() {
+						fits++
+						continue
+					}
+					scrolls++
+					// The word costs no key: on the page the rename
+					// touches, the row drawn with the old, longer word
+					// names nothing this row lacks (#281, #284).
+					whole := m.keymap()
+					if longer := strings.Replace(whole, "j/k rows · ", "j/k scroll · ", 1); longer != whole {
+						was := strings.Replace(m.footerMirrorTraded(longer, inner), "j/k scroll · ", "j/k rows · ", 1)
+						if !footerNamesAll(was, foot) {
+							t.Errorf("%s: the shorter word cost the row a key\n  now=%q\n  was=%q", where, r108ttWordKeys(foot), r108ttWordKeys(was))
+						}
+					}
+					// Earned: the press the row names moves the mark, and
+					// on this stand it moves no line of the page.
+					doc := m.doc(m.readerWidth())
+					top, mark := m.readerTop(doc), r108ttWordMark(m)
+					pressKey(m, "j")
+					poll(m, sc)
+					if m.readerTop(m.doc(m.readerWidth())) == top {
+						if got := r108ttWordMark(m); got == mark {
+							t.Errorf("%s: on a page that scrolls `j` moved neither the page nor the mark\n  mark=%q", where, mark)
+						} else {
+							walked++
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if scrolls < 20 {
+		t.Errorf("only %d reader stands on a page that scrolls; the renamed side is unmeasured", scrolls)
+	}
+	if fits < 20 {
+		t.Errorf("only %d reader stands on a page that fits; the held side is unmeasured", fits)
+	}
+	if walked < 10 {
+		t.Errorf("only %d scrolling stands where `j` walked the mark and scrolled nothing; the frame's own refutation is unmeasured", walked)
+	}
+	t.Logf("reader stands: %d scrolling · %d fitting · %d where `j` walked the mark and moved no line", scrolls, fits, walked)
+}
+
+var r108ttWordSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r108ttWordRoutes are ways onto a reader page: straight in, in on another
+// row, and the chapter and cursor keys pressed once there, so both a page
+// that fits and a page that scrolls are stood on.
+var r108ttWordRoutes = [][]string{
+	{"tab", "tab"},
+	{"tab", "tab", "]"},
+	{"tab", "tab", "j"},
+	{"1", "tab", "tab"},
+	{"2", "tab", "tab"},
+}
+
+// r108ttWordKeys is the keymap half of a footer, for a message.
+func r108ttWordKeys(foot string) string {
+	s := strings.TrimSpace(ansi.Strip(foot))
+	if i := strings.Index(s, "  "); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// r108ttWordMark is the reader row the cursor stands on, by its own words.
+func r108ttWordMark(m *Model) string {
+	opts := ReaderOpts{Width: m.readerWidth(), Height: m.readerHeight(),
+		Scroll: m.scroll, Anchor: m.anchor, Unfolded: m.unfolded,
+		CWD: m.readerCWD(), Now: m.now, Lanes: m.laneClauses()}
+	for _, line := range strings.Split(RenderReader(m.events, opts), "\n") {
+		if plain := ansi.Strip(line); strings.ContainsRune(plain, '▸') {
+			return strings.TrimRight(plain, " ")
+		}
+	}
+	return ""
+}

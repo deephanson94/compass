@@ -3710,6 +3710,20 @@ func (m *Model) footerTraded(keys string, w int) string {
 			keys = bare
 		}
 	}
+	if m.level >= levelReader && !m.readerPageFits() && strings.HasPrefix(keys, "j/k rows · ") {
+		// The word is two cells shorter than the one it replaced (#307),
+		// and on four rows the two cells moved the note's reserve so the
+		// shed took `x hide` or `m live pane` off a row that had named
+		// them. A word costs no key: where the finished row under the
+		// short word names fewer keys than under the long one, the row is
+		// drawn to the long word's width and the note ends two cells in.
+		was := m.footerMirrorTraded(strings.Replace(keys, "j/k rows · ", "j/k scroll · ", 1), w)
+		now := m.footerMirrorTraded(keys, w)
+		if !footerNamesAll(strings.Replace(was, "j/k scroll · ", "j/k rows · ", 1), now) {
+			return m.footerMirrorTraded(keys, w-2)
+		}
+		return now
+	}
 	return m.footerMirrorTraded(keys, w)
 }
 
