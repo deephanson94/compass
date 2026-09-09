@@ -4332,6 +4332,44 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 			keys = shed(minimal, " · ? help")
 		}
 	}
+	if goesBack := " · k goes back"; strings.HasSuffix(minimal, goesBack) {
+		// `at the present · k goes back` names the key that retreats,
+		// and the row it is drawn on names it already, first of all its
+		// clauses, as `j/k rows` — one sentence said twice on one row,
+		// the harm #95 and #96 folded on the ship row and the header
+		// and #299 folded on this very row for `enter · no pane`. The
+		// keymap is the only place the reader's keys are named, so it
+		// is the note's clause that goes. Fourteen cells: at eighty in
+		// the archive's own session view `j` and `ctrl+d` at the end of
+		// a trail moved nothing and cost the footer `[ ] chapters` and
+		// `tab deeper`, the frame's only naming of the way deeper — the
+		// word `tab` stands nowhere else on the frame — while `G` on
+		// the same stand answers `at the present` and keeps it. The
+		// clause yields to a key naming a level and only where the key
+		// comes back (#175, #297), and only where the finished row
+		// still names the key the clause named. Measured with the
+		// chapter key's yield below, since the two are taken on the
+		// same row (#297).
+		short := strings.TrimSuffix(minimal, goesBack)
+		cand := drops
+		if order, moved := chapterKeyAboveTheWayIn(drops); moved && !m.chapterNote() && strings.Contains(whole, " · [ ] chapters") {
+			cand = order
+		}
+		for i, d := range cand {
+			if d == " · ? help" {
+				cand = cand[:i]
+				break
+			}
+		}
+		floor := max(min(12, lipgloss.Width(short)), lipgloss.Width(short))
+		k := shedKeys(whole, cand, func(k string) bool { return lipgloss.Width(k)+2+floor <= w })
+		plain := shedKeys(whole, drops, func(k string) bool { return lipgloss.Width(k) <= w })
+		if strings.Contains(k, "j/k ") && levelKeyLost(plain, keys) && !levelKeyLost(plain, k) {
+			keys, minimal = k, short
+			note = strings.TrimSuffix(note, goesBack)
+			forms = noteForms(note)
+		}
+	}
 	if chapters := " · [ ] chapters"; !m.chapterNote() && strings.Contains(whole, chapters) {
 		// The way in outlasts a key that moves inside a panel already
 		// open (#39). At eighty the trail's own keys are 65 cells

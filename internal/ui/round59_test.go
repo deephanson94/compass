@@ -14264,3 +14264,121 @@ func TestTheBoardsMirrorKeySaysTheFlagBothWays(t *testing.T) {
 	}
 	t.Logf("board stands where `m` arms the mirror: %d · stands off the board: %d", boards, deeps)
 }
+
+// ---- round 106, second-day ----
+// TestThePresentNoteKeepsTheWayDeeper holds the rule of #300: the drawn
+// form of `at the present · k goes back` gives up its way-back clause —
+// which the row it stands on already names, first of all its clauses, as
+// `j/k rows` — wherever the clause would cost the row a key naming a
+// level that the row named one keypress earlier, and only there.
+func TestThePresentNoteKeepsTheWayDeeper(t *testing.T) {
+	forceASCII(t)
+	r106sdLevelKey := func(row string) bool {
+		for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
+			if strings.Contains(row, k) {
+				return true
+			}
+		}
+		return false
+	}
+	r106sdFrame := func(sc scene, w, h int, keys []string) (*Model, []string) {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m, strings.Split(ansi.Strip(m.View()), "\n")
+	}
+	r106sdScene := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+
+	// The frame it was found on: the archive's own session view at eighty,
+	// the cursor on the newest leg, where `j` and `ctrl+d` move nothing.
+	sd := r106sdScene("second-day")
+	for _, key := range []string{"j", "ctrl+d"} {
+		_, before := r106sdFrame(sd, 80, 24, []string{"A", "tab"})
+		if got := strings.TrimRight(before[len(before)-1], " "); !strings.Contains(got, "tab deeper") {
+			t.Fatalf("second-day 80x24 [A tab]: the row before %q names no way deeper: %q", key, got)
+		}
+		m, rows := r106sdFrame(sd, 80, 24, []string{"A", "tab", key})
+		foot := strings.TrimRight(rows[len(rows)-1], " ")
+		for i := range rows[:len(rows)-1] {
+			if strings.TrimRight(rows[i], " ") != strings.TrimRight(before[i], " ") {
+				t.Errorf("second-day 80x24: %q moved row %d: %q -> %q", key, i, before[i], rows[i])
+			}
+		}
+		if strings.Contains(foot, "k goes back") || !strings.HasSuffix(foot, "at the present") {
+			t.Errorf("second-day 80x24 [A tab %s]: the row draws %q, want it to end in %q with no way-back clause", key, foot, "at the present")
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("second-day 80x24 [A tab %s]: the row lost the way deeper: %q", key, foot)
+		}
+		if !strings.Contains(foot, "j/k rows") {
+			t.Errorf("second-day 80x24 [A tab %s]: the clause went and the row does not name the key it named: %q", key, foot)
+		}
+		if m.note != "at the present · k goes back" {
+			t.Errorf("second-day 80x24 [A tab %s]: the note itself is %q: only the form the row draws yields", key, m.note)
+		}
+		if lipgloss.Width(foot) > 80 {
+			t.Errorf("second-day 80x24 [A tab %s]: the row runs past the terminal (%d): %q", key, lipgloss.Width(foot), foot)
+		}
+	}
+
+	// The rule, over every scene at five widths under both profiles.
+	stands, refusals := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range [][]string{{"tab"}, {"A", "tab"}} {
+					for _, key := range []string{"j", "ctrl+d"} {
+						stands++
+						m, before := r106sdFrame(sc, size[0], size[1], route)
+						was := before[len(before)-1]
+						pressKey(m, key)
+						poll(m, sc)
+						rows := strings.Split(ansi.Strip(m.View()), "\n")
+						foot := rows[len(rows)-1]
+						if m.note != "at the present · k goes back" {
+							continue
+						}
+						refusals++
+						if r106sdLevelKey(was) && !r106sdLevelKey(foot) {
+							t.Errorf("%v %s %dx%d %v then %q: the present note costs the row its only naming of a level: %q -> %q",
+								prof, sc.name, size[0], size[1], route, key,
+								strings.TrimRight(was, " "), strings.TrimRight(foot, " "))
+						}
+						if strings.Contains(foot, "k goes back") && !strings.Contains(foot, "j/k ") {
+							t.Errorf("%v %s %dx%d %v then %q: the row draws the way-back clause and names the key nowhere: %q",
+								prof, sc.name, size[0], size[1], route, key, strings.TrimRight(foot, " "))
+						}
+						if lipgloss.Width(foot) > size[0] {
+							t.Errorf("%v %s %dx%d %v then %q: the row runs past the terminal (%d): %q",
+								prof, sc.name, size[0], size[1], route, key, lipgloss.Width(foot), foot)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if refusals < 100 {
+		t.Fatalf("the rule reached only %d present notes over %d stands: it has gone vacuous", refusals, stands)
+	}
+
+	// And the clause still stands where it costs no key: one width up from
+	// the frame above, the same press keeps both (#175's proviso), so a
+	// yield taken everywhere fails here.
+	if _, rows := r106sdFrame(sd, 120, 34, []string{"A", "tab", "j"}); !strings.Contains(rows[len(rows)-1], "at the present · k goes back") {
+		t.Errorf("second-day 120x34 [A tab j]: the row no longer says the way back: %q — the clause yielded where it cost no key",
+			strings.TrimRight(rows[len(rows)-1], " "))
+	}
+}
