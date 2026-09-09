@@ -1108,6 +1108,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorMove(m.trailHalfPage())
 			if m.cursor == was {
 				m.note = "at the present · k goes back"
+				if len(TrailRows(m.trail, m.level)) <= 1 {
+					// A trail of one row: `k` goes nowhere either, and
+					// pressed on this very frame it answers `no leg to
+					// move to`. `j`, `k` and `ctrl+u` each ask this
+					// question at this end of this trail; the page key
+					// down was the one branch that did not, so it sent
+					// the person to a key that moves nothing and, at
+					// eighty, its fourteen extra cells cost the frame
+					// `tab deeper`, its only naming of the way deeper
+					// (#175, #187, #190, #194, #198, #201, #264, #283).
+					m.note = "no leg to move to" // no key goes anywhere
+				}
 			}
 			return m, nil
 		case "ctrl+u":

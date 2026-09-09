@@ -12165,3 +12165,128 @@ func TestTheArchiveNamesTheHideKeyOnTheRowItKeeps(t *testing.T) {
 	}
 	t.Logf("archive stands on a kept live row: %d · shed of nothing: %d · naming `x hide`: %d · hide clause offered: %d", kept, whole, named, offered)
 }
+
+// ---- round 101, second-day ----
+// TestThePageKeyDownAnswersLikeItsSiblingsOnATrailOfOne pins round 101's
+// second-day fold: on a trail of one row `ctrl+d` said `at the present ·
+// k goes back`, naming a key that on the same frame answers `no leg to
+// move to` — the answer `j`, `k` and `ctrl+u` all give at that end of that
+// trail — and at eighty its fourteen extra cells cost the footer
+// `tab deeper`, the frame's only naming of the way deeper (#175, #187,
+// #190, #194, #198, #201, #264, #283).
+//
+// Two sides. The frame it was found on: second-day and first-session at
+// eighty, `tab` then `ctrl+d`, under both colour profiles (#215, #218) —
+// the note is the short one, `k` pressed there says the same thing (#221),
+// and `tab deeper` stands. Then the rule over every scene, five widths and
+// both profiles: wherever the session view's trail draws one row, all four
+// movement keys answer alike, and the long form never stands on a frame
+// where `k` moves nothing.
+func TestThePageKeyDownAnswersLikeItsSiblingsOnATrailOfOne(t *testing.T) {
+	const short = "no leg to move to"
+	const long = "at the present · k goes back"
+
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"ascii", termenv.Ascii}, {"truecolor", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// footer is the frame's last drawn row, colour stripped.
+	footer := func(frame string) string {
+		rows := strings.Split(ansi.Strip(frame), "\n")
+		for i := len(rows) - 1; i >= 0; i-- {
+			if strings.TrimSpace(rows[i]) != "" {
+				return rows[i]
+			}
+		}
+		return ""
+	}
+	// stand replays a route from a scene's opening frame.
+	stand := func(sc scene, w, h int, keys ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	sceneNamed := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+
+	// --- the frames it was found on -------------------------------------
+	for _, pr := range profiles {
+		lipgloss.SetColorProfile(pr.p)
+		for _, name := range []string{"second-day", "first-session"} {
+			sc := sceneNamed(name)
+			m := stand(sc, 80, 24, "tab", "ctrl+d")
+			if m.level != levelWaypoints {
+				t.Fatalf("%s 80 %s: expected the session view, got Lv%d", name, pr.name, m.level)
+			}
+			if m.note != short {
+				t.Errorf("%s 80 %s: ctrl+d on a trail of one says %q, want %q", name, pr.name, m.note, short)
+			}
+			row := footer(m.View())
+			if strings.Contains(row, long) {
+				t.Errorf("%s 80 %s: the long form still stands: %q", name, pr.name, row)
+			}
+			if !strings.Contains(row, "tab deeper") {
+				t.Errorf("%s 80 %s: the way deeper is off the row: %q", name, pr.name, row)
+			}
+			// #221: the key the old note named, pressed on that frame.
+			k := stand(sc, 80, 24, "tab", "ctrl+d", "k")
+			if k.note != short {
+				t.Errorf("%s 80 %s: k pressed on the noted frame says %q, want %q", name, pr.name, k.note, short)
+			}
+			// and the way deeper is a key that acts.
+			deeper := stand(sc, 80, 24, "tab", "ctrl+d", "tab")
+			if deeper.level <= m.level {
+				t.Errorf("%s 80 %s: tab did not go deeper (Lv%d)", name, pr.name, deeper.level)
+			}
+		}
+	}
+
+	// --- the rule, everywhere -------------------------------------------
+	sizes := [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+	checked := 0
+	for _, pr := range profiles {
+		lipgloss.SetColorProfile(pr.p)
+		for _, sc := range allScenes() {
+			for _, size := range sizes {
+				w, h := size[0], size[1]
+				for _, route := range [][]string{{"tab"}, {"2", "tab"}, {"3", "tab"}} {
+					base := stand(sc, w, h, route...)
+					if base.level != levelWaypoints {
+						continue
+					}
+					if len(TrailRows(base.trail, base.level)) > 1 {
+						continue // the long form is honest where k moves
+					}
+					checked++
+					for _, key := range []string{"ctrl+d", "ctrl+u", "j", "k"} {
+						m := stand(sc, w, h, append(append([]string{}, route...), key)...)
+						if m.note != short {
+							t.Errorf("%s %dx%d %s route=%v: %s answers %q on a trail of one, want %q",
+								sc.name, w, h, pr.name, route, key, m.note, short)
+						}
+						if strings.Contains(footer(m.View()), long) {
+							t.Errorf("%s %dx%d %s route=%v: %s draws the long form where k moves nothing",
+								sc.name, w, h, pr.name, route, key)
+						}
+					}
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no trail of one was reached: the rule was never asked")
+	}
+}
