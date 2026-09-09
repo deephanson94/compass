@@ -3466,7 +3466,9 @@ func TestTheRowLeavesThePresentToTheTrailTheBoxLeavesStanding(t *testing.T) {
 	if !strings.Contains(view, "5 ○ mobile") {
 		t.Errorf("the freed row was not given to a session:\n%s", ansi.Strip(m.View()))
 	}
-	if !strings.Contains(view, "▾ 7 more below · j") {
+	// The count alone: the fold sheds its key clause while the quick
+	// replies hold the keyboard (#280's rule, at Lv1).
+	if !strings.Contains(view, "▾ 7 more below") {
 		t.Errorf("the list's own count did not follow the row it gained:\n%s", ansi.Strip(m.View()))
 	}
 
@@ -11535,5 +11537,132 @@ func TestTheWidthRefusalKeepsItsUnitOnlyWhereItCostsNoKey(t *testing.T) {
 	}
 	if checked < 10 {
 		t.Fatalf("only %d refusals still wore the unit — the rule was not exercised", checked)
+	}
+}
+
+// ---- round 100, fleet-hygiene ----
+// ---- round 100, fleet-hygiene ----
+
+// r100fhFold is the fleet column's fold row on a frame — "▾ 9 more below · j",
+// "▴ ⌁ work · 1 more above · k" — read past the panel rule so the trail's own
+// text never lands in it.
+func r100fhFold(view string) string {
+	for _, ln := range strings.Split(ansi.Strip(view), "\n") {
+		t := strings.TrimSpace(ln)
+		if !strings.HasPrefix(t, "▾ ") && !strings.HasPrefix(t, "▴ ") {
+			continue
+		}
+		if !strings.Contains(t, "more below") && !strings.Contains(t, "more above") {
+			continue
+		}
+		if i := strings.IndexAny(t, "│┃"); i >= 0 {
+			t = strings.TrimSpace(t[:i])
+		}
+		return t
+	}
+	return ""
+}
+
+// r100fhCount is a fold row without its key clause: the count alone, which is
+// what a press of `j` on a frame that holds the key would change.
+func r100fhCount(row string) string {
+	row = strings.TrimSuffix(row, " · j")
+	return strings.TrimSuffix(row, " · k")
+}
+
+// r100fhFoot is the footer of a frame — the row that names the keys the frame
+// holds.
+func r100fhFoot(view string) string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	return strings.TrimSpace(rows[len(rows)-1])
+}
+
+// r100fhWalk presses a route on a fresh scene model, polling after each key
+// the way the deck's own refresh does.
+func r100fhWalk(sc scene, w, h int, route []string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheFleetFoldDropsItsKeyWhileALineIsBeingTyped holds the fleet column's
+// fold to the key it names on frames where a search, a quick reply or a typed
+// line has the keyboard. #280 shed the clause at Lv2 and Lv3, where `j` and
+// `k` belong to the trail's rows and the reader's page; the same harm is at
+// Lv1 whenever `m.searching` or `m.replying` is on, because every key then
+// belongs to that line (`app.go`, "While a search query is being typed, every
+// key belongs to it"). Pressed on such a frame `j` types the letter into the
+// query or the line, or puts the quick replies away — it never moves the list,
+// and every folded row stays folded, under a footer that names `esc` for the
+// way back (#232, #250). The count is the row's own answer at every level
+// (#137) and stays.
+func TestTheFleetFoldDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	// The routes that leave a line being typed at Lv1: the search, the
+	// quick replies, and the reply's own typed line.
+	captured := [][]string{{"/"}, {"r"}, {"r", "t"}}
+	// The routes that leave the fleet holding its keys, for the held side.
+	free := [][]string{{}, {"j"}, {"esc"}, {"x"}}
+
+	shed, kept := 0, 0
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for _, route := range captured {
+					m := r100fhWalk(sc, w, h, route)
+					if !m.searching && !m.replying {
+						continue
+					}
+					row := r100fhFold(m.View())
+					if row == "" {
+						continue
+					}
+					shed++
+					if strings.Contains(row, "· j") || strings.Contains(row, "· k") {
+						t.Errorf("%s %s %dx%d %v: the fold names a key the line has taken: %q over %q",
+							prof.name, sc.name, w, h, route, row, r100fhFoot(m.View()))
+					}
+					if !strings.Contains(row, "more below") && !strings.Contains(row, "more above") {
+						t.Errorf("%s %s %dx%d %v: the fold lost its count: %q",
+							prof.name, sc.name, w, h, route, row)
+					}
+					// Pressed on that very frame, `j` leaves the list where
+					// it stands: the fold is unmoved or gone with the line.
+					after := r100fhWalk(sc, w, h, append(append([]string(nil), route...), "j"))
+					got := r100fhFold(after.View())
+					if got != "" && r100fhCount(got) != r100fhCount(row) {
+						t.Errorf("%s %s %dx%d %v: `j` moved the list, %q -> %q",
+							prof.name, sc.name, w, h, route, row, got)
+					}
+				}
+				for _, route := range free {
+					m := r100fhWalk(sc, w, h, route)
+					if m.searching || m.replying || m.focus() != panelFleet {
+						continue
+					}
+					if row := r100fhFold(m.View()); row != "" &&
+						(strings.Contains(row, "· j") || strings.Contains(row, "· k")) {
+						kept++
+					}
+				}
+			}
+		}
+	}
+	if shed < 20 {
+		t.Fatalf("the walk reached only %d folds under a typed line", shed)
+	}
+	if kept < 20 {
+		t.Fatalf("the fleet kept its key on only %d folds — the yield took too many", kept)
 	}
 }

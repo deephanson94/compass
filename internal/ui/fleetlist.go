@@ -281,8 +281,20 @@ func (m *Model) fleetBlock(rows []fleetRow, w int) (lines []string, selStart, se
 // The count is the row's own answer at every level — the list is cut here,
 // and by this much (#137) — and the way back to the list is `esc back`,
 // which the footer of those frames already names (#232, #250).
+//
+// The panel is not the whole of it. At Lv1 the keys are the fleet's only
+// while nothing else is being typed: a search, the quick replies and the
+// reply's own line each take every key that reaches them ("While a search
+// query is being typed, every key belongs to it", app.go), so `j` pressed
+// on such a frame types a letter into the query or the line, or puts the
+// replies away — the list stands still and every folded row stays folded,
+// under a footer that names `esc` for the way back. The clause goes there
+// for the same reason it goes at Lv2 (#280); the count stays (#137).
 func (m *Model) foldKey(k string) string {
 	if m.focus() != panelFleet {
+		return ""
+	}
+	if m.searching || m.replying {
 		return ""
 	}
 	return " · " + k
