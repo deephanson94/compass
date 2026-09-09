@@ -12438,3 +12438,187 @@ func TestTheHiddenCountDropsItsKeysWhileALineIsBeingTyped(t *testing.T) {
 		t.Fatalf("the hidden count kept its keys on only %d rows — the yield took too many", kept)
 	}
 }
+
+// ---- round 102, second-day ----
+// TestTheSessionViewNamesTheSearchKey pins round 102's second-day fold:
+// `/` opens the fleet search at Lv2 exactly as it does on the board, on a
+// list and in the reader — it takes the header's `/query · n of m`,
+// narrows the fleet beside the trail and swaps the row for `/▏ · enter
+// keeps it · esc cancels` — and no key on the row said so, on the very
+// frame a fleet of one opens at. `shedOrder` has ranked `· / search` among
+// this level's own keys all along with nothing on the row to match: a key
+// that acts and is never named is the one thing a footer is for (#24,
+// #175, #187, #277, #284). The clause is taken where the finished row
+// still names every key it named without it (#281, #284), so a row the
+// width has already cut into keeps its keys and says nothing.
+//
+// Two sides. The frame it was found on: second-day and first-session at
+// the three widths whose opening frame stands at Lv2, under both colour
+// profiles (#215, #218) — the row names `/ search`, `/` pressed there
+// opens the fleet search (#221), and the level's own keys still stand.
+// Then the rule over every scene, five widths and both profiles: wherever
+// the walk stands at Lv2 on a row shed of nothing (one still wearing the
+// attach aside, the first fragment `shedOrder` gives up) and `/` opens the
+// fleet search, the row names it — and, the held side, wherever a row at
+// that level names `/ search`, the key it names acts from there.
+func TestTheSessionViewNamesTheSearchKey(t *testing.T) {
+	forceASCII(t)
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		for i := len(rows) - 1; i >= 0; i-- {
+			if strings.TrimSpace(rows[i]) != "" {
+				return rows[i]
+			}
+		}
+		return ""
+	}
+	keysOf := func(row string) string {
+		s := strings.TrimSpace(row)
+		if i := strings.Index(s, "  "); i >= 0 {
+			s = s[:i]
+		}
+		return s
+	}
+	// opensSearch presses `/` on the stand itself and takes the deck back
+	// with the `esc` the search row names, so the walk goes on from where
+	// it stood. It reports whether the fleet search opened and whether the
+	// round trip put the deck back; where it did not, the caller walks the
+	// route again rather than trusting a moved stand.
+	type stand struct {
+		level                     int
+		cursor                    int
+		query, note               string
+		searching, replying, help bool
+	}
+	at := func(m *Model) stand {
+		return stand{m.level, m.cursor, m.query, m.note, m.searching, m.replying, m.showHelp}
+	}
+	opensSearch := func(m *Model, sc scene) (bool, bool) {
+		was := at(m)
+		pressKey(m, "/")
+		poll(m, sc)
+		opened := m.searching && m.searchFleet
+		pressKey(m, "esc")
+		poll(m, sc)
+		m.note = was.note // the round trip's own answer, not the stand's
+		return opened, at(m) == was
+	}
+	sizes := [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+	profiles := []termenv.Profile{termenv.Ascii, termenv.TrueColor}
+
+	// --- the frame it was found on: the opening frame of a fleet of one ---
+	found := 0
+	for _, prof := range profiles {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			if sc.name != "second-day" && sc.name != "first-session" {
+				continue
+			}
+			for _, size := range sizes {
+				w, h := size[0], size[1]
+				m := sceneModel(sc, w, h)
+				if m.level != levelWaypoints {
+					continue // the deck opens on the board or the list at this width
+				}
+				tag := fmt.Sprintf("%s %dx%d p%v opening", sc.name, w, h, prof)
+				keys := keysOf(foot(m))
+				opened, back := opensSearch(m, sc)
+				if !opened {
+					t.Fatalf("%s: `/` opens no fleet search here — the pin's premise is gone: %q", tag, keys)
+				}
+				if !back {
+					t.Fatalf("%s: `/` then `esc` did not put the deck back", tag)
+				}
+				found++
+				if !strings.Contains(keys, "/ search") {
+					t.Errorf("%s: `/` opens the fleet search on the frame this scene opens at and the row names it nowhere: %q", tag, keys)
+				}
+				for _, k := range []string{"j/k legs", "m live pane", "r reply", "a ask", "tab reader", "? help", "q quit"} {
+					if !strings.Contains(keys, k) {
+						t.Errorf("%s: the search key cost the row %q: %q", tag, k, keys)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if found < 12 {
+		t.Fatalf("only %d opening frames stood at Lv2 — the frame side was not exercised", found)
+	}
+
+	// --- the rule, over every scene ---
+	whole, named, offered := 0, 0, 0
+	for _, prof := range profiles {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			if prof != termenv.Ascii && sc.name != "second-day" && sc.name != "first-session" {
+				continue // colour is measured on this operator's own two scenes (#215, #218)
+			}
+			for _, size := range sizes {
+				w, h := size[0], size[1]
+				m := sceneModel(sc, w, h)
+				route := []string{}
+				for i := 0; i <= len(canonicalKeys); i++ {
+					if i > 0 {
+						pressKey(m, canonicalKeys[i-1])
+						poll(m, sc)
+						route = append(route, canonicalKeys[i-1])
+					}
+					if m.level != levelWaypoints || m.showHelp || m.searching || m.replying {
+						continue
+					}
+					row := foot(m)
+					keys := keysOf(row)
+					tag := fmt.Sprintf("%s %dx%d p%v Lv%d stand %d", sc.name, w, h, prof, m.level, i)
+					if x := lipgloss.Width(row); x > w {
+						t.Errorf("%s: the footer overruns its terminal: %d cells: %q", tag, x, row)
+					}
+					acts, back := opensSearch(m, sc)
+					if !back {
+						// The round trip moved the stand (a query was
+						// standing on it): walk the route again so the
+						// rest of the walk is the walk.
+						m = sceneModel(sc, w, h)
+						for _, k := range route {
+							pressKey(m, k)
+							poll(m, sc)
+						}
+					}
+					on := strings.Contains(keys, "/ search")
+					if on {
+						named++
+						// The held side: a row names no key that does not
+						// act from where it stands (#24, #227).
+						if !acts {
+							t.Errorf("%s: the row names `/ search` where `/` opens no fleet search: %q", tag, keys)
+						}
+					}
+					if !acts {
+						continue
+					}
+					offered++
+					// The biting side, on the rows nothing has been shed
+					// from: a row still wearing the attach aside has given
+					// up no fragment at all, so it has the cells for the
+					// clause and must carry it.
+					if strings.Contains(row, attachHint) {
+						whole++
+						if !on {
+							t.Errorf("%s: `/` opens the fleet search here and the row, shed of nothing, says so nowhere: %q", tag, keys)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if offered < 100 {
+		t.Fatalf("the walk stood at only %d Lv2 stands where `/` acts", offered)
+	}
+	if whole < 20 {
+		t.Fatalf("only %d of them drew a row shed of nothing — the biting side was not exercised", whole)
+	}
+	t.Logf("Lv2 stands where `/` acts: %d · rows shed of nothing: %d · naming `/ search`: %d", offered, whole, named)
+}

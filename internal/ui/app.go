@@ -3575,6 +3575,22 @@ func (m *Model) statusChips() string {
 // because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
+	row := m.footerGuarded(keys, w)
+	// The search key is new to the session view's row for the same reason
+	// as the hide key and pays the same price: it is taken only where the
+	// finished row still names every key it named without it (#281, #284).
+	// The reader named it before either of them and is not measured here.
+	if clause := " · / search"; m.level >= levelWaypoints && m.level < levelReader && strings.Contains(keys, clause) {
+		if bare := m.footerGuarded(strings.Replace(keys, clause, "", 1), w); !footerNamesAll(bare, row) {
+			return bare
+		}
+	}
+	return row
+}
+
+// footerGuarded draws the row for this keymap with the hide clause's own
+// trade measured on it (#284).
+func (m *Model) footerGuarded(keys string, w int) string {
 	row := m.footerWith(keys, w)
 	guarded := []string{" · x hide", " · x unhide"}
 	if m.level < levelWaypoints {
@@ -3694,9 +3710,21 @@ func (m *Model) keymap() string {
 	case m.level >= levelReader:
 		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · " + m.hideKeymap() + " · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		// `/` opens the fleet search here as it does on the board, on a
+		// list and in the reader: pressed at this level it takes the
+		// header's `/query · n of m`, narrows the fleet beside the
+		// trail and swaps the row for `/▏ · enter keeps it · esc
+		// cancels` — and no key on the row said so, on the very frame a
+		// fleet of one opens at. Every neighbouring level names it, and
+		// `shedOrder` has ranked `· / search` among this level's own
+		// keys all along with nothing on the row to match: a key that
+		// acts and is never named is the one thing a footer is for
+		// (#24, #175, #187, #277, #284). It stands where the reader
+		// stands it, before the hide key, and sheds at the rank it
+		// already has (#39, #281).
+		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · " + m.hideKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
 	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
 		// At Lv1 the page keys drive the trail beside the list (§3); on a
