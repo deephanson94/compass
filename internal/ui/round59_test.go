@@ -13780,3 +13780,176 @@ func TestTheNoPaneRefusalKeepsTheWayDeeper(t *testing.T) {
 		}
 	}
 }
+
+// ---- round 105, two-tools ----
+// ---- round 105, two-tools, the one thing ----
+
+// r105ttArchiveSizes are the five terminals the walkthrough is drawn at.
+var r105ttArchiveSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r105ttArchiveRoutes are ways into the archive's three levels — its board,
+// its list and its session view — with and without a hidden live row in it.
+var r105ttArchiveRoutes = [][]string{
+	{"A"}, {"A", "tab"}, {"x", "A"},
+	{"2", "x", "A"}, {"2", "x", "A", "esc"}, {"2", "x", "A", "tab"},
+}
+
+// r105ttArchiveClause is the clause the archive's row was missing.
+const r105ttArchiveClause = " · g grab"
+
+// r105ttArchiveFoot is the drawn footer of a frame, escapes stripped.
+func r105ttArchiveFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	if len(rows) == 0 {
+		return ""
+	}
+	return rows[len(rows)-1]
+}
+
+// r105ttArchiveKeys is the keymap half of a footer: what stands before the
+// gap the note lives after (#134's reserve), with the attach aside — which
+// is not a key (#55) — read past.
+func r105ttArchiveKeys(foot string) string {
+	s := strings.TrimRight(foot, " ")
+	s = strings.Replace(s, " (prefix d returns)", "", 1)
+	if i := strings.Index(strings.TrimLeft(s, " "), "  "); i >= 0 {
+		s = strings.TrimLeft(s, " ")[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// TestTheArchivesRowNamesTheGrabKey pins the archive's rows to the key that
+// acts on them. `g` is the fleet's key, and the archive is not outside the
+// fleet: pressed on the archive's board, its list or its session view it
+// finds the session waiting on you, leaves the archive for the live fleet
+// standing on that session's row and attaches — on the two-tools scene from
+// the hidden `2 api · opencode` to `1 infra · claude · sonnet-4-5`, the
+// other tool on the other model — and no key on the row said so, on a row
+// that stood 152 of 220 cells with sixty-eight blank and the attach aside
+// still on it (`scenes/two-tools-220x48.txt:2002`). The keymap's own reason
+// for dropping the clause — "in the archive `g` has nothing to grab and `A`
+// is the way home" — is refuted on that frame twice over: `g` grabs, and
+// `A` is a different key with a different landing (it comes home on the row
+// you left; `g` comes home on another session's and attaches).
+//
+// Three sides, so the pin cannot be got by jamming the clause onto every
+// row:
+//   - where the archive's drawn row has given nothing up — the attach aside
+//     is the first fragment `shedOrder` drops (#284's own measure) — and `g`
+//     acts on it, the row names `g grab`;
+//   - where the row names it, the key must do what the clause says (find the
+//     session waiting on you and say where it went) and the row must still
+//     name the way home, the help and the quit;
+//   - the archive's reader never names it, because one level deeper `g` is
+//     not the grab (#241, #246).
+func TestTheArchivesRowNamesTheGrabKey(t *testing.T) {
+	forceASCII(t)
+	stands, roomy, named, readers := 0, 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r105ttArchiveSizes {
+				w, h := size[0], size[1]
+				for _, route := range r105ttArchiveRoutes {
+					for _, deeper := range []bool{false, true} {
+						m := sceneModel(sc, w, h)
+						for _, k := range route {
+							pressKey(m, k)
+							poll(m, sc)
+						}
+						if !m.archiveView {
+							continue
+						}
+						if deeper {
+							pressKey(m, "tab")
+							poll(m, sc)
+							if !m.archiveView || m.level < levelReader {
+								continue
+							}
+							// One level deeper the key is not the grab.
+							readers++
+							if keys := r105ttArchiveKeys(r105ttArchiveFoot(m)); strings.Contains(keys, "g grab") {
+								t.Errorf("%s %v %dx%d: the archive's reader offers `g grab`, but `g` here is not the grab (#241, #246)\n  foot=%q",
+									sc.name, route, w, h, keys)
+							}
+							continue
+						}
+						if m.level >= levelReader {
+							continue
+						}
+						where := fmt.Sprintf("%s %v %dx%d Lv%d", sc.name, route, w, h, m.level)
+						foot := r105ttArchiveFoot(m)
+						keys := r105ttArchiveKeys(foot)
+						stands++
+
+						// The key is pressed on that very frame (#221),
+						// after the row above it has been read.
+						was, lvl := m.selectedKey, m.level
+						pressKey(m, "g")
+						poll(m, sc)
+						// `g` found a session waiting on you and said
+						// where it went; the harm is that it took the
+						// deck out of the archive, onto another row.
+						found := strings.HasPrefix(strings.TrimSpace(m.note), "→ ")
+						acts := !m.archiveView || m.selectedKey != was || m.level != lvl
+						has := strings.Contains(keys, "g grab")
+
+						// The biting side is the row that has given up
+						// nothing at all: the attach aside is the first
+						// fragment `shedOrder` drops, so a row still
+						// wearing it has shed nothing (#284's measure) —
+						// and so is a row that still names its own attach
+						// key with the clause's cells standing blank
+						// beside the note's reserve.
+						free := w - lipgloss.Width(strings.TrimRight(foot, " "))
+						whole := strings.Contains(foot, attachHint) ||
+							(strings.Contains(keys, "enter") && free >= lipgloss.Width(r105ttArchiveClause))
+						if acts && whole {
+							roomy++
+							if !has {
+								t.Errorf("%s: `g` grabs from the archive — it leaves for the live fleet standing on %q and attaches (note %q) — and the row, shed of nothing, says so nowhere (%d cells free)\n  foot=%q",
+									where, m.selectedKey, strings.TrimSpace(m.note), free, keys)
+								continue
+							}
+						}
+						if !has {
+							continue
+						}
+						named++
+						// The clause is taken only where it costs no key,
+						// so the row that names it still names the way
+						// home and the help — the last keys any archive
+						// row gives up (#24, #39, #56, #281, #284).
+						for _, must := range []string{"A fleet", "? help", "q quit"} {
+							if !strings.Contains(keys, must) {
+								t.Errorf("%s: the row names `g grab` and no longer names %q\n  foot=%q", where, must, keys)
+							}
+						}
+						if !found {
+							t.Errorf("%s: the row names `g grab` and `g` said %q, not where it went\n  foot=%q", where, strings.TrimSpace(m.note), keys)
+							continue
+						}
+						for _, r := range strings.Split(ansi.Strip(m.View()), "\n") {
+							if lipgloss.Width(r) > w {
+								t.Errorf("%s: the frame `g` landed on has a row over %d cells: %q", where, w, r)
+							}
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 200 {
+		t.Errorf("only %d archive stands; the pin measures nothing", stands)
+	}
+	if readers < 40 {
+		t.Errorf("only %d archive reader stands; the held side is unmeasured", readers)
+	}
+	if roomy < 20 {
+		t.Errorf("only %d archive stands where the grab acts on a row shed of nothing; the biting side is unmeasured", roomy)
+	}
+	t.Logf("archive stands: %d · rows shed of nothing where `g` grabs: %d · naming `%s`: %d · archive reader stands: %d",
+		stands, roomy, strings.TrimPrefix(r105ttArchiveClause, " · "), named, readers)
+}

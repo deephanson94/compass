@@ -3645,7 +3645,11 @@ func (m *Model) footerLine(w int) string {
 	// because that trade is what the cells are spent against: measured on
 	// the half-traded row the clause bought itself in at 152 by taking
 	// `ctrl+d/u half page` and handing the search key back in its place.
-	if clause := " · g grab"; m.level >= levelWaypoints && m.level < levelReader && strings.Contains(keys, clause) {
+	// The archive's three levels take the clause on the same terms
+	// (#295's own measure, one view over): the trade is the row's, not
+	// the level's, so it is measured wherever the clause is new to the
+	// row — the archive's board and list included.
+	if clause := " · g grab"; m.level < levelReader && (m.level >= levelWaypoints || m.archiveView) && strings.Contains(keys, clause) {
 		bare := strings.Replace(keys, clause, "", 1)
 		if !footerNamesAll(m.footerSearchTraded(bare, w), m.footerSearchTraded(keys, w)) {
 			keys = bare
@@ -3733,8 +3737,11 @@ func footerNamesAll(was, now string) bool {
 func (m *Model) keymap() string {
 	keys := "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x hide · g grab · ? help · q quit"
 	if m.archiveView {
-		// In the archive `g` has nothing to grab and `A` is the way home, so the
-		// keymap says that instead. In the live view the archive announces itself
+		// In the archive `A` is the way home, so the keymap says that
+		// where the live view says `⇧tab board`; `g` is named below,
+		// where the frame after it is drawn (#295 and the block under
+		// this switch — it has something to grab here). In the live view
+		// the archive announces itself
 		// on the fleet's own last row: "N archived · A browses". The chapter
 		// keys act here as they do on the live list, and answered
 		// `no earlier prompt` on a row that did not name them (#193).
@@ -3833,6 +3840,30 @@ func (m *Model) keymap() string {
 		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
+	}
+	if m.archiveView && m.level < levelReader && !m.showHelp && !m.searching && !m.replying && !strings.Contains(keys, " · g grab") {
+		// `g` is the fleet's key and it acts in the archive too: pressed
+		// on any of the archive's three levels it finds the session
+		// waiting on you, leaves the archive for the live fleet standing
+		// on that session's row and attaches — on the two-tool scene from
+		// the hidden `2 api · opencode` to `1 infra · claude · sonnet-4-5`,
+		// the other tool on the other model — and no key on the row said
+		// so, on a row that stood 152 of 220 cells with sixty-eight blank
+		// and the attach aside still on it. The keymap above said `g` "has
+		// nothing to grab" here, which the frame refutes; `A fleet`, the
+		// other half of that reason, is a different key with a different
+		// landing — it comes home on the row you left, where `g` comes
+		// home on another session's and attaches. A key that acts and is
+		// never named is the one thing a footer is for (#24, #175, #187,
+		// #277, #284, #289, #295). It stands with the level's own keys,
+		// before the way home (#56), and sheds at the rank `shedOrder`
+		// already gives it (#39, #281); #78's gate below still takes it
+		// off a fleet with nothing amber.
+		if strings.Contains(keys, " · A fleet") {
+			keys = strings.Replace(keys, " · A fleet", " · g grab · A fleet", 1)
+		} else {
+			keys = strings.Replace(keys, " · ? help", " · g grab · ? help", 1)
+		}
 	}
 	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
 		// At Lv1 the page keys drive the trail beside the list (§3); on a
