@@ -6148,7 +6148,7 @@ func r86ttFooter(m *Model) string {
 }
 
 func TestTheDigitOfTheRowYouAreOnSaysSo(t *testing.T) {
-	const note = "the session you are on"
+	const note = "the one you are on"
 	sc := r86ttScene(t, "two-tools")
 	for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 		for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -6868,7 +6868,7 @@ func r88sdBSearchStand(sc scene, w, h int) *Model {
 // are on` (#238). It answers so here too.
 func TestTheFleetDoesNotDenyTheDigitItsHeaderIsDrawing(t *testing.T) {
 	forceASCII(t)
-	const want = "the session you are on"
+	const want = "the one you are on"
 	for _, sc := range []scene{sceneSecondDay(), sceneFirstSession()} {
 		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -7325,7 +7325,7 @@ func TestNoHelpRowPromisesAGrabTheReaderWillNotMake(t *testing.T) {
 
 // ---- round 88, two-tools, second finding, re-pointed by round 96 ----
 // #245 answered the board's digit pressed on a hidden live row the archive
-// draws with `the session you are on`, to keep #242's `2 api is live` from
+// draws with `the one you are on`, to keep #242's `2 api is live` from
 // naming a digit the frame does not. The sentence names one too: on this
 // very stand the frame draws one row, `▸1 ● api`, and both `1` and `2`
 // answered it. In the archive the digits are the archive's own (#32), so
@@ -7344,7 +7344,7 @@ func TestTheArchivesDrawnRowIsTheSessionYouAreOn(t *testing.T) {
 		pressKey(m, "x")
 		pressKey(m, "A")
 		pressKey(m, "1")
-		if m.note != "the session you are on" {
+		if m.note != "the one you are on" {
 			t.Errorf("%dx%d: the archive answered %q to the digit its own row wears", size[0], size[1], m.note)
 		}
 		pressKey(m, "2")
@@ -10550,13 +10550,13 @@ func TestTheArchiveRefusesADigitNoRowWears(t *testing.T) {
 					pressKey(m, fmt.Sprintf("%d", caret))
 					poll(m, sc)
 					// The digit the caret's own row wears still answers.
-					if m.note != "the session you are on" && m.note != "" {
+					if m.note != "the one you are on" && m.note != "" {
 						t.Errorf("%s %dx%d prof=%v: the archive's own digit %d answered %q",
 							st.scene, size[0], size[1], prof, caret, m.note)
 					}
 					pressKey(m, fmt.Sprintf("%d", caret))
 					poll(m, sc)
-					if m.note != "the session you are on" {
+					if m.note != "the one you are on" {
 						t.Errorf("%s %dx%d prof=%v: the digit the caret's row (%d) wears answered %q",
 							st.scene, size[0], size[1], prof, caret, m.note)
 					} else {
@@ -11664,5 +11664,106 @@ func TestTheFleetFoldDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
 	}
 	if kept < 20 {
 		t.Fatalf("the fleet kept its key on only %d folds — the yield took too many", kept)
+	}
+}
+
+// ---- round 100, second-day ----
+// ---- round 100, second day: the digit that moved nothing costs no level ----
+//
+// `A` then `1` on the second day's archive at eighty drew
+//
+//	j/k move · a ask · A fleet · ? help · q quit            the session you are on
+//
+// under a frame whose body the digit had not moved by one cell: the answer to
+// a key that did nothing cost the footer `tab deeper`, the frame's only
+// naming of the way deeper, and `tab` pressed there walks straight to Lv2.
+// That is the harm #156, #159, #175, #187, #190, #194, #198, #201 and #264
+// each folded, and #156 and #159 folded it on this very scene at this very
+// width by shortening the sentence. The answer is `the one you are on`: the
+// digit and the name are the header's (#233, #238), and eighteen cells leave
+// the way deeper standing.
+func TestTheDigitRefusalKeepsTheWayDeeper(t *testing.T) {
+	const said = "the one you are on"
+	const wasSaid = "the session you are on"
+	levelKeys := []string{"tab deeper", "tab session", "tab reader"}
+	rows := func(m *Model) []string { return strings.Split(ansi.Strip(m.View()), "\n") }
+	footerOf := func(m *Model) string { r := rows(m); return r[len(r)-1] }
+	bodyOf := func(m *Model) string { r := rows(m); return strings.Join(r[:len(r)-1], "\n") }
+	walk := func(sc scene, w, h int, route ...string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range route {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+
+	// The frame it was found on, under both profiles (#215, #218).
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		sc := sceneSecondDay()
+		m := walk(sc, 80, 24, "A")
+		if !strings.Contains(footerOf(m), "tab deeper") {
+			lipgloss.SetColorProfile(old)
+			t.Fatalf("prof=%v: the archive's own footer names no way deeper: %q", prof, footerOf(m))
+		}
+		before := bodyOf(m)
+		pressKey(m, "1")
+		poll(m, sc)
+		if m.note != said {
+			t.Errorf("prof=%v: the digit of the row the archive is on answered %q", prof, m.note)
+		}
+		if bodyOf(m) != before {
+			t.Errorf("prof=%v: the digit that says it moved nothing moved the frame", prof)
+		}
+		if f := footerOf(m); !strings.Contains(f, "tab deeper") {
+			t.Errorf("prof=%v: the answer cost the frame the way deeper: %q", prof, f)
+		}
+		// And the way deeper it names is the one `tab` takes.
+		lv := m.level
+		pressKey(m, "tab")
+		poll(m, sc)
+		if m.level <= lv {
+			t.Errorf("prof=%v: `tab` on the frame naming `tab deeper` went from Lv%d to Lv%d", prof, lv, m.level)
+		}
+		lipgloss.SetColorProfile(old)
+	}
+
+	// The rule, over every scene at five widths under both profiles: where
+	// the digit answers that it is the row you are on, the answer costs the
+	// footer no key naming a level.
+	stood, seen := 0, 0
+	for _, sc := range allScenes() {
+		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				for _, route := range [][]string{{"1"}, {"3"}, {"A", "1"}} {
+					m := walk(sc, wh[0], wh[1], route[:len(route)-1]...)
+					was := footerOf(m)
+					pressKey(m, route[len(route)-1])
+					poll(m, sc)
+					seen++
+					if strings.Contains(footerOf(m), wasSaid) {
+						t.Errorf("%s %dx%d prof=%v route=%v: the long form still stands", sc.name, wh[0], wh[1], prof, route)
+					}
+					if m.note != said {
+						continue
+					}
+					stood++
+					for _, k := range levelKeys {
+						if strings.Contains(was, k) && !strings.Contains(footerOf(m), k) {
+							t.Errorf("%s %dx%d prof=%v route=%v: the answer cost the frame %q: %q",
+								sc.name, wh[0], wh[1], prof, route, k, footerOf(m))
+						}
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	if stood == 0 {
+		t.Fatalf("the sentence never stood over %d stands: the digit says nothing", seen)
 	}
 }

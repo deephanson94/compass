@@ -957,8 +957,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// `j`, `G` and the search walk use one level down (#24,
 				// #221, #228, #231, #235). The header names the row at
 				// the same cells on every frame, so the note leaves the
-				// digit and the name to it (#233).
-				m.note = "the session you are on"
+				// digit and the name to it (#233), and the noun with
+				// them: at eighty `the session you are on` (22 cells)
+				// took the archive's own footer down to `j/k move · a
+				// ask · A fleet · ? help · q quit`, costing the frame
+				// `tab deeper`, its only naming of the way deeper, for
+				// an answer to a key that had moved nothing — the harm
+				// #156, #159, #175, #187, #190, #194, #198, #201 and
+				// #264 each folded, twice on this scene at this width.
+				// Eighteen cells leave the way deeper standing.
+				m.note = "the one you are on"
 			}
 		} else {
 			m.note = fmt.Sprintf("no session %d", i+1)
@@ -982,7 +990,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// this sentence at this stand wherever the query
 					// happens to match the row, so the note is the deck's
 					// own and repeats nothing the header says (#233).
-					m.note = "the session you are on"
+					m.note = "the one you are on"
 				}
 				if s.Live && m.archiveView && drawn && s.Info.Key() == shown.Info.Key() && m.digits[s.Info.Key()] == i+1 {
 					if m.archiveDrawsRow(s.Info.Key()) {
