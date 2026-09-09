@@ -9508,7 +9508,11 @@ func TestTheSentRowInTheArchiveDoesNotKeepAMoveThatCannotMove(t *testing.T) {
 // subject is the word the frame supplies twice — the column's own title
 // `▌FLEET · archive` and the header's `archive 12` chip — so it yields,
 // leaving `it is off the board` (19 cells), and only where a key naming a
-// level comes back for it.
+// level comes back for it. Its routes never pressed `tab`, so the
+// archive's session view went on paying: round 104 took the last three
+// cells and the note answers the key's own question — `it is not
+// hidden`, sixteen cells — which is what keeps `tab deeper` there at
+// eighty.
 func TestTheArchivesHideRefusalKeepsTheWayDeeper(t *testing.T) {
 	forceASCII(t)
 	levelKey := func(foot string) bool {
@@ -9531,7 +9535,7 @@ func TestTheArchivesHideRefusalKeepsTheWayDeeper(t *testing.T) {
 		pressKey(m, k)
 		poll(m, sc)
 	}
-	if got, want := foot(m), " j/k move · tab deeper · a ask · A fleet · ? help · q quit  it is off the board"; got != want {
+	if got, want := foot(m), " j/k move · tab deeper · a ask · A fleet · ? help · q quit     it is not hidden"; got != want {
 		t.Errorf("second-day 80x24 A x:\n got  %q\n want %q", got, want)
 	}
 	// The rule, over every scene at every width under both colour
@@ -9553,7 +9557,7 @@ func TestTheArchivesHideRefusalKeepsTheWayDeeper(t *testing.T) {
 					pressKey(m, "x")
 					poll(m, sc)
 					after := foot(m)
-					if !strings.HasSuffix(after, "off the board") || strings.Contains(after, "is hidden") {
+					if !strings.HasSuffix(after, "it is not hidden") || strings.Contains(after, "is hidden") {
 						continue // the key acted, or answered something else
 					}
 					if levelKey(before) && !levelKey(after) {
@@ -9599,7 +9603,7 @@ func r93fhArchiveRefusal(sc scene, w, h int) (before, after string, ok bool) {
 	poll(m, sc)
 	rows = strings.Split(m.View(), "\n")
 	after = ansi.Strip(rows[len(rows)-1])
-	if !strings.Contains(after, "off the board") || strings.Contains(after, "is back on the board") {
+	if !strings.Contains(after, "it is not hidden") || strings.Contains(after, "is back on the board") {
 		return "", "", false
 	}
 	return before, after, true
@@ -9623,8 +9627,11 @@ var r93fhProfiles = []struct {
 }{{"ascii", termenv.Ascii}, {"colour", termenv.TrueColor}}
 
 // TestTheArchivesOffTheBoardNoteNamesTheRowNotTheView is the frame: the
-// note is about the session the caret stands on and fits in nineteen
-// cells, at every width and both profiles.
+// note is about the session the caret stands on and fits in sixteen
+// cells, at every width and both profiles. (Round 104 took the last
+// three: the note answers the key's own question, `it is not hidden`,
+// which is what keeps `tab deeper` on the archive's session view at
+// eighty — the row this pin's routes never reached.)
 func TestTheArchivesOffTheBoardNoteNamesTheRowNotTheView(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
@@ -9643,8 +9650,8 @@ func TestTheArchivesOffTheBoardNoteNamesTheRowNotTheView(t *testing.T) {
 					t.Errorf("%s %s %dx%d: the note about the row names the view instead: %q",
 						p.name, sc.name, size[0], size[1], note)
 				}
-				if n := lipgloss.Width(note); n > 19 {
-					t.Errorf("%s %s %dx%d: the note is %d cells, nineteen is the room the footer can spare: %q",
+				if n := lipgloss.Width(note); n > 16 {
+					t.Errorf("%s %s %dx%d: the note is %d cells, sixteen is the room the footer can spare: %q",
 						p.name, sc.name, size[0], size[1], n, note)
 				}
 			}
@@ -9676,7 +9683,7 @@ func TestTheArchivesOffTheBoardNoteCostsNoKeyThatActs(t *testing.T) {
 				// from a hundred columns up. At eighty the keys alone
 				// fill sixty-nine of the eighty cells, so no sentence
 				// that says anything can keep `/ search` there — the
-				// nineteen-cell form buys back the two that fit.
+				// sixteen-cell form buys back the two that fit.
 				keys := []string{"tab deeper", "a ask"}
 				if size[0] >= 100 {
 					keys = append(keys, "/ search")
@@ -11877,7 +11884,7 @@ func TestTheSessionViewAndTheReaderNameTheHideKey(t *testing.T) {
 					// The held side: a key on the row answers from the row.
 					// Where `x` moves nothing it says why, and the row
 					// keeps the key its own note is about (#24, #57, #227).
-					if on && !acts && !strings.Contains(said, " stays · ") && said != "the live one stays" && said != "it is off the board" {
+					if on && !acts && !strings.Contains(said, " stays · ") && said != "the live one stays" && said != "it is not hidden" {
 						t.Errorf("%s: the row offers %q where `x` neither moves nor says why (note %q): %q", tag, clause, said, foot)
 					}
 				}
@@ -12117,7 +12124,7 @@ func TestTheArchiveNamesTheHideKeyOnTheRowItKeeps(t *testing.T) {
 						// the row keeps the key its own note is about
 						// (#24, #57, #227).
 						acts, said := r101ttPressX(sc, w, h, route[:i+1])
-						if on && !acts && !strings.Contains(said, " stays · ") && said != "the live one stays" && said != "it is off the board" {
+						if on && !acts && !strings.Contains(said, " stays · ") && said != "the live one stays" && said != "it is not hidden" {
 							t.Errorf("%s: the archive offers the hide key where `x` neither moves nor says why (note %q): %q", tag, said, foot)
 						}
 						if !keeps {
@@ -13522,4 +13529,127 @@ func TestTheSessionViewsRowNamesTheGrabKey(t *testing.T) {
 		t.Errorf("only %d session-view stands where the grab acts on a row shed of nothing; the biting side is unmeasured", roomy)
 	}
 	t.Logf("session-view stands: %d · rows shed of nothing where `g` grabs: %d · naming `g grab`: %d · reader stands: %d", stands, roomy, named, readers)
+}
+
+// ---- round 104, second-day ----
+// ---- round 104, second-day, the one thing ----
+// The archive's hide refusal keeps the way deeper on the archive's own
+// session view. Round 93 folded this very harm on the archive's list and
+// yielded the note from thirty-six cells to nineteen, but its routes were
+// `{A}`, `{A,j}`, `{A,j,j}` and `{/,pytest,enter,A}` — never one `tab`
+// deeper — so the row it never measured went on paying: at eighty,
+// `A` then `tab` then `x` took ` j/k rows · [ ] chapters · tab deeper ·
+// esc back · A fleet · ? help · q quit` (76 of 80) down to ` j/k rows ·
+// esc back · A fleet · ? help · q quit  it is off the board`, losing
+// `tab deeper`, the frame's only naming of the way deeper, for a note
+// answering a key that moved nothing — the frame is byte-identical
+// otherwise. That the length is the cause is on the same frame: `G`
+// there draws `at the present`, fourteen cells, and `tab deeper` stands.
+// The note answers the key's own question instead of repeating where the
+// row is: `x` in the archive brings a hidden row back (SPEC §3), the
+// archive's own header says `hidden · x brings one back` of the rows it
+// does bring back (#291), and this row is not one of them. `it is not
+// hidden`, sixteen cells; where the row is is what the frame says three
+// ways already — the column title `▌FLEET · archive`, the header's
+// `archive 12` chip and the row's own `○` (#24, #52, #175, #187, #190,
+// #194, #198, #201, #210, #264, #283, #287).
+func TestTheArchivesHideRefusalNamesTheWayDeeper(t *testing.T) {
+	forceASCII(t)
+	r104sdWayDeeper := func(foot string) bool {
+		for _, k := range []string{"tab deeper", "tab reader", "tab session", "enter attach"} {
+			if strings.Contains(foot, k) {
+				return true
+			}
+		}
+		return false
+	}
+	r104sdFoot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		for i := len(rows) - 1; i >= 0; i-- {
+			if strings.TrimSpace(rows[i]) != "" {
+				return strings.TrimRight(rows[i], " ")
+			}
+		}
+		return ""
+	}
+	r104sdBodyOf := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		for i := len(rows) - 1; i >= 0; i-- {
+			if strings.TrimSpace(rows[i]) != "" {
+				rows[i] = ""
+				break
+			}
+		}
+		return strings.Join(rows, "\n")
+	}
+	r104sdWalk := func(sc scene, w, h int, route []string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range route {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+
+	// The frame it was found on: the second day's archive at eighty, one
+	// `A`, one `tab`, one `x`.
+	sc := sceneSecondDay()
+	before := r104sdWalk(sc, 80, 24, []string{"A", "tab"})
+	after := r104sdWalk(sc, 80, 24, []string{"A", "tab", "x"})
+	if got, want := r104sdFoot(after),
+		" j/k rows · tab deeper · esc back · A fleet · ? help · q quit  it is not hidden"; got != want {
+		t.Errorf("second-day 80x24 A tab x:\n got  %q\n want %q", got, want)
+	}
+	if r104sdBodyOf(after) != r104sdBodyOf(before) {
+		t.Errorf("second-day 80x24 A tab x: `x` moved something other than the footer")
+	}
+	// The same row one keypress earlier named the way deeper, and the
+	// note must not have cost it.
+	if !r104sdWayDeeper(r104sdFoot(before)) {
+		t.Fatalf("second-day 80x24 A tab: the row this is measured against names no way deeper: %q", r104sdFoot(before))
+	}
+
+	// The rule, over every scene at five widths under both profiles, on
+	// the archive's list, its session view and its reader: where `x` is
+	// refused on an archived row, the row it draws keeps a key naming
+	// the way deeper if the row one keypress earlier had one, and the
+	// refusal is the archive's own sentence.
+	routes := [][]string{{"A"}, {"A", "tab"}, {"A", "tab", "tab"}, {"A", "j", "tab"}}
+	old := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(old)
+	stands, refused := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, sz := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := sz[0], sz[1]
+				for _, route := range routes {
+					b := r104sdWalk(sc, w, h, route)
+					if !b.archiveView {
+						continue
+					}
+					a := r104sdWalk(sc, w, h, append(append([]string{}, route...), "x"))
+					stands++
+					if r104sdBodyOf(a) != r104sdBodyOf(b) {
+						continue // `x` acted: this is the held side
+					}
+					note := a.note
+					if note == "" {
+						continue
+					}
+					// `x` is the key that was pressed, so the note is
+					// `x`'s own answer, whatever words it wears.
+					refused++
+					fb, fa := r104sdFoot(b), r104sdFoot(a)
+					if r104sdWayDeeper(fb) && !r104sdWayDeeper(fa) {
+						t.Errorf("%s %dx%d %v then x: the refusal %q cost the frame its only naming of the way deeper\n before %q\n after  %q",
+							sc.name, w, h, route, note, fb, fa)
+					}
+				}
+			}
+		}
+	}
+	if stands < 150 || refused < 150 {
+		t.Fatalf("the walk reached only %d archive stands, %d of them refusals", stands, refused)
+	}
 }

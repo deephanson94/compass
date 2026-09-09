@@ -2008,8 +2008,22 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		// 120 — for a sentence about a key the footer does not offer
 		// (#24, #52, #210: the note is one sentence for the key and for
 		// the footer that offers it, and a refusal never costs a key that
-		// acts).
-		return "it is off the board"
+		// acts). Its routes never pressed `tab`, so the archive's own
+		// session view went on paying: at eighty `A tab x` took ` j/k
+		// rows · [ ] chapters · tab deeper · esc back · A fleet · ? help
+		// · q quit` down to ` j/k rows · esc back · A fleet · ? help · q
+		// quit`, losing `tab deeper`, that frame's only naming of the
+		// way deeper, for an answer to a key that moved nothing — while
+		// `G` on the same frame draws fourteen cells and the key stands.
+		// So the sentence yields the last of what the frame supplies and
+		// answers the key's own question instead. In the archive `x`
+		// brings a hidden row back (§3), and the archive's own header
+		// says `hidden · x brings one back` of the rows it does bring
+		// back (#291): this row is not one of them. Where the row is is
+		// what the frame says three ways already — `▌FLEET · archive`,
+		// the header's `archive 12` chip and the row's own `○` (#175,
+		// #187, #190, #194, #198, #201, #264, #283, #287).
+		return "it is not hidden"
 	case m.liveCount() <= 1:
 		// The rule is the fleet's, not the view's: `liveCount` counts
 		// what is `onBoard`, the same number in the archive as on the
@@ -4658,7 +4672,7 @@ func (m *Model) hideNote() bool {
 		strings.HasSuffix(m.note, " is back on the board") ||
 		strings.Contains(m.note, " stays · ") ||
 		m.note == "the live one stays" ||
-		m.note == "it is off the board"
+		m.note == "it is not hidden"
 }
 
 // hideKeyMoves reports whether `x` acts from where the row stands: a
