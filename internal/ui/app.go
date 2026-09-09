@@ -3592,7 +3592,16 @@ func (m *Model) keymap() string {
 			// landed on the one chipped `[fleet]`, whose own footer then
 			// names `tab deeper` for the step that is left. The word is
 			// the archive's own at every other level (#40, #246).
-			keys = "h/l columns · " + m.enterKeymap() + " · tab deeper · r reply · / search · x unhide · A fleet · ? help · q quit"
+			// `a` acts here on the very row the caret is on — the
+			// historian for the selected session, `case "a"` at every
+			// level — and the archive is where it is the reason to be
+			// (#264, and the shed's own comment below). The archive's
+			// list one `tab deeper` away names it, so does the live
+			// board this branch was copied from before `a ask` existed,
+			// and the board's own footer stood 82 cells wide in 120 with
+			// the key nowhere on it: a key that acts and is never named
+			// is the one thing a footer is for (#24, #175, #187).
+			keys = "h/l columns · " + m.enterKeymap() + " · tab deeper · r reply · a ask · / search · x unhide · A fleet · ? help · q quit"
 		}
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"

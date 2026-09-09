@@ -10991,3 +10991,114 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// ---- round 98, fleet-hygiene ----
+// TestTheArchiveBoardNamesTheAskKeyItActsOn pins round ninety-eight's one
+// thing.
+//
+// The archive's board footer was copied from the live board's before `a ask`
+// existed (round 24 added the key to the live branch and not to the archive
+// branch beside it), and never picked it up: `h/l columns · enter · no pane ·
+// tab deeper · / search · A fleet · ? help · q quit`, 82 cells inside 120,
+// with the key nowhere on it — while `a` acts there on the very row the
+// caret is on, the archive's list one `tab deeper` away names it, the live
+// board names it, and the shed's own comment calls the archive `a ask`'s
+// reason to be there (#264, #24, #175, #187).
+//
+// The rule, over every scene with an archive at every width its board fits
+// and under both colour profiles: where `a` pressed on the archive's board
+// returns a command, the footer of that very frame names `a ask`. Held on
+// the other side by counting the keys that stood before and requiring that
+// none is lost — so satisfying this by emptying the footer fails — and by
+// the live board keeping its own `a ask`.
+func TestTheArchiveBoardNamesTheAskKeyItActsOn(t *testing.T) {
+	named, live := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range [][]string{{"A", "shift+tab"}, {"x", "A", "shift+tab"}, {"A", "j", "shift+tab"}} {
+					m := sceneModel(sc, size[0], size[1])
+					poll(m, sc)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if !m.archiveView || m.level != levelBoard || !m.boardShown() {
+						continue
+					}
+					foot := r98fhFooterRow(m)
+					before := r98fhKeyWords(foot)
+					if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}); cmd == nil {
+						continue
+					}
+					if !strings.Contains(foot, "a ask") {
+						lipgloss.SetColorProfile(old)
+						t.Errorf("%v %s %dx%d %v: `a` acts on the archive board and the footer does not name it: %q",
+							prof, sc.name, size[0], size[1], route, strings.TrimSpace(foot))
+						lipgloss.SetColorProfile(prof)
+						continue
+					}
+					named++
+					// Nothing the footer already said is paid for it: the
+					// attach aside is not a key (#55, #211), so the keys
+					// are counted by their first word.
+					for _, want := range []string{"h/l", "enter", "tab", "/", "A", "?", "q"} {
+						if !before[want] {
+							continue
+						}
+						if !r98fhKeyWords(foot)[want] {
+							lipgloss.SetColorProfile(old)
+							t.Errorf("%v %s %dx%d %v: the archive board lost %q for the ask key: %q",
+								prof, sc.name, size[0], size[1], route, want, strings.TrimSpace(foot))
+							lipgloss.SetColorProfile(prof)
+						}
+					}
+				}
+				// The live board this branch was copied from keeps its own.
+				m := sceneModel(sc, size[0], size[1])
+				poll(m, sc)
+				if m.level == levelBoard && m.boardShown() && !m.archiveView {
+					if !strings.Contains(r98fhFooterRow(m), "a ask") {
+						lipgloss.SetColorProfile(old)
+						t.Errorf("%v %s %dx%d: the live board stopped naming the ask key: %q",
+							prof, sc.name, size[0], size[1], strings.TrimSpace(r98fhFooterRow(m)))
+						lipgloss.SetColorProfile(prof)
+					} else {
+						live++
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if named == 0 || live == 0 {
+		t.Fatalf("vacuous: archive boards naming the ask %d, live boards keeping it %d", named, live)
+	}
+	t.Logf("archive boards naming `a ask`: %d · live boards keeping it: %d", named, live)
+}
+
+// r98fhFooterRow is the keymap row of the frame as drawn: the last row that
+// carries the way out, which every footer ends with (#35).
+func r98fhFooterRow(m *Model) string {
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], "? help") {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
+// r98fhKeyWords is the set of keys a footer names, each by the word it is
+// pressed with, so a clause losing only its parenthetical loses no key.
+func r98fhKeyWords(foot string) map[string]bool {
+	out := map[string]bool{}
+	for _, clause := range strings.Split(foot, "·") {
+		if f := strings.Fields(clause); len(f) > 0 {
+			out[f[0]] = true
+		}
+	}
+	return out
+}
