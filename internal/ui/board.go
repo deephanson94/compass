@@ -406,7 +406,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// that carries it is still the archive's line and no session's name.
 	strip := strings.TrimSpace(ansi.Strip(lines[len(lines)-1]))
 	if free := h - len(lines); free >= 2 && !m.archiveView && len(m.overlaps()) == 0 &&
-		!strings.HasPrefix(strip, "+") && strings.HasSuffix(strip, fmt.Sprintf("%d archived · A browses", m.archivedCount())) {
+		!strings.HasPrefix(strip, "+") && strings.HasSuffix(strip, fmt.Sprintf("%d archived%s", m.archivedCount(), m.archiveDoorKey())) {
 		bw, top := w, len(lines)-1
 		// The band is a column too: where the reply box begins inside it,
 		// it is composed at the width the box leaves, as a board column
@@ -838,7 +838,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 			fixed = append(fixed, m.hiddenClause(n))
 		}
 		if n := m.archivedCount(); n > 0 {
-			fixed = append(fixed, fmt.Sprintf("%s archived · A browses", m.archiveDoorCount(n)))
+			fixed = append(fixed, fmt.Sprintf("%s archived%s", m.archiveDoorCount(n), m.archiveDoorKey()))
 		}
 	} else {
 		fixed = append(fixed, "A live fleet")

@@ -1922,7 +1922,7 @@ func (m *Model) trailColumn(w, h int) []string {
 		// Under a search the band holds what matched (#98); where nothing
 		// did, the archive's door stays: the fleet of one has no list to
 		// say it on (#56).
-		rows = append(rows, "", dimStyle.Render(clip(fmt.Sprintf("%s archived · A browses", m.archiveDoorCount(m.archivedCount())), w)))
+		rows = append(rows, "", dimStyle.Render(clip(fmt.Sprintf("%s archived%s", m.archiveDoorCount(m.archivedCount()), m.archiveDoorKey()), w)))
 	}
 	if m.sessionView() && len(band) > 0 {
 		// The rows a short trail leaves are the recent band's (#47): a

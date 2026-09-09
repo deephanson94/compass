@@ -2699,7 +2699,10 @@ func (m *Model) View() string {
 // row the person sees and not off the row under the box. The box's own
 // edge may stand on the same row, so the door is matched where it ends
 // rather than by what the row ends with.
-var doorOnARow = regexp.MustCompile(`archived · (?:[^·]*hidden · )?A(?: browses)?(?:\s|$)`)
+// The key half is optional: while a line has the keyboard the archive's
+// line wears no key (#282's rule on this row, archiveDoorKey), and it is
+// the count the box must not cover.
+var doorOnARow = regexp.MustCompile(`\d archived(?: · [^·]*hidden)?(?: · A(?: browses)?)?(?:\s|$)`)
 
 func frameNamesTheArchive(frame string) bool {
 	for _, row := range strings.Split(ansi.Strip(frame), "\n") {

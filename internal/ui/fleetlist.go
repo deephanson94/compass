@@ -80,6 +80,27 @@ func (m *Model) fleetColumn(w, h int) []string {
 // to them. On the frame whose note just said the same words the note is
 // the one that stands down (#64 the other way round): the strip has the
 // cells and the footer has none (#173).
+// archiveDoorKey is the key clause the archive's own line wears — " · A
+// browses" — and, like the fold's clause beside it, it is worn only where
+// that key is the deck's to give. While a search query, the quick replies
+// or the reply's own line has the keyboard, every key belongs to what is
+// being typed ("While a search query is being typed, every key belongs to
+// it", app.go): `A` pressed on such a frame types the letter into the
+// query or the line, or puts the replies away, and the archive does not
+// open. The count is the line's own answer at every moment — this many are
+// archived, and this is where they are counted (#137) — and the way on is
+// `esc`, which every one of those footers names. It is #282's rule on the
+// row beside the fold, and the footer's own `A archive` clause has been
+// gated on these two flags all along (app.go). The line still stands, so
+// the archive is still discovered and the box still steps off it (#62,
+// #64, #126): what goes is the key, not the count.
+func (m *Model) archiveDoorKey() string {
+	if m.searching || m.replying {
+		return ""
+	}
+	return " · A browses"
+}
+
 func (m *Model) hiddenClause(n int) string {
 	return fmt.Sprintf("%s hidden · A, then x", m.hiddenDoorCount(n))
 }
@@ -144,9 +165,9 @@ func (m *Model) fleetLines(w, h int) []string {
 		last := ""
 		switch {
 		case archived > 0 && hidden > 0:
-			last = fmt.Sprintf("%s archived · %s hidden · A browses", count, m.hiddenDoorCount(hidden))
+			last = fmt.Sprintf("%s archived · %s hidden%s", count, m.hiddenDoorCount(hidden), m.archiveDoorKey())
 		case archived > 0:
-			last = fmt.Sprintf("%s archived · A browses", count)
+			last = fmt.Sprintf("%s archived%s", count, m.archiveDoorKey())
 		case hidden > 0:
 			// Below the board's width there is no strip: the list's last
 			// line is where a hide stays said.

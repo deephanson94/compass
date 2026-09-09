@@ -3302,8 +3302,11 @@ func TestTheAttachRefusalYieldsToTheKeyThatActs(t *testing.T) {
 func TestTheReplyBoxDoesNotStandOnTheStrip(t *testing.T) {
 	forceASCII(t)
 	// The door in every form it sheds to, matched where it ends: the
-	// box's own edge may stand on the same row (#176).
-	door := regexp.MustCompile(`archived · (?:[^·]*hidden · )?A(?: browses)?(?:\s|$)`)
+	// box's own edge may stand on the same row (#176). The key half is
+	// optional — while the panel is up the line wears no key, since `A`
+	// does not act there (#282's rule on this row, archiveDoorKey) — and
+	// what this test is about is the row the box must not cover.
+	door := regexp.MustCompile(`\d archived(?: · [^·]*hidden)?(?: · A(?: browses)?)?(?:\s|$)`)
 	for _, c := range []struct {
 		name string
 		sc   scene
@@ -11892,4 +11895,124 @@ func TestTheSessionViewAndTheReaderNameTheHideKey(t *testing.T) {
 		t.Fatalf("only %d stands drew a row shed of nothing — the biting side was not exercised", full)
 	}
 	t.Logf("stands: %d · `x` acts: %d · rows shed of nothing: %d · named: %d", deep, acted, full, named)
+}
+
+// ---- round 101, fleet-hygiene ----
+// ---- round 101, fleet-hygiene ----
+
+// r101fhDoorRow matches the archive's own line in every form it is drawn and
+// sheds to — "recent · 41 archived · A browses", "0 of 300 archived · A",
+// "41 archived · 1 hidden · A browses", "12 archived" — with the band's rule
+// to the gutter and the panel's own edge already trimmed off it.
+var r101fhDoorRow = regexp.MustCompile(`^(?:recent · )?\d+(?: of \d+)? archived(?: · \d+(?: of \d+)? hidden)?(?: · A(?: browses)?)?$`)
+
+// r101fhDoor is the archive's line on a frame, read out of whichever column
+// draws it: the fleet's last row, the band's header, the board's strip or the
+// session view's own fallback. "" when the frame draws no such row.
+func r101fhDoor(view string) string {
+	for _, ln := range strings.Split(ansi.Strip(view), "\n") {
+		for _, seg := range strings.Split(ln, "│") {
+			seg = strings.Trim(seg, "─ \t")
+			if r101fhDoorRow.MatchString(seg) {
+				return seg
+			}
+		}
+	}
+	return ""
+}
+
+// r101fhFooter is the last row of a frame — the keys the frame offers.
+func r101fhFooter(view string) string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	return strings.TrimSpace(rows[len(rows)-1])
+}
+
+// r101fhPress walks a route on a fresh scene model, polling after each key
+// the way the deck's own refresh does.
+func r101fhPress(sc scene, w, h int, route ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheArchiveLineDropsItsKeyWhileALineIsBeingTyped holds the archive's own
+// line — the fleet's last row, the band's header, the board's strip — to the
+// key it names. #282 shed the fold's `· j` at Lv1 wherever a search, the quick
+// replies or the reply's typed line has the keyboard, because every key then
+// belongs to that line ("While a search query is being typed, every key
+// belongs to it", app.go). `A` is on the same side of that gate: pressed on
+// such a frame it types the letter into the query or the line, or puts the
+// replies away, and the archive does not open — while the row beside the fold
+// went on saying `A browses`. The footer has been gated on these very two
+// flags all along (app.go: the `A archive` clause), so the frame said with one
+// row what it refused to say with another. What goes is the key; the count
+// stays, so the archive is still discovered and the reply box still steps off
+// the line it would cover (#62, #64, #126, #137).
+func TestTheArchiveLineDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	// The routes that leave a line being typed: the search, the quick
+	// replies, and the reply's own typed line.
+	captured := [][]string{{"/"}, {"r"}, {"r", "t"}}
+	// The routes that leave the deck holding its keys, for the held side.
+	free := [][]string{{}, {"j"}, {"esc"}}
+
+	shed, kept := 0, 0
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for _, route := range captured {
+					m := r101fhPress(sc, w, h, route...)
+					if !m.searching && !m.replying || m.archiveView {
+						continue
+					}
+					view := m.View()
+					row := r101fhDoor(view)
+					if row == "" {
+						continue
+					}
+					shed++
+					if strings.Contains(row, " · A") {
+						t.Errorf("%s %s %dx%d %v: the archive line names a key the typed line has taken: %q over %q",
+							prof.name, sc.name, w, h, route, row, r101fhFooter(view))
+					}
+					if !strings.Contains(row, "archived") {
+						t.Errorf("%s %s %dx%d %v: the archive line lost its count: %q",
+							prof.name, sc.name, w, h, route, row)
+					}
+					// Pressed on that very frame, `A` does not browse.
+					after := r101fhPress(sc, w, h, append(append([]string(nil), route...), "A")...)
+					if after.archiveView {
+						t.Errorf("%s %s %dx%d %v: `A` opened the archive after all, so the key belongs on %q",
+							prof.name, sc.name, w, h, route, row)
+					}
+				}
+				for _, route := range free {
+					m := r101fhPress(sc, w, h, route...)
+					if m.searching || m.replying || m.archiveView || m.archivedCount() == 0 {
+						continue
+					}
+					if row := r101fhDoor(m.View()); strings.Contains(row, " · A") {
+						kept++
+					}
+				}
+			}
+		}
+	}
+	if shed < 20 {
+		t.Fatalf("the walk reached only %d archive lines under a typed line", shed)
+	}
+	if kept < 20 {
+		t.Fatalf("the archive line kept its key on only %d frames — the yield took too many", kept)
+	}
 }

@@ -91,9 +91,9 @@ func (m *Model) recentHeader() string {
 	if n := m.hiddenCount(); n > 0 {
 		// The line the band folds in carried the hidden count: at a
 		// hundred columns a hide left no trace on the screen (#86).
-		return fmt.Sprintf("recent · %s archived · %s hidden · A browses", archived, m.hiddenDoorCount(n))
+		return fmt.Sprintf("recent · %s archived · %s hidden%s", archived, m.hiddenDoorCount(n), m.archiveDoorKey())
 	}
-	return fmt.Sprintf("recent · %s archived · A browses", archived)
+	return fmt.Sprintf("recent · %s archived%s", archived, m.archiveDoorKey())
 }
 
 // recentLines is the band drawn into avail rows of a column w wide: the
