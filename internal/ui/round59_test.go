@@ -14774,3 +14774,169 @@ func TestTheReaderCursorSaysWhenItTakesACell(t *testing.T) {
 	}
 	t.Logf("rows walked whose mark is pushed in front of the row's own words: %d", pushed)
 }
+
+// ---- round 107, two-tools ----
+// r107ttCurSizes are the five terminals the walkthrough is drawn at.
+var r107ttCurSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r107ttCurRoutes are ways down to a reader page: straight in, in on
+// another row, and the chapter and cursor keys pressed once there, so both
+// a page that fits and a page that scrolls are stood on.
+var r107ttCurRoutes = [][]string{
+	{"tab", "tab"},
+	{"tab", "tab", "]"},
+	{"tab", "tab", "j"},
+	{"1", "tab", "tab"},
+}
+
+const (
+	// The reader's two names for the same pair of keys: what they do on a
+	// page that scrolls, and what they do on one that fits (#83, #300).
+	r107ttCurScroll = "j/k scroll"
+	r107ttCurRows   = "j/k rows"
+	r107ttCurUnfold = "space unfold"
+	r107ttCurPage   = "ctrl+d/u half page"
+	// The room the clause needs, with margin: `j/k rows · ` is eleven
+	// cells, and the narrowest gap the deck draws between the keymap and
+	// the note is two, so a row with this much between them takes the
+	// clause without shedding anything.
+	r107ttCurRoom = 24
+)
+
+// r107ttCurKeys is the keymap half of a footer: what stands before the gap
+// the note lives after (#134's reserve), with the attach aside — which is
+// not a key (#55) — read past.
+func r107ttCurKeys(foot string) string {
+	s := strings.TrimLeft(strings.TrimRight(ansi.Strip(foot), " "), " ")
+	if i := strings.Index(s, "  "); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// r107ttCurNote is the note half of the same row, or "" where the row draws
+// none.
+func r107ttCurNote(foot string) string {
+	s := strings.TrimLeft(strings.TrimRight(ansi.Strip(foot), " "), " ")
+	if i := strings.Index(s, "  "); i >= 0 {
+		return strings.TrimSpace(s[i:])
+	}
+	return ""
+}
+
+// r107ttCurGap is the free cells between the keymap and the note on a row
+// drawn `inner` cells wide: the room a new clause has to come out of.
+func r107ttCurGap(foot string, inner int) int {
+	return inner - lipgloss.Width(r107ttCurKeys(foot)) - lipgloss.Width(r107ttCurNote(foot))
+}
+
+// TestTheReadersFittingPageNamesTheCursorKeys pins the reader's movement
+// keys to what they do on a page that is all on screen.
+//
+// #83 shed `j/k scroll` and `ctrl+d/u half page` from such a page because
+// "the keys that move the viewport move nothing" — true while the reader
+// had no cursor. #300 gave it one and drew it: on a fitting page `j` and `k`
+// walk the `▸` a row at a time and `space` unfolds the row it stands on,
+// so a second fold on that one screen is reachable by these keys and by
+// nothing else. The row went on naming `space unfold` and naming no key
+// that reaches it. #220 settled the words one level out, where the same
+// keys move the cursor and not the viewport: `j/k rows`.
+//
+// Three sides, so the words cannot be jammed onto every page:
+//   - a fitting reader page whose row has the room names `j/k rows`;
+//   - a page that scrolls keeps `j/k scroll` and never says `j/k rows`,
+//     because there the key does move the viewport, and a page that fits
+//     still offers no `ctrl+d/u half page` — the shortcut #200 shed and
+//     the help teaches;
+//   - the clause costs nothing: the finished row names every key the same
+//     row names without it, and no row runs past its terminal.
+func TestTheReadersFittingPageNamesTheCursorKeys(t *testing.T) {
+	forceASCII(t)
+	roomy, scrolls := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r107ttCurSizes {
+				w, h := size[0], size[1]
+				inner := w - 2
+				for _, route := range r107ttCurRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.showHelp || m.searching || m.replying || m.level < levelReader {
+						continue
+					}
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					if len(rows) == 0 {
+						continue
+					}
+					foot := rows[len(rows)-1]
+					keys := r107ttCurKeys(foot)
+					where := fmt.Sprintf("%s %v %dx%d Lv%d", sc.name, route, w, h, m.level)
+
+					fits := len(m.doc(m.readerWidth())) <= m.readerHeight()
+					if !fits {
+						// The page scrolls: there the pair does move the
+						// viewport, and the row says so.
+						scrolls++
+						if !strings.Contains(keys, r107ttCurScroll) && lipgloss.Width(keys) < inner-lipgloss.Width(r107ttCurScroll+" · ") {
+							t.Errorf("%s: a reader page that scrolls names neither scroll key on a row with the room\n  foot=%q", where, keys)
+						}
+						if strings.Contains(keys, r107ttCurRows) {
+							t.Errorf("%s: a reader page that scrolls says %q; there the keys move the viewport (#83)\n  foot=%q", where, r107ttCurRows, keys)
+						}
+						continue
+					}
+					if strings.Contains(keys, r107ttCurScroll) {
+						t.Errorf("%s: a reader page all on screen says %q; nothing scrolls there (#83)\n  foot=%q", where, r107ttCurScroll, keys)
+					}
+					// The page key stays shed here: a shortcut for a
+					// distance `j` covers, the first thing this row gives
+					// up and a key the help teaches (#42, #51, #200).
+					if strings.Contains(keys, r107ttCurPage) {
+						t.Errorf("%s: a reader page all on screen offers %q (#200)\n  foot=%q", where, r107ttCurPage, keys)
+					}
+					// A lane's page with no turns offers only the way out
+					// (#56): it names no unfold key either, and no
+					// movement key is owed on it.
+					if !strings.Contains(keys, r107ttCurUnfold) {
+						continue
+					}
+					if r107ttCurGap(foot, inner) >= r107ttCurRoom {
+						roomy++
+						if !strings.Contains(keys, r107ttCurRows) {
+							t.Errorf("%s: the reader's page fits and the row has %d free cells, and it names %q with no key that reaches the row the unfold acts on (#300)\n  foot=%q",
+								where, r107ttCurGap(foot, inner), r107ttCurUnfold, keys)
+						}
+					}
+					// Whatever the row took, it paid no key for it:
+					// the same stand drawn without the clause names
+					// nothing this row does not (#281, #284, #295).
+					whole := m.keymap()
+					bare := strings.Replace(whole, r107ttCurRows+" · ", "", 1)
+					if bare != whole {
+						if !footerNamesAll(m.footerTraded(bare, inner), foot) {
+							t.Errorf("%s: the cursor clause cost the row a key\n  with=%q\n  without=%q", where, keys, r107ttCurKeys(m.footerTraded(bare, inner)))
+						}
+					}
+					for _, r := range rows {
+						if lipgloss.Width(r) > w {
+							t.Errorf("%s: a row runs past the terminal (%d of %d): %q", where, lipgloss.Width(r), w, r)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if roomy < 30 {
+		t.Errorf("only %d fitting reader stands with the room for the clause; the biting side is unmeasured", roomy)
+	}
+	if scrolls < 50 {
+		t.Errorf("only %d reader stands on a page that scrolls; the held side is unmeasured", scrolls)
+	}
+	t.Logf("fitting reader stands with the room: %d · stands on a page that scrolls: %d", roomy, scrolls)
+}

@@ -3694,9 +3694,28 @@ func (m *Model) replyRefusalSaid(whole string) string {
 	return ""
 }
 
-// footerTraded draws the row for this keymap with the trades the mirror,
-// grab and search clauses each pay for their place on it.
+// footerTraded draws the row for this keymap with the trades the cursor,
+// mirror, grab and search clauses each pay for their place on it.
 func (m *Model) footerTraded(keys string, w int) string {
+	// The reader's fitting page names the key that walks its cursor
+	// (#300) on the same terms as every clause new to a row since #281:
+	// only where the finished row still names every key it named without
+	// it. The trade is measured first, before the mirror's, because the
+	// eleven cells this clause wants are the cells that trade is spent
+	// against. Where the width is not there the row comes back exactly as
+	// it stood, `space unfold` at its head.
+	if clause := "j/k rows · "; m.level >= levelReader && strings.HasPrefix(keys, clause) {
+		bare := strings.Replace(keys, clause, "", 1)
+		if !footerNamesAll(m.footerMirrorTraded(bare, w), m.footerMirrorTraded(keys, w)) {
+			keys = bare
+		}
+	}
+	return m.footerMirrorTraded(keys, w)
+}
+
+// footerMirrorTraded draws the row with the mirror, grab and search
+// clauses' own trades measured on it.
+func (m *Model) footerMirrorTraded(keys string, w int) string {
 	// The reader's mirror key is new to its row for the same reason as
 	// the hide key and the search key one level out, and pays the same
 	// price: it is taken only where the finished row still names every
@@ -3963,20 +3982,27 @@ func (m *Model) keymap() string {
 		}
 	}
 	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying {
-		// #83 one level down: on a page that is all on screen the keys
-		// that move the viewport move nothing, and the app says so itself
-		// the moment they are pressed ("all of it is on screen") — so a
-		// footer naming them beside that note offered a key and its own
-		// refusal on the same row. The keys that still act on a page that
-		// fits stay: `[ ] chapters`, `space` unfolds, `/` and `n/N`
-		// search. #56 already drops both from a lane's page with no turns
-		// at all; this is the same rule on a page that has turns and no
-		// scroll. (The reader's cursor still moves under a fitting page's
-		// `j`/`k` — readerCursorMove — since Space still has to reach
-		// whichever fold on that one screen is not the first; the footer
-		// just has nothing to call it, there being nowhere to scroll to.)
-		if doc := m.doc(m.readerWidth()); len(doc) <= m.readerHeight() {
-			keys = strings.Replace(keys, "j/k scroll · ", "", 1)
+		// #83 one level down, at what the keys do here now. #83 shed both
+		// keys from a page all on screen because "the keys that move the
+		// viewport move nothing" and the app says so itself the moment
+		// they are pressed — true while the reader had no cursor. #300
+		// gave it one and drew it: on a page that fits `j` and `k` walk
+		// the `▸` a row at a time and `space` unfolds the row it stands
+		// on, so a second fold on that one screen is reachable by these
+		// keys and by nothing else, and the row went on naming `space
+		// unfold` and naming nothing that reaches it. A key that acts and
+		// is never named is the one thing a footer is for (#24, #175,
+		// #187). #220 settled the words one level out, where the same
+		// keys move the cursor and not the viewport: the movement key is
+		// `j/k rows`. So `scroll` gives way to the unit the key moves,
+		// and a page that scrolls keeps `j/k scroll`. The page key stays
+		// shed: it is a shortcut for a distance `j` covers, the first
+		// thing this row gives up and a key the help teaches (#42, #51,
+		// #200). The clause is taken only where the finished row still
+		// names every key it named without it (footerTraded, #281, #284,
+		// #295).
+		if m.readerPageFits() {
+			keys = strings.Replace(keys, "j/k scroll · ", "j/k rows · ", 1)
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
 		}
 	}
@@ -4066,7 +4092,7 @@ func (m *Model) keymap() string {
 		if len(m.readerEvents()) == 0 {
 			// Nothing to scroll, unfold, search or step: a page with no
 			// turns offers only the way out (#56).
-			for _, drop := range []string{"j/k scroll · ", "ctrl+d/u half page · ", "space unfold · ", "/ search · ", "n/N · ", "[ ] turns · ", " · h/l session", "h/l session · "} {
+			for _, drop := range []string{"j/k scroll · ", "j/k rows · ", "ctrl+d/u half page · ", "space unfold · ", "/ search · ", "n/N · ", "[ ] turns · ", " · h/l session", "h/l session · "} {
 				keys = strings.Replace(keys, drop, "", 1)
 			}
 		}
@@ -5101,6 +5127,13 @@ func (m *Model) footerDrops(chapter bool) []string {
 		kept = append(kept, drop)
 	}
 	return kept
+}
+
+// readerPageFits says whether the reader's whole document is on screen —
+// the page where `j` and `k` move the cursor and never the viewport (#83,
+// #300).
+func (m *Model) readerPageFits() bool {
+	return len(m.doc(m.readerWidth())) <= m.readerHeight()
 }
 
 // shedOrder is the order the footer gives up its optional keys in, first
