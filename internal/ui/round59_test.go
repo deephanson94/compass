@@ -13653,3 +13653,130 @@ func TestTheArchivesHideRefusalNamesTheWayDeeper(t *testing.T) {
 		t.Fatalf("the walk reached only %d archive stands, %d of them refusals", stands, refused)
 	}
 }
+
+// ---- round 105, second-day ----
+// TestTheNoPaneRefusalKeepsTheWayDeeper holds the no-pane refusal to the
+// rule #165 gave it: it wears the naming form `attach needs a pane` /
+// `reply needs a pane` "precisely so that naming the key would buy a key
+// back", and where the naming buys nothing it costs cells instead. In the
+// archive's own session view at eighty — `second-day`, `A` then `tab`, the
+// frame one keypress deeper than the list #264 measured — the nineteen
+// cells took `tab deeper` off the row, the frame's only naming of the way
+// deeper, for a key that moved nothing; the same refusal on the archive's
+// list one level out keeps the key. The note there is `no pane`, seven
+// cells, the word the row's own `enter · no pane` clause already uses.
+//
+// Three sides: the frame it was found on, both keys; the rule over every
+// scene, five widths, two routes and both profiles — wherever a no-pane
+// refusal is drawn, the row keeps a key naming a level if the row one
+// keypress earlier had one; and the naming form still stands where it
+// costs nothing, on the canonical walkthrough that carries it.
+func TestTheNoPaneRefusalKeepsTheWayDeeper(t *testing.T) {
+	forceASCII(t)
+	r105sdLevelKey := func(row string) bool {
+		for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
+			if strings.Contains(row, k) {
+				return true
+			}
+		}
+		return false
+	}
+	r105sdFrame := func(sc scene, w, h int, keys []string) (*Model, []string) {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m, strings.Split(ansi.Strip(m.View()), "\n")
+	}
+	r105sdScene := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+
+	// The frame it was found on: the archive's own session view at eighty.
+	sd := r105sdScene("second-day")
+	for _, key := range []string{"enter", "r"} {
+		_, rowsBefore := r105sdFrame(sd, 80, 24, []string{"A", "tab"})
+		if got := strings.TrimRight(rowsBefore[len(rowsBefore)-1], " "); !strings.Contains(got, "tab deeper") {
+			t.Fatalf("second-day 80x24 [A tab]: the row before %q names no way deeper: %q", key, got)
+		}
+		m, rows := r105sdFrame(sd, 80, 24, []string{"A", "tab", key})
+		foot := strings.TrimRight(rows[len(rows)-1], " ")
+		for i := range rows[:len(rows)-1] {
+			if strings.TrimRight(rows[i], " ") != strings.TrimRight(rowsBefore[i], " ") {
+				t.Errorf("second-day 80x24: %q moved row %d: %q -> %q", key, i, rowsBefore[i], rows[i])
+			}
+		}
+		if !strings.HasSuffix(foot, "no pane") || strings.Contains(foot, "needs a pane") {
+			t.Errorf("second-day 80x24 [A tab %s]: the refusal the row draws is %q, want it to end in %q", key, foot, "no pane")
+		}
+		if !strings.HasSuffix(m.note, " needs a pane") {
+			t.Errorf("second-day 80x24 [A tab %s]: the refusal set is %q: the note itself is unchanged, only the form the row draws", key, m.note)
+		}
+		if !strings.Contains(foot, "tab deeper") {
+			t.Errorf("second-day 80x24 [A tab %s]: the row lost the way deeper: %q", key, foot)
+		}
+		if lipgloss.Width(foot) > 80 {
+			t.Errorf("second-day 80x24 [A tab %s]: the row runs past the terminal (%d): %q", key, lipgloss.Width(foot), foot)
+		}
+	}
+
+	// The rule, over every scene at five widths under both profiles.
+	routes := [][]string{{"A", "tab"}, {"A"}}
+	stands, refusals := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range routes {
+					for _, key := range []string{"enter", "r"} {
+						stands++
+						m := sceneModel(sc, size[0], size[1])
+						for _, k := range route {
+							pressKey(m, k)
+							poll(m, sc)
+						}
+						rowsBefore := strings.Split(ansi.Strip(m.View()), "\n")
+						was := rowsBefore[len(rowsBefore)-1]
+						pressKey(m, key)
+						poll(m, sc)
+						rows := strings.Split(ansi.Strip(m.View()), "\n")
+						foot := rows[len(rows)-1]
+						if m.note != "no pane" && !strings.HasSuffix(m.note, " needs a pane") {
+							continue
+						}
+						refusals++
+						if r105sdLevelKey(was) && !r105sdLevelKey(foot) {
+							t.Errorf("%v %s %dx%d %v then %q: the no-pane refusal %q costs the row its only naming of a level: %q -> %q",
+								prof, sc.name, size[0], size[1], route, key, m.note, strings.TrimRight(was, " "), strings.TrimRight(foot, " "))
+						}
+						if lipgloss.Width(foot) > size[0] {
+							t.Errorf("%v %s %dx%d %v then %q: the row runs past the terminal (%d): %q",
+								prof, sc.name, size[0], size[1], route, key, lipgloss.Width(foot), foot)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if refusals < 100 {
+		t.Fatalf("the rule reached only %d no-pane refusals over %d stands: it has gone vacuous", refusals, stands)
+	}
+
+	// And the naming form stands where it costs no key: the canonical
+	// walkthrough that draws both (#165, #232).
+	walk := walkthrough(r105sdScene("fleet-hygiene"), 80, 24, canonicalKeys)
+	for _, said := range []string{"attach needs a pane", "reply needs a pane"} {
+		if !strings.Contains(walk, said) {
+			t.Errorf("fleet-hygiene 80x24: the walkthrough no longer says %q: the naming form yielded where it cost no key", said)
+		}
+	}
+}

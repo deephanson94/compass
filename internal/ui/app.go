@@ -4230,6 +4230,47 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 			forms = noteForms(note)
 		}
 	}
+	if strings.HasSuffix(minimal, " needs a pane") &&
+		!strings.Contains(shedKeys(whole, drops, func(k string) bool { return lipgloss.Width(k) <= w }), "enter · no pane") {
+		// #165 gave the no-pane refusal the naming form `attach needs a
+		// pane` / `reply needs a pane` — nineteen and eighteen cells
+		// against the seven of `no pane` — "precisely so that naming
+		// the key would buy a key back": beside the row's own `enter ·
+		// no pane` the clause says the same thing twice, and #232 takes
+		// it there. Where the row draws no such clause the naming buys
+		// nothing, and in the archive's own session view at eighty it
+		// costs `tab deeper`, the frame's only naming of the way deeper
+		// — the harm #156, #159, #165, #175, #187, #190, #194, #198,
+		// #264, #283, #287 and #296 each folded — while the same
+		// refusal on the archive's list one level out keeps the key.
+		// So the naming yields to a key naming a level, and only where
+		// the key comes back; the key the note answers is the key just
+		// pressed, and `no pane` is the word the row's own clause and
+		// the board's card already use. The candidate is measured with
+		// the chapter key's yield below, since the two are taken
+		// together, and against the footer this frame draws with no
+		// news on it (#175), as that yield measures it.
+		short := "no pane"
+		cand := drops
+		if order, moved := chapterKeyAboveTheWayIn(drops); moved && !m.chapterNote() && strings.Contains(whole, " · [ ] chapters") {
+			cand = order
+		}
+		for i, d := range cand {
+			if d == " · ? help" {
+				cand = cand[:i]
+				break
+			}
+		}
+		// `fitsWith`'s own arithmetic for the short form's reserve.
+		floor := max(min(12, lipgloss.Width(short)), lipgloss.Width(short))
+		k := shedKeys(whole, cand, func(k string) bool { return lipgloss.Width(k)+2+floor <= w })
+		plain := shedKeys(whole, drops, func(k string) bool { return lipgloss.Width(k) <= w })
+		if levelKeyLost(plain, keys) && !levelKeyLost(plain, k) {
+			note, minimal = short, short
+			forms = noteForms(note)
+			keys = shed(minimal, " · ? help")
+		}
+	}
 	if chapters := " · [ ] chapters"; !m.chapterNote() && strings.Contains(whole, chapters) {
 		// The way in outlasts a key that moves inside a panel already
 		// open (#39). At eighty the trail's own keys are 65 cells
@@ -4242,17 +4283,7 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 		// The chapter key yields to a key naming a level, and only
 		// where the key comes back. Under a chapter key's own note the
 		// key the note is about stays where it is (#24, #57).
-		order := make([]string, 0, len(drops))
-		moved := false
-		for _, d := range drops {
-			if d == chapters {
-				continue
-			}
-			if !moved && (d == " · tab deeper" || d == " · tab reader") {
-				order, moved = append(order, chapters), true
-			}
-			order = append(order, d)
-		}
+		order, moved := chapterKeyAboveTheWayIn(drops)
 		if moved {
 			up := order
 			for i, d := range order {
@@ -4413,6 +4444,28 @@ func (m *Model) refusedKeys() []string {
 // attachHint is the parenthetical the footer carries outside tmux: the
 // lowest-ranked fragment on the row (#31), beneath a key or a note.
 const attachHint = " (prefix d returns)"
+
+// chapterKeyAboveTheWayIn is the shed order with `[ ] chapters` moved to
+// just above the key that names the way in, and whether the row names one
+// for it to stand above. It is the order the chapter key's yield spends
+// its cells in, and the order a note's own yield is judged against: the
+// two are taken on the same row, so a note measured against the unyielded
+// order reads a key as lost that the yield brings back.
+func chapterKeyAboveTheWayIn(drops []string) ([]string, bool) {
+	const chapters = " · [ ] chapters"
+	order := make([]string, 0, len(drops))
+	moved := false
+	for _, d := range drops {
+		if d == chapters {
+			continue
+		}
+		if !moved && (d == " · tab deeper" || d == " · tab reader") {
+			order, moved = append(order, chapters), true
+		}
+		order = append(order, d)
+	}
+	return order, moved
+}
 
 // shedKeys gives up the keymap's optional fragments in order until fits
 // holds, then puts back, most recently shed first, each one that fits
