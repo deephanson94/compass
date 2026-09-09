@@ -1789,9 +1789,11 @@ func TestReaderWrapsTheCallLine(t *testing.T) {
 }
 
 // A conversation that fits says so, at either end. The reader's cursor
-// (readerCursorMove) still steps under the hood on a page like this one —
-// Space has to be able to reach whichever fold on the one screen is not
-// the first — but the page has nowhere to scroll to, and keeps saying so.
+// (readerCursorMove) steps under the hood on a page like this one — Space
+// has to be able to reach whichever fold on the one screen is not the first
+// — and while it steps, the step is what the press did and the row says
+// nothing; the page has nowhere to scroll to, and says so on the press that
+// finds the end.
 func TestFittingConversationSaysSo(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
@@ -1799,9 +1801,12 @@ func TestFittingConversationSaysSo(t *testing.T) {
 	m.events = eventsFor(m.trail)[:2]
 	pressTab(m)
 	pressTab(m)
-	press(m, "j")
+	m.note = "" // the second Tab's own note, not this key's
+	for i := 0; i < 200 && m.note == ""; i++ {
+		press(m, "j") // down to the last row of a page with nowhere to scroll
+	}
 	if !strings.Contains(m.note, "all of it is on screen") {
-		t.Errorf("j on a fitting conversation said %q", m.note)
+		t.Errorf("j at the end of a fitting conversation said %q", m.note)
 	}
 }
 

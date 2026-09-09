@@ -6649,8 +6649,15 @@ func TestTheReaderStartKeyAnswersLikeItsPair(t *testing.T) {
 				return mm
 			}
 			k := top()
-			pressKey(k, "k")
-			poll(k, c.sc)
+			// `k` is the cursor's key since #300: it answers this end once
+			// the cursor has reached it, not the moment the page has.
+			for i := 0; i < 4000; i++ {
+				pressKey(k, "k")
+				poll(k, c.sc)
+				if k.note != "" {
+					break
+				}
+			}
 			want := k.note
 			if want == "" {
 				t.Fatalf("%s %dx%d: `k` said nothing at the start", c.name, w, h)
@@ -14507,4 +14514,160 @@ func TestTheReplyRefusalSaysTheNoPaneOnce(t *testing.T) {
 		t.Fatalf("the walk reached no frame drawing %q", r106fhReplyNote)
 	}
 	t.Logf("frames drawing the reply refusal: %d", reached)
+}
+
+// ---- round 107, second-day ----
+// TestTheReaderMoveSaysWhatItDid holds the rule this round folds: in the
+// reader, `all of it is on screen` (#83) is the answer to a press that moved
+// nothing, and it is drawn only there. Since the cursor (#300) `j`, `k`,
+// `ctrl+d` and `ctrl+u` step the mark on a page that fits as well as on one
+// that does not, and the sentence stood over a press that moved the mark
+// exactly as it stood over one that could not — one row for two opposite
+// outcomes, so the person could not read from it whether the key had done
+// anything (#221). A press that moves the mark says so by moving it and
+// draws no note; a press that cannot keeps #83's word.
+func TestTheReaderMoveSaysWhatItDid(t *testing.T) {
+	forceASCII(t)
+
+	r107sdScene := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+	r107sdWalk := func(sc scene, w, h int, keys []string) (*Model, []string) {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m, strings.Split(ansi.Strip(m.View()), "\n")
+	}
+	r107sdFoot := func(rows []string) string { return strings.TrimRight(rows[len(rows)-1], " ") }
+	// The rows every cursor mark on the frame stands on. The reader's mark is
+	// the ▸ markAnchor cuts into its cursor row (#300), the same cell the
+	// trail's cursor spends; a press that steps the reader's cursor is one
+	// that puts a mark on a different row. The row's own words, not its
+	// place on screen: a step that scrolls the page under the cursor can
+	// leave the mark on the same screen line.
+	r107sdMarks := func(rows []string) []string {
+		var out []string
+		for _, r := range rows[:len(rows)-1] {
+			if strings.ContainsRune(r, '▸') {
+				out = append(out, strings.TrimSpace(r))
+			}
+		}
+		return out
+	}
+	r107sdSame := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// One: the frame it was found on. The live session's reader at eighty,
+	// a page of five rows that fits whole: the first `j` walks the mark off
+	// the prompt onto the row beneath it, the second cannot walk it any
+	// further. The two presses must not draw the same row.
+	sd := r107sdScene("second-day")
+	_, opened := r107sdWalk(sd, 80, 24, []string{"tab", "tab"})
+	if !strings.Contains(strings.Join(opened, "\n"), "READER · hello") {
+		t.Fatalf("second-day 80x24 [tab tab]: not the reader: %q", r107sdFoot(opened))
+	}
+	_, one := r107sdWalk(sd, 80, 24, []string{"tab", "tab", "j"})
+	_, two := r107sdWalk(sd, 80, 24, []string{"tab", "tab", "j", "j"})
+	if r107sdSame(r107sdMarks(one), r107sdMarks(opened)) {
+		t.Fatalf("second-day 80x24: the first `j` moved the mark nowhere — not the stand this pins")
+	}
+	if !r107sdSame(r107sdMarks(two), r107sdMarks(one)) {
+		t.Fatalf("second-day 80x24: the second `j` moved the mark — not the stand this pins")
+	}
+	if strings.Contains(r107sdFoot(one), "all of it is on screen") {
+		t.Errorf("second-day 80x24 [tab tab j]: `j` moved the mark and the row answers the page's question: %q", r107sdFoot(one))
+	}
+	if !strings.Contains(r107sdFoot(two), "all of it is on screen") {
+		t.Errorf("second-day 80x24 [tab tab j j]: `j` moved nothing and the row does not say why: %q", r107sdFoot(two))
+	}
+	if r107sdFoot(one) == r107sdFoot(two) {
+		t.Errorf("second-day 80x24: one row for a press that moved the mark and a press that could not: %q", r107sdFoot(one))
+	}
+	// The cells the note gave up come back as keys, and none is lost.
+	for _, key := range []string{"/ search", "esc back", "A archive", "? help", "q quit"} {
+		if !strings.Contains(r107sdFoot(one), key) {
+			t.Errorf("second-day 80x24 [tab tab j]: the row lost %q: %q", key, r107sdFoot(one))
+		}
+	}
+	if lipgloss.Width(r107sdFoot(one)) > 80 {
+		t.Errorf("second-day 80x24 [tab tab j]: the row runs past the terminal (%d): %q",
+			lipgloss.Width(r107sdFoot(one)), r107sdFoot(one))
+	}
+
+	// Two: the rule, over every scene at five widths on all four keys under
+	// both profiles. Wherever a reader press moves a drawn row, the row does
+	// not answer the page's question; wherever it moves nothing, the row
+	// says something.
+	moves, stucks := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, key := range []string{"j", "k", "ctrl+d", "ctrl+u"} {
+					m, before := r107sdWalk(sc, size[0], size[1], []string{"tab", "tab"})
+					if m.level != 3 {
+						continue
+					}
+					for n := 1; n <= 3; n++ {
+						pressKey(m, key)
+						poll(m, sc)
+						rows := strings.Split(ansi.Strip(m.View()), "\n")
+						foot := r107sdFoot(rows)
+						was, now := r107sdMarks(before), r107sdMarks(rows)
+						switch {
+						case len(was) != len(now):
+							// The first press after a jump only draws the mark
+							// where the page is already looking (#300); it
+							// steps the cursor nowhere.
+						case !r107sdSame(was, now):
+							moves++
+							if strings.Contains(foot, "all of it is on screen") {
+								t.Errorf("%v %s %dx%d [tab tab] then %d×%q: the press moved the mark and the row answers the page's question: %q",
+									prof, sc.name, size[0], size[1], n, key, foot)
+							}
+						default:
+							stucks++
+							if m.note == "" {
+								t.Errorf("%v %s %dx%d [tab tab] then %d×%q: the press moved the mark nowhere and said nothing: %q",
+									prof, sc.name, size[0], size[1], n, key, foot)
+							}
+						}
+						if lipgloss.Width(foot) > size[0] {
+							t.Errorf("%v %s %dx%d [tab tab] then %d×%q: the row runs past the terminal (%d): %q",
+								prof, sc.name, size[0], size[1], n, key, lipgloss.Width(foot), foot)
+						}
+						before = rows
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if moves < 60 || stucks < 60 {
+		t.Fatalf("the rule reached %d moving presses and %d stuck ones: it has gone vacuous", moves, stucks)
+	}
+
+	// Three: #83's sentence still stands where the press moves nothing, so a
+	// fold that drops the note from the reader altogether fails here.
+	if _, rows := r107sdWalk(sd, 80, 24, []string{"tab", "tab", "k"}); !strings.Contains(r107sdFoot(rows), "all of it is on screen") {
+		t.Errorf("second-day 80x24 [tab tab k]: `k` at the first row no longer says why it moved nothing: %q", r107sdFoot(rows))
+	}
 }

@@ -714,11 +714,15 @@ func (m *Model) scrollBy(delta int) bool {
 // where the reader is now looking, not from where the cursor was left.
 //
 // A conversation that already shows every line keeps `scrollBy`'s own word
-// for it, "all of it is on screen" (#83), whichever of the four keys is
-// pressed: there is nothing to page to, and the footer already sheds the
-// scroll keys on the same test. The cursor still steps underneath — Space
-// still has to reach whichever of two folds on that one screen is not the
-// first — but nothing about a page with nowhere to scroll needs saying so.
+// for it, "all of it is on screen" (#83) — but only where the press moved
+// nothing, which is the fact that word is about. Since the cursor (#300)
+// these four keys step the mark on such a page too, and the sentence stood
+// over a press that moved the mark exactly as it stood over one that could
+// not, so the row said the same thing for both and the person could not
+// tell from it whether the key had done anything (#221; SPEC's round-one
+// rule against a key that acts unremarked). A press that moves the mark
+// says so by moving it: the frame is not the same frame, and the note is
+// the refusal's, not the move's.
 func (m *Model) readerCursorMove(delta int) bool {
 	doc := m.doc(m.readerWidth())
 	if len(doc) == 0 {
@@ -755,7 +759,9 @@ func (m *Model) readerCursorMove(delta int) bool {
 		m.scroll = clampScroll(target-height+1, len(doc), height)
 	}
 	if fits {
-		m.note = "all of it is on screen"
+		if !moved {
+			m.note = "all of it is on screen"
+		}
 		return true
 	}
 	return moved
