@@ -13953,3 +13953,97 @@ func TestTheArchivesRowNamesTheGrabKey(t *testing.T) {
 	t.Logf("archive stands: %d · rows shed of nothing where `g` grabs: %d · naming `%s`: %d · archive reader stands: %d",
 		stands, roomy, strings.TrimPrefix(r105ttArchiveClause, " · "), named, readers)
 }
+
+// ---- round 105, fleet-hygiene ----
+// r105fhAttachNote is the refusal `enter` draws where the selected session
+// has no pane (#165), and r105fhPaneClause is the keymap's own clause for
+// the same key on the same row. They are one sentence: the note names the
+// key the clause names and says what the clause says.
+const (
+	r105fhAttachNote  = "attach needs a pane"
+	r105fhPaneClause  = "enter · no pane"
+	r105fhSearchKey   = "/ search"
+	r105fhTypedFooter = "esc cancels"
+)
+
+// r105fhRoute is one walk to a frame whose `enter` cannot attach.
+type r105fhRoute struct {
+	keys []string
+	what string
+}
+
+// r105fhWalks are the ways to a paneless row: the archive at its list, its
+// board and its session view — every archived session is paneless — and,
+// on the fleets that have one, the live session with no pane.
+var r105fhWalks = []r105fhRoute{
+	{[]string{"A"}, "archive list"},
+	{[]string{"A", "shift+tab"}, "archive board"},
+	{[]string{"A", "tab"}, "archive session view"},
+	{[]string{"3"}, "live list, the third session"},
+}
+
+// r105fhFooter is the last drawn row of a frame, colour stripped.
+func r105fhFooter(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.TrimSpace(rows[len(rows)-1])
+}
+
+// TestTheAttachRefusalSaysTheNoPaneOnce holds the attach refusal to the
+// rule every other refusal on the deck keeps: the row says the sentence
+// once. `enter` on a paneless row draws `attach needs a pane`, nineteen
+// cells naming the key; where the same row also draws its own
+// `enter · no pane` the frame says one thing twice, and on the archive's
+// session view at 152 the second saying costs `/ search`, a key that acts
+// on that very row (#95, #96, #165, #264). Three sides: under the note the
+// clause is gone; the note still stands, so the frame says why; and the
+// walk actually reaches such frames, so a yield that never draws the note
+// fails too.
+func TestTheAttachRefusalSaysTheNoPaneOnce(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	scenes := allScenes()
+	reached, twice := 0, 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range scenes {
+			for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, walk := range r105fhWalks {
+					m := sceneModel(sc, size[0], size[1])
+					for _, k := range walk.keys {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					before := r105fhFooter(m)
+					if strings.Contains(before, r105fhTypedFooter) {
+						continue // a line has the keyboard, not the deck
+					}
+					pressKey(m, "enter")
+					poll(m, sc)
+					foot := r105fhFooter(m)
+					if !strings.Contains(foot, r105fhAttachNote) {
+						continue // this row could be attached
+					}
+					reached++
+					if strings.Contains(foot, r105fhPaneClause) {
+						twice++
+						t.Errorf("%s %s %dx%d %s: the row says the same sentence twice — %q beside %q\n   foot=%q",
+							prof.name, sc.name, size[0], size[1], walk.what,
+							r105fhPaneClause, r105fhAttachNote, foot)
+					}
+					if strings.Contains(before, r105fhSearchKey) && !strings.Contains(foot, r105fhSearchKey) &&
+						size[0] >= 152 {
+						t.Errorf("%s %s %dx%d %s: the refusal cost the row %q, which the row named one keypress earlier\n   was =%q\n   now =%q",
+							prof.name, sc.name, size[0], size[1], walk.what, r105fhSearchKey, before, foot)
+					}
+				}
+			}
+		}
+	}
+	if reached == 0 {
+		t.Fatalf("the walk reached no frame drawing %q", r105fhAttachNote)
+	}
+	t.Logf("frames drawing the refusal: %d, of which saying it twice: %d", reached, twice)
+}

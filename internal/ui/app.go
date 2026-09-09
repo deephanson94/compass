@@ -4084,6 +4084,19 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 		return dimStyle.Render(clip(keys, w)), keys
 	}
 	var left string
+	// The clause the note already says goes before any key is shed.
+	// `attach needs a pane` names the key and says what `enter · no pane`
+	// says, so a row drawing both says one sentence twice — the harm #165
+	// gave the note its form to end and the harm #95 and #96 folded on the
+	// ship row and the header. It is not a stuck key, which yields only
+	// where a key that acts comes back (#210, #216): nothing is given up,
+	// the sentence is simply not said twice, and the cells it held go back
+	// to the keymap, where they buy `/ search`, `[ ] chapters` and `n/N`
+	// back on the rows that had shed them for it (#264's rule: a note
+	// costs no key that acts on the row it refuses).
+	if k := m.attachRefusalSaid(keys); k != "" {
+		keys = strings.Replace(keys, k, "", 1)
+	}
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
 	// clip the note before the keymap goes.
