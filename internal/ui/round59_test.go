@@ -14671,3 +14671,106 @@ func TestTheReaderMoveSaysWhatItDid(t *testing.T) {
 		t.Errorf("second-day 80x24 [tab tab k]: `k` at the first row no longer says why it moved nothing: %q", r107sdFoot(rows))
 	}
 }
+
+// ---- round 107, fleet-hygiene ----
+// r107fhCursorRoutes are the ways into the reader this pin walks: the live
+// fleet's first session, the archive's, the second and third rows of the
+// board — every one of them ends on a conversation whose prose the model
+// wrote flush left, which is the row the cursor mark has no spare cell on.
+var r107fhCursorRoutes = [][]string{
+	{"tab", "tab"},
+	{"A", "tab", "tab"},
+	{"j", "tab", "tab"},
+}
+
+// r107fhDrawnCursorRow is the row RenderReader draws the cursor on: the one
+// line of the panel carrying the mark. "" when the panel draws none.
+func r107fhDrawnCursorRow(panel string) string {
+	for _, line := range strings.Split(panel, "\n") {
+		if strings.Contains(line, "▸") {
+			return strings.TrimRight(ansi.Strip(line), " ")
+		}
+	}
+	return ""
+}
+
+// TestTheReaderCursorSaysWhenItTakesACell holds the reader's cursor to the
+// deck's own truncation discipline (SPEC §4): the mark may take a cell of a
+// row that has no spare one, but a cell taken from the row's own words is a
+// cut, and every cut in the reader carries the mark that says so.
+//
+// At HEAD the mark was pushed in front of a flush-left prose row and one cell
+// came off the far end in silence: on `very-long` at 100 and 120 the canonical
+// walkthrough drew "…the current shape" for "…the current shape;" and
+// "…touches every caller" for "…touches every caller.", and on `many-idle` at
+// 120 two presses of `j` drew "I'll take the narrower on" for "…the narrower
+// one" — a different sentence, with nothing on the frame to say a letter had
+// been taken.
+//
+// Three sides, under both colour profiles (#215, #218): the drawn cursor row
+// carries every word the unmarked row carried, or else ends in the cut mark;
+// the row never grows past the panel; and the walk actually reaches rows whose
+// mark has to be pushed in front, so a reader that stopped drawing prose fails
+// here too.
+func TestTheReaderCursorSaysWhenItTakesACell(t *testing.T) {
+	pushed := 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for _, route := range r107fhCursorRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.level != levelReader {
+						continue
+					}
+					for step := 0; step < 120; step++ {
+						opts := ReaderOpts{Width: m.readerWidth(), Height: m.readerHeight(),
+							Scroll: m.scroll, Anchor: m.anchor, Unfolded: m.unfolded,
+							CWD: m.readerCWD(), Now: m.now, Lanes: m.laneClauses()}
+						doc := m.doc(opts.Width)
+						i := m.anchor
+						if i < 0 || i >= len(doc) {
+							break
+						}
+						words := strings.TrimRight(ansi.Strip(doc[i].render("")), " ")
+						// Only the rows with no spare cell are this pin's:
+						// where the mark takes an indent or the space after
+						// a glyph, nothing of the row's own words moves.
+						if r := []rune(words); len(r) > 1 && r[1] != ' ' && !strings.HasPrefix(words, "▸") {
+							pushed++
+							row := r107fhDrawnCursorRow(RenderReader(m.events, opts))
+							if row != "" && !strings.Contains(row, words) && !strings.HasSuffix(row, "…") {
+								t.Errorf("%s %s %dx%d %v +%d j: the cursor took a cell of the row's own words and said nothing\n  the row  =%q\n  the cursor drew=%q",
+									prof.name, sc.name, w, h, route, step, words, row)
+							}
+							if lipgloss.Width(row) > opts.Width {
+								t.Errorf("%s %s %dx%d %v +%d j: the cursor row runs past the panel (%d of %d): %q",
+									prof.name, sc.name, w, h, route, step, lipgloss.Width(row), opts.Width, row)
+							}
+						}
+						was := m.anchor
+						pressKey(m, "j")
+						poll(m, sc)
+						if m.anchor == was {
+							break
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+	if pushed == 0 {
+		t.Fatalf("the walk never reached a row whose mark has to be pushed in front: nothing was measured")
+	}
+	t.Logf("rows walked whose mark is pushed in front of the row's own words: %d", pushed)
+}

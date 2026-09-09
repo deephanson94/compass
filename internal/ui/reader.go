@@ -142,13 +142,19 @@ func markAnchor(line string, w int) string {
 	// such cell to spend; there the mark is pushed in front instead of
 	// eating the line's first letter, and one cell comes off the far end
 	// to keep the row the width it was.
+	//
+	// That last cell is a cut like any other cut in the reader, so it
+	// carries the reader's own mark rather than going in silence: a row
+	// already the reader's full width drew "I'll take the narrower one"
+	// as "the narrower on", a different sentence with nothing on the
+	// frame to say a cell had been taken (SPEC §4 — a truncation says so).
 	if r := []rune(plain); len(r) > 1 && r[1] == ' ' {
 		r[1] = '▸'
 		plain = string(r)
 	} else {
 		plain = "▸" + plain
-		if r := []rune(plain); w > 0 && len(r) > w {
-			plain = string(r[:len(r)-1])
+		if w > 0 {
+			plain = clip(plain, w) // a no-op on every row that fits
 		}
 	}
 	if pad := w - lipgloss.Width(plain); pad > 0 {
