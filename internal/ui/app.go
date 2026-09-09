@@ -1323,7 +1323,17 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		// page already showing the last screenful `G` moved no line and
 		// said nothing, the dead key SPEC's round-one rule bans while
 		// `j` and `ctrl+d` on the same page both answered.
-		if !m.scrollBy(1 << 30) { // clamped to the last screenful
+		// On a page that fits, `scrollBy` answers the page's question
+		// itself and reports the move made (lv3.go), so this end's own
+		// word was unreachable there: `g` and `G`, the two keys named
+		// for the two opposite ends, came back as one frame saying `all
+		// of it is on screen`, the sentence #309 has just taken off `j`
+		// and `k` at those same two ends. One fact keeps one name (#24,
+		// #228, #307): the end says the end here too. The top keeps
+		// #83's word, as #309 left it — the frame draws " the start of
+		// the conversation" over it — and the width trade is #309's own,
+		// measured in footerLine.
+		if !m.scrollBy(1<<30) || m.readerPageFits() { // clamped to the last screenful
 			m.note = "end of the conversation"
 		}
 	case " ", "space":

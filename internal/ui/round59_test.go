@@ -15436,3 +15436,180 @@ func TestTheReaderSaysWhichEndTheCursorIsAt(t *testing.T) {
 	}
 	t.Logf("fitting reader stands: %d (with the cell %d, without %d) · stands on a page that scrolls: %d", fits, roomy, tight, scrolls)
 }
+
+// ---- round 109, fleet-hygiene ----
+// r109fhJumpSizes are the five terminals the walkthrough is drawn at.
+var r109fhJumpSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r109fhJumpRoutes are two ways down to a reader page — straight in, and in
+// on another row — so both a page that fits and a page that scrolls are
+// stood on.
+var r109fhJumpRoutes = [][]string{
+	{"tab", "tab"},
+	{"1", "tab", "tab"},
+}
+
+const (
+	r109fhJumpEnd  = "end of the conversation"
+	r109fhJumpTop  = "start of the conversation"
+	r109fhJumpPage = "all of it is on screen"
+)
+
+// r109fhJumpFoot splits a drawn footer into the keymap before the gap and
+// the note after it.
+func r109fhJumpFoot(rows []string) (keys, note string) {
+	if len(rows) == 0 {
+		return "", ""
+	}
+	s := strings.TrimSpace(ansi.Strip(rows[len(rows)-1]))
+	if i := strings.Index(s, "  "); i >= 0 {
+		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i:])
+	}
+	return s, ""
+}
+
+// r109fhJumpNoted is the finished footer for the stand the reader is on now,
+// drawn with note in the note's place, so the trade can be read key for key
+// without pressing anything.
+func r109fhJumpNoted(m *Model, w int, note string) string {
+	was := m.note
+	m.note = note
+	out := ansi.Strip(m.footerTraded(m.keymap(), w-2))
+	m.note = was
+	return out
+}
+
+// r109fhJumpPress presses key n times on the stand the reader is on and
+// returns the frame the last press came back with.
+func r109fhJumpPress(m *Model, sc scene, key string, n int) []string {
+	for i := 0; i < n; i++ {
+		pressKey(m, key)
+		poll(m, sc)
+	}
+	return strings.Split(ansi.Strip(m.View()), "\n")
+}
+
+// The reader's jump keys are named for the two opposite ends of the
+// conversation, and on a page that fits they said one thing for both: `g`
+// and `G` came back as the same frame under `all of it is on screen`, the
+// page's sentence, not the press's — the very thing #309 has just taken off
+// `j` and `k` at those same two ends, and the thing #309's own footer trade
+// says these two keys already do. On a page that scrolls both keys already
+// name the ends apart, so the reader owns both words. `G` says the end here
+// too, where the row has the cell for it (#308, #309); where it has not,
+// #83's word stands; `g` keeps #83's word at the top, whose marker the
+// frame draws over the cursor, as #309 left it.
+func TestTheReaderJumpKeySaysWhichEndItReached(t *testing.T) {
+	forceASCII(t)
+	fits, scrolls, roomy, tight := 0, 0, 0, 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range r109fhJumpSizes {
+				w, h := size[0], size[1]
+				for _, route := range r109fhJumpRoutes {
+					base := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(base, k)
+						poll(base, sc)
+					}
+					if base.showHelp || base.searching || base.replying || base.level < levelReader {
+						continue
+					}
+					where := fmt.Sprintf("%s %s %v %dx%d", prof.name, sc.name, route, w, h)
+					page := base.readerPageFits()
+					// The trade is read on the stand the press comes to
+					// rest on, before anything is pressed — and after the
+					// frame is drawn, because the note's reserve is
+					// measured against the rows the frame drew.
+					base.View()
+					bare := r109fhJumpNoted(base, w, r109fhJumpPage)
+					with := r109fhJumpNoted(base, w, r109fhJumpEnd)
+					room := footerNamesAll(bare, with)
+
+					// Twice: on a page that scrolls the first press
+					// travels and the second is the one that must answer;
+					// on a page that fits neither can move. `G` is pressed
+					// on the stand itself and `g` on a second walk down to
+					// it, so each key is the last thing the frame saw.
+					down := r109fhJumpPress(base, sc, "G", 2)
+					keysG, noteG := r109fhJumpFoot(down)
+					mg := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(mg, k)
+						poll(mg, sc)
+					}
+					up := r109fhJumpPress(mg, sc, "g", 2)
+					_, noteg := r109fhJumpFoot(up)
+
+					for _, frame := range [][]string{down, up} {
+						for _, r := range frame {
+							if lipgloss.Width(r) > w {
+								t.Errorf("%s: a row runs past the terminal (%d of %d): %q", where, lipgloss.Width(r), w, r)
+							}
+						}
+					}
+					if !page {
+						// The held side: a page that scrolls already
+						// names its two ends apart under these keys, and
+						// this fold moves none of it.
+						scrolls++
+						if noteG != r109fhJumpEnd || noteg != r109fhJumpTop {
+							t.Errorf("%s: a reader page that scrolls stopped naming its ends under `g`/`G`: G=%q g=%q", where, noteG, noteg)
+						}
+						continue
+					}
+					fits++
+					// One: the top keeps #83's word, and the frame draws
+					// the marker that answers for it.
+					if noteg != r109fhJumpPage {
+						t.Errorf("%s: `g` on a page that fits no longer answers the page's question: %q", where, noteg)
+					}
+					joined := strings.Join(up, "\n")
+					if !strings.Contains(joined, "the start of the conversation") &&
+						!strings.Contains(joined, "the start of the agent's own conversation") {
+						t.Errorf("%s: the top of a fitting page draws no start marker, so #83's word there answers nothing", where)
+					}
+					if room {
+						roomy++
+						// Two: where the row has the cell, `G` says which
+						// end it reached, and the two keys stop saying
+						// one thing.
+						if noteG != r109fhJumpEnd {
+							t.Errorf("%s: the row has the cell and `G` on a page that fits still does not say which end it reached: %q", where, noteG)
+						}
+						if noteG == noteg {
+							t.Errorf("%s: one sentence for both ends of a page that fits — `G` and `g` say the same thing: %q", where, noteG)
+						}
+						// Three: and it is paid for with no key that acts.
+						if !footerNamesAll(bare, keysG) {
+							t.Errorf("%s: the end word cost the row a key\n  end =%q\n  bare=%q", where, keysG, bare)
+						}
+					} else {
+						// Four: where the row has no cell for the longer
+						// word, #83's word stands (#308, #309).
+						tight++
+						if noteG != r109fhJumpPage {
+							t.Errorf("%s: the row has no cell for the end's own word and did not keep #83's: %q", where, noteG)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+	if fits < 40 {
+		t.Fatalf("only %d fitting reader stands reached: the biting side is unmeasured", fits)
+	}
+	if roomy < 40 {
+		t.Fatalf("only %d fitting stands had the cell for the end's own word: the biting side is unmeasured", roomy)
+	}
+	if scrolls < 10 {
+		t.Fatalf("only %d scrolling reader stands reached: the held side is unmeasured", scrolls)
+	}
+	t.Logf("fitting reader stands: %d (with the cell %d, without %d) · stands on a page that scrolls: %d", fits, roomy, tight, scrolls)
+}
