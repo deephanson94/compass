@@ -3611,6 +3611,18 @@ func (m *Model) statusChips() string {
 // because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
+	// The reader's mirror key is new to its row for the same reason as
+	// the hide key and the search key one level out, and pays the same
+	// price: it is taken only where the finished row still names every
+	// key it named without it (#281, #284, #289). At 220 the reader's
+	// row stands 145 cells of 220; at 152 and 120 the fourteen cells the
+	// clause needs come out of `n/N`, `[ ] turns` and `x hide`, so the
+	// row keeps its keys and the clause waits for the width.
+	if clause := " · m live pane"; m.level >= levelReader && strings.Contains(keys, clause) {
+		if bare := strings.Replace(keys, clause, "", 1); !footerNamesAll(m.footerGuarded(bare, w), m.footerGuarded(keys, w)) {
+			keys = bare
+		}
+	}
 	row := m.footerGuarded(keys, w)
 	// The search key is new to the session view's row for the same reason
 	// as the hide key and pays the same price: it is taken only where the
@@ -3742,7 +3754,18 @@ func (m *Model) keymap() string {
 			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit" // the chapter keys act here too (#193)
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		// `m` is the deck's key, not a level's, and here it always acts:
+		// pressed in the reader it takes the deck to the session view
+		// with the live pane standing and says `the live pane` (#290),
+		// whichever way the flag stands — and no key on the row said so,
+		// on a row that stood 145 of 220 cells. A key that acts and is
+		// never named is the one thing a footer is for (#24, #175, #187,
+		// #277, #284, #289). The label is one-sided because the key is:
+		// in the reader there is no `m conversation` to offer, the way
+		// back being the key the session view names. `shedOrder` has
+		// ranked the clause among the shared keys all along, so it sheds
+		// at the rank it already has (#39, #281).
+		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · m live pane · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
 		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
@@ -3871,7 +3894,7 @@ func (m *Model) keymap() string {
 		// Below the list the archive's footer still names the way home (#55).
 		keys = strings.Replace(keys, " · ? help", " · A fleet · ? help", 1)
 	}
-	if m.showMirror {
+	if m.showMirror && m.level < levelReader {
 		keys = strings.Replace(keys, "m live pane", "m conversation", 1) // the toggle's other side
 	}
 	if s, ok := m.selected(); ok {
@@ -4836,7 +4859,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// changes with the mirror's state, and a rank that changed with it
 	// made the row's order flip under one keypress.
 	mirror := " · m live pane"
-	if m.showMirror {
+	if m.showMirror && m.level < levelReader {
 		mirror = " · m conversation" // the toggle's other label, the same rank
 	}
 	// The attach aside goes first, then the page key — a shortcut for a

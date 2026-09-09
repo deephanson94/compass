@@ -13061,3 +13061,166 @@ func TestTheFleetsMissNamesEscOnlyWhereEscClearsIt(t *testing.T) {
 	}
 	t.Logf("stands drawing the miss: %d · naming `esc clears it`: %d", stands, clause)
 }
+
+// ---- round 103, two-tools ----
+// ---- round 103, two-tools ----
+
+// r103ttRowSizes are the five terminals the walkthrough is drawn at.
+var r103ttRowSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r103ttRowRoutes are four ways into the reader from the opening frame.
+var r103ttRowRoutes = [][]string{{"tab", "tab"}, {"2", "tab", "tab"}, {"3", "tab", "tab"}, {"j", "tab", "tab"}}
+
+// r103ttRowFoot is the drawn footer of a frame, escapes stripped.
+func r103ttRowFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	if len(rows) == 0 {
+		return ""
+	}
+	return rows[len(rows)-1]
+}
+
+// r103ttRowKeys is the keymap half of a footer: what stands before the gap
+// the keymap never contains, the attach aside read past (#55, #134).
+func r103ttRowKeys(foot string) string {
+	s := strings.TrimRight(foot, " ")
+	s = strings.Replace(s, " (prefix d returns)", "", 1)
+	if i := strings.Index(strings.TrimLeft(s, " "), "  "); i >= 0 {
+		s = strings.TrimLeft(s, " ")[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// r103ttRowWide is the clause's own width in cells, separator and all.
+const r103ttRowWide = " · m live pane"
+
+// TestTheReadersRowNamesTheMirrorKey pins the reader's row to the key that
+// acts on it. `m` is the deck's key, not a level's: pressed in the reader it
+// takes the deck to the session view with the live pane standing and says
+// `the live pane` — on either press, since #290 — and no key on the row said
+// so, on a row that stood 145 cells of 220 with the rest blank. A key that
+// acts and is never named is the one thing a footer is for (#24, #175, #187,
+// #277, #284, #289).
+//
+// Three sides, so the pin cannot be got by jamming the clause onto every row:
+//   - where the drawn row leaves the clause's own cells blank, it must name
+//     the key;
+//   - where the row names it, the key must do what the clause says;
+//   - the label is one-sided, because the key is: in the reader there is no
+//     `m conversation` to offer, on either side of the flag — the way back is
+//     the key the session view names (#62, #290).
+func TestTheReadersRowNamesTheMirrorKey(t *testing.T) {
+	forceASCII(t)
+	stands, roomy, named, standing := 0, 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r103ttRowSizes {
+				w, h := size[0], size[1]
+				for _, route := range r103ttRowRoutes {
+					for _, mirror := range []bool{false, true} {
+						m := sceneModel(sc, w, h)
+						for _, k := range route {
+							pressKey(m, k)
+							poll(m, sc)
+						}
+						if mirror {
+							// The other side of the flag: the pane on,
+							// then back into the reader.
+							if !(m.sessionView() && m.level >= levelReader) {
+								continue
+							}
+							pressKey(m, "m")
+							poll(m, sc)
+							pressKey(m, "tab")
+							poll(m, sc)
+						}
+						if !(m.sessionView() && m.level >= levelReader) {
+							continue
+						}
+						where := sc.name + " " + route[0] + " " + itoaPin(w) + "x" + itoaPin(h)
+						if mirror {
+							where += " (pane on)"
+							standing++
+						}
+						foot := r103ttRowFoot(m)
+						keys := r103ttRowKeys(foot)
+						stands++
+
+						// The label is the reader's own, on either side.
+						if strings.Contains(keys, "m conversation") {
+							t.Errorf("%s: the reader's row offers `m conversation`, but `m` here draws the live pane\n  foot=%q", where, keys)
+						}
+
+						// Does the key act on this very frame (#221)?
+						// The stand is spent here: the row above is read,
+						// then the key is pressed on that very model.
+						n := m
+						before := ansi.Strip(n.View())
+						pressKey(n, "m")
+						poll(n, sc)
+						acts := ansi.Strip(n.View()) != before
+						has := strings.Contains(keys, "m live pane")
+
+						// The biting side is the row that has given up
+						// nothing: the attach aside is the first fragment
+						// `shedOrder` drops, so a row still wearing it is a
+						// row shed of nothing at all (#284's own measure),
+						// and so is one with the clause's own cells still
+						// blank beside the note's reserve. There the clause
+						// costs no key, and `m` acts, so the row names it.
+						free := w - lipgloss.Width(foot)
+						whole := strings.Contains(foot, attachHint) || free >= lipgloss.Width(r103ttRowWide)
+						if acts && whole {
+							roomy++
+							if !has {
+								t.Errorf("%s: `m` acts in the reader — it takes this very frame to the live pane (level %d, note %q) — and the row, shed of nothing, says so nowhere (%d cells free)\n  foot=%q",
+									where, n.level, strings.TrimSpace(n.note), free, keys)
+								continue
+							}
+						}
+						if !has {
+							continue
+						}
+						named++
+						// The clause is taken only where it costs no key,
+						// so the row that names it still names the way out
+						// and the help — the last keys any row gives up
+						// (#24, #39, #281, #284).
+						for _, must := range []string{"esc back", "? help", "q quit"} {
+							if !strings.Contains(keys, must) {
+								t.Errorf("%s: the row names `m live pane` and no longer names %q\n  foot=%q", where, must, keys)
+							}
+						}
+						// The row names it: the key must do what the clause says.
+						if !acts {
+							t.Errorf("%s: the row names `m live pane` and `m` moved nothing", where)
+							continue
+						}
+						if !n.showMirror || n.level != levelWaypoints || strings.TrimSpace(n.note) != "the live pane" {
+							t.Errorf("%s: the row names `m live pane` and `m` gave mirror=%v level=%d note=%q",
+								where, n.showMirror, n.level, strings.TrimSpace(n.note))
+						}
+						for _, r := range strings.Split(ansi.Strip(n.View()), "\n") {
+							if lipgloss.Width(r) > w {
+								t.Errorf("%s: the frame `m` landed on has a row over %d cells: %q", where, w, r)
+							}
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 24 {
+		t.Errorf("only %d reader stands; the pin measures nothing", stands)
+	}
+	if standing < 12 {
+		t.Errorf("only %d reader stands with the pane already on; the flag's other side is unmeasured", standing)
+	}
+	if roomy < 12 {
+		t.Errorf("only %d reader stands with the clause's cells free; the biting side is unmeasured", roomy)
+	}
+	t.Logf("reader stands: %d · with the pane on: %d · with the clause's cells free: %d · naming `m live pane`: %d", stands, standing, roomy, named)
+}
