@@ -124,6 +124,27 @@ func (m *Model) hiddenDoorKey() string {
 	return " · A, then x"
 }
 
+// liveDoorClause is the archive board's own door back — "A live fleet" —
+// and it is worn only where that key is the deck's to give. While a
+// search query, the quick replies or the reply's own line has the
+// keyboard, every key belongs to what is being typed ("While a search
+// query is being typed, every key belongs to it", app.go): `A` pressed
+// on such a frame types the letter into the query or the line, and the
+// live fleet does not come back. It is #282's, #285's, #288's and
+// #291's rule on the last clause of the family that had not taken it.
+// Unlike the archive count beside it on the live board's strip, this
+// clause is a signpost whole — key and destination, no count — so what
+// goes is the clause, as the footer's own `A fleet` clause already goes
+// on these two flags (app.go). The way on is `esc`, which every one of
+// those footers names, and the header still says `board` under
+// `archive N of M`, so where the frame is is never in doubt (#62, #126).
+func (m *Model) liveDoorClause() string {
+	if m.searching || m.replying {
+		return ""
+	}
+	return "A live fleet"
+}
+
 func (m *Model) hiddenClause(n int) string {
 	return fmt.Sprintf("%s hidden%s", m.hiddenDoorCount(n), m.hiddenDoorKey())
 }

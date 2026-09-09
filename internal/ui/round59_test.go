@@ -13224,3 +13224,139 @@ func TestTheReadersRowNamesTheMirrorKey(t *testing.T) {
 	}
 	t.Logf("reader stands: %d · with the pane on: %d · with the clause's cells free: %d · naming `m live pane`: %d", stands, standing, roomy, named)
 }
+
+// ---- round 104, fleet-hygiene ----
+// ---- round 104, fleet-hygiene ----
+
+// r104fhBodyRows is a frame's drawn rows with the footer dropped: the
+// footer is the keymap's own row and is gated on these flags already, so
+// the question here is only what the board's own body says.
+func r104fhBodyRows(view string) []string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	last := len(rows) - 1
+	for last > 0 && strings.TrimSpace(rows[last]) == "" {
+		last--
+	}
+	if last <= 0 {
+		return nil
+	}
+	return rows[:last]
+}
+
+// r104fhDoorRow is the archive board's strip row as a frame draws it — the
+// row that carries the door back to the live fleet — or "" where the board
+// draws no such row.
+func r104fhDoorRow(view string) string {
+	for _, ln := range r104fhBodyRows(view) {
+		if strings.Contains(ln, "A live fleet") {
+			return strings.TrimSpace(ln)
+		}
+	}
+	return ""
+}
+
+// r104fhFooter is the last drawn row of a frame — the keys it offers.
+func r104fhFooter(view string) string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.TrimSpace(rows[i]) != "" {
+			return strings.TrimSpace(rows[i])
+		}
+	}
+	return ""
+}
+
+// r104fhWalk replays a route from a scene's opening frame, polling after
+// each key the way the deck's own refresh does.
+func r104fhWalk(sc scene, w, h int, route ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheArchiveBoardsDoorBackDropsItsKeyWhileALineIsBeingTyped holds the
+// archive board's strip to the key it names. #282 shed the fold's `· j`,
+// #285 the archive line's `· A browses`, #288 the hidden count's
+// `· A, then x` and #291 the archive's hidden header its `· x brings one
+// back`, wherever a search query, the quick replies or the reply's own
+// typed line has the keyboard, because every key then belongs to that line
+// ("While a search query is being typed, every key belongs to it" and
+// "While the quick replies are up, a digit picks one and anything else
+// puts them away", app.go). `A live fleet` on the archive board's strip is
+// the last clause of that family and had not taken the rule: pressed on
+// such a frame `A` types the letter into the query or into the line the
+// deck is about to send, and the live fleet does not come back.
+//
+// Unlike the archive count beside it on the live board's strip, this
+// clause is a signpost whole — key and destination, with no count to keep
+// — so what goes is the clause, exactly as the footer's own `A fleet`
+// already goes on these two flags. The header still reads `board` under
+// `archive N of M` and the way on is `esc`, which every one of those
+// footers names, so where the frame is is never in doubt (#62, #126).
+//
+// Three sides, so the pin cannot be got by taking the clause everywhere:
+//   - where a line is being typed the strip names no key;
+//   - `A` pressed on that very frame does not bring the live fleet back
+//     (#221);
+//   - where the deck holds its own keys the strip still says `A live
+//     fleet`, counted, so a yield that shed it always fails here.
+func TestTheArchiveBoardsDoorBackDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// `A` opens the archive and `⇧tab` puts its board up; the suffix then
+	// gives the keyboard to the search, the quick replies or a typed line.
+	toBoard := []string{"A", "shift+tab"}
+	suffixes := [][]string{{"/"}, {"/", "a"}, {"r"}, {"r", "t"}, {"a"}}
+
+	shed, kept := 0, 0
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				base := r104fhWalk(sc, w, h, toBoard...)
+				if !base.archiveView || base.searching || base.replying {
+					continue
+				}
+				if r104fhDoorRow(base.View()) == "" {
+					continue // this deck draws no archive board here
+				}
+				kept++
+				for _, suffix := range suffixes {
+					route := append(append([]string(nil), toBoard...), suffix...)
+					m := r104fhWalk(sc, w, h, route...)
+					if !m.archiveView || (!m.searching && !m.replying) {
+						continue // the key opened no line on this deck
+					}
+					shed++
+					if row := r104fhDoorRow(m.View()); row != "" {
+						t.Errorf("%s %s %dx%d %v: the archive board's strip names a key the typed line has taken: %q over %q",
+							prof.name, sc.name, w, h, route, row, r104fhFooter(m.View()))
+					}
+					// Pressed on that very frame, `A` does not bring the
+					// live fleet back (#221): it goes into the query or
+					// into the line the deck is about to send.
+					after := r104fhWalk(sc, w, h, append(append([]string(nil), route...), "A")...)
+					if !after.archiveView {
+						t.Errorf("%s %s %dx%d %v: `A` left the archive after all, so the key belongs on the strip",
+							prof.name, sc.name, w, h, route)
+					}
+				}
+			}
+		}
+	}
+	if shed < 20 {
+		t.Fatalf("the walk reached only %d archive-board strips under a typed line", shed)
+	}
+	if kept < 20 {
+		t.Fatalf("the archive board's strip kept its door on only %d frames — the yield took too many", kept)
+	}
+}
