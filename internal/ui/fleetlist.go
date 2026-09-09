@@ -273,6 +273,21 @@ func (m *Model) fleetBlock(rows []fleetRow, w int) (lines []string, selStart, se
 	return lines, selStart, selEnd
 }
 
+// foldKey is the key clause the fold wears — " · j", " · k" — and it is worn
+// only where that key is the list's own. `j` and `k` move the fleet at Lv1;
+// at Lv2 and Lv3 the same keys have been handed to the trail's rows and the
+// reader's page (`focus`), so pressing `j` on such a frame walks the cursor
+// and leaves every folded row folded, while the fleet's title wears no `▌`.
+// The count is the row's own answer at every level — the list is cut here,
+// and by this much (#137) — and the way back to the list is `esc back`,
+// which the footer of those frames already names (#232, #250).
+func (m *Model) foldKey(k string) string {
+	if m.focus() != panelFleet {
+		return ""
+	}
+	return " · " + k
+}
+
 // scrollFleet windows the column onto h lines, following the selection: the
 // offset moves as little as it can, so headers travel with their groups and
 // the list only slides when the selection would otherwise fall off the edge.
@@ -395,7 +410,7 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 		// The fold names the group it cut into: under "▴ 1 more above"
 		// a row's pane tag read ":0.0" of no tmux session, its "⌁ harness"
 		// header being the first thing the fold hid.
-		count := fmt.Sprintf("%d more above · k", countEntries(lines[:off]))
+		count := fmt.Sprintf("%d more above%s", countEntries(lines[:off]), m.foldKey("k"))
 		fold := "▴ " + count
 		if group := foldedHeader(lines, off); group != "" {
 			fold = "▴ " + group + " · " + count
@@ -411,7 +426,7 @@ func (m *Model) scrollFleet(lines []string, selStart, selEnd, h int) []string {
 	}
 	out = append(out, lines[off:end]...)
 	if bottom > 0 {
-		out = append(out, dimStyle.Render(fmt.Sprintf("▾ %d more below · j", countEntries(lines[end:]))))
+		out = append(out, dimStyle.Render(fmt.Sprintf("▾ %d more below%s", countEntries(lines[end:]), m.foldKey("j"))))
 	}
 	return out
 }

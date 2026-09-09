@@ -11338,3 +11338,110 @@ func TestTheChapterNoteLeavesItsQuoteToTheRow(t *testing.T) {
 		t.Fatalf("the frames drew %d quoted rows, expected at least 500", rowsWithQuotes)
 	}
 }
+
+// ---- round 99, second-day ----
+// TestTheFleetFoldNamesTheKeyOnlyWhereItMoves holds the fleet column's fold to
+// the key it names. "▾ 3 more below · j" is the list saying it is cut and how
+// to see the rest, and `j` is the list's key only while the keys are in the
+// fleet panel — the one wearing `▌`. At Lv2 the same key walks the trail's
+// rows and at Lv3 it scrolls the reader's page, so on those frames the fold
+// named a key that leaves every folded row folded. The count is the row's own
+// answer at every level and stays; the way back to the list is `esc back`,
+// which those footers already name (#232, #250).
+func TestTheFleetFoldNamesTheKeyOnlyWhereItMoves(t *testing.T) {
+	foldRow := func(view string) string {
+		for _, ln := range strings.Split(ansi.Strip(view), "\n") {
+			if strings.Contains(ln, "more below") || strings.Contains(ln, "more above") {
+				return strings.TrimRight(ln, " ")
+			}
+		}
+		return ""
+	}
+	walk := func(sc scene, w, h int, route []string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range route {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	// The frames it was found on: the second day's archived session opened
+	// one and two levels in, where the fleet column keeps its fold.
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, stand := range []struct {
+			w, h  int
+			route []string
+			lv    int
+		}{
+			{100, 30, []string{"A", "1", "tab"}, 2},
+			{152, 40, []string{"A", "1", "tab", "tab"}, 3},
+			{220, 48, []string{"A", "1", "tab", "tab"}, 3},
+		} {
+			sd := sceneSecondDay()
+			m := walk(sd, stand.w, stand.h, stand.route)
+			if m.level != stand.lv {
+				t.Fatalf("%s %d: %v landed at Lv%d, not Lv%d", prof.name, stand.w, stand.route, m.level, stand.lv)
+			}
+			row := foldRow(m.View())
+			if row == "" {
+				t.Fatalf("%s %d: no fold on %v", prof.name, stand.w, stand.route)
+			}
+			if strings.Contains(row, "· j") || strings.Contains(row, "· k") {
+				t.Errorf("%s %d %v: the fold names a key the fleet does not hold: %q",
+					prof.name, stand.w, stand.route, row)
+			}
+			if !strings.Contains(row, "more below") && !strings.Contains(row, "more above") {
+				t.Errorf("%s %d %v: the fold lost its count: %q", prof.name, stand.w, stand.route, row)
+			}
+			// Pressed on that very frame, `j` leaves the fold as it was.
+			after := walk(sd, stand.w, stand.h, append(append([]string(nil), stand.route...), "j"))
+			if got := foldRow(after.View()); got != row {
+				t.Errorf("%s %d %v: `j` moved the fold %q -> %q", prof.name, stand.w, stand.route, row, got)
+			}
+		}
+	}
+
+	// The rule, and its held side: off the fleet the fold is the count
+	// alone; on the fleet it keeps the key that moves the list.
+	routes := [][]string{
+		{}, {"tab"}, {"tab", "tab"}, {"A"}, {"A", "1", "tab"}, {"A", "1", "tab", "tab"},
+		{"A", "j"}, {"tab", "j"}, {"x"}, {"A", "shift+tab", "tab"},
+	}
+	keyed := 0
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range routes {
+					m := walk(sc, size[0], size[1], route)
+					row := foldRow(m.View())
+					if row == "" {
+						continue
+					}
+					named := strings.Contains(row, "· j") || strings.Contains(row, "· k")
+					if m.focus() == panelFleet {
+						if named {
+							keyed++
+						}
+						continue
+					}
+					if named {
+						t.Errorf("%s %s %dx%d %v (Lv%d): the fold names a key the fleet does not hold: %q",
+							prof.name, sc.name, size[0], size[1], route, m.level, row)
+					}
+				}
+			}
+		}
+	}
+	if keyed == 0 {
+		t.Errorf("no fold kept its key where the fleet holds it: the yield took every one")
+	}
+}

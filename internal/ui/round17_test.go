@@ -121,8 +121,16 @@ func TestTheFoldNamesTheGroupItCutInto(t *testing.T) {
 			if !isHeaderLine(first) && first != "" && !strings.Contains(plain, " · ") {
 				t.Errorf("the fold over an entry names no group: %q over %q", plain, first)
 			}
-			if !strings.Contains(plain, "more above · k") {
+			// The count is what this assertion was for; the key clause
+			// beside it is worn only where the fleet holds `j`/`k`, and
+			// this model is one level in (#137, and the fold's own key
+			// rule). Re-pointed to the count, with the key asserted
+			// where the keys are the list's.
+			if !strings.Contains(plain, "more above") {
 				t.Errorf("the fold lost its count: %q", plain)
+			}
+			if m.focus() == panelFleet && !strings.Contains(plain, "more above · k") {
+				t.Errorf("the fold lost the key that moves the list: %q", plain)
 			}
 		}
 		m.move(1)
