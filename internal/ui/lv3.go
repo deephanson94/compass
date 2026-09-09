@@ -760,7 +760,24 @@ func (m *Model) readerCursorMove(delta int) bool {
 	}
 	if fits {
 		if !moved {
+			// Which end the cursor stands at is the question the press
+			// asked; #83's word answers the page's, and the row said only
+			// the page's — one sentence for two opposite refusals, so `k`
+			// on the first row and `j` on the last drew the very same
+			// footer and the person could not read from it which end had
+			// been reached (#221; #304's own rule one level down). At the
+			// top the frame answers on its own face: `readerAbove` draws
+			// " the start of the conversation" directly over the cursor,
+			// so #83's word stands there as #304 left it — a note leaving
+			// to the row what the row already draws (#128, #134). No row
+			// draws the other end, so there the note takes the reader's
+			// own word for it, the one `j` and `ctrl+d` already get on
+			// every page that scrolls, so one fact keeps one name (#24,
+			// #228, #307).
 			m.note = "all of it is on screen"
+			if delta > 0 {
+				m.note = "end of the conversation"
+			}
 		}
 		return true
 	}

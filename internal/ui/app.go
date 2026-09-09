@@ -3639,6 +3639,23 @@ func (m *Model) statusChips() string {
 // because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
+	// The end's own word is one cell longer than #83's, which the same key
+	// draws at the other end of the same page, and a word costs no key
+	// (#308): where the finished row under it names fewer keys than under
+	// #83's, the row keeps #83's word, as it already does under `g` and `G`
+	// on the same page. The trade is measured before every other, because
+	// the cell this one wants is the cell they are all spent against
+	// (#281, #284, #306).
+	if m.level >= levelReader && m.note == "end of the conversation" && m.readerPageFits() {
+		with := m.footerTraded(keys, w)
+		m.note = "all of it is on screen"
+		without := m.footerTraded(keys, w)
+		m.note = "end of the conversation"
+		if !footerNamesAll(without, with) {
+			return without
+		}
+		return with
+	}
 	// The clause the reply refusal already says goes before any trade is
 	// measured. #165 gave both no-pane refusals their naming form
 	// "precisely so that naming the key would buy a key back", and the

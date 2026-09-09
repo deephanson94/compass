@@ -14594,7 +14594,13 @@ func TestTheReaderMoveSaysWhatItDid(t *testing.T) {
 	if strings.Contains(r107sdFoot(one), "all of it is on screen") {
 		t.Errorf("second-day 80x24 [tab tab j]: `j` moved the mark and the row answers the page's question: %q", r107sdFoot(one))
 	}
-	if !strings.Contains(r107sdFoot(two), "all of it is on screen") {
+	// The sentence is the end's own, not the page's. No row draws that end
+	// of the document, while the start is drawn over the cursor
+	// (readerAbove), so #83's word keeps the end the frame already answers
+	// and this one takes the reader's own — the word `j` gets on every page
+	// that scrolls (#24, #228, #309). Part three below holds #83's word
+	// where it still stands.
+	if !strings.Contains(r107sdFoot(two), "end of the conversation") {
 		t.Errorf("second-day 80x24 [tab tab j j]: `j` moved nothing and the row does not say why: %q", r107sdFoot(two))
 	}
 	if r107sdFoot(one) == r107sdFoot(two) {
@@ -15234,4 +15240,199 @@ func r108ttWordMark(m *Model) string {
 		}
 	}
 	return ""
+}
+
+// ---- round 108, fleet-hygiene ----
+// ---- round 108, fleet-hygiene ----
+// r108fhOnScreen, r108fhEndWord and r108fhStartWord are the three sentences
+// a reader press that moved nothing can draw: what the page holds (#83), and
+// the reader's own words for its two ends (#24, #228).
+const (
+	r108fhOnScreen  = "all of it is on screen"
+	r108fhEndWord   = "end of the conversation"
+	r108fhStartWord = "start of the conversation"
+)
+
+// r108fhEndSizes are the five terminals the walkthrough is drawn at.
+var r108fhEndSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r108fhEndRoutes are ways down to a reader page: straight in, in on another
+// row, and the chapter and cursor keys pressed once there, so both a page
+// that fits and a page that scrolls are stood on.
+var r108fhEndRoutes = [][]string{
+	{"tab", "tab"},
+	{"tab", "tab", "]"},
+	{"tab", "tab", "j"},
+	{"1", "tab", "tab"},
+}
+
+// r108fhEndFoot splits a drawn footer into the keymap that stands before the
+// gap and the note that stands after it.
+func r108fhEndFoot(rows []string) (keys, note string) {
+	if len(rows) == 0 {
+		return "", ""
+	}
+	s := strings.TrimLeft(strings.TrimRight(ansi.Strip(rows[len(rows)-1]), " "), " ")
+	if i := strings.Index(s, "  "); i >= 0 {
+		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i:])
+	}
+	return strings.TrimSpace(s), ""
+}
+
+// r108fhEndNoted is the finished footer for the stand the reader is on now,
+// drawn with note in the note's place, so the trade the fold makes can be
+// read key for key without pressing anything.
+func r108fhEndNoted(m *Model, w int, note string) string {
+	was := m.note
+	m.note = note
+	out := ansi.Strip(m.footerTraded(m.keymap(), w-2))
+	m.note = was
+	return out
+}
+
+// r108fhEndStand puts the reader's cursor on the row at the far end in
+// direction step — the last line of the document for `j`, the first for `k`,
+// never the air between blocks — with the page scrolled so that row is on
+// it, then presses the key that can go no further twice: the first settles
+// the viewport, the second is the press that must answer. It returns the
+// frame that press came back with.
+func r108fhEndStand(m *Model, sc scene, step int) []string {
+	doc := m.doc(m.readerWidth())
+	at := len(doc) - 1
+	if step < 0 {
+		at = 0
+	}
+	for at >= 0 && at < len(doc) && doc[at].kind == readerBlank {
+		at -= step
+	}
+	if at < 0 || at >= len(doc) {
+		return strings.Split(ansi.Strip(m.View()), "\n")
+	}
+	m.scroll = clampScroll(at-m.readerHeight()/2, len(doc), m.readerHeight())
+	m.anchor, m.anchorAt = at, doc[at].at
+	key := "j"
+	if step < 0 {
+		key = "k"
+	}
+	for i := 0; i < 2; i++ {
+		pressKey(m, key)
+		poll(m, sc)
+	}
+	return strings.Split(ansi.Strip(m.View()), "\n")
+}
+
+// TestTheReaderSaysWhichEndTheCursorIsAt holds the rule this round folds. On
+// a reader page that scrolls, `j` and `k` at the two ends already answer with
+// the reader's own words for them — "end of the conversation" and "start of
+// the conversation" (#24, #228). On a page that fits, both ends drew #83's
+// "all of it is on screen" instead: one sentence for two opposite refusals,
+// so `k` on the first row and `j` on the last came back as the very same
+// footer and the person could not read from it which end had been reached
+// (#221, #304's own rule one level down). The top of a fitting page is
+// answered on the frame's own face — `readerAbove` draws " the start of the
+// conversation" directly over the cursor — so #83's word stays there, the
+// way a note leaves to the row what the row already draws (#128, #134). The
+// bottom has no such row, and takes the reader's own word for that end where
+// the row has the cell for it (#281, #284, #306); where it has not, #83's
+// word stands, and no key that acts is ever paid for the change (#264).
+//
+// Four sides, at five widths under both colour profiles (#215, #218).
+func TestTheReaderSaysWhichEndTheCursorIsAt(t *testing.T) {
+	forceASCII(t)
+	fits, scrolls, roomy, tight := 0, 0, 0, 0
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range r108fhEndSizes {
+				w, h := size[0], size[1]
+				for _, route := range r108fhEndRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.showHelp || m.searching || m.replying || m.level < levelReader {
+						continue
+					}
+					where := fmt.Sprintf("%s %s %v %dx%d", prof.name, sc.name, route, w, h)
+					page := len(m.doc(m.readerWidth())) <= m.readerHeight()
+
+					bottom := r108fhEndStand(m, sc, 1)
+					endKeys, endNote := r108fhEndFoot(bottom)
+					// Measured on the very stand the press came to rest on,
+					// before anything else is pressed.
+					bare := r108fhEndNoted(m, w, r108fhOnScreen)
+					with := r108fhEndNoted(m, w, r108fhEndWord)
+					room := footerNamesAll(bare, with)
+
+					top := r108fhEndStand(m, sc, -1)
+					_, startNote := r108fhEndFoot(top)
+
+					if !page {
+						scrolls++
+						// The held side: a page that scrolls already names
+						// its two ends apart, and this fold moves none of it.
+						if endNote != r108fhEndWord || startNote != r108fhStartWord {
+							t.Errorf("%s: a reader page that scrolls stopped naming its ends: end=%q start=%q", where, endNote, startNote)
+						}
+						continue
+					}
+					fits++
+					// One: #83's word is not lost. It keeps the end whose
+					// marker the frame draws over the cursor.
+					if !strings.Contains(startNote, r108fhOnScreen) {
+						t.Errorf("%s: `k` at the first row of a page that fits no longer answers the page's question: %q", where, startNote)
+					}
+					joined := strings.Join(top, "\n")
+					if !strings.Contains(joined, "the start of the conversation") &&
+						!strings.Contains(joined, "the start of the agent's own conversation") {
+						t.Errorf("%s: the top of a fitting page draws no start marker, so #83's word there answers nothing", where)
+					}
+					// Two: where the row has the cell, the end says which
+					// end it is, and the two ends stop saying one thing.
+					if room {
+						roomy++
+						if endNote != r108fhEndWord {
+							t.Errorf("%s: the row has the cell and `j` at the last row still does not say which end it reached: %q", where, endNote)
+						}
+						if endNote == startNote {
+							t.Errorf("%s: one sentence for both ends of a page that fits — `j` on the last row and `k` on the first say the same thing: %q", where, endNote)
+						}
+						// Three: it is paid for with no key that acts.
+						if !footerNamesAll(bare, endKeys) {
+							t.Errorf("%s: the end word cost the row a key\n  end =%q\n  bare=%q", where, endKeys, bare)
+						}
+					} else {
+						// Four: and where it has not, #83's word stands.
+						tight++
+						if endNote != r108fhOnScreen {
+							t.Errorf("%s: the row has no cell for the end's own word and did not keep #83's: %q", where, endNote)
+						}
+					}
+					for _, frame := range [][]string{bottom, top} {
+						for _, r := range frame {
+							if lipgloss.Width(r) > w {
+								t.Errorf("%s: a row runs past the terminal (%d of %d): %q", where, lipgloss.Width(r), w, r)
+							}
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+	if fits < 60 {
+		t.Fatalf("only %d fitting reader stands reached: the biting side is unmeasured", fits)
+	}
+	if scrolls < 20 {
+		t.Fatalf("only %d scrolling reader stands reached: the held side is unmeasured", scrolls)
+	}
+	if roomy < 60 {
+		t.Fatalf("only %d fitting stands had the cell for the end's own word: the biting side is unmeasured", roomy)
+	}
+	t.Logf("fitting reader stands: %d (with the cell %d, without %d) · stands on a page that scrolls: %d", fits, roomy, tight, scrolls)
 }

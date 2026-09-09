@@ -1805,8 +1805,27 @@ func TestFittingConversationSaysSo(t *testing.T) {
 	for i := 0; i < 200 && m.note == ""; i++ {
 		press(m, "j") // down to the last row of a page with nowhere to scroll
 	}
-	if !strings.Contains(m.note, "all of it is on screen") {
+	// Which sentence it is depends on what the frame already draws. At the
+	// top `readerAbove` draws " the start of the conversation" directly
+	// over the cursor, so the note is free to answer the page's question
+	// and keeps #83's word. At the bottom no row draws that end, and one
+	// sentence for both ends meant `k` on the first row and `j` on the last
+	// came back as the very same footer; there the note takes the reader's
+	// own word for that end, the one every page that scrolls already gets
+	// (#24, #228, #309).
+	if !strings.Contains(m.note, "end of the conversation") {
 		t.Errorf("j at the end of a fitting conversation said %q", m.note)
+	}
+	end := m.note
+	m.note = ""
+	for i := 0; i < 200 && m.note == ""; i++ {
+		press(m, "k") // back up to the first row of the same page
+	}
+	if !strings.Contains(m.note, "all of it is on screen") {
+		t.Errorf("k at the start of a fitting conversation said %q", m.note)
+	}
+	if m.note == end {
+		t.Errorf("one sentence for both ends of a fitting conversation: %q", end)
 	}
 }
 
