@@ -3753,11 +3753,71 @@ func (m *Model) keymapAt(w int) string {
 }
 
 // footerWith renders the keymap and the note into one row w wide.
+//
+// A width refused is drawn twice. The unit is the one word of it the
+// person's own terminal supplies (#190), and it yields wherever the row
+// without it names a key the row with it did not. The trade is measured on
+// the finished row, because the note's own reserve is what the keys are
+// shed against: #190's gate read the row half-shed and only for a key
+// naming a level, so at a hundred columns `mirror needs 110 columns` stood
+// without `r reply` — the key that types into the very pane it is refusing
+// to draw — where the same refusal at eighty already stood bare. The cells
+// go to a key that acts, and only where one comes back, which is how the
+// deck's own chapter yield spends them (#24, #165, #175, #187, #194, #198,
+// #201, #264).
 func (m *Model) footerWith(keys string, w int) string {
+	row, named := m.footerRow(keys, w)
+	if unit := " columns"; strings.HasSuffix(m.note, unit) {
+		was := m.note
+		m.note = strings.TrimSuffix(was, unit)
+		short, shortNamed := m.footerRow(keys, w)
+		m.note = was
+		if keysGained(named, shortNamed) {
+			return short
+		}
+	}
+	return row
+}
+
+// keysGained says whether the footer the shorter note leaves names every
+// key the longer one named and one more besides. The attach aside is not a
+// key (#55) and is read past on both sides, so a note yields its cells for
+// a key and never for the parenthetical that finishes one.
+func keysGained(was, now string) bool {
+	read := func(s string) []string {
+		var out []string
+		for _, frag := range strings.Split(strings.ReplaceAll(s, attachHint, ""), " · ") {
+			if f := strings.TrimSpace(frag); f != "" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	had, has := read(was), read(now)
+	if len(has) <= len(had) {
+		return false
+	}
+	for _, c := range had {
+		found := false
+		for _, d := range has {
+			if d == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// footerRow draws one such row and says which keys it named.
+func (m *Model) footerRow(keys string, w int) (string, string) {
 	if m.note == "" {
 		fits := func(k string) bool { return lipgloss.Width(k) <= w }
 		keys = shedKeys(keys, m.chapterYield(keys, m.footerDrops(false), fits), fits)
-		return dimStyle.Render(clip(keys, w))
+		return dimStyle.Render(clip(keys, w)), keys
 	}
 	var left string
 	// The note is the news, but the keymap is the only place the reader's
@@ -3919,22 +3979,6 @@ func (m *Model) footerWith(keys string, w int) string {
 			forms = noteForms(note)
 		}
 	}
-	if unit := " columns"; strings.HasSuffix(minimal, unit) && strings.HasSuffix(m.note, unit) {
-		// A width refused: `no board under 110 columns` (26) and `mirror
-		// needs 110 columns` (24) against the 22 the Lv1 footer leaves
-		// cost it `tab deeper`, the frame's only naming of the way
-		// deeper — the harm #175 and #187 each folded, on the very form
-		// #165 held up as the one that "names the key and keeps the way
-		// in". The unit is the one word of it the person's own terminal
-		// supplies; the number, which is the only thing to act on, and
-		// the key stay. Only where the key comes back.
-		short := strings.TrimSuffix(minimal, unit)
-		if k, base := shed(short, " · ? help"), shed("", ""); levelKeyLost(base, keys) && !levelKeyLost(base, k) {
-			keys, minimal = k, short
-			note = short
-			forms = noteForms(note)
-		}
-	}
 	if i := strings.Index(minimal, " to "+mirrorMark); i > 0 && strings.HasPrefix(minimal, "↪ ") && strings.HasPrefix(m.note, "↪ ") {
 		// A trace's destination proves where a line landed (#39) and
 		// stays; the arrow is its preposition. `↪ sent to ⌁ harness:1.0`
@@ -4015,7 +4059,7 @@ func (m *Model) footerWith(keys string, w int) string {
 	left = dimStyle.Render(clip(keys, w))
 	room := w - lipgloss.Width(left) - 2
 	if room < noteFloor() {
-		return dimStyle.Render(shedClauses(note, w)) // no keymap fits beside it
+		return dimStyle.Render(shedClauses(note, w)), "" // no keymap fits beside it
 	}
 	// The reserve is room the note grows into (#134, #180). Where the note
 	// has no form to grow into it the cells stand blank and a key is
@@ -4051,7 +4095,7 @@ func (m *Model) footerWith(keys string, w int) string {
 		shown = dimStyle.Render(shedClauses(forms[len(forms)-1], room))
 	}
 	gap := w - lipgloss.Width(left) - lipgloss.Width(shown)
-	return left + strings.Repeat(" ", gap) + shown
+	return left + strings.Repeat(" ", gap) + shown, keys
 }
 
 // noteDrawnIn is the width the note is drawn at in room cells — the fullest

@@ -11445,3 +11445,95 @@ func TestTheFleetFoldNamesTheKeyOnlyWhereItMoves(t *testing.T) {
 		t.Errorf("no fold kept its key where the fleet holds it: the yield took every one")
 	}
 }
+
+// ---- round 99, two-tools ----
+// r99ttUnit is the one word of a width refusal the person's own terminal
+// supplies (#190): `mirror needs 110 columns`, `no board under 110 columns`.
+const r99ttUnit = " columns"
+
+// r99ttFooterKeys is the footer's keys as a set, read past the attach
+// aside, which is not a key (#55).
+func r99ttFooterKeys(view string) map[string]bool {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	foot := rows[len(rows)-1]
+	keys := map[string]bool{}
+	for _, frag := range strings.Split(strings.ReplaceAll(foot, attachHint, ""), " · ") {
+		if f := strings.TrimSpace(frag); f != "" {
+			keys[f] = true
+		}
+	}
+	return keys
+}
+
+// TestTheWidthRefusalKeepsItsUnitOnlyWhereItCostsNoKey walks every scene at
+// the two widths a width refusal is drawn at, under both colour profiles
+// (#215, #218). Wherever the note ends in the unit, the same frame is drawn
+// again with the unit dropped: the shorter note must put no key on the row
+// that the longer one left off. A key that acts and is not named is what a
+// footer is for (#24, #165, #175, #187, #190, #194, #198, #264), and the
+// eight cells are a word the terminal supplies.
+func TestTheWidthRefusalKeepsItsUnitOnlyWhereItCostsNoKey(t *testing.T) {
+	forceASCII(t)
+	routes := [][]string{
+		{"m"},
+		{"tab", "m"},
+		{"shift+tab"},
+		{"j", "tab", "m"},
+		{"j", "m"},
+		{"tab", "tab", "m"},
+		{"shift+tab", "shift+tab"},
+	}
+	refusals, checked := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}} {
+				w, h := size[0], size[1]
+				for ri, route := range routes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					view := m.View()
+					rows := strings.Split(ansi.Strip(view), "\n")
+					foot := strings.TrimSpace(rows[len(rows)-1])
+					if !strings.Contains(foot, "110") {
+						continue
+					}
+					refusals++
+					// The refusal still names its number and its key.
+					if !strings.Contains(foot, "mirror needs 110") && !strings.Contains(foot, "no board under 110") {
+						t.Errorf("%s %dx%d r%d p%v: the width refusal lost its words: %q", sc.name, w, h, ri, prof, foot)
+						continue
+					}
+					if !strings.HasSuffix(m.note, r99ttUnit) {
+						continue
+					}
+					checked++
+					was := r99ttFooterKeys(view)
+					m.note = strings.TrimSuffix(m.note, r99ttUnit)
+					now := r99ttFooterKeys(m.View())
+					var gained []string
+					for k := range now {
+						if !was[k] && !strings.Contains(k, "110") {
+							gained = append(gained, k)
+						}
+					}
+					if len(gained) > 0 {
+						t.Errorf("%s %dx%d r%d p%v: the unit cost the footer %s: %q",
+							sc.name, w, h, ri, prof, fmt.Sprint(gained), foot)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if refusals < 40 {
+		t.Fatalf("the walk reached only %d width refusals", refusals)
+	}
+	if checked < 10 {
+		t.Fatalf("only %d refusals still wore the unit — the rule was not exercised", checked)
+	}
+}
