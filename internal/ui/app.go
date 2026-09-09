@@ -3704,7 +3704,7 @@ func (m *Model) footerTraded(keys string, w int) string {
 	// eleven cells this clause wants are the cells that trade is spent
 	// against. Where the width is not there the row comes back exactly as
 	// it stood, `space unfold` at its head.
-	if clause := "j/k rows · "; m.level >= levelReader && strings.HasPrefix(keys, clause) {
+	if clause := "j/k rows · "; m.level >= levelReader && m.readerPageFits() && strings.HasPrefix(keys, clause) {
 		bare := strings.Replace(keys, clause, "", 1)
 		if !footerNamesAll(m.footerMirrorTraded(bare, w), m.footerMirrorTraded(keys, w)) {
 			keys = bare
@@ -3897,9 +3897,9 @@ func (m *Model) keymap() string {
 		// back being the key the session view names. `shedOrder` has
 		// ranked the clause among the shared keys all along, so it sheds
 		// at the rank it already has (#39, #281).
-		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · m live pane · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · m live pane · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
-		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
 		// `/` opens the fleet search here as it does on the board, on a
 		// list and in the reader: pressed at this level it takes the
@@ -3994,15 +3994,20 @@ func (m *Model) keymap() string {
 		// is never named is the one thing a footer is for (#24, #175,
 		// #187). #220 settled the words one level out, where the same
 		// keys move the cursor and not the viewport: the movement key is
-		// `j/k rows`. So `scroll` gives way to the unit the key moves,
-		// and a page that scrolls keeps `j/k scroll`. The page key stays
-		// shed: it is a shortcut for a distance `j` covers, the first
+		// `j/k rows`, and the reader's keys are the same keys: they walk
+		// the mark a row at a time and move the viewport only when the
+		// mark would leave it, so `rows` is what they move on every page
+		// and `scroll` was the name of a job they do only sometimes and
+		// often not at all (#308). The page key stays shed where the page
+		// fits: it is a shortcut for a distance `j` covers, the first
 		// thing this row gives up and a key the help teaches (#42, #51,
-		// #200). The clause is taken only where the finished row still
-		// names every key it named without it (footerTraded, #281, #284,
-		// #295).
+		// #200). Where the clause is new to the row — the page that fits,
+		// which shed its movement key altogether under #83 — it is taken
+		// only where the finished row still names every key it named
+		// without it (footerTraded, #281, #284, #295); where the row
+		// named `j/k scroll` already the new word is two cells shorter
+		// and costs nothing.
 		if m.readerPageFits() {
-			keys = strings.Replace(keys, "j/k scroll · ", "j/k rows · ", 1)
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
 		}
 	}

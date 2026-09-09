@@ -14844,10 +14844,10 @@ func r107ttCurGap(foot string, inner int) int {
 //
 // Three sides, so the words cannot be jammed onto every page:
 //   - a fitting reader page whose row has the room names `j/k rows`;
-//   - a page that scrolls keeps `j/k scroll` and never says `j/k rows`,
-//     because there the key does move the viewport, and a page that fits
-//     still offers no `ctrl+d/u half page` — the shortcut #200 shed and
-//     the help teaches;
+//   - a page that scrolls names `j/k rows` too and never says `j/k scroll`
+//     (#307: the key walks the mark there and moves the viewport only
+//     behind it), and a page that fits still offers no `ctrl+d/u half
+//     page` — the shortcut #200 shed and the help teaches;
 //   - the clause costs nothing: the finished row names every key the same
 //     row names without it, and no row runs past its terminal.
 func TestTheReadersFittingPageNamesTheCursorKeys(t *testing.T) {
@@ -14879,14 +14879,16 @@ func TestTheReadersFittingPageNamesTheCursorKeys(t *testing.T) {
 
 					fits := len(m.doc(m.readerWidth())) <= m.readerHeight()
 					if !fits {
-						// The page scrolls: there the pair does move the
-						// viewport, and the row says so.
+						// The page scrolls: the pair still walks the mark a
+						// row at a time and moves the viewport only when the
+						// mark would leave it (#300, #307), so the row names
+						// what the keys move here as well.
 						scrolls++
-						if !strings.Contains(keys, r107ttCurScroll) && lipgloss.Width(keys) < inner-lipgloss.Width(r107ttCurScroll+" · ") {
-							t.Errorf("%s: a reader page that scrolls names neither scroll key on a row with the room\n  foot=%q", where, keys)
+						if !strings.Contains(keys, r107ttCurRows) && lipgloss.Width(keys) < inner-lipgloss.Width(r107ttCurRows+" · ") {
+							t.Errorf("%s: a reader page that scrolls names neither movement key on a row with the room\n  foot=%q", where, keys)
 						}
-						if strings.Contains(keys, r107ttCurRows) {
-							t.Errorf("%s: a reader page that scrolls says %q; there the keys move the viewport (#83)\n  foot=%q", where, r107ttCurRows, keys)
+						if strings.Contains(keys, r107ttCurScroll) {
+							t.Errorf("%s: a reader page that scrolls says %q; the keys walk rows there too (#307)\n  foot=%q", where, r107ttCurScroll, keys)
 						}
 						continue
 					}
@@ -14939,4 +14941,155 @@ func TestTheReadersFittingPageNamesTheCursorKeys(t *testing.T) {
 		t.Errorf("only %d reader stands on a page that scrolls; the held side is unmeasured", scrolls)
 	}
 	t.Logf("fitting reader stands with the room: %d · stands on a page that scrolls: %d", roomy, scrolls)
+}
+
+// ---- round 108, second-day ----
+// TestTheReaderMovementKeyNamesRows holds the rule this round folds: the
+// reader's movement key is named for what it moves, `j/k rows`, on every
+// page. Since #300 `j` and `k` walk the drawn `▸` a row at a time and move
+// the viewport only when the mark would leave it, so `scroll` named a job
+// the key does sometimes and often not at all: on the archive's reader at
+// eighty the first eight `k` presses from the opening stand step the mark
+// and scroll nothing at all, under a row saying `j/k scroll` (#221). #220
+// settled the word one level out and #306 brought it to the reader's
+// fitting page; it is the same key on both pages.
+func TestTheReaderMovementKeyNamesRows(t *testing.T) {
+	forceASCII(t)
+
+	r108sdScene := func(name string) scene {
+		for _, sc := range allScenes() {
+			if sc.name == name {
+				return sc
+			}
+		}
+		t.Fatalf("no scene %q", name)
+		return scene{}
+	}
+	r108sdWalk := func(sc scene, w, h int, keys []string) (*Model, []string) {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m, strings.Split(ansi.Strip(m.View()), "\n")
+	}
+	r108sdFoot := func(rows []string) string { return strings.TrimRight(rows[len(rows)-1], " ") }
+	// The page under the cursor, with the cursor taken out of it: the mark
+	// is the one cell markAnchor spends on the row it stands on (#300), so
+	// two frames that differ only in where the mark is are the same page,
+	// drawn at the same scroll.
+	r108sdPage := func(rows []string) string {
+		var out []string
+		for _, r := range rows[:len(rows)-1] {
+			// The mark takes the cell after the row's glyph where there is
+			// one and is pushed in front of the row's own words where there
+			// is not (#300, #305), so the cell it spends is put back and the
+			// row's spacing normalised before the two pages are compared.
+			out = append(out, strings.Join(strings.Fields(strings.Replace(r, "▸", " ", 1)), " "))
+		}
+		return strings.Join(out, "\n")
+	}
+	r108sdMarks := func(rows []string) string {
+		var out []string
+		for _, r := range rows[:len(rows)-1] {
+			if strings.ContainsRune(r, '▸') {
+				out = append(out, strings.TrimSpace(r))
+			}
+		}
+		return strings.Join(out, "\n")
+	}
+
+	// One: the frame it was found on. `second-day` at eighty, the archive's
+	// own reader — a conversation that does not fit, opened at its end with
+	// four lines above the viewport. Eight presses of `k` walk the mark up
+	// the page and not one of them moves the page.
+	sd := r108sdScene("second-day")
+	m, stand := r108sdWalk(sd, 80, 24, []string{"A", "tab", "tab"})
+	if m.level != 3 || !strings.Contains(strings.Join(stand, "\n"), "READER · api") {
+		t.Fatalf("second-day 80x24 [A tab tab]: not the archive's reader: %q", r108sdFoot(stand))
+	}
+	if m.readerPageFits() {
+		t.Fatalf("second-day 80x24 [A tab tab]: the page fits — not the stand this pins")
+	}
+	if strings.Contains(r108sdFoot(stand), "j/k scroll") {
+		t.Errorf("second-day 80x24 [A tab tab]: the row names the cursor key for a job it does not do: %q", r108sdFoot(stand))
+	}
+	if !strings.Contains(r108sdFoot(stand), "j/k rows") {
+		t.Errorf("second-day 80x24 [A tab tab]: the row names no movement key at all: %q", r108sdFoot(stand))
+	}
+	// The row keeps every key it named under the longer word.
+	for _, key := range []string{"space unfold", "[ ] turns", "esc back", "A fleet", "? help", "q quit"} {
+		if !strings.Contains(r108sdFoot(stand), key) {
+			t.Errorf("second-day 80x24 [A tab tab]: the row lost %q: %q", key, r108sdFoot(stand))
+		}
+	}
+	if w := lipgloss.Width(r108sdFoot(stand)); w > 80 {
+		t.Errorf("second-day 80x24 [A tab tab]: the row runs past the terminal (%d): %q", w, r108sdFoot(stand))
+	}
+	page, marks, moved := r108sdPage(stand), r108sdMarks(stand), 0
+	for n := 1; n <= 8; n++ {
+		pressKey(m, "k")
+		poll(m, sd)
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		if r108sdPage(rows) != page {
+			t.Errorf("second-day 80x24 [A tab tab] then %d×%q: the page scrolled — not the stand this pins", n, "k")
+			break
+		}
+		if r108sdMarks(rows) == marks {
+			t.Errorf("second-day 80x24 [A tab tab] then %d×%q: the mark stopped moving — not the stand this pins", n, "k")
+			break
+		}
+		if strings.Contains(r108sdFoot(rows), "j/k scroll") {
+			t.Errorf("second-day 80x24 [A tab tab] then %d×%q: the press scrolled nothing under a row saying so: %q",
+				n, "k", r108sdFoot(rows))
+		}
+		marks = r108sdMarks(rows)
+		moved++
+	}
+	if moved != 8 {
+		t.Errorf("the found stand walked the mark %d rows without scrolling, want 8", moved)
+	}
+
+	// Two: the rule, over every scene at five widths under both profiles.
+	// No reader row names `j/k scroll`, and the reader's rows that name a
+	// movement key name `j/k rows` — the same word the trail's rows use for
+	// the same key (#220).
+	named, stands := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				for _, route := range [][]string{{"tab", "tab"}, {"A", "tab", "tab"}} {
+					rm, rows := r108sdWalk(sc, size[0], size[1], route)
+					if rm.level != 3 {
+						continue
+					}
+					stands++
+					foot := r108sdFoot(rows)
+					if strings.Contains(foot, "j/k scroll") {
+						t.Errorf("%v %s %dx%d %v: the reader's row names `j/k scroll`: %q", prof, sc.name, size[0], size[1], route, foot)
+					}
+					if strings.Contains(foot, "j/k rows") {
+						named++
+					}
+					if w := lipgloss.Width(foot); w > size[0] {
+						t.Errorf("%v %s %dx%d %v: the row runs past the terminal (%d): %q", prof, sc.name, size[0], size[1], route, w, foot)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 100 || named < 60 {
+		t.Fatalf("the rule reached %d reader stands, %d of them naming the key: it has gone vacuous", stands, named)
+	}
+
+	// Three: the word is a rename, not a shed. A fold that answers the
+	// finding by dropping the movement key from the reader altogether fails
+	// here: the page that scrolls names it, and so does the page that fits
+	// where the width is there for it (#306).
+	if _, rows := r108sdWalk(sd, 220, 48, []string{"tab", "tab"}); !strings.Contains(r108sdFoot(rows), "j/k rows") {
+		t.Errorf("second-day 220x48 [tab tab]: the fitting page no longer names the cursor key: %q", r108sdFoot(rows))
+	}
 }
