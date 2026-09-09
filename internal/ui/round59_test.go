@@ -13360,3 +13360,166 @@ func TestTheArchiveBoardsDoorBackDropsItsKeyWhileALineIsBeingTyped(t *testing.T)
 		t.Fatalf("the archive board's strip kept its door on only %d frames — the yield took too many", kept)
 	}
 }
+
+// ---- round 104, two-tools ----
+// ---- round 104, two-tools ----
+
+// r104ttGrabSizes are the five terminals the walkthrough is drawn at.
+var r104ttGrabSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r104ttGrabRoutes are four ways into the session view from the opening
+// frame, and the same four one step deeper into the reader.
+var r104ttGrabRoutes = [][]string{{"tab"}, {"2", "tab"}, {"3", "tab"}, {"j", "tab"}, {"j", "j", "tab"}, {"l", "tab"}}
+
+// r104ttGrabClause is the clause's own width in cells, separator and all.
+const r104ttGrabClause = " · g grab"
+
+// r104ttGrabFoot is the drawn footer of a frame, escapes stripped.
+func r104ttGrabFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	if len(rows) == 0 {
+		return ""
+	}
+	return rows[len(rows)-1]
+}
+
+// r104ttGrabKeys is the keymap half of a footer: what stands before the gap
+// the keymap never contains, the attach aside read past (#55, #134).
+func r104ttGrabKeys(foot string) string {
+	s := strings.TrimRight(foot, " ")
+	s = strings.Replace(s, " (prefix d returns)", "", 1)
+	if i := strings.Index(strings.TrimLeft(s, " "), "  "); i >= 0 {
+		s = strings.TrimLeft(s, " ")[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// TestTheSessionViewsRowNamesTheGrabKey pins the session view's row to the
+// key that acts on it. `g` is the fleet's key, not the board's: pressed at
+// Lv2 it takes the oldest session waiting on you, moves the header, the
+// trail and the reader onto it and attaches — on a two-tool fleet the deck
+// comes back standing on the other tool's row — and no key on the row said
+// so, on a row that stood 188 cells of 220 with thirty-two blank and the
+// attach aside still on it. A key that acts and is never named is the one
+// thing a footer is for (#24, #175, #187, #277, #284, #289), and the help
+// in the reader sends the person here for it ("the grab is a level out",
+// #246).
+//
+// Three sides, so the pin cannot be got by jamming the clause onto every
+// row:
+//   - where the drawn row is shed of nothing and `g` grabs, the row names
+//     `g grab`;
+//   - where the row names it, the key must do what the clause says — the
+//     selection moves to a session waiting on you, the note says where it
+//     went — and the row must still name the way out, the help and the quit;
+//   - the reader's row never names it, because one level deeper `g` is the
+//     start of the conversation and not the grab (#241, #246).
+func TestTheSessionViewsRowNamesTheGrabKey(t *testing.T) {
+	forceASCII(t)
+	stands, roomy, named, readers := 0, 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r104ttGrabSizes {
+				w, h := size[0], size[1]
+				for _, route := range r104ttGrabRoutes {
+					for _, deeper := range []bool{false, true} {
+						m := sceneModel(sc, w, h)
+						for _, k := range route {
+							pressKey(m, k)
+							poll(m, sc)
+						}
+						if deeper {
+							pressKey(m, "tab")
+							poll(m, sc)
+							if m.level < levelReader {
+								continue
+							}
+							// One level deeper the key is not the grab.
+							readers++
+							if keys := r104ttGrabKeys(r104ttGrabFoot(m)); strings.Contains(keys, "g grab") {
+								t.Errorf("%s %s %dx%d: the reader's row offers `g grab`, but `g` here is the start of the conversation (#241, #246)\n  foot=%q",
+									sc.name, route[0], w, h, keys)
+							}
+							continue
+						}
+						if m.level != levelWaypoints {
+							continue
+						}
+						where := fmt.Sprintf("%s %s %dx%d", sc.name, route[0], w, h)
+						foot := r104ttGrabFoot(m)
+						keys := r104ttGrabKeys(foot)
+						stands++
+
+						// Does the key grab on this very frame (#221)?
+						// The stand is spent here: the row above is read,
+						// then the key is pressed on that very model.
+						was := m.selectedKey
+						pressKey(m, "g")
+						poll(m, sc)
+						// `g` found a session waiting on you and said where
+						// it went; `moved` is the harm — the deck came back
+						// standing on another session's row.
+						found := strings.HasPrefix(strings.TrimSpace(m.note), "→ ")
+						moved := m.selectedKey != was
+						has := strings.Contains(keys, "g grab")
+
+						// The biting side is the row that has given up
+						// nothing: the attach aside is the first fragment
+						// `shedOrder` drops, so a row still wearing it is a
+						// row shed of nothing at all (#284's own measure),
+						// and so is one with the clause's own cells still
+						// blank beside the note's reserve.
+						free := w - lipgloss.Width(strings.TrimRight(foot, " "))
+						whole := strings.Contains(foot, attachHint) || free >= lipgloss.Width(r104ttGrabClause)
+						if moved && whole {
+							roomy++
+							if !has {
+								t.Errorf("%s: `g` grabs from the session view — it moves the deck onto %q and attaches (note %q) — and the row, shed of nothing, says so nowhere (%d cells free)\n  foot=%q",
+									where, m.selectedKey, strings.TrimSpace(m.note), free, keys)
+								continue
+							}
+						}
+						if !has {
+							continue
+						}
+						named++
+						// The clause is taken only where it costs no key,
+						// so the row that names it still names the way out
+						// and the help — the last keys any row gives up
+						// (#24, #39, #281, #284).
+						for _, must := range []string{"esc board", "? help", "q quit"} {
+							if !strings.Contains(keys, must) {
+								t.Errorf("%s: the row names `g grab` and no longer names %q\n  foot=%q", where, must, keys)
+							}
+						}
+						// The row names it: the key must do what the
+						// clause says — find the session waiting on you and
+						// say where it went (#78).
+						if !found {
+							t.Errorf("%s: the row names `g grab` and `g` said %q, not where it went\n  foot=%q", where, strings.TrimSpace(m.note), keys)
+							continue
+						}
+						for _, r := range strings.Split(ansi.Strip(m.View()), "\n") {
+							if lipgloss.Width(r) > w {
+								t.Errorf("%s: the frame `g` landed on has a row over %d cells: %q", where, w, r)
+							}
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 120 {
+		t.Errorf("only %d session-view stands; the pin measures nothing", stands)
+	}
+	if readers < 120 {
+		t.Errorf("only %d reader stands; the held side is unmeasured", readers)
+	}
+	if roomy < 24 {
+		t.Errorf("only %d session-view stands where the grab acts on a row shed of nothing; the biting side is unmeasured", roomy)
+	}
+	t.Logf("session-view stands: %d · rows shed of nothing where `g` grabs: %d · naming `g grab`: %d · reader stands: %d", stands, roomy, named, readers)
+}

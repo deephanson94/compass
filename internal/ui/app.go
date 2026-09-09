@@ -3623,6 +3623,26 @@ func (m *Model) footerLine(w int) string {
 			keys = bare
 		}
 	}
+	// The grab key is new to the session view's row for the same reason
+	// as the hide key, the search key and the reader's mirror key, and
+	// pays the same price: it is taken only where the finished row still
+	// names every key it named without it (#281, #284, #289, #293).
+	// Its trade is measured on the row the search trade below finishes,
+	// because that trade is what the cells are spent against: measured on
+	// the half-traded row the clause bought itself in at 152 by taking
+	// `ctrl+d/u half page` and handing the search key back in its place.
+	if clause := " · g grab"; m.level >= levelWaypoints && m.level < levelReader && strings.Contains(keys, clause) {
+		bare := strings.Replace(keys, clause, "", 1)
+		if !footerNamesAll(m.footerSearchTraded(bare, w), m.footerSearchTraded(keys, w)) {
+			keys = bare
+		}
+	}
+	return m.footerSearchTraded(keys, w)
+}
+
+// footerSearchTraded draws the row for this keymap with the search
+// clause's own trade measured on it (#289).
+func (m *Model) footerSearchTraded(keys string, w int) string {
 	row := m.footerGuarded(keys, w)
 	// The search key is new to the session view's row for the same reason
 	// as the hide key and pays the same price: it is taken only where the
@@ -3781,7 +3801,22 @@ func (m *Model) keymap() string {
 		// (#24, #175, #187, #277, #284). It stands where the reader
 		// stands it, before the hide key, and sheds at the rank it
 		// already has (#39, #281).
-		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		// `g` is the fleet's key and it acts here: pressed in the session
+		// view it takes the oldest session waiting on you, moves the
+		// header, the trail and the reader onto it and attaches — the
+		// deck comes back standing on another session's row, on a
+		// two-tool fleet the other tool's — and no key on the row said
+		// so, on a row that stood 172 of 220 cells with forty-eight
+		// blank. A key that acts and is never named is the one thing a
+		// footer is for (#24, #175, #187, #277, #284, #289), and the
+		// help in the reader sends the person here for it ("the grab is
+		// a level out", #246). `shedOrder` has ranked `· g grab` first
+		// among this level's own keys all along with nothing on the row
+		// to match, so it sheds at the rank it already has (#39, #281),
+		// and #78's and #36's gates below still take it off a fleet with
+		// nothing amber and off a fleet of one. It stands after the hide
+		// key, where the board and the list already stand it (#52).
+		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
