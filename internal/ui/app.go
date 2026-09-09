@@ -3564,10 +3564,18 @@ func (m *Model) statusChips() string {
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
 	row := m.footerWith(keys, w)
+	guarded := []string{" · x hide", " · x unhide"}
 	if m.level < levelWaypoints {
-		return row
+		// Below the session view the two views' own rows have named
+		// their hide key since #24; the one clause measured here is the
+		// one the archive's live row takes, which is new to the row for
+		// the same reason and pays the same price (#284).
+		if !m.archiveView {
+			return row
+		}
+		guarded = []string{" · x hide"}
 	}
-	for _, clause := range []string{" · x hide", " · x unhide"} {
+	for _, clause := range guarded {
 		if !strings.Contains(keys, clause) {
 			continue
 		}
@@ -3742,8 +3750,24 @@ func (m *Model) keymap() string {
 		}
 	}
 	if m.archiveView {
-		if s, ok := m.selected(); !ok || !s.Live || m.onBoard(s) {
-			keys = strings.Replace(keys, " · x unhide", "", 1) // the cursor is not on a hidden row: the key answers no question
+		// The clause is the row's, not the view's. On a hidden row `x`
+		// brings it back and the archive says `x unhide`; on the live row
+		// an archive with nothing in it keeps (#244, #248) the same key
+		// takes it off the board, which is `x hide` and is what the live
+		// list one `A` away already draws — the clause was dropped there
+		// on the reasoning that "the key answers no question", and the
+		// key answers it: pressed, it hid the session, moved the header,
+		// the trail and the reader to another row and put a row back in
+		// the archive, with nothing on the footer having offered it
+		// (#24, #175, #187, #277, #284). On an archived row `x` refuses
+		// in its own words and `hideKeyStuck` takes the clause under
+		// #93's rule, which is where the drop belongs.
+		s, ok := m.selected()
+		switch {
+		case !ok || !s.Live:
+			keys = strings.Replace(keys, " · x unhide", "", 1)
+		case m.onBoard(s):
+			keys = strings.Replace(keys, " · x unhide", " · x hide", 1)
 		}
 	}
 	// The keymap sheds its optional fragments before it clips: a footer

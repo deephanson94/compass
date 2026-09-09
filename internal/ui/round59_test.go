@@ -12016,3 +12016,152 @@ func TestTheArchiveLineDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
 		t.Fatalf("the archive line kept its key on only %d frames — the yield took too many", kept)
 	}
 }
+
+// ---- round 101, two-tools ----
+// r101ttSpare is the cells the keys leave in their own field: the note is
+// right-aligned behind a gap the keymap never contains (#134's reserve),
+// so the row's width with a note on it says nothing about what the keys
+// have room for.
+func r101ttSpare(foot string, w int) int {
+	keys := foot
+	if i := strings.Index(strings.TrimPrefix(keys, " "), "  "); i >= 0 {
+		keys = strings.TrimPrefix(keys, " ")[:i]
+	}
+	return w - 1 - lipgloss.Width(keys)
+}
+
+func r101ttFoot(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.TrimRight(rows[len(rows)-1], " ")
+}
+
+// r101ttPressX walks the route again on a fresh model, presses `x` and
+// says whether the frame above the footer moved, with the note the press
+// left: the frame is what a person sees (#215, #218, #221).
+func r101ttPressX(sc scene, w, h int, route []string) (bool, string) {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	body := strings.Join(rows[:len(rows)-1], "\n")
+	pressKey(m, "x")
+	poll(m, sc)
+	after := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.Join(after[:len(after)-1], "\n") != body, m.note
+}
+
+// ---- round 101, two-tools, the one thing ----
+// The archive names the hide key on the row it keeps. `x` is the deck's
+// key at every level (#284): in the archive it brings a hidden row back,
+// and on the live row an archive with nothing in it keeps (#244, #248) the
+// same key takes that row off the board — the header's chips change, a row
+// lands back in the archive under `hidden · x brings one back`, and at Lv2
+// and Lv3 the trail and the reader go with it, while the only word about
+// any of it is the note after the press. The clause was dropped there on
+// the reasoning that "the cursor is not on a hidden row: the key answers
+// no question", and the key answers it. The word is the row's: `x unhide`
+// where the key brings one back, `x hide` where it takes one off, which is
+// what the live list one `A` away already draws for the same key on the
+// same session (#24, #175, #187, #277, #284). On an archived row `x`
+// refuses in its own words and `hideKeyStuck` takes the clause under #93's
+// rule, which this leaves alone.
+//
+// Two sides, so the pin cannot be got by naming the key everywhere:
+//   - where `x` takes the archive's live row off the board and the drawn
+//     row is shed of nothing, the footer names `x hide`;
+//   - where the archive's footer names a hide clause, `x` acts or says
+//     why in its own words (#227).
+func TestTheArchiveNamesTheHideKeyOnTheRowItKeeps(t *testing.T) {
+	forceASCII(t)
+	routes := [][]string{
+		{"A", "x", "x"},
+		{"2", "x", "A", "x", "x"},
+		{"2", "x", "A", "x", "tab", "tab"},
+	}
+	kept, whole, named, offered := 0, 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for ri, route := range routes {
+					m := sceneModel(sc, w, h)
+					for i, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+						if !m.archiveView || m.showHelp || m.searching || m.replying {
+							continue
+						}
+						s, ok := m.selected()
+						if !ok {
+							continue
+						}
+						foot := r101ttFoot(m)
+						tag := fmt.Sprintf("%s %dx%d r%d s%d Lv%d p%v", sc.name, w, h, ri, i+1, m.level, prof)
+						if x := lipgloss.Width(foot); x > w-1 {
+							t.Errorf("%s: the footer overruns its field: %d cells: %q", tag, x, foot)
+						}
+						on := strings.Contains(foot, " · x hide") || strings.Contains(foot, " · x unhide")
+						if on {
+							offered++
+						}
+						keeps := s.Live && m.onBoard(s)
+						if !on && !keeps {
+							continue // `x` is neither offered here nor the archive's own row: #93's rule holds it
+						}
+						// The held side: a key on the row answers from the
+						// row — where `x` moves nothing it says why, and
+						// the row keeps the key its own note is about
+						// (#24, #57, #227).
+						acts, said := r101ttPressX(sc, w, h, route[:i+1])
+						if on && !acts && !strings.Contains(said, " stays · ") && said != "the live one stays" && said != "it is off the board" {
+							t.Errorf("%s: the archive offers the hide key where `x` neither moves nor says why (note %q): %q", tag, said, foot)
+						}
+						if !keeps {
+							continue
+						}
+						// The row the archive keeps: `x` takes it off the
+						// board, so the clause is `x hide` and it is the
+						// row's own key.
+						kept++
+						if !acts {
+							t.Errorf("%s: the archive's live row does not move under `x` (note %q) — the pin's premise is gone: %q", tag, said, foot)
+						}
+						if strings.Contains(foot, " · x unhide") {
+							t.Errorf("%s: the archive says `x unhide` on a row that is on the board: %q", tag, foot)
+						}
+						// The biting side, on the rows nothing has been
+						// shed from: the attach aside is the first
+						// fragment `shedOrder` gives up, so a row still
+						// wearing it is a row shed of nothing at all.
+						// A shed row is #39's and is walked past here.
+						if strings.Contains(foot, attachHint) {
+							whole++
+							if !strings.Contains(foot, " · x hide") {
+								t.Errorf("%s: `x` takes this row off the board and the row, shed of nothing, says so nowhere (%d cells free): %q",
+									tag, r101ttSpare(foot, w), foot)
+							}
+						}
+						if strings.Contains(foot, " · x hide") {
+							named++
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if kept < 12 {
+		t.Fatalf("the walk stood on only %d archive rows the board still keeps", kept)
+	}
+	if whole < 6 {
+		t.Fatalf("only %d of them drew a row shed of nothing — the biting side was not exercised", whole)
+	}
+	if offered < 12 {
+		t.Fatalf("the archive offered a hide clause at only %d stands — the held side was not exercised", offered)
+	}
+	t.Logf("archive stands on a kept live row: %d · shed of nothing: %d · naming `x hide`: %d · hide clause offered: %d", kept, whole, named, offered)
+}
