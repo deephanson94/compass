@@ -12622,3 +12622,156 @@ func TestTheSessionViewNamesTheSearchKey(t *testing.T) {
 	}
 	t.Logf("Lv2 stands where `/` acts: %d · rows shed of nothing: %d · naming `/ search`: %d", offered, whole, named)
 }
+
+// ---- round 102, two-tools ----
+// r102ttMirrorSizes are the five terminals the walkthrough is drawn at.
+var r102ttMirrorSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r102ttMirrorRoutes are four ways into the reader from the opening frame.
+var r102ttMirrorRoutes = [][]string{{"tab", "tab"}, {"2", "tab", "tab"}, {"3", "tab", "tab"}, {"j", "tab", "tab"}}
+
+// r102ttMirrorFrame is one drawn frame with its escapes stripped, split into
+// the rows above the footer and the footer itself.
+func r102ttMirrorFrame(m *Model) (body, footer string) {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	if len(rows) == 0 {
+		return "", ""
+	}
+	return strings.Join(rows[:len(rows)-1], "\n"), rows[len(rows)-1]
+}
+
+// r102ttMirrorOverruns is the first row of the frame wider than the terminal,
+// or "" when every row fits.
+func r102ttMirrorOverruns(m *Model, w int) string {
+	for _, r := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if lipgloss.Width(r) > w {
+			return r
+		}
+	}
+	return ""
+}
+
+// TestTheReadersMirrorKeyIsNotASilentToggle pins both sides of `m` in the
+// reader. The reader is a level, not a panel (#15), so the frame `m` is
+// pressed on there draws the conversation whichever way the mirror's flag
+// stands: switched on, `m` goes to the session view with the live pane and
+// says `the live pane`; switched off, it left the reader byte for byte the
+// same with an empty note and moved a panel the person only meets one `esc`
+// later — a silent key of exactly the shape the width guard on the same key
+// refuses in its own words (#62, #221, #241). In the reader `m` means the
+// live pane on either press.
+//
+// The other side, so the pin cannot be got by making `m` one-way everywhere:
+// in the session view the key is still the toggle it has been since #62 —
+// pressed with the mirror standing it draws the conversation and says so —
+// and at the board the flag still flips.
+func TestTheReadersMirrorKeyIsNotASilentToggle(t *testing.T) {
+	forceASCII(t)
+	standing, first, toggles := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r102ttMirrorSizes {
+				w, h := size[0], size[1]
+				for _, route := range r102ttMirrorRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if !(m.sessionView() && m.level >= levelReader) {
+						continue
+					}
+					where := sc.name + " " + route[0] + " " + itoaPin(w) + "x" + itoaPin(h)
+
+					// First press: the mirror is off. It goes to the pane.
+					preBody, preFoot := r102ttMirrorFrame(m)
+					pressKey(m, "m")
+					poll(m, sc)
+					first++
+					if !m.showMirror || m.level != levelWaypoints {
+						t.Errorf("%s: `m` in the reader did not go to the live pane: mirror=%v level=%d", where, m.showMirror, m.level)
+						continue
+					}
+					if got := strings.TrimSpace(m.note); got != "the live pane" {
+						t.Errorf("%s: `m` in the reader said %q, want %q", where, got, "the live pane")
+					}
+					if body, _ := r102ttMirrorFrame(m); body == preBody {
+						t.Errorf("%s: `m` in the reader drew the same frame\n  foot=%q", where, strings.TrimSpace(preFoot))
+					}
+					if r := r102ttMirrorOverruns(m, w); r != "" {
+						t.Errorf("%s: row over %d cells: %q", where, w, r)
+					}
+
+					// Back into the reader, the mirror standing: the same key
+					// must answer the same way, not flip a panel in silence.
+					pressKey(m, "tab")
+					poll(m, sc)
+					if !(m.sessionView() && m.level >= levelReader) {
+						continue
+					}
+					standing++
+					wasBody, wasFoot := r102ttMirrorFrame(m)
+					pressKey(m, "m")
+					poll(m, sc)
+					body, _ := r102ttMirrorFrame(m)
+					note := strings.TrimSpace(m.note)
+					if body == wasBody && note == "" {
+						t.Errorf("%s: `m` in the reader turned the mirror %v and drew the same frame with no note (%d cells free)\n  foot=%q",
+							where, m.showMirror, w-lipgloss.Width(wasFoot), strings.TrimSpace(wasFoot))
+						continue
+					}
+					if !m.showMirror || m.level != levelWaypoints || note != "the live pane" {
+						t.Errorf("%s: `m` in the reader with the mirror standing gave mirror=%v level=%d note=%q, want the live pane at the session view",
+							where, m.showMirror, m.level, note)
+					}
+					if r := r102ttMirrorOverruns(m, w); r != "" {
+						t.Errorf("%s: row over %d cells: %q", where, w, r)
+					}
+
+					// The other side: in the session view the key is still a
+					// toggle, and its way back is named on the row (#62).
+					if _, foot := r102ttMirrorFrame(m); !strings.Contains(foot, " · m conversation") {
+						t.Errorf("%s: the session view under the mirror does not name the way back\n  foot=%q", where, strings.TrimSpace(foot))
+					}
+					pressKey(m, "m")
+					poll(m, sc)
+					toggles++
+					if m.showMirror {
+						t.Errorf("%s: `m` in the session view did not draw the conversation back", where)
+					}
+					if got := strings.TrimSpace(m.note); got != "the conversation" {
+						t.Errorf("%s: `m` in the session view said %q, want %q", where, got, "the conversation")
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	// Not vacuous: the stands the two sides are measured on.
+	if first < 24 {
+		t.Errorf("only %d reader stands to press `m` on; the pin measures nothing", first)
+	}
+	if standing < 24 {
+		t.Errorf("only %d reader stands with the mirror standing; the silent press is unmeasured", standing)
+	}
+	if toggles < 24 {
+		t.Errorf("only %d session-view stands; the toggle's other side is unmeasured", toggles)
+	}
+}
+
+// itoaPin is strconv.Itoa under a name no other file in this package uses.
+func itoaPin(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [8]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}

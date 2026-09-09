@@ -924,7 +924,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.note = "no mirror in the archive · A returns to the fleet"
 			return m, nil
 		}
-		m.showMirror = !m.showMirror
+		if m.sessionView() && m.level >= levelReader {
+			// In the reader the key is not a toggle. The mirror is a
+			// panel of the session view and the reader is a level, not
+			// a panel (#15), so the frame `m` is pressed on here draws
+			// the conversation whichever way the flag stands: switched
+			// on it goes to the pane and says `the live pane` below,
+			// switched off it left the reader byte for byte the same
+			// with an empty note and moved a panel the person meets one
+			// `esc` later — the silent second press the width guard
+			// above refuses in its own words (#62, #221, #241). Here
+			// `m` means the live pane, on either press; the way back is
+			// `m conversation`, the key the session view names.
+			m.showMirror = true
+		} else {
+			m.showMirror = !m.showMirror
+		}
 		switch {
 		case !m.showMirror && m.sessionView() && m.level == levelWaypoints:
 			m.note = "the conversation" // short: the panel's own title says the rest, and the keys stay
