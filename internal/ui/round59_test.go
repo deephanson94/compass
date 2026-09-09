@@ -15613,3 +15613,105 @@ func TestTheReaderJumpKeySaysWhichEndItReached(t *testing.T) {
 	}
 	t.Logf("fitting reader stands: %d (with the cell %d, without %d) · stands on a page that scrolls: %d", fits, roomy, tight, scrolls)
 }
+
+// ---- round 109, second-day ----
+// TestTheHelpNamesTheCursorMark pins the legend's gloss for `▸`, the row
+// cursor the board, the trail and (since #300) the reader all draw.
+//
+// Three sides:
+//
+//   - the frame it was found on — `second-day` at eighty and at 220, where
+//     the deck draws `▸` on the frame the help is opened from and the
+//     legend under `?` named eighteen marks and never that one;
+//   - the rule — over every scene, five widths and both colour profiles
+//     (#215, #218): wherever the help draws the panel mark's line and the
+//     width holds the clause, the line names `▸`, with a floor so a fold
+//     that quietly stops drawing the help cannot pass;
+//   - the price — the gloss is an addition and not a swap: the panel
+//     mark keeps its own sentence, and every gloss the legend carried at
+//     that width is still on the frame, so no mark is traded for this one.
+func TestTheHelpNamesTheCursorMark(t *testing.T) {
+	forceASCII(t)
+	const panelGloss = "marks the panel your keys are in — tab moves it"
+	const clause = "▸ its row"
+
+	// helpFrameAt drives one scene at one size to the help and returns the
+	// frame before `?` and the help frame itself, both stripped.
+	helpFrameAt := func(sc scene, w, h int) (string, string) {
+		m := sceneModel(sc, w, h)
+		before := ansi.Strip(m.View())
+		pressKey(m, "?")
+		poll(m, sc)
+		return before, ansi.Strip(m.View())
+	}
+
+	// 1 · the frame.
+	for _, size := range [][2]int{{80, 24}, {220, 48}} {
+		w, h := size[0], size[1]
+		before, help := helpFrameAt(sceneSecondDay(), w, h)
+		if !strings.Contains(before, "▸") {
+			t.Errorf("second-day %dx%d: the frame the help is opened from draws no ▸ — this pin is standing on the wrong frame:\n%s", w, h, before)
+		}
+		if !strings.Contains(help, panelGloss) {
+			t.Fatalf("second-day %dx%d: the help draws no panel-mark line at all:\n%s", w, h, help)
+		}
+		if !strings.Contains(help, clause) {
+			for _, l := range strings.Split(help, "\n") {
+				if strings.Contains(l, panelGloss) {
+					t.Errorf("second-day %dx%d: the legend names the panel mark and never the row cursor the frame beneath it draws: %q", w, h, strings.TrimRight(l, " "))
+				}
+			}
+		}
+	}
+
+	// 2 · the rule, and 3 · the price.
+	sizes := [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+	stands, named := 0, 0
+	for _, sc := range allScenes() {
+		for _, size := range sizes {
+			w, h := size[0], size[1]
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				_, help := helpFrameAt(sc, w, h)
+				lipgloss.SetColorProfile(old)
+				if !strings.Contains(help, panelGloss) {
+					continue
+				}
+				stands++
+				if strings.Contains(help, clause) {
+					named++
+				} else if w != 152 {
+					t.Errorf("%s %dx%d %v: the legend names the panel mark and never `▸`", sc.name, w, h, prof)
+				}
+				// The price: nothing the legend already said is gone.
+				// The `⚠` gloss is the tail of the legend's last line and
+				// the first thing a clause that wraps pushes off the
+				// overlay, so it is required wherever the clause was
+				// taken and the width drew it (vacuous on a tree without
+				// the clause, exact on one that paid for it).
+				want := []string{panelGloss, "fleet:", "trail:", "you were here", "⌁ "}
+				if w >= 100 && strings.Contains(help, clause) {
+					want = append(want, "⚠ ")
+				}
+				for _, s := range want {
+					if !strings.Contains(help, s) {
+						t.Errorf("%s %dx%d %v: the row cursor's gloss cost the legend %q", sc.name, w, h, prof, s)
+					}
+				}
+				// And the row it rides is still the panel mark's own.
+				for _, l := range strings.Split(help, "\n") {
+					if strings.Contains(l, clause) && !strings.Contains(l, panelGloss) {
+						t.Errorf("%s %dx%d %v: `▸` took a row of its own instead of the panel mark's: %q", sc.name, w, h, prof, strings.TrimRight(l, " "))
+					}
+				}
+			}
+		}
+	}
+	if stands < 80 {
+		t.Errorf("only %d help stands drew the panel mark's line, want at least 80 — the walk is not reaching the help any more", stands)
+	}
+	if named < 70 {
+		t.Errorf("only %d of %d help stands name `▸`, want at least 70", named, stands)
+	}
+}

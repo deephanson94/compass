@@ -547,6 +547,25 @@ func dropToolGloss(lines []string) []string {
 	return out
 }
 
+// helpCursorGloss puts the row cursor's mark on the panel mark's line, where
+// the line still stands in one row of w cells. `▸` is drawn on all but a
+// handful of the frames the deck renders — the board's cursor row, the
+// trail's, and since #300 the reader's, where the literal mark is the only
+// thing that survives colour off — and the legend named eighteen marks and
+// never this one, while `space unfold` and `j / k` are taught with nothing
+// on the page saying what they act on. It rides the `▌` line because the
+// two marks answer one question between them: which panel the keys are in,
+// and which row inside it. Taken only where the line still fits the width
+// it is drawn at, so no gloss beneath it is ever pushed off the overlay
+// (#281's rule, in the legend).
+func helpCursorGloss(l string, w int) string {
+	const clause = " \u00b7 \u25b8 its row"
+	if !strings.HasPrefix(l, focusMark+" marks") || ansi.StringWidth(strings.ReplaceAll(l, "\u00a0", " ")+clause) > w {
+		return l
+	}
+	return l + clause
+}
+
 func helpLegendLines(w int, roomy, tools, board bool) []string {
 	var lines []string
 	for _, l := range helpLegendFor(tools, board) {
@@ -554,7 +573,7 @@ func helpLegendLines(w int, roomy, tools, board bool) []string {
 			lines = append(lines, "")
 			continue
 		}
-		lines = append(lines, dimStyle.Render(shedClauses(strings.ReplaceAll(l, "\u00a0", " "), w)))
+		lines = append(lines, dimStyle.Render(shedClauses(strings.ReplaceAll(helpCursorGloss(l, w), "\u00a0", " "), w)))
 	}
 	return helpLegendClasses(lines, w, roomy)
 }
@@ -570,6 +589,7 @@ func helpLegendWrapped(w int, roomy bool, h int, tools, board bool) []string {
 			lines = append(lines, "")
 			continue
 		}
+		l = helpCursorGloss(l, w)
 		if ansi.StringWidth(l) <= w {
 			lines = append(lines, dimStyle.Render(strings.ReplaceAll(l, "\u00a0", " ")))
 			continue
