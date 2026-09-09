@@ -521,7 +521,7 @@ func (m *Model) fleetRows() []fleetRow {
 	rows := make([]fleetRow, 0, len(m.sessions)+len(groups))
 	for _, g := range groups {
 		if headers {
-			hdr := fleetRow{header: true, label: g.name}
+			hdr := fleetRow{header: true, label: m.groupLabel(g.name)}
 			if !m.archiveView && g.name != elsewhereGroup {
 				// The group is the tmux session: say so, because "work"
 				// over a row read as a word, not a place to attach to.
@@ -643,8 +643,32 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 }
 
 // hiddenGroup is the archive's first group: live sessions `x` took off the
-// board, so the way back is where the strip said it was.
+// board, so the way back is where the strip said it was. hiddenGroupWord
+// is the group without that way — the word the header keeps when the key
+// is not the deck's to give (groupLabel).
 const hiddenGroup = "hidden · x brings one back"
+const hiddenGroupWord = "hidden"
+
+// groupLabel is the name a group header draws. Only the hidden group's
+// name carries a key, and it wears it on the same terms as every other
+// door on this screen: while a search query, the quick replies or the
+// reply's own line has the keyboard, every key belongs to what is being
+// typed ("While a search query is being typed, every key belongs to it"
+// and "While the quick replies are up, a digit picks one and anything
+// else puts them away", app.go). `x` pressed on such a frame types `x`
+// into the query or into the line the deck is about to send, or puts the
+// replies away; it brings nothing back. The group's own word stays — the
+// rows under it are still the hidden ones, which is the header's
+// question — and the way on is `esc`, which every one of those footers
+// names. It is #282's, #285's and #288's rule on the archive's own
+// header: what goes is the key, not the group (#285, #288). The footer
+// names `x unhide` only where the deck holds the key, so no footer moves.
+func (m *Model) groupLabel(name string) string {
+	if name == hiddenGroup && (m.searching || m.replying) {
+		return hiddenGroupWord
+	}
+	return name
+}
 
 // archiveGroups buckets the archived sessions by project — where you started
 // them, which is how you remember them — newest group first, newest first

@@ -12775,3 +12775,146 @@ func itoaPin(n int) string {
 	}
 	return string(b[i:])
 }
+
+// ---- round 103, fleet-hygiene ----
+// ---- round 103, fleet-hygiene ----
+
+// r103fhGroupHeader is the archive's hidden-group header as a frame draws
+// it: the fleet column's own row, read up to the panel rule, so the trail
+// beside it is not part of the label.
+func r103fhGroupHeader(view string) (string, bool) {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	last := len(rows) - 1
+	for last > 0 && strings.TrimSpace(rows[last]) == "" {
+		last--
+	}
+	for i, ln := range rows {
+		if i == last {
+			continue // the footer is the keymap's own row, not the body's
+		}
+		cell := ln
+		if j := strings.Index(cell, "│"); j >= 0 {
+			cell = cell[:j]
+		}
+		cell = strings.TrimSpace(cell)
+		if cell == "hidden" || strings.HasPrefix(cell, "hidden · ") {
+			return cell, true
+		}
+	}
+	return "", false
+}
+
+// r103fhLastRow is the last drawn row of a frame — the keys it offers.
+func r103fhLastRow(view string) string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.TrimSpace(rows[i]) != "" {
+			return strings.TrimSpace(rows[i])
+		}
+	}
+	return ""
+}
+
+// r103fhWalk replays a route from a scene's opening frame, polling after
+// each key the way the deck's own refresh does.
+func r103fhWalk(sc scene, w, h int, route ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped holds the
+// archive's first group header to the key it names. #282 shed the fold's
+// `· j`, #285 the archive line's `· A browses` and #288 the hidden count's
+// `· A, then x` wherever a search query, the quick replies or the reply's
+// own typed line has the keyboard, because every key then belongs to that
+// line ("While a search query is being typed, every key belongs to it" and
+// "While the quick replies are up, a digit picks one and anything else puts
+// them away", app.go). `hidden · x brings one back` is the same door on the
+// archive's own header and had not taken the rule: pressed on such a frame
+// `x` types `x` into the query or into the line the deck is about to send,
+// or puts the replies away — it brings nothing back. What goes is the key,
+// not the group: the rows under the header are still the hidden ones, which
+// is the header's whole question, and the way on is `esc`, which every one
+// of those footers names (#137, #285, #288).
+//
+// Two sides, so the pin cannot be got by taking the clause everywhere:
+//   - where a line is being typed, the header names no key, the group's own
+//     word still stands, and `x` pressed on that very frame brings nothing
+//     back (#221);
+//   - where the deck holds its own keys, the header still names `x`.
+func TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// `x` takes the selected session off the board and `A` opens the
+	// archive, where it is listed under the hidden group; the rest of each
+	// route gives the keyboard to the search, the quick replies or the
+	// reply's own line.
+	captured := [][]string{
+		{"x", "A", "/"},
+		{"x", "A", "r"},
+		{"x", "A", "r", "t"},
+	}
+	// The routes that leave the deck holding its keys, for the held side.
+	free := [][]string{{"x", "A"}, {"x", "A", "j"}}
+
+	shed, kept := 0, 0
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for _, route := range captured {
+					m := r103fhWalk(sc, w, h, route...)
+					if !m.archiveView || (!m.searching && !m.replying) {
+						continue
+					}
+					view := m.View()
+					label, ok := r103fhGroupHeader(view)
+					if !ok {
+						continue // the group is not on this frame
+					}
+					shed++
+					if strings.Contains(label, "brings one back") {
+						t.Errorf("%s %s %dx%d %v: the archive's hidden header names a key the typed line has taken: %q over %q",
+							prof.name, sc.name, w, h, route, label, r103fhLastRow(view))
+					} else if label != "hidden" {
+						t.Errorf("%s %s %dx%d %v: the group lost more than its key: %q",
+							prof.name, sc.name, w, h, route, label)
+					}
+					// Pressed on that very frame, `x` brings nothing
+					// back (#221): it goes into the query or the line,
+					// or it puts the quick replies away.
+					after := r103fhWalk(sc, w, h, append(append([]string(nil), route...), "x")...)
+					if after.hiddenCount() != m.hiddenCount() {
+						t.Errorf("%s %s %dx%d %v: `x` unhid a session after all, so the key belongs on %q",
+							prof.name, sc.name, w, h, route, label)
+					}
+				}
+				for _, route := range free {
+					m := r103fhWalk(sc, w, h, route...)
+					if !m.archiveView || m.searching || m.replying {
+						continue
+					}
+					if label, ok := r103fhGroupHeader(m.View()); ok && strings.Contains(label, "brings one back") {
+						kept++
+					}
+				}
+			}
+		}
+	}
+	if shed < 20 {
+		t.Fatalf("the walk reached only %d hidden group headers under a typed line", shed)
+	}
+	if kept < 20 {
+		t.Fatalf("the archive's hidden header kept its key on only %d rows — the yield took too many", kept)
+	}
+}
