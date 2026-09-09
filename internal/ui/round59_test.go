@@ -11767,3 +11767,129 @@ func TestTheDigitRefusalKeepsTheWayDeeper(t *testing.T) {
 		t.Fatalf("the sentence never stood over %d stands: the digit says nothing", seen)
 	}
 }
+
+// ---- round 100, two-tools ----
+// The session view and the reader name the hide key.
+//
+// `case "x"` is the deck's, not a level's: `toggleHidden` runs at the
+// board, at the list, in the session view and in the reader alike. At the
+// last two it takes the session out from under the person — at 220 on the
+// two-tools scene, `2` `tab` and `x` swap `2 api · opencode · sonnet-4-5`
+// for `3 api · claude · opus-4-1`, header, trail and reader together —
+// over a footer 168 cells wide in a 219-cell field with fifty-one blank
+// cells and no `x` on it. A key that acts and is never named is the one
+// thing a footer is for (#24, #175, #187, #277), and the row that refuses
+// `x` must name `x` (#227).
+//
+// Two sides, so the fold cannot be got by naming the key everywhere:
+//   - where `x` acts and the drawn row has the cells free, the row names it;
+//   - where the row names it, `x` acts — the key is never offered on a
+//     refusal (#227) or on an archived row with nothing to bring back.
+func r100ttFooterRow(m *Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.TrimRight(rows[len(rows)-1], " ")
+}
+
+// r100ttHideActs presses `x` from this stand on a copy and says whether
+// the frame moved: the frame is what a person sees (#215, #218, #221).
+// It also hands back the note the press left, so a key that moves nothing
+// can be asked whether it said why (#24, #221, #227).
+func r100ttHideActs(sc scene, w, h int, route []string) (bool, string) {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	before := ansi.Strip(m.View())
+	rows := strings.Split(before, "\n")
+	body := strings.Join(rows[:len(rows)-1], "\n")
+	pressKey(m, "x")
+	poll(m, sc)
+	after := strings.Split(ansi.Strip(m.View()), "\n")
+	return strings.Join(after[:len(after)-1], "\n") != body, m.note
+}
+
+func TestTheSessionViewAndTheReaderNameTheHideKey(t *testing.T) {
+	forceASCII(t)
+	routes := [][]string{
+		{"tab"},
+		{"tab", "tab"},
+		{"2", "tab"},
+		{"2", "tab", "tab"},
+		{"x", "A", "tab"},
+	}
+	deep, acted, named, full := 0, 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for ri, route := range routes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.level < levelWaypoints || m.showHelp || m.searching || m.replying {
+						continue
+					}
+					deep++
+					foot := r100ttFooterRow(m)
+					clause := "x hide"
+					if m.archiveView {
+						clause = "x unhide"
+					}
+					on := strings.Contains(foot, clause)
+					acts, said := r100ttHideActs(sc, w, h, route)
+					if acts {
+						acted++
+					}
+					if on {
+						named++
+					}
+					tag := fmt.Sprintf("%s %dx%d r%d Lv%d p%v", sc.name, w, h, ri, m.level, prof)
+					// The row must not overrun its field, whatever it names.
+					if x := lipgloss.Width(foot); x > w-1 {
+						t.Errorf("%s: the footer overruns its field: %d cells: %q", tag, x, foot)
+					}
+					// The biting side, on the rows nothing has been shed
+					// from: the attach aside is the first fragment the
+					// footer gives up (`shedOrder`), so a row still
+					// wearing it is a row shed of nothing at all. There
+					// the key costs no other, and `x` acts, so the row
+					// names it. A shed row is #39's — its backfill stops
+					// at the first key too wide, the price the unit
+					// refusal pays at eighty too (#281) — so those stands
+					// are walked and counted and only this side passes
+					// them by.
+					whole := strings.Contains(foot, attachHint)
+					if whole {
+						full++
+					}
+					if acts && !on && whole {
+						t.Errorf("%s: `x` acts — it takes this very session off the board — and the row, shed of nothing, says so nowhere (%d cells free): %q",
+							tag, w-1-lipgloss.Width(foot), foot)
+					}
+					// The held side: a key on the row answers from the row.
+					// Where `x` moves nothing it says why, and the row
+					// keeps the key its own note is about (#24, #57, #227).
+					if on && !acts && !strings.Contains(said, " stays · ") && said != "the live one stays" && said != "it is off the board" {
+						t.Errorf("%s: the row offers %q where `x` neither moves nor says why (note %q): %q", tag, clause, said, foot)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if deep < 40 {
+		t.Fatalf("the walk reached only %d stands at Lv2 or deeper", deep)
+	}
+	if acted < 20 {
+		t.Fatalf("`x` acted at only %d of them — the rule was not exercised", acted)
+	}
+	if full < 10 {
+		t.Fatalf("only %d stands drew a row shed of nothing — the biting side was not exercised", full)
+	}
+	t.Logf("stands: %d · `x` acts: %d · rows shed of nothing: %d · named: %d", deep, acted, full, named)
+}

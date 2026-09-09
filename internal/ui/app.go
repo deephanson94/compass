@@ -3551,9 +3551,59 @@ func (m *Model) statusChips() string {
 
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
+//
+// The hide key is the last key the session view and the reader take onto
+// the row and the first they give up: `x` acts there, so the footer names
+// it, and it is not the reason a person is that deep, so it is taken only
+// where the finished row still names every key the row without it named
+// (#39's ranks, measured as #281 measures them — on the finished row,
+// because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
-	return m.footerWith(keys, w)
+	row := m.footerWith(keys, w)
+	if m.level < levelWaypoints {
+		return row
+	}
+	for _, clause := range []string{" · x hide", " · x unhide"} {
+		if !strings.Contains(keys, clause) {
+			continue
+		}
+		bare := m.footerWith(strings.Replace(keys, clause, "", 1), w)
+		if !footerNamesAll(bare, row) {
+			return bare // the key cost the row another key
+		}
+	}
+	return row
+}
+
+// footerNamesAll says whether the finished row `now` names every key
+// `was` named. The note is not a key and is read past: it stands after
+// the gap the keymap never contains (#134's reserve), and the attach
+// aside is not a key either (#55).
+func footerNamesAll(was, now string) bool {
+	read := func(s string) []string {
+		s = strings.ReplaceAll(ansi.Strip(s), attachHint, "")
+		if i := strings.Index(s, "  "); i >= 0 {
+			s = s[:i]
+		}
+		var out []string
+		for _, frag := range strings.Split(s, " · ") {
+			if f := strings.TrimSpace(frag); f != "" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	has := map[string]bool{}
+	for _, k := range read(now) {
+		has[k] = true
+	}
+	for _, k := range read(was) {
+		if !has[k] {
+			return false
+		}
+	}
+	return true
 }
 
 // keymap is the whole keymap for where the keys are now, before any of it
@@ -3617,13 +3667,13 @@ func (m *Model) keymap() string {
 			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit" // the chapter keys act here too (#193)
 		}
 	case m.level >= levelReader && m.sessionView():
-		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
-		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.enterKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k scroll · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
-		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		keys = "j/k legs · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · " + m.hideKeymap() + " · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
 	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
 		// At Lv1 the page keys drive the trail beside the list (§3); on a
@@ -4396,6 +4446,25 @@ func (m *Model) attachRefusalSaid(whole string) string {
 		}
 	}
 	return ""
+}
+
+// hideKeymap is the clause for `x` where the keys are now. `case "x"` is
+// the deck's, not a level's: it takes the selected session off the board —
+// or brings it back — at the board, at the list, in the session view and
+// in the reader alike, and at the last two it swaps the frame under the
+// person for another session's while no key on the row says so. A key that
+// acts and is never named is the one thing a footer is for (#24, #175,
+// #187, #277), and the row that refuses `x` must name `x` (#227);
+// `shedOrder` has ranked `x hide` and `x unhide` among these two levels'
+// own keys all along with nothing on the row to match. In the archive the
+// key is the way back, the clause the archive's own list already wears —
+// and everything `keymap` already says of it stands: a fleet of one has no
+// session to hide, and a row that is not hidden has nothing to bring back.
+func (m *Model) hideKeymap() string {
+	if m.archiveView {
+		return "x unhide"
+	}
+	return "x hide"
 }
 
 // hideKeyStuck is the board's or the list's `x hide` on a selection it
