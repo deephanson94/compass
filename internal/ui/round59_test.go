@@ -12290,3 +12290,151 @@ func TestThePageKeyDownAnswersLikeItsSiblingsOnATrailOfOne(t *testing.T) {
 		t.Fatal("no trail of one was reached: the rule was never asked")
 	}
 }
+
+// ---- round 102, fleet-hygiene ----
+// ---- round 102, fleet-hygiene ----
+
+// r102fhHiddenClause matches the hidden count in every form a drawn row
+// wears it — "1 hidden", "1 hidden · A, then x", "0 of 2 hidden" — wherever
+// it sits on the row: alone on the fleet's last line, between the overlaps
+// and the archive count on the board's strip, or on the header's chips.
+var r102fhHiddenClause = regexp.MustCompile(`\d+(?: of \d+)? hidden(?: · A, then x)?`)
+
+// r102fhCounts is every hidden clause a frame draws, the footer left out:
+// the footer is the keymap's own row and the note's, and this pin is about
+// what the *body* claims while the footer is a typed line's.
+func r102fhCounts(view string) []string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	last := len(rows) - 1
+	for last > 0 && strings.TrimSpace(rows[last]) == "" {
+		last--
+	}
+	var out []string
+	for i, ln := range rows {
+		if i == last {
+			continue
+		}
+		out = append(out, r102fhHiddenClause.FindAllString(ln, -1)...)
+	}
+	return out
+}
+
+// r102fhFooter is the last drawn row of a frame — the keys it offers.
+func r102fhFooter(view string) string {
+	rows := strings.Split(ansi.Strip(view), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.TrimSpace(rows[i]) != "" {
+			return strings.TrimSpace(rows[i])
+		}
+	}
+	return ""
+}
+
+// r102fhWalk replays a route from a scene's opening frame, polling after
+// each key the way the deck's own refresh does.
+func r102fhWalk(sc scene, w, h int, route ...string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range route {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// TestTheHiddenCountDropsItsKeysWhileALineIsBeingTyped holds the hidden
+// count's clause to the keys it names. #282 shed the fold's `· j` and #285
+// the archive line's `· A browses` wherever a search query, the quick
+// replies or the reply's own typed line has the keyboard, because every key
+// then belongs to that line ("While a search query is being typed, every
+// key belongs to it", app.go). `A, then x` is the last clause on the same
+// side of that gate, and on the board's strip it sits on the very row #285
+// folded: at HEAD one row reads `1 hidden · A, then x   300 archived`, the
+// archive count shed of its key and the hidden count keeping two. Pressed
+// there, `A` types the letter into the query or into the line the deck is
+// about to send and `x` types `x`; neither goes near the archive. The
+// footer names neither key in these states already, so what goes is the
+// keys, not the count: the hidden sessions are still counted where they
+// have always been counted (#137, #173, #199, #202, #285).
+//
+// Two sides, so the pin cannot be got by taking the clause everywhere:
+//   - where a line is being typed, no drawn row names the keys, the count
+//     still stands, and `A` pressed on that frame does not open the archive;
+//   - where the deck holds its own keys, the clause is still drawn.
+func TestTheHiddenCountDropsItsKeysWhileALineIsBeingTyped(t *testing.T) {
+	profiles := []struct {
+		name string
+		p    termenv.Profile
+	}{{"forceASCII", termenv.Ascii}, {"colour on", termenv.TrueColor}}
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// `x` takes the selected session off the board, so every route below
+	// stands on a fleet with something hidden. The captured routes then
+	// give the keyboard to the search, the quick replies and the reply's
+	// own line, at Lv0/Lv1 and again in the session view where the
+	// header's chip carries the clause (#202).
+	captured := [][]string{
+		{"x", "/"},
+		{"x", "r"},
+		{"x", "r", "t"},
+		{"x", "tab", "/"},
+		{"x", "tab", "r"},
+	}
+	// The routes that leave the deck holding its keys, for the held side.
+	free := [][]string{{"x"}, {"x", "j"}, {"x", "tab"}}
+
+	shed, kept := 0, 0
+	for _, prof := range profiles {
+		lipgloss.SetColorProfile(prof.p)
+		for _, sc := range allScenes() {
+			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				for _, route := range captured {
+					m := r102fhWalk(sc, w, h, route...)
+					if !m.searching && !m.replying {
+						continue
+					}
+					if m.hiddenCount() == 0 || m.archiveView {
+						continue
+					}
+					view := m.View()
+					counts := r102fhCounts(view)
+					if len(counts) == 0 {
+						continue // the box covers the row on this frame
+					}
+					shed++
+					for _, c := range counts {
+						if strings.Contains(c, "A, then x") {
+							t.Errorf("%s %s %dx%d %v: the hidden count names keys the typed line has taken: %q over %q",
+								prof.name, sc.name, w, h, route, c, r102fhFooter(view))
+						}
+					}
+					// Pressed on that very frame, `A` does not browse
+					// (#221): it goes into the query or the line.
+					after := r102fhWalk(sc, w, h, append(append([]string(nil), route...), "A")...)
+					if after.archiveView {
+						t.Errorf("%s %s %dx%d %v: `A` opened the archive after all, so the keys belong on %q",
+							prof.name, sc.name, w, h, route, counts[0])
+					}
+				}
+				for _, route := range free {
+					m := r102fhWalk(sc, w, h, route...)
+					if m.searching || m.replying || m.archiveView || m.hiddenCount() == 0 {
+						continue
+					}
+					for _, c := range r102fhCounts(m.View()) {
+						if strings.Contains(c, "A, then x") {
+							kept++
+						}
+					}
+				}
+			}
+		}
+	}
+	if shed < 20 {
+		t.Fatalf("the walk reached only %d hidden counts under a typed line", shed)
+	}
+	if kept < 20 {
+		t.Fatalf("the hidden count kept its keys on only %d rows — the yield took too many", kept)
+	}
+}

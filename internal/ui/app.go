@@ -3528,7 +3528,7 @@ func (m *Model) statusChips() string {
 			// while the same keypresses at eighty drew `1 hidden · A,
 			// then x`. The question is what the frame drew (#199): where
 			// no fleet body stands, the chip carries the clause (#202).
-			parts = append(parts, dimStyle.Render(fmt.Sprintf("%s hidden · A, then x", m.hiddenDoorCount(n))))
+			parts = append(parts, dimStyle.Render(m.hiddenClause(n)))
 		}
 	}
 	if len(parts) == 0 {

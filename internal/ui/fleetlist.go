@@ -101,8 +101,31 @@ func (m *Model) archiveDoorKey() string {
 	return " · A browses"
 }
 
+// hiddenDoorKey is the key clause the hidden count wears — " · A, then
+// x" — and, like archiveDoorKey beside it on the very same row, it is
+// worn only where those keys are the deck's to give. While a search
+// query, the quick replies or the reply's own line has the keyboard,
+// every key belongs to what is being typed ("While a search query is
+// being typed, every key belongs to it", app.go): `A` pressed on such a
+// frame types the letter into the query or into the line the deck is
+// about to send, or puts the replies away, and `x` types `x` — neither
+// goes near the archive. The count is the row's own answer at every
+// moment — this many are off the board (#137) — and the way on is `esc`,
+// which every one of those footers names. It is #282's and #285's rule
+// on the last clause that had not taken it: on the board's strip the two
+// clauses sit on one row, so at HEAD the same row sheds `A browses` from
+// its archive count and keeps `A, then x` on its hidden count. The
+// footer names neither key in these states already, so no footer moves.
+// What goes is the key, not the count (#285).
+func (m *Model) hiddenDoorKey() string {
+	if m.searching || m.replying {
+		return ""
+	}
+	return " · A, then x"
+}
+
 func (m *Model) hiddenClause(n int) string {
-	return fmt.Sprintf("%s hidden · A, then x", m.hiddenDoorCount(n))
+	return fmt.Sprintf("%s hidden%s", m.hiddenDoorCount(n), m.hiddenDoorKey())
 }
 
 // hiddenDoorCount is the strip's hidden count: the whole, or what the
