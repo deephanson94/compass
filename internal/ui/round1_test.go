@@ -1254,10 +1254,16 @@ func TestMoreDeadKeysSayWhy(t *testing.T) {
 	if m.level != levelReader {
 		t.Fatalf("level = %d, want the reader", m.level)
 	}
+	// `G` carries the viewport to the last screenful, but the reader's own
+	// cursor (readerCursorMove) starts that screenful's own top, not the
+	// document's last row — `j` has to be run to the true end before it
+	// refuses (#<ref>, the reader's cursor).
 	press(m, "G")
-	press(m, "j")
+	for i := 0; i < len(m.doc(m.readerWidth()))+1 && !strings.Contains(m.note, "end of the conversation"); i++ {
+		press(m, "j")
+	}
 	if !strings.Contains(m.note, "end of the conversation") {
-		t.Errorf("j at the end of the reader said %q", m.note)
+		t.Errorf("running j to the end of the reader never said so: %q", m.note)
 	}
 	press(m, "g")
 	press(m, "k")
@@ -1325,7 +1331,7 @@ func TestReaderMarksCallsStillOut(t *testing.T) {
 	forceASCII(t)
 	tr := fixtureTrail(fixtureBase)
 	tr.Branches = append(tr.Branches, journey.Branch{ToolUseID: "toolu_out", Label: "measure the thing", Start: fixtureBase.Add(38 * time.Minute), AfterLeg: 3})
-	got := RenderReader(eventsBehind(tr, "Bash: python backfill.py --all"), ReaderOpts{Width: 80, Height: 200})
+	got := RenderReader(eventsBehind(tr, "Bash: python backfill.py --all"), ReaderOpts{Width: 80, Height: 200, Anchor: -1})
 	if !strings.Contains(got, "⋯ still out") {
 		t.Errorf("an agent still out is not marked:\n%s", got)
 	}
@@ -1564,7 +1570,7 @@ func TestReaderSpellsTheQuestion(t *testing.T) {
 	forceASCII(t)
 	ev := []transcript.Event{{Type: transcript.EventAssistant, UUID: "1", Timestamp: fixtureBase, Text: "One decision.",
 		ToolUses: []transcript.ToolUse{{ID: "q", Name: "AskUserQuestion", Input: json.RawMessage(`{"questions":[{"question":"Open port 22?","options":[{"label":"yes"},{"label":"no"}]}]}`)}}}}
-	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 20})
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 20, Anchor: -1})
 	if !strings.Contains(got, "AskUserQuestion(Open port 22? [yes / no])") {
 		t.Errorf("the question is not on the call line:\n%s", got)
 	}
@@ -1692,8 +1698,14 @@ func TestReaderTitleUsesTheDrawnLabel(t *testing.T) {
 		journey.Leg{Class: journey.Scout, Label: "x.go", Start: fixtureBase.Add(39 * time.Minute), Current: true})
 	m.SetTrail(tr)
 	m.events = eventsFor(m.trail)
-	pressTab(m)
-	press(m, "k") // onto the ship leg
+	// The one Tab from Lv2 already opens the reader: `openTrail` stood the
+	// deck at Lv2 with the cursor carried over from the board's own trail,
+	// which lands on this fixture's ship leg without moving it — the `k`
+	// this test once pressed here fired at Lv3, not Lv2, and did nothing
+	// on the old scroll-only reader; now that `k` moves the reader's own
+	// cursor (readerCursorMove) it stepped off the very row this test
+	// means to check, so it is gone rather than fired somewhere that
+	// changes what the test is measuring.
 	pressTab(m)
 	if got := m.readerTitle(90); !strings.Contains(got, "auth: push feat/sessions") || strings.Contains(got, "push ·") {
 		t.Errorf("reader title %q does not carry the ship's commit", got)
@@ -1770,13 +1782,16 @@ func TestReaderWrapsTheCallLine(t *testing.T) {
 	q := "Open port 22 to the office CIDR only, or keep the bastion host and its jump rules as they are today?"
 	ev := []transcript.Event{{Type: transcript.EventAssistant, UUID: "1", Timestamp: fixtureBase,
 		ToolUses: []transcript.ToolUse{{ID: "q", Name: "AskUserQuestion", Input: json.RawMessage(fmt.Sprintf(`{"questions":[{"question":%q,"options":[{"label":"office CIDR"},{"label":"keep bastion"}]}]}`, q))}}}}
-	got := RenderReader(ev, ReaderOpts{Width: 60, Height: 20})
+	got := RenderReader(ev, ReaderOpts{Width: 60, Height: 20, Anchor: -1})
 	if !strings.Contains(got, "keep bastion]") {
 		t.Errorf("the call line clipped the question:\n%s", got)
 	}
 }
 
-// A conversation that fits says so, at either end.
+// A conversation that fits says so, at either end. The reader's cursor
+// (readerCursorMove) still steps under the hood on a page like this one —
+// Space has to be able to reach whichever fold on the one screen is not
+// the first — but the page has nowhere to scroll to, and keeps saying so.
 func TestFittingConversationSaysSo(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 30)
@@ -1967,7 +1982,7 @@ func TestLateResultNamesItsCall(t *testing.T) {
 		{Type: transcript.EventUser, UUID: "3", Timestamp: fixtureBase.Add(2 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "b", Text: "x"}}},
 		{Type: transcript.EventUser, UUID: "4", Timestamp: fixtureBase.Add(3 * time.Minute), ToolResults: []transcript.ToolResult{{ToolUseID: "a", Text: "3 defects"}}},
 	}
-	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 30})
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 30, Anchor: -1})
 	if !strings.Contains(got, "↩ result of Agent(score the gates)") {
 		t.Errorf("a late result does not name its call:\n%s", got)
 	}

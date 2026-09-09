@@ -86,7 +86,7 @@ func TestCallPathsAreRelativeToTheSession(t *testing.T) {
 		{Type: transcript.EventUser, Timestamp: base.Add(3 * time.Second), CWD: "/home/user/api",
 			ToolResults: []transcript.ToolResult{{ToolUseID: "b", Text: "The file /home/user/api/src/auth.py has been updated."}}},
 	}
-	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 20, CWD: "/home/user/api/"})
+	got := RenderReader(ev, ReaderOpts{Width: 80, Height: 20, CWD: "/home/user/api/", Anchor: -1})
 	for _, want := range []string{"⏺ Read(src/tokens.py)", "⏺ Edit(src/auth.py)", "⏺ Write(/etc/hosts)", "⎿ The file src/auth.py has been updated."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -104,14 +104,14 @@ func TestCallPathsAreRelativeToTheSession(t *testing.T) {
 func TestFoldRowsLeadWithTheOutput(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 70, Height: 20})
+	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 70, Height: 20, Anchor: -1})
 	if !strings.Contains(got, "⎿ collected 20 items · 5 more lines") {
 		t.Errorf("the pytest result should lead with its first line:\n%s", got)
 	}
 	if strings.Contains(got, "space unfolds") {
 		t.Errorf("every row said how to unfold itself:\n%s", got)
 	}
-	got = RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 70, Height: 20, Unfolded: map[int]bool{3: true}})
+	got = RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 70, Height: 20, Unfolded: map[int]bool{3: true}, Anchor: -1})
 	if !strings.Contains(got, "⎿ 6 lines\n    collected 20 items") {
 		t.Errorf("an unfolded result should be counted, then shown:\n%s", got)
 	}
@@ -136,7 +136,7 @@ func TestFoldRowsLeadWithTheOutput(t *testing.T) {
 		{Type: transcript.EventUser, Timestamp: base.Add(7 * time.Second),
 			ToolResults: []transcript.ToolResult{{ToolUseID: "f", IsError: true, Text: "..........F\nFAILED test_a.py::test_x"}}},
 	}
-	got = RenderReader(ev, ReaderOpts{Width: 70, Height: 20})
+	got = RenderReader(ev, ReaderOpts{Width: 70, Height: 20, Anchor: -1})
 	for _, want := range []string{
 		"⎿ 3 lines",                        // a file is counted, not quoted
 		"⎿ 1 passed in 0.4s · 1 more line", // the dots are not what the run said
@@ -162,7 +162,7 @@ func TestProseKeepsAReadingMeasure(t *testing.T) {
 		{Type: transcript.EventAssistant, Timestamp: base.Add(2 * time.Second),
 			ToolUses: []transcript.ToolUse{{ID: "b", Name: "Bash", Input: json.RawMessage(`{"command":"` + strings.Repeat("x", 130) + `"}`)}}},
 	}
-	got := RenderReader(ev, ReaderOpts{Width: 160, Height: 30})
+	got := RenderReader(ev, ReaderOpts{Width: 160, Height: 30, Anchor: -1})
 	widest, call := 0, 0
 	for _, line := range strings.Split(got, "\n") {
 		w := lipgloss.Width(strings.TrimRight(line, " "))
@@ -232,13 +232,13 @@ func TestProseHonoursTheMarkdownATerminalCan(t *testing.T) {
 func TestYourTurnsCarryTheirClock(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 60, Height: 20})
+	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 60, Height: 20, Anchor: -1})
 	first := strings.Split(got, "\n")[0]
 	clock := fixtureBase.Local().Format("15:04")
 	if !strings.HasPrefix(first, "❯ fix the 401 bug") || !strings.HasSuffix(strings.TrimRight(first, " "), clock) {
 		t.Errorf("the turn should carry %s on its right: %q", clock, first)
 	}
-	got = RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 40, Height: 20})
+	got = RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 40, Height: 20, Anchor: -1})
 	first = strings.Split(got, "\n")[0]
 	if !strings.HasSuffix(strings.TrimRight(first, " "), clock) {
 		t.Errorf("a turn that fills its row wraps and keeps the clock: %q", first)

@@ -237,9 +237,11 @@ type Model struct {
 	trailScroll int
 	trailPinned bool
 
-	// anchor is the reader line the Lv2 cursor's row lands on — marked, so the
-	// two panels say they are showing the same moment. -1 when there is no
-	// cursor to follow.
+	// anchor is the reader's own cursor: the document line marked, and the
+	// row Space acts on. It opens on the Lv2 cursor's row — so the two
+	// panels say they are showing the same moment — and from there `j`/`k`
+	// and `ctrl+d`/`ctrl+u` step it a line or a half page at a time
+	// (readerCursorMove). -1 when there is no cursor to draw.
 	anchor     int
 	anchorAt   time.Time // the moment the anchor stands for; zero when none
 	anchorText string    // what that row said
@@ -1272,19 +1274,19 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 			return m, m.refresh()
 		}
 	case "j", "down":
-		if !m.scrollBy(1) {
+		if !m.readerCursorMove(1) {
 			m.note = "end of the conversation"
 		}
 	case "k", "up":
-		if !m.scrollBy(-1) {
+		if !m.readerCursorMove(-1) {
 			m.note = "start of the conversation"
 		}
 	case "ctrl+d":
-		if !m.scrollBy(m.readerHeight() / 2) {
+		if !m.readerCursorMove(m.readerHeight() / 2) {
 			m.note = "end of the conversation"
 		}
 	case "ctrl+u":
-		if !m.scrollBy(-m.readerHeight() / 2) {
+		if !m.readerCursorMove(-(m.readerHeight() / 2)) {
 			m.note = "start of the conversation"
 		}
 	case "[", "]":
@@ -3896,10 +3898,13 @@ func (m *Model) keymap() string {
 		// the moment they are pressed ("all of it is on screen") — so a
 		// footer naming them beside that note offered a key and its own
 		// refusal on the same row. The keys that still act on a page that
-		// fits stay: `[ ]` steps turns, `space` unfolds, `/` and `n/N`
+		// fits stay: `[ ] chapters`, `space` unfolds, `/` and `n/N`
 		// search. #56 already drops both from a lane's page with no turns
 		// at all; this is the same rule on a page that has turns and no
-		// scroll.
+		// scroll. (The reader's cursor still moves under a fitting page's
+		// `j`/`k` — readerCursorMove — since Space still has to reach
+		// whichever fold on that one screen is not the first; the footer
+		// just has nothing to call it, there being nowhere to scroll to.)
 		if doc := m.doc(m.readerWidth()); len(doc) <= m.readerHeight() {
 			keys = strings.Replace(keys, "j/k scroll · ", "", 1)
 			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)

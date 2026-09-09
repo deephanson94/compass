@@ -21,7 +21,7 @@
                                                        │ moment34 the expiry check compares a UTC stamp against local
                                                        │ time, which is why it only fails after a refresh
                                                        │
-                                                       │ moment37 patching tokens.py to compare in UTC, then rerunning
+                                                       │ ▸moment37 patching tokens.py to compare in UTC, then rerunning
                                                        │ the two tests that were objecting
                                                        │
                                                        │ moment39 both refresh tests pass now; rerunning the whole auth

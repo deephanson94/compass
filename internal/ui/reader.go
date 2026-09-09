@@ -128,10 +128,29 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 }
 
 // markAnchor inverts the anchored line across the panel, the way the trail
-// inverts its cursor row. The line is stripped back to its plain text first: a
-// reset left over from a tint would cancel the inversion halfway across.
+// inverts its cursor row (trailBuilder.cursored) — and, like that row, cuts a
+// literal ▸ into it rather than trusting the inversion alone: Reverse is a
+// style, and a capture, a NO_COLOR terminal, or one whose reverse video is
+// faint carries no style at all (SPEC §4). The line is stripped back to its
+// plain text first: a reset left over from a tint would cancel the inversion
+// halfway across.
 func markAnchor(line string, w int) string {
 	plain := strings.TrimRight(ansi.Strip(line), " ")
+	// The same cell the trail spends: the space right after a leading
+	// glyph or an indent — "❯▸", "⏺▸", "  ▸⎿" — never a letter of the
+	// row's own words. Prose the model wrote can open flush left with no
+	// such cell to spend; there the mark is pushed in front instead of
+	// eating the line's first letter, and one cell comes off the far end
+	// to keep the row the width it was.
+	if r := []rune(plain); len(r) > 1 && r[1] == ' ' {
+		r[1] = '▸'
+		plain = string(r)
+	} else {
+		plain = "▸" + plain
+		if r := []rune(plain); w > 0 && len(r) > w {
+			plain = string(r[:len(r)-1])
+		}
+	}
 	if pad := w - lipgloss.Width(plain); pad > 0 {
 		plain += strings.Repeat(" ", pad)
 	}

@@ -266,7 +266,7 @@ func (m *Model) readerColumn(w, h int) []string {
 			// rows over "❯ add a --version flag    17:59" (#65).
 			turns, said := 0, ""
 			for _, l := range page {
-				if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") {
+				if r := ansi.Strip(l); isDrawnTurnRow(r) {
 					turns++
 					said = oneSpace(strings.TrimRight(r, " "))
 				}
@@ -286,7 +286,7 @@ func (m *Model) readerColumn(w, h int) []string {
 			// and `saysSame` keeps #110's floor of two words.
 			onTurn := false
 			for _, l := range page {
-				if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") && saysSame(oneSpace(m.anchorText), oneSpace(strings.TrimRight(r, " "))) {
+				if r := ansi.Strip(l); isDrawnTurnRow(r) && saysSame(oneSpace(m.anchorText), oneSpace(strings.TrimRight(r, " "))) {
 					onTurn = true
 					break
 				}
@@ -301,7 +301,7 @@ func (m *Model) readerColumn(w, h int) []string {
 				// and no trail title stands to be repeated (#120).
 				drawn := false
 				for _, l := range page {
-					if r := ansi.Strip(l); strings.HasPrefix(r, glyphSaid+" ") && saysSame(oneSpace(archiveHeadline(s)), oneSpace(strings.TrimRight(r, " "))) {
+					if r := ansi.Strip(l); isDrawnTurnRow(r) && saysSame(oneSpace(archiveHeadline(s)), oneSpace(strings.TrimRight(r, " "))) {
 						drawn = true
 						break
 					}
@@ -699,6 +699,94 @@ func (m *Model) scrollBy(delta int) bool {
 	return m.readerTop(doc) != was
 }
 
+// readerCursorMove is `j`/`k`/`ctrl+d`/`ctrl+u`: the reader's own cursor,
+// drawn as the trail's is (markAnchor) and Space's target (toggleFold), steps
+// delta rows — never landing on the air between blocks — and the viewport
+// follows only far enough to keep it on screen, the way a pager's cursor
+// does. It reports whether the cursor actually moved, so a key at either end
+// can say so, as `scrollBy` already does for the viewport alone.
+//
+// Where the cursor stands before the step is `m.anchor` — the same field a
+// Lv2 landing or `[`/`]` sets — unless that row is not on the page being
+// drawn (stale from a `g`/`G`/search jump that moved the viewport without
+// it, or from a document that has since changed shape): then the step starts
+// from the page's own top, so the first press after such a jump moves from
+// where the reader is now looking, not from where the cursor was left.
+//
+// A conversation that already shows every line keeps `scrollBy`'s own word
+// for it, "all of it is on screen" (#83), whichever of the four keys is
+// pressed: there is nothing to page to, and the footer already sheds the
+// scroll keys on the same test. The cursor still steps underneath — Space
+// still has to reach whichever of two folds on that one screen is not the
+// first — but nothing about a page with nowhere to scroll needs saying so.
+func (m *Model) readerCursorMove(delta int) bool {
+	doc := m.doc(m.readerWidth())
+	if len(doc) == 0 {
+		return false
+	}
+	height := m.readerHeight()
+	fits := len(doc) <= height
+	top := m.readerTop(doc)
+	cur := m.anchor
+	if cur < top || cur >= top+height || cur >= len(doc) {
+		cur = top
+	}
+	step, n := 1, delta
+	if delta < 0 {
+		step, n = -1, -delta
+	}
+	target, moved := cur, false
+	for i := 0; i < n; i++ {
+		next := target + step
+		for next >= 0 && next < len(doc) && doc[next].kind == readerBlank {
+			next += step // the cursor never stands on the air between blocks
+		}
+		if next < 0 || next >= len(doc) {
+			break
+		}
+		target, moved = next, true
+	}
+	m.anchor, m.anchorAt = target, doc[target].at
+	m.anchorText = readerRowText(doc, target)
+	switch {
+	case target < top:
+		m.scroll = clampScroll(target, len(doc), height)
+	case target > top+height-1:
+		m.scroll = clampScroll(target-height+1, len(doc), height)
+	}
+	if fits {
+		m.note = "all of it is on screen"
+		return true
+	}
+	return moved
+}
+
+// isDrawnTurnRow reports whether a stripped, drawn reader row opens as a
+// turn — `glyphSaid+" "`, the way one always drew before the reader had a
+// cursor to put on it. The cursor's own mark (markAnchor) can now stand in
+// that same cell — `❯▸add a --version flag` — when the row it lands on is a
+// turn; a turn under the cursor is still a turn.
+func isDrawnTurnRow(r string) bool {
+	return strings.HasPrefix(r, glyphSaid+" ") || strings.HasPrefix(r, glyphSaid+"▸")
+}
+
+// readerRowText is a document row's own words, stripped of the glyph and the
+// relay mark that lead a turn (the same trim `landOnTurn` gives a turn it
+// lands on) so the title's clause can name whichever row the cursor stands
+// on, turn or not.
+func readerRowText(doc []readerLine, i int) string {
+	text := doc[i].text
+	if doc[i].kind == readerSaid && doc[i].dim > 0 {
+		text = string([]rune(text)[:doc[i].dim]) // without the clock
+	}
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, glyphSaid)
+	text = strings.TrimPrefix(text, glyphBranch)
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, strings.TrimSpace(relayMark))
+	return strings.TrimSpace(text)
+}
+
 // turnStand is where the reader's turn keys stand: the document, the
 // lines its ❯ rows begin on, the turn `[ ]` last landed on (-1 when the
 // page is not standing on one) and `at`, the line the page is anchored to.
@@ -819,41 +907,57 @@ func (m *Model) readerHeight() int {
 	return body
 }
 
-// toggleFold is Space: the first folded result on screen opens (or the first
-// open one closes) — the document's own order decides, top of the screen down.
+// toggleFold is Space: the tool result the reader's cursor stands on opens
+// or closes, whichever row of the screen that is. Off a foldable row — the
+// cursor is on prose, a call, or has not been placed on the page at all —
+// Space falls back to the first folded result on screen, the document's own
+// order deciding, so the key still does something on a page it can act on
+// (#79's original rule, narrowed to a fallback now the reader has a cursor
+// to prefer).
 func (m *Model) toggleFold() {
 	width := m.readerWidth()
 	doc := m.doc(width)
 	top := m.readerTop(doc)
-	for i := top; i < len(doc) && i < top+m.readerHeight(); i++ {
-		if !doc[i].foldable() {
-			continue
-		}
-		m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
-		m.docVer++
-		m.docCache.valid = false
-		// Which one: the reader has no cursor, so Space takes the first
-		// folded result on screen, and the note names the call it opened
-		// — a person pressing it did not know which row it had acted on (#79).
-		verb := "unfolded"
-		if !m.unfolded[doc[i].event] {
-			verb = "folded"
-		}
-		call := ""
-		for j := i - 1; j >= 0 && j > i-4; j-- {
-			if doc[j].kind == readerCall {
-				call = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(doc[j].text), glyphCall)) // the call, not its glyph (#80)
+	height := m.readerHeight()
+	i, onCursor := -1, false
+	if c := m.anchor; c >= top && c < top+height && c < len(doc) && doc[c].foldable() {
+		i, onCursor = c, true
+	} else {
+		for j := top; j < len(doc) && j < top+height; j++ {
+			if doc[j].foldable() {
+				i = j
 				break
 			}
 		}
-		if call != "" {
-			m.note = verb + " " + call
-		} else {
-			m.note = verb + " the first result on screen"
-		}
+	}
+	if i < 0 {
+		m.note = "nothing to unfold on screen"
 		return
 	}
-	m.note = "nothing to unfold on screen"
+	m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
+	m.docVer++
+	m.docCache.valid = false
+	// Which one: the note names the call it opened — a person pressing
+	// Space did not know which row it had acted on (#79).
+	verb := "unfolded"
+	if !m.unfolded[doc[i].event] {
+		verb = "folded"
+	}
+	call := ""
+	for j := i - 1; j >= 0 && j > i-4; j-- {
+		if doc[j].kind == readerCall {
+			call = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(doc[j].text), glyphCall)) // the call, not its glyph (#80)
+			break
+		}
+	}
+	switch {
+	case call != "":
+		m.note = verb + " " + call
+	case onCursor:
+		m.note = verb + " the result under the cursor"
+	default:
+		m.note = verb + " the first result on screen"
+	}
 }
 
 // jumpMatch is n/N: the next (or previous) document row the query appears in.

@@ -282,7 +282,12 @@ func TestTheReaderTitleLeavesTheTurnToThePage(t *testing.T) {
 		if strings.Contains(l, "READER · hello") {
 			title = l
 		}
-		if strings.HasPrefix(strings.TrimLeft(l, " "), "❯ add a --version flag") {
+		// The reader's cursor opens on this very turn (there is only one),
+		// and marks it — "❯▸add a --version flag" — the same convention
+		// the trail's own cursor wears; either form of the row still names
+		// the turn.
+		trimmed := strings.TrimLeft(l, " ")
+		if strings.HasPrefix(trimmed, "❯ add a --version flag") || strings.HasPrefix(trimmed, "❯▸add a --version flag") {
 			turn = l
 		}
 	}
@@ -456,7 +461,11 @@ func TestTheArchiveReaderTitleLeavesTheAskToTheTurnRow(t *testing.T) {
 	}
 	turn := ""
 	for _, l := range strings.Split(view, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(l, " "), "❯ ") {
+		// `[` lands the reader's cursor on this very turn, marking it
+		// "❯▸…" rather than "❯ …" (markAnchor's convention, the same the
+		// trail's cursor wears) — either form is still the turn row.
+		trimmed := strings.TrimLeft(l, " ")
+		if strings.HasPrefix(trimmed, "❯ ") || strings.HasPrefix(trimmed, "❯▸") {
 			turn = l
 			break
 		}
@@ -639,7 +648,10 @@ func TestTheTurnNoteLeavesTheClockToTheRow(t *testing.T) {
 	}
 	turn := ""
 	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
-		if strings.HasPrefix(strings.TrimLeft(l, " "), "❯ relayed") {
+		// `[` lands the reader's cursor on this turn, marking it "❯▸relayed"
+		// rather than "❯ relayed" (markAnchor's convention); either is the row.
+		trimmed := strings.TrimLeft(l, " ")
+		if strings.HasPrefix(trimmed, "❯ relayed") || strings.HasPrefix(trimmed, "❯▸relayed") {
 			turn = strings.TrimRight(l, " ")
 		}
 	}
@@ -4557,7 +4569,16 @@ func TestTheWalkKeyYieldsWithNoSearchToWalk(t *testing.T) {
 	}{
 		{"two-tools", sceneTwoTools, 100, 30, 13, "r reply"},
 		{"subagents", sceneSubagents, 100, 30, 33, "r reply"},
-		{"two-tools", sceneTwoTools, 120, 34, 19, "h/l session"},
+		// {"two-tools", sceneTwoTools, 120, 34, 19, "h/l session"} stood
+		// here: canonicalKeys[15:18] is `k`, `k`, `j` in this scene's
+		// reader, and the reader's cursor (readerCursorMove) now steps
+		// under those keys even on a page that fits, same as it must to
+		// reach a second fold Space could not reach before. Landing off
+		// the session's one turn leaves `turnStand` reporting `cur < 0`,
+		// so `[ ] turns` reads as a key that still moves and is no
+		// longer shed at this stand — the two cells `n/N` frees go to it
+		// rather than to `h/l session`, and there is no longer room for
+		// both. The other two rows still pin the trade this test is for.
 	} {
 		m := reader(c.scene(), c.w, c.h, c.n)
 		for _, k := range []string{"n", "N"} {
@@ -4734,9 +4755,15 @@ func TestAStuckKeyIsTriedAgainOnceAnotherHasYielded(t *testing.T) {
 		return m, sc
 	}
 
-	// The five stands of the first session's reader at eighty whose note
-	// is the scroll key's, not the turn key's.
-	for _, n := range []int{16, 17, 18, 20, 21} {
+	// The stands of the first session's reader at eighty whose note is the
+	// scroll key's, not the turn key's. (18, 20 and 21 stood here too
+	// until the reader had its own cursor: canonicalKeys[17], [19] and
+	// [20] are `j`s that, under readerCursorMove, step the cursor off
+	// this session's one turn onto the stub below it — `turnStand` then
+	// reports `cur < 0`, and `[` legitimately lands back on the turn
+	// rather than refusing, which is the key acting, not a stuck key
+	// answering in place.)
+	for _, n := range []int{16, 17} {
 		m, _ := stand(sceneFirstSession, 80, 24, n)
 		if m.level < levelReader {
 			t.Fatalf("first-session 80x24 after %d keys: expected the reader, got Lv%d", n, m.level)
@@ -11184,7 +11211,11 @@ func TestAChapterNoteOfOneChapterIsTheCountAlone(t *testing.T) {
 			if strings.Contains(foot, `❯ 1/1 · "`) {
 				t.Errorf("%s %d: the one chapter's note quotes the sentence its own ❯ row draws: %q", prof.name, w, foot)
 			}
-			if !strings.Contains(ansi.Strip(m.View()), "❯ fix the 401 on token refresh") {
+			// `[` lands the reader's cursor on this very turn, marking it
+			// "❯▸fix the 401…" rather than "❯ fix the 401…" (markAnchor's
+			// convention); either form is the turn the note names.
+			view := ansi.Strip(m.View())
+			if !strings.Contains(view, "❯ fix the 401 on token refresh") && !strings.Contains(view, "❯▸fix the 401 on token refresh") {
 				t.Errorf("%s %d: the turn the note names is not drawn", prof.name, w)
 			}
 		}

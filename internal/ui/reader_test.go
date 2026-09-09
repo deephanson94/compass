@@ -53,7 +53,7 @@ func fixtureEvents(base time.Time) []transcript.Event {
 func TestT50ReaderGolden(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 60, Height: 24})
+	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 60, Height: 24, Anchor: -1})
 	compareGolden(t, "reader-60x24.txt", got)
 }
 
@@ -62,7 +62,7 @@ func TestT50ReaderUnfoldedGolden(t *testing.T) {
 	forceASCII(t)
 
 	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{
-		Width: 60, Height: 24, Unfolded: map[int]bool{3: true},
+		Width: 60, Height: 24, Unfolded: map[int]bool{3: true}, Anchor: -1,
 	})
 	compareGolden(t, "reader-60x24-unfolded.txt", got)
 }
@@ -73,7 +73,7 @@ func TestT50ReaderSearchGolden(t *testing.T) {
 	forceASCII(t)
 
 	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{
-		Width: 60, Height: 24, Query: "refresh",
+		Width: 60, Height: 24, Query: "refresh", Anchor: -1,
 	})
 	compareGolden(t, "reader-60x24-search.txt", got)
 }
@@ -472,17 +472,27 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 	}
 	still(t, "g")
 
+	// `j` now steps the reader's own cursor (readerCursorMove), not the
+	// viewport: on a tall page two rows of cursor movement from the top
+	// never reach the edge of the screenful, so the viewport itself does
+	// not have to move for the mark to.
+	before := m.anchor
 	press(m, "j")
 	press(m, "j")
-	// Two rows down — or three, when the second would have put a line of
-	// air at the top of the page, which a single step never does.
 	doc := m.doc(m.readerWidth())
-	want := 2
-	if doc[2].kind == readerBlank {
-		want = 3
+	want := before
+	for moved := 0; moved < 2 && want < len(doc)-1; {
+		want++
+		for want < len(doc)-1 && doc[want].kind == readerBlank {
+			want++
+		}
+		moved++
 	}
-	if m.scroll != want {
-		t.Errorf("j j at Lv3 = line %d, want %d", m.scroll, want)
+	if m.anchor != want {
+		t.Errorf("j j at Lv3 moved the cursor to %d, want %d", m.anchor, want)
+	}
+	if m.scroll != 0 {
+		t.Errorf("j j at Lv3 scrolled to %d, though the cursor is still on the first screenful", m.scroll)
 	}
 	still(t, "j")
 
