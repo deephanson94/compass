@@ -945,6 +945,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case !m.showMirror && m.sessionView() && m.level == levelWaypoints:
 			m.note = "the conversation" // short: the panel's own title says the rest, and the keys stay
+		case !m.showMirror && m.level == levelBoard:
+			// The board draws no mirror either way (#15), so the flag is
+			// the whole of what the key changed — and the frame said
+			// nothing: `m` here turned the mirror off, came back byte for
+			// byte with the note gone, and left no way to know which way
+			// the flag stands. That is the silent second press #241 and
+			// #290 refused one and two levels in, on the one level where
+			// the panel never answers for the key. It is the state
+			// `mirror on` already says, said the other way (#37, #177):
+			// ten cells, inside the note's own reserve, so the row gives
+			// up nothing for it.
+			m.note = "mirror off"
 		case !m.showMirror:
 		case m.sessionView() && m.level == levelWaypoints:
 			m.note = "the live pane"

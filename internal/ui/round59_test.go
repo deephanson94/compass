@@ -14078,3 +14078,189 @@ func TestTheAttachRefusalSaysTheNoPaneOnce(t *testing.T) {
 	}
 	t.Logf("frames drawing the refusal: %d, of which saying it twice: %d", reached, twice)
 }
+
+// ---- round 106, two-tools ----
+// r106ttOffSizes are the five terminals the walkthrough is drawn at. Below
+// `deckWideCols` the key refuses in its own words (`mirror needs 110
+// columns`) and never flips the flag, so those two widths measure the guard
+// rather than the toggle.
+var r106ttOffSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r106ttOffRoutes are ways to a frame `m` is pressed on: the board it opens
+// on and two moves across it, and three walks a level or two in, where the
+// panel the key puts away is replaced by something the frame draws.
+var r106ttOffRoutes = [][]string{
+	{}, {"j"}, {"1"},
+	{"tab"}, {"tab", "tab"}, {"tab", "tab", "]"},
+}
+
+// r106ttOffOn and r106ttOffBoard are the two halves of the board's mirror
+// sentence: the state the first press says, and the state the second owes.
+// `the conversation` and `the live pane` are the same sentence one and two
+// levels in, where a panel answers for the key.
+const (
+	r106ttOffOn    = "mirror on"
+	r106ttOffBoard = "mirror off"
+	r106ttOffDeep  = "the conversation"
+	r106ttOffPane  = "the live pane"
+)
+
+// r106ttOffFrame is one drawn frame, escapes stripped and read once: the
+// rows above the footer, the footer, its keymap half and its note.
+type r106ttOffFrame struct {
+	rows []string
+	body string
+	foot string
+	keys string
+	note string
+}
+
+func r106ttOffRead(m *Model) r106ttOffFrame {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	f := r106ttOffFrame{rows: rows}
+	if len(rows) == 0 {
+		return f
+	}
+	f.body = strings.Join(rows[:len(rows)-1], "\n")
+	f.foot = rows[len(rows)-1]
+	f.keys = r106ttOffKeys(f.foot)
+	s := strings.TrimLeft(strings.TrimRight(f.foot, " "), " ")
+	if i := strings.Index(s, "  "); i >= 0 {
+		f.note = strings.TrimSpace(s[i:])
+	}
+	return f
+}
+
+// r106ttOffKeys is the keymap half of a footer: what stands before the gap
+// the note lives after (#134's reserve), with the attach aside — which is
+// not a key (#55) — read past.
+func r106ttOffKeys(foot string) string {
+	s := strings.TrimRight(foot, " ")
+	s = strings.Replace(s, " (prefix d returns)", "", 1)
+	if i := strings.Index(strings.TrimLeft(s, " "), "  "); i >= 0 {
+		s = strings.TrimLeft(s, " ")[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// r106ttOffClauses splits a keymap half into its clauses, so a row can be
+// asked whether it still names everything it named before.
+func r106ttOffClauses(keys string) []string {
+	var out []string
+	for _, c := range strings.Split(keys, " · ") {
+		if c = strings.TrimSpace(c); c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// TestTheBoardsMirrorKeySaysTheFlagBothWays pins the board's `m` to the
+// state it changed. The mirror is a panel of Lv1 and Lv2 and the board
+// draws it at neither (#15), so on the board the flag is the whole of what
+// the key does: the first press says `mirror on` (#37, #177) and the second
+// said nothing at all — the frame above the footer came back byte for byte
+// and the note went, on 237 of the 912 corpus stands where `m` arms the
+// mirror, every one of them the board. That is the silent second press #241
+// refused for the reader's `g` and #290 refused for the reader's own `m`,
+// on the one level where no panel answers for the key. The board says the
+// state the other way round: `mirror off`, ten cells, inside the note's own
+// reserve.
+//
+// Three sides, so the sentence cannot be jammed onto every level:
+//   - on the board, where `m` turns the mirror off, the note is
+//     `mirror off` and the body above the footer is unchanged, so the note
+//     is the only thing that can answer;
+//   - the row pays nothing for it: the off frame names every key the on
+//     frame named, and the frame fits its terminal;
+//   - one and two levels in the key keeps its own words — the session view
+//     says `the conversation` and the reader `the live pane` on either
+//     press (#290) — and no frame off the board ever says `mirror off`.
+func TestTheBoardsMirrorKeySaysTheFlagBothWays(t *testing.T) {
+	forceASCII(t)
+	boards, deeps := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r106ttOffSizes {
+				w, h := size[0], size[1]
+				for _, route := range r106ttOffRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.showHelp || m.searching || m.replying || m.archiveView {
+						continue
+					}
+					where := fmt.Sprintf("%s %v %dx%d Lv%d", sc.name, route, w, h, m.level)
+
+					// The first press arms the mirror; the second is the
+					// one under test, pressed on the frame it is read
+					// from (#221).
+					pressKey(m, "m")
+					poll(m, sc)
+					if !m.showMirror {
+						continue
+					}
+					board := m.level == levelBoard
+					on := r106ttOffRead(m)
+					if board && on.note != r106ttOffOn {
+						t.Errorf("%s: `m` armed the mirror on the board and said %q, not %q", where, on.note, r106ttOffOn)
+					}
+					pressKey(m, "m")
+					poll(m, sc)
+					off := r106ttOffRead(m)
+					note, offKeys := off.note, off.keys
+
+					if !board {
+						// One and two levels in the key keeps its own
+						// words, and never the board's.
+						deeps++
+						if note == r106ttOffBoard {
+							t.Errorf("%s: `m` off the board says %q; here a panel answers for the key (#290)", where, note)
+						}
+						if m.sessionView() && note != r106ttOffDeep && note != r106ttOffPane {
+							t.Errorf("%s: `m` in the session view says %q, not %q or %q", where, note, r106ttOffDeep, r106ttOffPane)
+						}
+						continue
+					}
+
+					boards++
+					if off.body != on.body {
+						t.Errorf("%s: `m` on the board redrew the frame above the footer; the board draws no mirror either way (#15)", where)
+					}
+					if note == "" {
+						t.Errorf("%s: `m` turned the mirror off on the board and said nothing; the frame above the footer came back byte for byte and only the note went\n  foot=%q",
+							where, strings.TrimRight(off.foot, " "))
+						continue
+					}
+					if note != r106ttOffBoard {
+						t.Errorf("%s: the board's mirror-off note is %q, not the state %q", where, note, r106ttOffBoard)
+					}
+					// The note is inside the reserve: the row gives up no
+					// key for it (#39, #177, #281, #284).
+					for _, clause := range r106ttOffClauses(on.keys) {
+						if !strings.Contains(offKeys, clause) {
+							t.Errorf("%s: the mirror-off note cost the row %q\n  on =%q\n  off=%q", where, clause, on.keys, offKeys)
+						}
+					}
+					for _, r := range off.rows {
+						if lipgloss.Width(r) > w {
+							t.Errorf("%s: the frame `m` landed on has a row over %d cells: %q", where, w, r)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if boards < 100 {
+		t.Errorf("only %d board stands where `m` arms the mirror; the biting side is unmeasured", boards)
+	}
+	if deeps < 150 {
+		t.Errorf("only %d stands off the board; the held side is unmeasured", deeps)
+	}
+	t.Logf("board stands where `m` arms the mirror: %d · stands off the board: %d", boards, deeps)
+}
