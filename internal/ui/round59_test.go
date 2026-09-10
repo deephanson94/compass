@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
@@ -11091,6 +11093,16 @@ func itoa(n int) string {
 // none is lost — so satisfying this by emptying the footer fails — and by
 // the live board keeping its own `a ask`.
 func TestTheArchiveBoardNamesTheAskKeyItActsOn(t *testing.T) {
+	// Whether `a` acts is read off the command the key returns, and the
+	// deck refuses the key where no `claude` is on PATH: on a runner with
+	// none the probe named no archive board and the pin was vacuous. The
+	// pin asks about the row, not the machine, so it puts a `claude` on
+	// its own PATH; the command it returns is never run here.
+	stub := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stub, askBin), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
 	named, live := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
 		old := lipgloss.ColorProfile()
