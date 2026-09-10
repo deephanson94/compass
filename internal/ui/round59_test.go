@@ -17006,3 +17006,197 @@ func r112ttEndMarkedCells(frame string) []string {
 	}
 	return out
 }
+
+// ---- round 112, fleet-hygiene (converged with #319 and #320; kept as a guard) ----
+// r112fhSizes is the deck's own width ladder, so the reader's follow is
+// pinned at every shape the deck draws — the defect this pins was two
+// widths wide and would have hidden at any one of them.
+var r112fhSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r112fhWalk is a mixed cursor walk: a few single rows, then a page. The
+// page key is the one that overshot, and it only overshot from a mark
+// already low on a scrolling page, which is what the `j`s put it there
+// for. `ctrl+u` and `k` walk the same ground back the other way.
+// r112fhShrinks are terminals the deck can find itself in mid-read: a
+// window snapped narrow, a tmux pane unzoomed, a font stepped up.
+var r112fhShrinks = [][2]int{{90, 12}, {120, 20}}
+
+var r112fhWalk = []string{
+	"j", "j", "ctrl+d", "j", "ctrl+d", "ctrl+d", "j", "j", "ctrl+d",
+	"k", "ctrl+u", "k", "k", "ctrl+u", "ctrl+u", "j", "ctrl+d", "j", "ctrl+d",
+}
+
+// r112fhReaderColumn is the frame's reader column: the reader is the last
+// panel at every width — beside the trail's companion from 120 up, alone
+// below it — so the mark is looked for after the row's last panel rule and
+// never in the trail's own cursor.
+func r112fhReaderColumn(line string) string {
+	cells := strings.Split(ansi.Strip(line), "│")
+	return cells[len(cells)-1]
+}
+
+// r112fhMarkedRow is the drawn reader line carrying the cursor, if the
+// frame draws one at all.
+func r112fhMarkedRow(frame string) (string, bool) {
+	for _, l := range strings.Split(frame, "\n") {
+		if col := r112fhReaderColumn(l); strings.Contains(col, "▸") {
+			return col, true
+		}
+	}
+	return "", false
+}
+
+// r112fhSaysRow reports whether the drawn, cursor-bearing line carries the
+// document row's own opening words: the mark replaces a cell rather than
+// hiding one (#305), so the row's words survive it.
+func r112fhSaysRow(line, text string) bool {
+	flat := strings.ReplaceAll(line, "▸", " ")
+	want := strings.TrimSpace(text)
+	if r := []rune(want); len(r) > 12 {
+		want = string(r[:12])
+	}
+	return want != "" && strings.Contains(flat, want)
+}
+
+// TestTheReaderCursorStaysOnThePageTheFrameDraws pins the reader's cursor
+// keys against #300's rule: the page a cursor key moves to is the page the
+// mark is drawn on.
+//
+// `readerCursorMove` followed the cursor by setting `m.scroll`, but the
+// page the frame draws is `readerTopIn`'s, which walks that raw scroll back
+// off a transcript blank and off a result whose call is the row above (`readerTopIn`). Where it walked back, `ctrl+d` from a mark low on a scrolling
+// page left the cursor one row below the drawn page: the body did not move
+// a line, the mark left the frame altogether, the reader's title clause
+// named a row the frame did not draw, and there was no note — four of the
+// walkthrough's 608 Lv3 stands, in two scenes at two widths, identical
+// under both colour profiles (#317, recorded and not cut). Three sides,
+// both profiles (#215, #218), on every scene the deck has:
+//
+//  1. after every cursor press the mark is inside the page the frame
+//     draws, so the frame is never a reader page with no cursor on it;
+//  2. the frame draws it, in the reader's own column;
+//  3. the drawn mark stands on the row the model counts as the cursor;
+//  4. `space` on the document's last row — whose unfolded rows take the
+//     page off its tail — keeps the mark on the page, so the next `j` steps
+//     forward rather than back to the page's top (#316, recorded);
+//  5. and a terminal resized under an open reader keeps it too (#319).
+func TestTheReaderCursorStaysOnThePageTheFrameDraws(t *testing.T) {
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		presses, drawn, scrolling, ends, resizes := 0, 0, 0, 0, 0
+		for _, sc := range allScenes() {
+			for _, size := range r112fhSizes {
+				w, h := size[0], size[1]
+				m := sceneModel(sc, w, h)
+				toLv3(m)
+				if len(m.doc(m.readerWidth())) == 0 {
+					continue // a lane whose agent has written nothing
+				}
+				if len(m.doc(m.readerWidth())) > m.readerHeight() {
+					scrolling++
+				}
+				for step, k := range r112fhWalk {
+					pressKey(m, k)
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 {
+						break
+					}
+					top, height := m.readerTop(doc), m.readerHeight()
+					at := m.anchor
+					where := prof.name + " " + sc.name
+					// (1) the mark is on the page the frame draws
+					if at < top || at >= top+height {
+						t.Errorf("%s %dx%d: after %s (step %d) the cursor stands on row %d, off the drawn page [%d,%d); note %q",
+							where, w, h, k, step, at, top, top+height, m.note)
+						continue
+					}
+					presses++
+					// The frame itself is drawn where the page can move —
+					// a conversation that fits draws its whole self and
+					// its top is 0 whatever the scroll — and once per
+					// reader besides, so a fitting page is seen too. The
+					// frame is what costs the time here; this spends it
+					// where the mark can be lost.
+					if len(doc) <= height && step > 0 {
+						continue
+					}
+					drawn++
+					// (2) and the frame draws it
+					line, ok := r112fhMarkedRow(m.View())
+					if !ok {
+						t.Errorf("%s %dx%d: after %s (step %d) the reader draws no cursor at all; note %q",
+							where, w, h, k, step, m.note)
+						continue
+					}
+					// (3) on the row the model counts
+					if !r112fhSaysRow(line, doc[at].text) {
+						t.Errorf("%s %dx%d: after %s (step %d) the drawn cursor is on %q, not on row %d %q",
+							where, w, h, k, step, strings.TrimSpace(line), at, strings.TrimSpace(doc[at].text))
+					}
+				}
+				// (4) and the fold's own repair keeps the mark on the page
+				m = sceneModel(sc, w, h)
+				toLv3(m)
+				doc := m.doc(m.readerWidth())
+				if len(doc) == 0 {
+					continue
+				}
+				pressKey(m, "G")
+				pressKey(m, "space")
+				doc = m.doc(m.readerWidth())
+				at, top, height := m.anchor, m.readerTop(doc), m.readerHeight()
+				ends++
+				if at < top || at >= top+height {
+					t.Errorf("%s %s %dx%d: `space` on the document's last row left the cursor on row %d, off the drawn page [%d,%d); note %q",
+						prof.name, sc.name, w, h, at, top, top+height, m.note)
+					continue
+				}
+				if _, ok := r112fhMarkedRow(m.View()); !ok {
+					t.Errorf("%s %s %dx%d: after `space` on the document's last row the reader draws no cursor at all; note %q",
+						prof.name, sc.name, w, h, m.note)
+					continue
+				}
+				was := m.anchor
+				pressKey(m, "j")
+				if m.anchor < was {
+					t.Errorf("%s %s %dx%d: after `space` on the document's last row `j` stepped the cursor from row %d back to row %d",
+						prof.name, sc.name, w, h, was, m.anchor)
+				}
+				// (5) and a resize under the open reader keeps it
+				for _, to := range r112fhShrinks {
+					m = sceneModel(sc, w, h)
+					toLv3(m)
+					if len(m.doc(m.readerWidth())) == 0 {
+						continue
+					}
+					pressKey(m, "ctrl+d")
+					pressKey(m, "j")
+					if _, ok := r112fhMarkedRow(m.View()); !ok {
+						continue
+					}
+					stood := m.anchorAt
+					m.Update(tea.WindowSizeMsg{Width: to[0], Height: to[1]})
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 {
+						continue
+					}
+					resizes++
+					_ = stood
+					if _, ok := r112fhMarkedRow(m.View()); !ok {
+						t.Errorf("%s %s %dx%d resized to %dx%d: the reader draws no cursor at all",
+							prof.name, sc.name, w, h, to[0], to[1])
+					}
+				}
+			}
+		}
+		if presses < 600 || drawn < 150 || scrolling < 8 || ends < 40 || resizes < 50 {
+			t.Errorf("%s: the pin measured %d presses, %d of them on a drawn frame, over %d scrolling readers, %d ends and %d resizes — too few to mean anything",
+				prof.name, presses, drawn, scrolling, ends, resizes)
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+}
