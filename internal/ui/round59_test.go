@@ -16033,3 +16033,119 @@ func TestTheLaneReaderOpensOnACursor(t *testing.T) {
 		t.Errorf("only %d reader stands drew no document, want at least 5 — the empty lane is the price side of this pin", empty)
 	}
 }
+
+// ---- round 110, two-tools ----
+// TestTheArchiveMirrorRefusalNamesTheDoorOnce holds the archive's `m`
+// refusal to one saying of one fact.
+//
+// `m` in the archive has no mirror to turn on, and it says so. It also
+// spelled out the way back — "no mirror in the archive · A returns to the
+// fleet" — while `A fleet` stood on the very same row, twenty cells to its
+// left: the same thing said twice on one line, which #95 and #96 settled
+// and #299 and #303 cut out of the attach and reply refusals. Here the
+// second saying was not free. The note is forty-nine cells; the row is one
+// line; and at 120 five of the eleven keys the archive's own row drew a
+// press earlier came off it to pay for them — `tab deeper`, the frame's
+// only naming of the way deeper (#264, #296, #297), and `j/k move` among
+// them — and four of thirteen at 152.
+//
+// Three sides, under both colour profiles (#215, #218):
+//   - the refusal says the fact and not the door: no clause of it names a
+//     key the keymap on the same row already names;
+//   - the door is still on the frame: the row names `A fleet`;
+//   - the shorter note costs the row nothing and buys some of it back: the
+//     finished row names every key it would have named under the long
+//     note, and on some stands names one the long note took away.
+func TestTheArchiveMirrorRefusalNamesTheDoorOnce(t *testing.T) {
+	forceASCII(t)
+	const long = "no mirror in the archive · A returns to the fleet"
+	stands, bought := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r110ttBDoorSizes {
+				w, h := size[0], size[1]
+				for _, route := range r110ttBDoorRoutes {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if !m.archiveView || m.showHelp || m.searching || m.replying {
+						continue
+					}
+					pressKey(m, "m")
+					poll(m, sc)
+					if !strings.HasPrefix(m.note, "no mirror in the archive") {
+						continue
+					}
+					stands++
+					where := fmt.Sprintf("%s %v m %dx%d", sc.name, route, w, h)
+					rows := strings.Split(ansi.Strip(m.View()), "\n")
+					foot := rows[len(rows)-1]
+					for _, r := range rows {
+						if lipgloss.Width(r) > w {
+							t.Errorf("%s: a row runs past the terminal (%d of %d): %q", where, lipgloss.Width(r), w, r)
+						}
+					}
+
+					// The fact, once: no clause of the note repeats a key
+					// the same row already names.
+					if strings.Contains(m.note, "A returns to the fleet") {
+						t.Errorf("%s: the refusal spells out `A` while the row names it: note=%q\n  foot=%q",
+							where, m.note, strings.TrimRight(foot, " "))
+					}
+
+					// The door is on the frame.
+					if !strings.Contains(r110ttBDoorKeys(foot), "A fleet") {
+						t.Errorf("%s: the row does not name the way back to the fleet\n  foot=%q", where, strings.TrimRight(foot, " "))
+					}
+
+					// And the short note costs nothing.
+					was := m.note
+					m.note = long
+					under := ansi.Strip(m.footerLine(w))
+					m.note = was
+					if !footerNamesAll(under, foot) {
+						t.Errorf("%s: the shorter note cost the row a key\n  now=%q\n  was=%q", where, r110ttBDoorKeys(foot), r110ttBDoorKeys(under))
+					}
+					if !footerNamesAll(foot, under) {
+						bought++
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if stands < 20 {
+		t.Errorf("only %d archive `m` refusals walked; the row this pin is about is unmeasured", stands)
+	}
+	if bought < 4 {
+		t.Errorf("only %d of the refusals bought a key back; the second saying's cost is unmeasured", bought)
+	}
+	t.Logf("archive `m` refusals: %d · rows that bought a key back: %d", stands, bought)
+}
+
+var r110ttBDoorSizes = [][2]int{{120, 34}, {152, 40}, {220, 48}}
+
+// r110ttBDoorRoutes are ways into the archive: its board, its list, a row
+// hidden on the way in, and one level deeper.
+var r110ttBDoorRoutes = [][]string{
+	{"A"},
+	{"A", "tab"},
+	{"x", "A"},
+	{"2", "x", "A"},
+	{"A", "j"},
+	{"A", "tab", "tab"},
+}
+
+// r110ttBDoorKeys is the keymap half of a footer, the note read past at
+// the gap the keymap never contains (#134).
+func r110ttBDoorKeys(foot string) string {
+	s := strings.TrimSpace(ansi.Strip(foot))
+	if i := strings.Index(s, "  "); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}

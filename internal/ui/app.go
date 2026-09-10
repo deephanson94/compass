@@ -923,7 +923,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.archiveView {
-			m.note = "no mirror in the archive · A returns to the fleet"
+			// Said once. The second clause spelled out what `A fleet`
+			// says on the very same row, twenty cells to its left, and
+			// the row is where a key is named (#95, #96, #299, #303):
+			// forty-nine cells of note took five of the eleven keys the
+			// row drew a press earlier off it at 120 — `tab deeper`, the
+			// frame's only naming of the way deeper (#264, #296, #297),
+			// and `j/k move` among them — and four of thirteen at 152.
+			// The refusal keeps its own fact, the row keeps the door.
+			m.note = "no mirror in the archive"
 			return m, nil
 		}
 		if m.sessionView() && m.level >= levelReader {
