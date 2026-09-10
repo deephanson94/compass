@@ -15859,3 +15859,171 @@ func r109ttLegKeys(foot string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+// ---- round 110, second-day ----
+// TestTheLaneReaderOpensOnACursor pins #300's last gap: the reader opened on
+// an agent's own conversation drew no cursor at all.
+//
+// A lane's reader opens at its end rather than on a trail row (#49) and the
+// path that does it cleared the anchor, so fifteen canonical `subagents`
+// frames — every `tab` onto a lane, at all five widths — drew no `▸` anywhere
+// in the reader panel while every other one of the corpus's 608 Lv3 frames
+// drew one, and the footer beside them named `j/k rows` and `space unfold`
+// with nothing on the frame saying which row those keys act on.
+//
+// Three sides: the frame it was found on, the rule over every Lv3 stand of
+// every scene, and the price — the mark is an addition, so the page still
+// opens on its newest line and the rows around it are untouched, and a lane
+// whose file holds no turn still draws no cursor, having no row to put one on.
+func TestTheLaneReaderOpensOnACursor(t *testing.T) {
+	forceASCII(t)
+
+	// laneReaderAt drives one scene to a stand and hands back the model.
+	laneReaderAt := func(sc scene, w, h int, keys []string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	// readerRows is the reader panel's own rows: at eighty and a hundred the
+	// reader owns the screen, so they are the frame's.
+	readerRows := func(frame string) []string {
+		var out []string
+		for _, l := range strings.Split(frame, "\n") {
+			out = append(out, strings.TrimRight(l, " "))
+		}
+		return out
+	}
+	// markedRow is the one row of the reader panel carrying the cursor.
+	markedRow := func(m *Model) (string, int) {
+		frame := ansi.Strip(m.View())
+		row, n := "", 0
+		for _, l := range readerRows(frame) {
+			if strings.Contains(l, "▸") {
+				row, n = l, n+1
+			}
+		}
+		return row, n
+	}
+
+	// The canonical walkthrough's own prefix to the first `tab` onto a lane.
+	toLane := []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab"}
+
+	// 1 · the frame: `subagents`, the lane reader, at the two widths where the
+	// reader owns the screen.
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		w, h := size[0], size[1]
+		sc := sceneSubagents()
+		m := laneReaderAt(sc, w, h, toLane)
+		if m.readerLane == "" {
+			t.Fatalf("subagents %dx%d: this pin is not standing on a lane's reader", w, h)
+		}
+		doc := m.doc(m.readerWidth())
+		if len(doc) == 0 {
+			t.Fatalf("subagents %dx%d: the lane's reader draws no document", w, h)
+		}
+		row, n := markedRow(m)
+		if n != 1 {
+			t.Errorf("subagents %dx%d: the reader opened on a lane draws %d cursor marks, want exactly one:\n%s", w, h, n, ansi.Strip(m.View()))
+		}
+		if m.anchor < 0 || m.anchor >= len(doc) {
+			t.Errorf("subagents %dx%d: the lane's reader opened with anchor %d — no row is the cursor's", w, h, m.anchor)
+			continue
+		}
+		if doc[m.anchor].kind == readerBlank {
+			t.Errorf("subagents %dx%d: the cursor opened on the air between blocks (row %d)", w, h, m.anchor)
+		}
+		// It stands where the page stands: the last row of the document,
+		// the newest thing the agent has written (#49).
+		last := len(doc) - 1
+		for last > 0 && doc[last].kind == readerBlank {
+			last--
+		}
+		if m.anchor != last {
+			t.Errorf("subagents %dx%d: the page opens on its newest line and the cursor stands on row %d of %d (%q), not the newest (%q)",
+				w, h, m.anchor, len(doc), readerRowText(doc, m.anchor), readerRowText(doc, last))
+		}
+		// And the row it marks is the last drawn row of the page.
+		want := "⋯ no result yet"
+		if !strings.Contains(row, want) {
+			t.Errorf("subagents %dx%d: the cursor stands on %q, want the newest line %q", w, h, row, want)
+		}
+		// The price: the page is the page it was. It still opens at its
+		// end, still says which end that is, and its footer still names
+		// the keys that act on the marked row.
+		frame := ansi.Strip(m.View())
+		for _, s := range []string{"the start of the agent's own conversation", "space unfold", "[ ] turns", "esc back"} {
+			if !strings.Contains(frame, s) {
+				t.Errorf("subagents %dx%d: the cursor cost the page %q", w, h, s)
+			}
+		}
+	}
+
+	// 2 · the rule: over every Lv3 stand of the canonical walkthrough, a
+	// reader with a document draws a cursor — `subagents` at five widths and
+	// both colour profiles (#215, #218), every other scene at a hundred.
+	type walk struct {
+		sc    scene
+		sizes [][2]int
+		profs []termenv.Profile
+	}
+	walks := []walk{{sceneSubagents(), [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}, []termenv.Profile{termenv.Ascii, termenv.TrueColor}}}
+	for _, sc := range allScenes() {
+		if sc.name == "subagents" {
+			continue
+		}
+		walks = append(walks, walk{sc, [][2]int{{100, 30}}, []termenv.Profile{termenv.Ascii}})
+	}
+	stands, lanes, empty := 0, 0, 0
+	for _, wk := range walks {
+		for _, size := range wk.sizes {
+			w, h := size[0], size[1]
+			for _, prof := range wk.profs {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				sc := wk.sc
+				m := sceneModel(sc, w, h)
+				keys := canonicalKeys
+				if len(sc.extra) > 0 {
+					keys = append(append(append([]string(nil), keys...), "esc"), sc.extra...)
+				}
+				for _, k := range keys {
+					pressKey(m, k)
+					poll(m, sc)
+					if m.level != levelReader {
+						continue
+					}
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 {
+						// A lane whose file holds no turn: no row, so no
+						// cursor, and no key on its footer walks one.
+						empty++
+						if m.anchor >= 0 {
+							t.Errorf("%s %dx%d %v after %q: a reader with no document opened with a cursor on row %d", sc.name, w, h, prof, k, m.anchor)
+						}
+						continue
+					}
+					stands++
+					if m.readerLane != "" {
+						lanes++
+					}
+					if m.anchor < 0 || m.anchor >= len(doc) || doc[m.anchor].kind == readerBlank {
+						t.Errorf("%s %dx%d %v after %q: the reader draws %d rows and no cursor stands on one (anchor %d)", sc.name, w, h, prof, k, len(doc), m.anchor)
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	if stands < 100 {
+		t.Errorf("only %d reader stands were reached, want at least 100 — the walk is not reaching the reader any more", stands)
+	}
+	if lanes < 20 {
+		t.Errorf("only %d of the reader stands were a lane's own conversation, want at least 20 — this pin is not standing on the frame it was written for", lanes)
+	}
+	if empty < 5 {
+		t.Errorf("only %d reader stands drew no document, want at least 5 — the empty lane is the price side of this pin", empty)
+	}
+}

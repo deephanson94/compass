@@ -629,10 +629,36 @@ func (m *Model) enterReader() {
 			m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
 			m.scroll = 0
 			m.scrollBy(1 << 30)
+			m.markNewestLine()
 			return
 		}
 	}
 	m.anchorReader()
+}
+
+// markNewestLine puts the reader's cursor on the last line of the document:
+// the newest thing the agent has written, which is the line the page was
+// just scrolled to.
+//
+// A lane's reader opens at its end rather than on the trail row the cursor
+// stands on (#49), and the path that does it cleared the anchor — so that
+// page alone came up with no cursor at all: #300's mark stood on every other
+// Lv3 page and on none of these, while the footer beside them named `j/k
+// rows` and `space unfold` with nothing on the frame saying which row they
+// act on, and `space` fell back to its top-down scan for want of a cursor
+// rather than by #300's rule, unfolding the first result from the top of a
+// page opened at the other end. The cursor stands where the page stands.
+func (m *Model) markNewestLine() {
+	doc := m.doc(m.readerWidth())
+	for i := len(doc) - 1; i >= 0; i-- {
+		if doc[i].kind == readerBlank {
+			continue // the cursor never stands on the air between blocks
+		}
+		m.anchor, m.anchorAt, m.anchorText = i, doc[i].at, readerRowText(doc, i)
+		return
+	}
+	// A lane whose file holds no turn draws no document at all (#53): no
+	// row, so no cursor, and its footer names no key that walks one.
 }
 
 // anchorReader points the reader at the row the Lv2 cursor stands on: the
