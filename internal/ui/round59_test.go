@@ -16858,3 +16858,151 @@ func TestTheReaderPageFollowsItsCursorWhenTheWindowChangesSize(t *testing.T) {
 	}
 	t.Logf("resize pairs %d · the page followed the cursor on %d · stood still on %d", pairs, followed, still)
 }
+
+// ---- round 112, two-tools ----
+// TestSpaceKeepsTheReaderCursorOnThePage holds Space to the rule #300 gave
+// the reader's movement keys: the page moves only far enough to keep the
+// cursor's row drawn.
+//
+// toggleFold resolves the anchor against the document the fold has just
+// reshaped (#314) but never moved the page to it. Unfolding a result the
+// cursor stood on near the end of a long conversation pushed the anchored
+// row below the page's last drawn line: the reader drew no `▸` at all while
+// the footer beside it named `j/k rows · space unfold`, and the note said
+// `unfolded Edit(loader.py)` over a page whose last row was that very call,
+// every line it opened below the screen (`many-idle` at 100x30 and 120x34,
+// 20 of 270 stands over six routes). The next press was worse than a lost
+// mark: with the anchor off the page readerCursorMove restarts from the
+// page's own top, so `j` — the key named for the next row down — stepped
+// the cursor twenty-two rows backwards.
+//
+// Four sides, under both colour profiles (#215, #218):
+//   - the fault: after Space, a reader stand whose anchor is a real row
+//     draws exactly one cursor mark;
+//   - it is the right row: the marked row carries the anchored row's own
+//     words;
+//   - the press after it walks forward: `j` on that landing never moves the
+//     anchor to a smaller row than it stood on;
+//   - it costs the row nothing: no drawn row exceeds its terminal, and the
+//     note still names what Space acted on.
+//
+// It refuses to be vacuous two ways: at least 100 Space presses are walked,
+// and at least 8 of them act with the cursor inside the document's last
+// screenful — the case the fix is about.
+func TestSpaceKeepsTheReaderCursorOnThePage(t *testing.T) {
+	presses, atEnd, marked := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r112ttEndSizes {
+				w, h := size[0], size[1]
+				for _, route := range r112ttEndRoutes() {
+					m := sceneModel(sc, w, h)
+					for _, k := range route {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					if m.level != levelReader {
+						continue
+					}
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 {
+						continue
+					}
+					presses++
+					if m.anchor >= len(doc)-m.readerHeight() {
+						atEnd++
+					}
+					note := m.note
+					before := m.anchor
+					cells := r112ttEndMarkedCells(m.View())
+
+					// Side 1 — the fault.
+					switch {
+					case before >= 0 && before < len(doc) && len(cells) != 1:
+						t.Errorf("%v %s %dx%d after %v: the reader draws %d cursor marks over anchor %d of %d rows (top %d, page %d); note %q",
+							prof, sc.name, w, h, route, len(cells), before, len(doc), m.readerTop(doc), m.readerHeight(), note)
+					case len(cells) == 1:
+						marked++
+						cell := cells[0]
+
+						// Side 2 — the right row.
+						want := readerRowText(doc, before)
+						spaced := strings.Replace(cell, "▸", " ", 1)
+						pushed := strings.Replace(cell, "▸", "", 1)
+						if f := strings.Fields(want); len(f) > 0 &&
+							!strings.Contains(spaced, f[0]) && !strings.Contains(pushed, f[0]) {
+							t.Errorf("%v %s %dx%d after %v: the marked row %q is not the anchored row %q",
+								prof, sc.name, w, h, route, cell, want)
+						}
+					}
+
+					// Side 4 — the cost, measured on the frame Space drew.
+					for _, row := range strings.Split(ansi.Strip(m.View()), "\n") {
+						if lipgloss.Width(row) > w {
+							t.Errorf("%v %s %dx%d after %v: a drawn row is %d cells in a %d-cell terminal: %q",
+								prof, sc.name, w, h, route, lipgloss.Width(row), w, row)
+							break
+						}
+					}
+					if note == "" {
+						t.Errorf("%v %s %dx%d after %v: Space acted and said nothing",
+							prof, sc.name, w, h, route)
+					}
+
+					// Side 3 — the press after it walks forward. Measured on
+					// every stand, not only the ones side 1 passed: where the
+					// mark is off the page it is exactly this that goes wrong.
+					pressKey(m, "j")
+					poll(m, sc)
+					if before >= 0 && m.anchor < before {
+						t.Errorf("%v %s %dx%d after %v: `j` moved the cursor from row %d back to row %d",
+							prof, sc.name, w, h, route, before, m.anchor)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+
+	t.Logf("Space presses walked: %d · with the cursor in the last screenful: %d · stands drawing a mark: %d",
+		presses, atEnd, marked)
+	if presses < 100 {
+		t.Errorf("this pin walked %d Space presses, too few to hold anything", presses)
+	}
+	if atEnd < 8 {
+		t.Errorf("this pin unfolded with the cursor in the last screenful %d times, too few to be about the defect it names", atEnd)
+	}
+}
+
+// r112ttEndSizes is the deck's own width ladder.
+var r112ttEndSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r112ttEndRoutes are ways down to a reader standing at the end of its
+// conversation — the trail's companion and a lane of its own, reached by
+// `G` and by the turn keys — each ending on the Space this pin is about.
+func r112ttEndRoutes() [][]string {
+	return [][]string{
+		{"1", "tab", "tab", "G", "tab", "space"},
+		{"1", "tab", "tab", "tab", "G", "space"},
+		{"2", "tab", "tab", "tab", "G", "space"},
+		{"3", "tab", "tab", "tab", "G", "space"},
+		{"1", "tab", "tab", "tab", "G", "space", "space"},
+	}
+}
+
+// r112ttEndMarkedCells are the reader panel's own drawn rows carrying the
+// cursor: at 80 and 100 the reader owns the screen, wider it stands right of
+// the last panel rule, so the trail's own mark is never counted as one.
+func r112ttEndMarkedCells(frame string) []string {
+	var out []string
+	for _, l := range strings.Split(ansi.Strip(frame), "\n") {
+		parts := strings.Split(l, "│")
+		cell := strings.TrimRight(parts[len(parts)-1], " ")
+		if strings.Contains(cell, "▸") {
+			out = append(out, cell)
+		}
+	}
+	return out
+}

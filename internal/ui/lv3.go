@@ -1130,6 +1130,20 @@ func (m *Model) toggleFold() {
 			}
 		}
 	}
+	// And the page follows the cursor, the rule #300 gave the movement keys
+	// in this same panel: the viewport moves only far enough to keep the
+	// mark on screen. Space alone did not have it. Unfolding a result the
+	// cursor stood on at the end of a long conversation added rows below
+	// the page's last one and left `scroll` where it was, so the anchor —
+	// correct, and resolved against the new document — sat below the drawn
+	// page: the frame drew no cursor at all while its footer named
+	// `j/k rows · space unfold`, and the note said `unfolded Edit(loader.py)`
+	// over a page whose last row was that call, the lines it opened all
+	// below the fold of the screen. The next `j` was worse than lost: with
+	// the anchor off the page `readerCursorMove` restarts from the page's
+	// own top, so the key named for the next row down stepped the mark
+	// twenty-odd rows *backwards*.
+	m.scrollToAnchor(m.doc(width), height)
 	// Which one: the note names the call it opened — a person pressing
 	// Space did not know which row it had acted on (#79).
 	verb := "unfolded"
@@ -1150,6 +1164,38 @@ func (m *Model) toggleFold() {
 		m.note = verb + " the result under the cursor"
 	default:
 		m.note = verb + " the first result on screen"
+	}
+}
+
+// scrollToAnchor moves the reader's page just far enough to draw the row the
+// cursor stands on, and no further — #300's own rule for the movement keys
+// in this panel, applied where the document changed shape under a still-valid
+// anchor rather than where the cursor stepped.
+//
+// The offset alone is not the page: readerTopIn takes a scroll and then pulls
+// the top back off a blank line and off a result whose call is the row above,
+// so a top computed as "the anchor at the bottom" can come back one or two
+// rows earlier and leave the anchor below the last drawn row after all. The
+// page is therefore asked, not assumed: the offset steps until the top the
+// reader will actually draw from holds the anchor, bounded by the document's
+// own ends.
+func (m *Model) scrollToAnchor(doc []readerLine, height int) {
+	if m.anchor < 0 || m.anchor >= len(doc) || height < 1 {
+		return
+	}
+	last := len(doc) - height
+	if top := readerTopIn(doc, m.scroll, height); m.anchor < top {
+		m.scroll = clampScroll(m.anchor, len(doc), height)
+		for m.scroll > 0 && m.anchor < readerTopIn(doc, m.scroll, height) {
+			m.scroll--
+		}
+		return
+	} else if m.anchor <= top+height-1 {
+		return
+	}
+	m.scroll = clampScroll(m.anchor-height+1, len(doc), height)
+	for m.scroll < last && m.anchor > readerTopIn(doc, m.scroll, height)+height-1 {
+		m.scroll++
 	}
 }
 
