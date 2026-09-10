@@ -23,8 +23,8 @@ the same way again.
 ```sh
 # the suite (go.mod pins 1.24.7; the local toolchain must be used)
 GOTOOLCHAIN=local go test -short ./...   # the developer run: under two minutes
-GOTOOLCHAIN=local go test ./... -timeout 40m   # the whole suite, sweeps included, as CI runs it
-COMPASS_SWEEP_COLOUR=1 GOTOOLCHAIN=local go test ./internal/ui -timeout 40m   # the sweeps walk colour on as well (#324); one corpus-wide parity pin holds it otherwise
+GOTOOLCHAIN=local go test ./... -timeout 40m   # the whole suite, sweeps included, as CI runs it; the sweeps run side by side (#325), -parallel N sets how many
+COMPASS_SWEEP_COLOUR=1 GOTOOLCHAIN=local go test ./internal/ui -timeout 40m   # the sweeps walk colour on as well (#324), one at a time; one corpus-wide parity pin holds it otherwise
 GOTOOLCHAIN=local go vet ./...
 
 # regenerate goldens after a deliberate frame change
