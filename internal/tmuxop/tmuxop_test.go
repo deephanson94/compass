@@ -1081,3 +1081,27 @@ func TestAGroupsCopyDoesNotResurrectADeadSession(t *testing.T) {
 		t.Errorf("the live session got %+v, want tinker:0.0", got[keyOf("s-live")])
 	}
 }
+
+// A quick reply is typed into the pane literally and then submitted — two
+// send-keys, the text with -l so tmux never reads a word of it as a key
+// name, then Enter on its own.
+func TestSendKeysTypesThenSubmits(t *testing.T) {
+	r := &fakeRunner{}
+	if err := tmuxop.SendKeys(r, "%7", "please continue; report status"); err != nil {
+		t.Fatal(err)
+	}
+	r.assertCalls(t,
+		[]string{"send-keys", "-t", "%7", "-l", "please continue; report status"},
+		[]string{"send-keys", "-t", "%7", "Enter"},
+	)
+
+	// The text failing to land means Enter must not be pressed on whatever
+	// was already in the pane's input.
+	r = &fakeRunner{errs: []error{errors.New("no such pane")}}
+	if err := tmuxop.SendKeys(r, "%7", "please continue"); err == nil {
+		t.Fatal("a failed send-keys was not reported")
+	}
+	if len(r.calls) != 1 {
+		t.Errorf("Enter was sent after the text failed: %v", r.calls)
+	}
+}

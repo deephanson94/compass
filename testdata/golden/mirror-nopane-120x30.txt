@@ -1,30 +1,30 @@
- ⌂ compass                                                                                                   ▲1  ●1  ○1
+ ⌂ compass · 2 api                                                                              ▲1 2m  ●1  ○1  1 unread
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · live                  │  ⌁ no pane · from transcript                 │  TRAIL · api                     [Lv1]
-                                │                                              │
-  1 ▲ infra      needs you   2m │ moment26 eighteen passed and two failed,     │ ◉ "fix the 401 bug"                38m
-     ◆ design AskUserQuestion   │ both of them in the refresh path and both    │ ╷
-                                │ about an expired token                       │ ◆ scout  middleware.py              5m
- ▸2 ● api                    3m │                                              │ │
-     ◆ test   1216✓ 2✗          │ moment28 opening tokens.py, which is where   │ ◆ build  tokens.py                 12m
-                                │ the expiry comparison the failing tests      │ │
-  3 ○ docs                  22m │ object to actually lives                     │ ◆ test   pytest              18✓ 2✗ 8m
-     ◆ docs   46✓               │                                              │ ├─◈ scout the payments module        ✓
-                                │ moment30 a syntax error at tokens.py line 88 │ ● fix    tokens.py                ← 2m
-                                │ was hiding the real fault; fixing that first │
-                                │ and rerunning                                │
-                                │                                              │
-                                │ moment34 the expiry check compares a UTC     │
-                                │ stamp against local time, which is why it    │
-                                │ only fails after a refresh                   │
-                                │                                              │
-                                │ moment37 patching tokens.py to compare in    │
-                                │ UTC, then rerunning the two tests that were  │
-                                │ objecting                                    │
-                                │                                              │
-                                │ moment39 both refresh tests pass now;        │
-                                │ rerunning the whole auth suite to be sure    │
-                                │ nothing else moved                           │
+ ▌ 2 ● api                                3m [session] │  ⌁ no pane · from transcript
+     ✗ red 18✓ 2✗ · edited since · ◈1 back     no pane │
+ ◉ "fix the 401 bug"                           38m ago │ moment16 sending a subagent at the payments module, in case it
+ ╷                                                     │ shares the same refresh helper
+ ◆ scout  middleware.py                             5m │
+ │                                                     │ moment21 the subagent came back: payments never touches
+ ◆ build  tokens.py                                12m │ refresh, so the blast radius is the auth package alone
+ │  └ touched tokens.py · middleware.py                │
+ │                                                     │ moment26 eighteen passed and two failed, both of them in the
+ ◆ test   pytest                             18✓ 2✗ 8m │ refresh path and both about an expired token
+ │  └ ✗ test_refresh_expired_token                     │
+ ├─◈ scout the payments module                ⌀ 7m ago │ moment28 opening tokens.py, which is where the expiry
+ │  └ came back with no report                         │ comparison the failing tests object to actually lives
+ ●▸fix    tokens.py                             for 3m │
+                                                       │ moment30 a syntax error at tokens.py line 88 was hiding the
+                                                       │ real fault; fixing that first and rerunning
+                                                       │
+                                                       │ moment34 the expiry check compares a UTC stamp against local
+                                                       │ time, which is why it only fails after a refresh
+                                                       │
+                                                       │ moment37 patching tokens.py to compare in UTC, then rerunning
+                                                       │ the two tests that were objecting
+                                                       │
+                                                       │ moment39 both refresh tests pass now; rerunning the whole auth
+                                                       │ suite to be sure nothing else moved
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · g grab · ? help · q quit
+ j/k rows · [ ] chapters · m conversation · a ask · x hide · tab reader · esc board · ? help · q quit     the live pane

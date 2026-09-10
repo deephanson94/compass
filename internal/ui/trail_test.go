@@ -63,8 +63,7 @@ func TestT43TrailLv2Golden(t *testing.T) {
 		return
 	}
 	for _, want := range []string{
-		"│  ├ 18 passed · 2 failed", // TestRun is undecorated
-		"│  ├ ✗ test_refresh_expired_token",
+		"│  ├ ✗ test_refresh_expired_token", // the run summary is the badge on the leg's row, not a row of its own
 		"│  └ ✗ test_refresh_revoked_token", // the last waypoint closes the leg
 		"│  ├ bug1 syntax error in tokens.py:88",
 		"│  ├ bug2 expiry compared in localtime", // numbered per leg, in At order
@@ -75,10 +74,16 @@ func TestT43TrailLv2Golden(t *testing.T) {
 			t.Errorf("Lv2 frame is missing %q", want)
 		}
 	}
+	if strings.Contains(got, "18 passed · 2 failed") {
+		t.Errorf("the run summary restates the badge on the row above it:\n%s", got)
+	}
 
 	// The same journey at Lv1 is the M1 graph: no waypoint carries into it.
 	lv1 := RenderTrail(fixtureLv2Trail(fixtureBase), TrailOpts{Todos: nil, Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: 24, Level: 1, Cursor: -1})
-	for _, gone := range []string{"18 passed", "bug1", "touched", "payments never"} {
+	// A returned subagent's report is on both levels now — a ✓ that kept its
+	// finding two keypresses down created an obligation without discharging
+	// it — so only the leg waypoints and the touched row are Lv2's.
+	for _, gone := range []string{"18 passed", "bug1", "touched"} {
 		if strings.Contains(lv1, gone) {
 			t.Errorf("Lv1 frame leaked the Lv2 detail %q", gone)
 		}
@@ -99,21 +104,35 @@ func TestT43TrailLv2Viewport(t *testing.T) {
 	opts := func(h int) TrailOpts {
 		return TrailOpts{Now: fixtureBase.Add(40 * time.Minute), Width: 38, Height: h, Level: 2, Cursor: -1, Pinned: true}
 	}
-	doc := TrailLines(tr, opts(24))
+	full := TrailLines(tr, opts(24))
+	dense := TrailLines(tr, opts(4))
+	if len(dense) >= len(full) {
+		t.Fatalf("a panel too short for the trail did not draw it dense: %d rows, full %d", len(dense), len(full))
+	}
 
-	for h := len(doc); h >= 4; h-- {
+	for h := len(full); h >= 4; h-- {
 		frame := RenderTrail(tr, opts(h))
 		lines := strings.Split(frame, "\n")
 		if len(lines) != h {
 			t.Fatalf("height %d: frame is %d lines", h, len(lines))
 		}
-		if got := TrailLines(tr, opts(h)); len(got) != len(doc) {
-			t.Errorf("height %d: the document changed with the panel (%d rows, want %d)", h, len(got), len(doc))
+		// The document is one of two: whole when it fits, dense when it
+		// does not — never a third thing at a third height.
+		want := full
+		if h < len(full) {
+			want = dense
+		}
+		if got := TrailLines(tr, opts(h)); strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("height %d: the document changed with the panel (%d rows, want %d)", h, len(got), len(want))
 		}
 		// Pinned: the last screenful, so HEAD and its own detail are the rows
 		// that never leave.
-		if !strings.Contains(lines[h-1], "touched tokens.py") {
-			t.Errorf("height %d: the last row is %q, want HEAD's detail", h, lines[h-1])
+		last := h - 1
+		for last > 0 && strings.TrimSpace(lines[last]) == "" {
+			last-- // a dense document shorter than the panel ends early
+		}
+		if !strings.Contains(lines[last], "touched tokens.py") {
+			t.Errorf("height %d: the last row is %q, want HEAD's detail", h, lines[last])
 		}
 		if !strings.Contains(frame, "● build") {
 			t.Errorf("height %d: HEAD was cropped:\n%s", h, frame)
@@ -204,8 +223,10 @@ func TestT44TrailGhostsMoreGolden(t *testing.T) {
 	if !strings.Contains(got, "┊ +2 more") {
 		t.Errorf("a plan of six should collapse its tail into one row:\n%s", got)
 	}
-	if n := strings.Count(got, glyphGhost); n != maxGhosts {
-		t.Errorf("drew %d ghosts, want %d", n, maxGhosts)
+	// Twenty rows give the plan ten: four ghosts and their rails, and
+	// the "+2 more" row, is what fits.
+	if n := strings.Count(got, glyphGhost); n != 4 {
+		t.Errorf("drew %d ghosts, want 4", n)
 	}
 	for _, gone := range []string{"open the PR", "ask about the rate limit"} {
 		if strings.Contains(got, gone) {
@@ -458,8 +479,10 @@ func TestT73NothingIsDropped(t *testing.T) {
 	tr := longTrail(100)
 	o := TrailOpts{Now: fixtureBase.Add(3 * time.Hour), Width: 38, Height: 20, Level: 1, Cursor: -1}
 	doc := TrailLines(tr, o)
-	if len(doc) < 200 {
-		t.Fatalf("the fixture is %d rows, want at least 200", len(doc))
+	// A trail this long is drawn dense — no rail row between legs — so the
+	// document is a row a leg, plus the prompt, the fork and HEAD.
+	if len(doc) < 100 {
+		t.Fatalf("the fixture is %d rows, want at least 100", len(doc))
 	}
 
 	seen := make([]bool, len(doc))
@@ -468,6 +491,9 @@ func TestT73NothingIsDropped(t *testing.T) {
 		at.Scroll = top
 		frame := strings.Split(RenderTrail(tr, at), "\n")
 		for i := 0; i < o.Height; i++ {
+			if i == 0 && isDetailRow(doc[top]) {
+				continue // the parent stands in for a child at the top
+			}
 			if frame[i] != doc[top+i] {
 				t.Fatalf("offset %d row %d is %q, want %q", top, i, frame[i], doc[top+i])
 			}
@@ -567,7 +593,7 @@ func TestLv2CursorBarSpansThePanel(t *testing.T) {
 	// The ASCII profile drops the inversion itself, so what is measured here is
 	// the shape underneath it: the row the cursor stands on, padded out to the
 	// panel. Every other row keeps its own length.
-	const width = 34
+	const width = 44
 	widest := 0 // the most padding any row needed, so a no-op cannot pass
 	for i := range rows {
 		o := TrailOpts{
@@ -636,7 +662,7 @@ func TestALegWithNothingToSayIsATickOnTheRail(t *testing.T) {
 		Prompts: []journey.Prompt{{Text: "fix the 401 bug", At: base}},
 		Legs: []journey.Leg{
 			{Class: journey.Scout, Label: "middleware.py", Start: base.Add(1 * time.Minute), End: base.Add(4 * time.Minute), Files: []string{"middleware.py"}},
-			{Class: journey.Test, Label: "pytest", Start: base.Add(5 * time.Minute), End: base.Add(6 * time.Minute)},
+			{Class: journey.Design, Label: "design", Start: base.Add(5 * time.Minute), End: base.Add(6 * time.Minute)},
 			{Class: journey.Build, Label: "tokens.py", Start: base.Add(7 * time.Minute), End: base.Add(15 * time.Minute), Files: []string{"tokens.py"}},
 			{Class: journey.Fix, Label: "tokens.py", Start: base.Add(16 * time.Minute), Files: []string{"tokens.py"}, Current: true},
 		},
@@ -649,8 +675,15 @@ func TestALegWithNothingToSayIsATickOnTheRail(t *testing.T) {
 	if len(doc) != 7 {
 		t.Fatalf("the trail is %d rows, want 7:\n%s", len(doc), strings.Join(doc, "\n"))
 	}
-	if got := strings.TrimSpace(doc[3]); got != "│ test" {
-		t.Errorf("row 3 = %q, want the tick %q", got, "│ test")
+	// The tick carries its duration.
+	if got := strings.TrimSpace(doc[3]); !strings.HasPrefix(got, "│ design") || !strings.HasSuffix(got, "1m") {
+		t.Errorf("row 3 = %q, want the tick %q", got, "│ design … 1m")
+	}
+	// A test leg with no verdict is never a tick: it is the one class that
+	// can be red, so it keeps its row and says "?".
+	tr.Legs[1] = journey.Leg{Class: journey.Test, Label: "pytest", Start: base.Add(5 * time.Minute), End: base.Add(6 * time.Minute)}
+	if got := strings.Join(TrailLines(tr, o), "\n"); !strings.Contains(got, "◆ test   pytest") || !strings.Contains(got, "? 1m") {
+		t.Errorf("a test run with no verdict is not a row with '?':\n%s", got)
 	}
 	if strings.HasPrefix(strings.TrimSpace(doc[4]), "◆ build") == false {
 		t.Errorf("the leg after the tick should follow it directly, got %q", doc[4])
@@ -724,6 +757,7 @@ func TestThePlanFromTheTranscriptFeedsTheGhosts(t *testing.T) {
 	m.SetSize(120, 30)
 	m.SetSessions(fixtureSessions(fixtureBase), fixtureBase.Add(40*time.Minute))
 	m.point(sessionKey("s-api"))
+	openTrail(m)
 
 	tr := fixtureTrail(fixtureBase)
 	tr.Tasks = []journey.Task{

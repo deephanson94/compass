@@ -1,15 +1,15 @@
- ⌂ compass                                                           ▲1  ●1  ○1
+ ⌂ compass · 1 infra                                    ▲1 2m  ●1  ○1  1 unread
  ──────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · live                    │  TRAIL · infra                        [Lv1]
+ ▌FLEET · live            [fleet] │  TRAIL · infra
                                   │
- ▸1 ▲ infra        needs you   2m │ ◌ nothing yet
-     ◆ design AskUserQuestion     │
-                                  │ scouting will appear here
+ ▸1 ▲ infra        needs you   2m │ ▲ design AskUserQuestion         waiting 2m
+     AskUserQuestion              │
+                                  │
   2 ● api                      3m │
      ◆ test   1216✓ 2✗            │
                                   │
-  3 ○ docs                    22m │
+  3 ○ docs            unread  22m │
      ◆ docs   46✓                 │
 
 
@@ -21,4 +21,4 @@
 
 
  ──────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · g grab · ? help · q quit
+ j/k move · enter · no pane · tab deeper · / search · g grab · ? help · q quit

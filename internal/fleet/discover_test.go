@@ -444,3 +444,31 @@ func TestDiscoverIgnoresCapturedCommandOutput(t *testing.T) {
 		}
 	}
 }
+
+// A worker session driven by a lead has one ask: the message the harness
+// relayed. The fleet titles it by the message, marked relayed, where it
+// used to have no title at all (#97).
+func TestDiscoverTitlesARelayedMessageAsTheAsk(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-home-user-porter")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const id = "88888888-8888-4888-8888-888888888888"
+	body := `{"type":"user","message":{"role":"user","content":"Another Claude session sent a message: the encoder is in, run the gates"},"uuid":"r1",` +
+		`"timestamp":"2026-08-30T09:00:00.000Z","cwd":"/home/user/porter","sessionId":"` + id + `","gitBranch":"main"}` + "\n" +
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Running them."}],` +
+		`"stop_reason":"end_turn"},"uuid":"r2","timestamp":"2026-08-30T09:00:30.000Z",` +
+		`"cwd":"/home/user/porter","sessionId":"` + id + `","gitBranch":"main"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := findSession(t, got, id)
+	if want := "the encoder is in, run the gates"; s.Title != want || !s.Relayed {
+		t.Errorf("Title = %q, Relayed = %v; want %q, relayed", s.Title, s.Relayed, want)
+	}
+}

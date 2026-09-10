@@ -53,7 +53,7 @@ func fixtureEvents(base time.Time) []transcript.Event {
 func TestT50ReaderGolden(t *testing.T) {
 	forceASCII(t)
 
-	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 60, Height: 24})
+	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{Width: 60, Height: 24, Anchor: -1})
 	compareGolden(t, "reader-60x24.txt", got)
 }
 
@@ -62,7 +62,7 @@ func TestT50ReaderUnfoldedGolden(t *testing.T) {
 	forceASCII(t)
 
 	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{
-		Width: 60, Height: 24, Unfolded: map[int]bool{3: true},
+		Width: 60, Height: 24, Unfolded: map[int]bool{3: true}, Anchor: -1,
 	})
 	compareGolden(t, "reader-60x24-unfolded.txt", got)
 }
@@ -73,7 +73,7 @@ func TestT50ReaderSearchGolden(t *testing.T) {
 	forceASCII(t)
 
 	got := RenderReader(fixtureEvents(fixtureBase), ReaderOpts{
-		Width: 60, Height: 24, Query: "refresh",
+		Width: 60, Height: 24, Query: "refresh", Anchor: -1,
 	})
 	compareGolden(t, "reader-60x24-search.txt", got)
 }
@@ -252,6 +252,7 @@ func followModel(w, h int) *Model {
 	m.SetTrail(fixtureLv2Trail(fixtureBase))
 	m.SetEvents(followEvents(fixtureBase))
 	m.SetMirror(fixtureFrame)
+	openTrail(m)
 	return m
 }
 
@@ -280,27 +281,28 @@ func walkTo(t *testing.T, m *Model, at time.Time) {
 func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 	forceASCII(t)
 
-	m := followModel(120, 30)
+	// Short enough that the conversation does not fit its panel: the
+	// reader at Lv3 takes the fleet's width on a deck this narrow, and at
+	// thirty rows the whole fixture fit on one screen.
+	m := followModel(120, 22)
+	if m.level != levelWaypoints {
+		t.Fatalf("a wide deck opened at Lv%d, want the session view", m.level)
+	}
 	if got := m.View(); strings.Contains(got, mirrorMark+" dev:1.0 · live") {
-		t.Fatalf("Lv1 opened the mirror unasked:\n%s", got)
+		t.Fatalf("the session view opened the mirror unasked:\n%s", got)
 	}
 	press(m, "m")
 	if got := m.View(); !strings.Contains(got, mirrorMark+" dev:1.0 · live") {
-		t.Fatalf("m did not bring the mirror:\n%s", got)
+		t.Fatalf("m did not bring the live pane beside the trail:\n%s", got)
 	}
-
-	pressTab(m)
-	if m.level != levelWaypoints {
-		t.Fatalf("tab left the deck at Lv%d", m.level)
-	}
+	press(m, "m") // and back to the conversation
 	got := m.View()
-	if !strings.Contains(got, "TRAIL · api") {
-		t.Errorf("Lv2 deck is missing the trail:\n%s", got)
+	if !strings.Contains(got, " 2 ● api") {
+		t.Errorf("Lv2 deck is missing the session's trail card:\n%s", got)
 	}
-	for _, gone := range []string{"READER · api", mirrorMark + " dev:1.0 · live"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("Lv2 has a middle panel (%q); it is the trail unfolded and nothing beside it", gone)
-		}
+	// Lv2 draws the reader beside the trail, following the cursor.
+	if !strings.Contains(got, "READER · api") || strings.Contains(got, mirrorMark+" dev:1.0 · live") {
+		t.Errorf("Lv2 should show the reader, not the mirror:\n%s", got)
 	}
 	m.zoomIn()
 	if got := m.View(); !strings.Contains(got, "READER · api") {
@@ -322,11 +324,15 @@ func TestT75Lv2ReaderFollowsTheCursor(t *testing.T) {
 			t.Fatalf("step %d: the Lv2 cursor left the trail (%d of %d rows)", step, m.cursor, len(rows))
 		}
 		row := rows[m.cursor]
-		if want := ReaderAnchor(m.events, opts, row.Time); want >= 0 && m.scroll != want {
-			t.Fatalf("cursor on the %s %q: the reader is at line %d, want its moment at %d",
-				row.Kind, row.Text, m.scroll, want)
+		if want := ReaderAnchor(m.events, opts, row.Time); want >= 0 && m.anchor != want {
+			t.Fatalf("cursor on the %s %q: the reader is anchored at line %d, want its moment at %d",
+				row.Kind, row.Text, m.anchor, want)
 		}
-		anchors[m.scroll] = true
+		if doc := m.doc(opts.Width); m.scroll != clampScroll(m.anchor, len(doc), m.readerHeight()) {
+			t.Fatalf("cursor on the %s %q: the reader scrolled to %d, want the anchor %d clamped to the last screenful",
+				row.Kind, row.Text, m.scroll, m.anchor)
+		}
+		anchors[m.anchor] = true
 		press(m, "k") // the cursor enters at the present, so it walks backwards
 	}
 	if len(anchors) < 3 {
@@ -361,9 +367,9 @@ func TestGReturnsToThePresentAtLv2(t *testing.T) {
 	forceASCII(t)
 
 	m := followModel(120, 30)
-	pressTab(m)
+	toLv2(m)
 	rows := TrailRows(m.trail, levelWaypoints)
-	newest := m.scroll // Tab opens on the present, so this is its moment
+	newest := m.scroll // the session opens on the present, so this is its moment
 
 	for i := 0; i < len(rows); i++ {
 		press(m, "k")
@@ -427,7 +433,7 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 	forceASCII(t)
 
 	m := followModel(120, 30)
-	pressTab(m)
+	toLv2(m)
 	walkTo(t, m, fixtureBase.Add(15*time.Minute))
 	cursor, anchored := m.cursor, m.scroll
 
@@ -466,13 +472,37 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 	}
 	still(t, "g")
 
+	// `j` now steps the reader's own cursor (readerCursorMove), not the
+	// viewport: on a tall page two rows of cursor movement from the top
+	// never reach the edge of the screenful, so the viewport itself does
+	// not have to move for the mark to.
+	before := m.anchor
 	press(m, "j")
 	press(m, "j")
-	if m.scroll != 2 {
-		t.Errorf("j j at Lv3 = line %d, want 2", m.scroll)
+	doc := m.doc(m.readerWidth())
+	want := before
+	for moved := 0; moved < 2 && want < len(doc)-1; {
+		want++
+		for want < len(doc)-1 && doc[want].kind == readerBlank {
+			want++
+		}
+		moved++
+	}
+	if m.anchor != want {
+		t.Errorf("j j at Lv3 moved the cursor to %d, want %d", m.anchor, want)
+	}
+	if m.scroll != 0 {
+		t.Errorf("j j at Lv3 scrolled to %d, though the cursor is still on the first screenful", m.scroll)
 	}
 	still(t, "j")
 
+	// Two presses, not one: since #313 `g` above carries the cursor to the
+	// document's own first row, not only the viewport, so `j j` left it
+	// only two rows down — a single half page from there does not yet
+	// leave this fixture's first screenful (23 rows against a 33-row
+	// document), where before the fix `g` left the cursor whichever row
+	// `walkTo` had put it on and one press already did.
+	pressCtrl(m, tea.KeyCtrlD)
 	pressCtrl(m, tea.KeyCtrlD)
 	if m.scroll <= 2 {
 		t.Errorf("ctrl+d at Lv3 = line %d, want half a page further down", m.scroll)
@@ -543,7 +573,7 @@ func TestTheReaderMarksTheAnchoredLine(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
 	m := followModel(120, 30)
-	pressTab(m) // Lv2: the cursor lands on the newest row
+	toLv2(m) // Lv2: the cursor lands on the newest row
 	if m.anchor < 0 {
 		t.Fatal("entering Lv2 anchored nothing")
 	}
@@ -585,7 +615,7 @@ func TestNoCursorMarksNothing(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
-	m := followModel(120, 30)
+	m := followModel(100, 30) // a narrow deck's Lv1: fleet and trail, no cursor
 	if m.anchor != -1 {
 		t.Errorf("Lv1 anchored line %d; there is no cursor to follow", m.anchor)
 	}

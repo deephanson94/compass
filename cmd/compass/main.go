@@ -12,6 +12,7 @@ import (
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/narrator"
+	"github.com/deephanson94/compass/internal/opencode"
 	"github.com/deephanson94/compass/internal/ui"
 )
 
@@ -51,6 +52,7 @@ func main() {
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
 		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only)`)
+	opencodeDB := fs.String("opencode-db", opencode.DefaultDB(), `OpenCode's store, whose sessions join the fleet when the file exists ("" = never)`)
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -63,6 +65,14 @@ func main() {
 
 	mgr := fleet.NewManager(*root)
 	mgr.SetLiveWindow(window)
+	if *opencodeDB != "" {
+		// OpenCode's sessions sit in the fleet beside Claude's when its
+		// store is on this machine; a store that will not open is left
+		// out without a word, since most machines have none.
+		if store, err := opencode.Open(*opencodeDB); err == nil {
+			store.Attach(mgr)
+		}
+	}
 	build := buildNarrator(mgr, *root, *model)
 
 	switch sub {
@@ -78,7 +88,7 @@ func main() {
 	case "help":
 		fs.Usage()
 	default:
-		if err := ui.Run(mgr, *readonly, *mirror, build); err != nil {
+		if err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build); err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
 		}

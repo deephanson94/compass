@@ -1,30 +1,30 @@
- ⌂ compass                                                                                                   ▲1  ●1  ○1
+ ⌂ compass · 2 api                                                                              ▲1 2m  ●1  ○1  1 unread
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- ▌FLEET · live                  │  ⌁ dev:1.0 · live                            │  TRAIL · api                     [Lv1]
-                                │                                              │
-  dev                        1m │                                              │ ◉ "fix the 401 bug"                38m
- ▸1 ● api                    3m │                                              │ ╷
-     ◆ test   1216✓ 2✗          │                                              │ ◆ scout  middleware.py              5m
-                                │                                              │ │
-  elsewhere               ▲  2m │                                              │ ◆ build  tokens.py                 12m
-  2 ▲ infra      needs you   2m │                                              │ │
-     ◆ design AskUserQuestion   │                                              │ ◆ test   pytest              18✓ 2✗ 8m
-                                │                                              │ ├─◈ scout the payments module        ✓
-  3 ○ docs                  22m │                                              │ ● fix    tokens.py                ← 2m
-     ◆ docs   46✓               │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │                                              │
-                                │ [38;5;39m⏺ Read(src/auth/middleware.py)[0m               │
-                                │   ⎿ read 214 lines                           │
-                                │                                              │
-                                │ [31m✗ test_refresh_expired_token — AssertionErro[0m │
-                                │                                              │
-                                │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m         │
+ ▌ 2 ● api                                3m [session] │  ⌁ dev:1.0 · live
+     ✗ red 18✓ 2✗ · edited since · ◈1 back       ⌁ dev │
+ ◉ "fix the 401 bug"                           38m ago │
+ ╷                                                     │
+ ◆ scout  middleware.py                             5m │
+ │                                                     │
+ ◆ build  tokens.py                                12m │
+ │  └ touched tokens.py · middleware.py                │
+ │                                                     │
+ ◆ test   pytest                             18✓ 2✗ 8m │
+ │  └ ✗ test_refresh_expired_token                     │
+ ├─◈ scout the payments module                ⌀ 7m ago │
+ │  └ came back with no report                         │
+ ●▸fix    tokens.py                             for 3m │
+                                                       │
+                                                       │
+                                                       │
+                                                       │
+                                                       │
+                                                       │ [38;5;39m⏺ Read(src/auth/middleware.py)[0m
+                                                       │   ⎿ read 214 lines
+                                                       │
+                                                       │ [31m✗ test_refresh_expired_token — AssertionError: expected 200, g[0m
+                                                       │
+                                                       │ [38;5;213m✻[0m Churning… (23s · esc to interrupt)[0m
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- j/k move · enter attach (prefix d returns) · g grab · ? help · q quit
+ j/k rows · [ ] chapters · m conversation · r reply · tab reader · esc board · ? help · q quit            the live pane

@@ -5,6 +5,8 @@ package transcript
 
 import (
 	"encoding/json"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -49,16 +51,24 @@ const resultTextCap = 2048
 
 // Event is one parsed transcript line.
 type Event struct {
-	Type        EventType
-	UUID        string
-	ParentUUID  string
-	Timestamp   time.Time // zero if absent/unparseable
-	SessionID   string
-	CWD         string
-	GitBranch   string
-	Version     string
+	Type       EventType
+	UUID       string
+	ParentUUID string
+	Timestamp  time.Time // zero if absent/unparseable
+	SessionID  string
+	CWD        string
+	GitBranch  string
+	Version    string
+	// Name is the name the person gave the session (/rename), from a
+	// "custom-title" or "agent-name" line; "" on every other line (#79).
+	Name        string
 	IsSidechain bool
 	Text        string // assistant: all text blocks joined "\n"; user: string content (empty if content is a block array)
+
+	// Model is the model an assistant event was produced by, as the
+	// transcript names it ("claude-opus-4-1-20250805"); "" on every other
+	// line and on a failed call.
+	Model string
 
 	// APIError marks an assistant event that is not the model speaking but the
 	// call to it failing: a quota refusal, an expired login, a 5xx. Status and
@@ -77,6 +87,40 @@ type Event struct {
 	ToolResults []ToolResult // tool_result blocks inside user-type lines
 }
 
+// apiErrorPattern is the failure as the CLI prints it — "API Error: 403 …",
+// sometimes led by "Please run /login ·". The status is the one number in it
+// a program can key on.
+var apiErrorPattern = regexp.MustCompile(`^(?:Please run /login\s*·\s*)?API Error:\s*(\d{3})\b`)
+
+// apiErrorInText reports whether an assistant text is the gateway's
+// refusal rather than the model's words, and the status it names.
+func apiErrorInText(text string) (int, bool) {
+	head := strings.TrimSpace(text)
+	if i := strings.IndexByte(head, '\n'); i >= 0 {
+		head = head[:i]
+	}
+	m := apiErrorPattern.FindStringSubmatch(head)
+	if m == nil {
+		return 0, false
+	}
+	status, _ := strconv.Atoi(m[1])
+	return status, true
+}
+
+func firstNonZero(a, b int) int {
+	if a != 0 {
+		return a
+	}
+	return b
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // rawLine stages the common top-level fields. `message` and `content` stay raw
 // because their shapes vary by line type.
 type rawLine struct {
@@ -86,6 +130,8 @@ type rawLine struct {
 	Timestamp   string          `json:"timestamp"`
 	SessionID   string          `json:"sessionId"`
 	CWD         string          `json:"cwd"`
+	CustomTitle string          `json:"customTitle"` // a "custom-title" line: the name /rename gave the session
+	AgentName   string          `json:"agentName"`   // an "agent-name" line: the same name, as the harness files it
 	GitBranch   string          `json:"gitBranch"`
 	Version     string          `json:"version"`
 	IsSidechain bool            `json:"isSidechain"`
@@ -93,6 +139,14 @@ type rawLine struct {
 	Content     json.RawMessage `json:"content"` // queue-operation: a plain string
 	IsMeta      bool            `json:"isMeta"`
 	ToolResult  json.RawMessage `json:"toolUseResult"`
+
+	// The API-error flags again, at the line's top level: Claude Code has
+	// written them there as well as inside the message, and a session
+	// dead on quota was reading as a finished turn because only the
+	// message was asked.
+	LineAPIError bool   `json:"isApiErrorMessage"`
+	LineStatus   int    `json:"apiErrorStatus"`
+	LineErrorKey string `json:"error"`
 }
 
 type rawMessage struct {
@@ -110,6 +164,7 @@ type rawMessage struct {
 	IsAPIError  bool   `json:"isApiErrorMessage"`
 	APIStatus   int    `json:"apiErrorStatus"`
 	APIErrorKey string `json:"error"`
+	Model       string `json:"model"` // "<synthetic>" on a failed call
 }
 
 type rawBlock struct {
@@ -140,6 +195,7 @@ func ParseLine(line []byte) (Event, error) {
 		CWD:         raw.CWD,
 		GitBranch:   raw.GitBranch,
 		Version:     raw.Version,
+		Name:        firstNonEmpty(raw.CustomTitle, raw.AgentName),
 		IsSidechain: raw.IsSidechain,
 		IsMeta:      raw.IsMeta,
 	}
@@ -160,9 +216,24 @@ func ParseLine(line []byte) (Event, error) {
 	if len(raw.Message) > 0 {
 		var msg rawMessage
 		if err := json.Unmarshal(raw.Message, &msg); err == nil {
-			ev.APIError = msg.IsAPIError
-			ev.Status, ev.ErrorKey = msg.APIStatus, msg.APIErrorKey
 			parseContent(&ev, msg.Content)
+			// Every shape the failure has been written in: the flag on
+			// the message, the flag on the line, the synthetic model,
+			// and — when none of those is there — the text itself,
+			// which is what the person sees on their screen.
+			ev.Status, ev.ErrorKey = firstNonZero(msg.APIStatus, raw.LineStatus), firstNonEmpty(msg.APIErrorKey, raw.LineErrorKey)
+			ev.APIError = msg.IsAPIError || raw.LineAPIError || msg.Model == "<synthetic>"
+			if ev.Type == EventAssistant && msg.Model != "" && msg.Model != "<synthetic>" {
+				ev.Model = msg.Model
+			}
+			if ev.Type == EventAssistant {
+				if status, ok := apiErrorInText(ev.Text); ok {
+					ev.APIError = true
+					if ev.Status == 0 {
+						ev.Status = status
+					}
+				}
+			}
 		}
 	}
 	if len(raw.ToolResult) > 0 {

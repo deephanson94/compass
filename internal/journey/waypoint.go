@@ -36,6 +36,13 @@ type Waypoint struct {
 	// then only ever disagree by someone editing both. Empty for kinds that
 	// have no useful short form.
 	Short string
+
+	// Runs, on a WaypointTestFail, is how many legs this test has now failed
+	// in, this one included: 1 the first time, 3 when a session has been
+	// round the same failure three times. It is the trail's plainest sign
+	// of a loop, and it is counted here, where the failure is recorded,
+	// rather than by every renderer walking the legs again.
+	Runs int
 }
 
 // maxWaypoints caps how many waypoints a leg keeps; overflow drops silently.
@@ -366,11 +373,22 @@ func shipWaypoints(text string, at time.Time) []Waypoint {
 // error's own sentence, the subagent's verdict.
 func firstNonEmptyLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
-		if l := strings.TrimSpace(line); l != "" {
+		if l := Untag(strings.TrimSpace(line)); l != "" {
 			return l
 		}
 	}
 	return ""
+}
+
+// Untag takes the harness's own wrapper off a result line: a tool_result
+// that failed arrives as "<tool_use_error>File has not been read yet
+// …</tool_use_error>", and the tag is the harness's, not the session's —
+// a leg's detail read "<tool_use_error>File has not been r…" (#78).
+func Untag(line string) string {
+	for _, tag := range []string{"tool_use_error", "error"} {
+		line = strings.TrimSuffix(strings.TrimPrefix(line, "<"+tag+">"), "</"+tag+">")
+	}
+	return strings.TrimSpace(line)
 }
 
 // dedupe keeps first-seen order and drops repeats — one failing test named

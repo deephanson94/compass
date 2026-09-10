@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,12 @@ type Snapshot struct {
 	Reason   string    // short human phrase, e.g. "turn ended with a question"
 	Activity string    // hint, e.g. `Bash: pytest tests/auth -x`, `reading middleware.py`
 
+	// Allowed is the budget the call in flight was given — a Bash timeout —
+	// when its silence is inside that budget, so a row can say "2m of 7m"
+	// where it would otherwise have said "silent 2m". Zero when the call
+	// has no budget or the budget has run out.
+	Allowed time.Duration
+
 	// APIError says the session is waiting on a call the API refused, not on
 	// anything it did. A reader needs the error's own words here more than the
 	// session's last good result, so the fleet lets this override its usual
@@ -90,6 +97,7 @@ type Machine struct {
 
 	lastUse    transcript.ToolUse // most recent tool_use seen, pending or not
 	hasLastUse bool
+	cwd        string // the session's directory, from its events: a command's own "cd" into it is not the news (#78)
 
 	// awaitingModel is true between a tool_result landing and the model's next
 	// assistant event: no tool is pending, but the turn is not over either.
@@ -104,6 +112,9 @@ func NewMachine() *Machine {
 
 // Observe feeds one event to the machine. Events must arrive in file order.
 func (m *Machine) Observe(ev transcript.Event) {
+	if ev.CWD != "" {
+		m.cwd = ev.CWD
+	}
 	// Lines without a timestamp (mode, latch, bookkeeping) still arrive but must
 	// not drag lastEventAt backwards to the zero time.
 	if !ev.Timestamp.IsZero() && ev.Timestamp.After(m.lastEventAt) {
@@ -175,12 +186,28 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 	// 3. Some other tool call is still in flight.
 	if oldest, ok := m.oldestPending(); ok {
 		quiet := now.Sub(m.lastEventAt)
-		act := activityFor(oldest.use)
+		act := activityFor(WithoutCD(oldest.use, m.cwd))
 		if m.hasLastUse {
-			act = activityFor(m.lastUse)
+			act = activityFor(WithoutCD(m.lastUse, m.cwd))
+		}
+		// A shell command is allowed its own budget before its silence means
+		// anything: the harness gives Bash a timeout (two minutes unless the
+		// call names one, up to ten) and kills the command when it runs out,
+		// so a `sleep 420` under a ten-minute budget is a session doing what
+		// it said, not one that has hung. The person reading "stuck" over a
+		// deliberate wait stopped trusting the word. The budget is the
+		// latest of every call in flight: Claude Code batches calls, and a
+		// Read issued beside the sleep is the oldest pending one.
+		allow, deadline, at := m.budget(now)
+		since := m.since(oldest.at)
+		if allow > 0 {
+			since = at // "for 2m of 10m" counts from the call the budget belongs to
 		}
 		if quiet < StuckAfter {
-			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "tool call in flight", Activity: act}
+			return Snapshot{State: Working, Since: since, Reason: "tool call in flight", Activity: act, Allowed: allow}
+		}
+		if allow > 0 && now.Before(deadline) {
+			return Snapshot{State: Working, Since: since, Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
 		}
 		return Snapshot{State: Stuck, Since: m.since(oldest.at), Reason: stuckReason(quiet), Activity: act}
 	}
@@ -314,6 +341,75 @@ func apiErrorText(s string) string {
 // apiErrorMarker is the phrase Claude Code writes before the status it got.
 const apiErrorMarker = "API Error:"
 
+// bashTimeout is the budget the harness gives a Bash call that names none,
+// and bashTimeoutMax the most it grants however large the call's own.
+const (
+	bashTimeout    = 2 * time.Minute
+	bashTimeoutMax = 10 * time.Minute
+)
+
+// budget is the budget of the pending call that is allowed the longest,
+// and the moment it runs out: zero when no call in flight has one, or
+// every one has run out.
+func (m *Machine) budget(now time.Time) (allow time.Duration, deadline, at time.Time) {
+	for _, p := range m.pending {
+		a := allowance(p.use)
+		if a == 0 {
+			continue
+		}
+		if d := m.since(p.at).Add(a); now.Before(d) && d.After(deadline) {
+			allow, deadline, at = a, d, m.since(p.at)
+		}
+	}
+	return allow, deadline, at
+}
+
+// allowance is how long a pending call may run before its silence counts —
+// the Bash timeout, in milliseconds on the call's input, or the harness's
+// default. Every other tool answers at once or not at all, so 0.
+func allowance(use transcript.ToolUse) time.Duration {
+	if use.Name != "Bash" {
+		return 0
+	}
+	if rawBool(use.Input, "run_in_background") {
+		return 0 // returns at once; the harness enforces no budget on it
+	}
+	if ms := rawNumber(use.Input, "timeout"); ms > 0 {
+		return min(time.Duration(ms)*time.Millisecond, bashTimeoutMax)
+	}
+	return bashTimeout
+}
+
+// rawBool reads a boolean field off a tool call's input; false when absent.
+func rawBool(input json.RawMessage, key string) bool {
+	if len(input) == 0 {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return false
+	}
+	var b bool
+	return json.Unmarshal(obj[key], &b) == nil && b
+}
+
+// rawNumber reads a numeric field off a tool call's input; 0 when absent or
+// not a number.
+func rawNumber(input json.RawMessage, key string) float64 {
+	if len(input) == 0 {
+		return 0
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return 0
+	}
+	var n float64
+	if err := json.Unmarshal(obj[key], &n); err != nil {
+		return 0
+	}
+	return n
+}
+
 func stuckReason(quiet time.Duration) string {
 	return fmt.Sprintf("no output for %s mid-turn", ShortDuration(quiet))
 }
@@ -330,6 +426,78 @@ func endsWithQuestion(text string) bool {
 }
 
 // activityFor renders the one-line hint for a tool call.
+// askedQuestion reads the first question out of an AskUserQuestion call's
+// input — {"questions":[{"question":"…","options":[{"label":"…"},…]}]} —
+// with its options after it, so the row says what is being decided.
+func askedQuestion(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var in struct {
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil || len(in.Questions) == 0 {
+		return ""
+	}
+	q := in.Questions[0]
+	text := firstLine(q.Question)
+	var labels []string
+	for _, o := range q.Options {
+		if l := strings.TrimSpace(o.Label); l != "" {
+			labels = append(labels, l)
+		}
+	}
+	if len(labels) > 0 {
+		text += " [" + strings.Join(labels, " / ") + "]"
+	}
+	return text
+}
+
+// WithoutCD is a Bash call with a leading "cd <cwd>;" or "cd <cwd> &&"
+// taken off its command when the directory is the session's own: the row
+// "Bash: cd /home/user/api; git diff …" spent its cells entering the room
+// the session was already in (#78). A bare "cd <cwd>" stays: there is
+// nothing else to show.
+func WithoutCD(use transcript.ToolUse, cwd string) transcript.ToolUse {
+	if use.Name != "Bash" || cwd == "" {
+		return use
+	}
+	cmd := rawField(use.Input, "command")
+	rest, ok := StripCD(cmd, cwd)
+	if !ok {
+		return use
+	}
+	out := use
+	out.Input = json.RawMessage(fmt.Sprintf(`{"command":%s}`, strconv.Quote(rest)))
+	return out
+}
+
+// StripCD is the command after its leading "cd <cwd>;" / "cd <cwd> &&",
+// and whether there was one to take.
+func StripCD(cmd, cwd string) (string, bool) {
+	cwd = strings.TrimRight(cwd, "/")
+	if cwd == "" {
+		return cmd, false
+	}
+	t := strings.TrimSpace(cmd)
+	for _, dir := range []string{cwd, cwd + "/", strconv.Quote(cwd), "'" + cwd + "'"} {
+		for _, sep := range []string{";", "&&"} {
+			if rest, ok := strings.CutPrefix(t, "cd "+dir+" "+sep+" "); ok && strings.TrimSpace(rest) != "" {
+				return strings.TrimSpace(rest), true
+			}
+			if rest, ok := strings.CutPrefix(t, "cd "+dir+sep+" "); ok && strings.TrimSpace(rest) != "" {
+				return strings.TrimSpace(rest), true
+			}
+		}
+	}
+	return cmd, false
+}
+
 func activityFor(use transcript.ToolUse) string {
 	switch use.Name {
 	case "Bash":
@@ -342,6 +510,14 @@ func activityFor(use transcript.ToolUse) string {
 			return verbOf(use.Name) + " " + filepath.Base(path)
 		}
 		return verbOf(use.Name)
+	case askUserQuestion:
+		// The question itself, not the tool's name: "needs you" is the whole
+		// game, and a row that said "AskUserQuestion" at every level left the
+		// person unable to triage what was being asked without attaching.
+		if q := askedQuestion(use.Input); q != "" {
+			return q
+		}
+		return use.Name
 	case "":
 		return "working"
 	default:

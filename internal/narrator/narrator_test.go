@@ -789,3 +789,29 @@ func TestALabelThatIsOnlyTheClassIsDeclined(t *testing.T) {
 	n.Request(sessAlpha, tr, "make refresh rotate the token")
 	r.noBatch(t, "the declined key is cooling off for one call")
 }
+
+// Request says whether the trail is spoken for. A caller that remembers it
+// asked, and stops asking, must not remember a refusal: with several
+// sessions asking every tick, the one refused would never be named.
+func TestRequestReportsARefusal(t *testing.T) {
+	n, r, _, notified := newNarrator(t)
+	tr := twoClosedAndAHead()
+
+	if !n.Request(sessAlpha, tr, "make refresh rotate the token") {
+		t.Fatal("the first request, with nothing in flight, was reported refused")
+	}
+	held := r.waitBatch(t)
+	// Held in flight: another session's request is refused, and says so.
+	if n.Request("other", tr, "something else") {
+		t.Error("a request while a batch was in flight was reported taken")
+	}
+	r.answer(
+		narrator.Label{Key: held[0].Key, Text: "wires the token refresh"},
+		narrator.Label{Key: held[1].Key, Text: "watches the suite go red"},
+	)
+	waitNotify(t, notified)
+	// Everything cached: nothing to ask, and that is not a refusal.
+	if !n.Request(sessAlpha, tr, "make refresh rotate the token") {
+		t.Error("a request with everything cached was reported refused")
+	}
+}

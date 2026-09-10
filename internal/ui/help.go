@@ -3,29 +3,41 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/deephanson94/compass/internal/journey"
 )
 
 // helpKeys is the M2 keymap. Keys that arrive in later milestones are named
 // here only when they already do something.
 var helpKeys = [][2]string{
-	{"1 – 9", "select a session"},
-	{"j / k", "move down / up (↓ ↑ too)"},
+	{"1 – 9", "select a session · a digit under recent opens that finished one"},
+	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
-	{"g", "grab the session waiting longest, and attach"},
+	{"g", "grab the oldest ▲ needs-you and attach — a ⊘ is skipped"},
 	{"A", "browse the archive — every past session, by project"},
-	{"tab", "zoom in: unfold each leg's waypoints (Lv2), then read it (Lv3)"},
-	{"⇧ tab", "zoom back out to the trail (esc too)"},
-	{"ctrl+d/u", "half a page: the trail at Lv1, the reader at Lv3"},
+	{"tab", "zoom in: board → session → reader"},
+	{"⇧ tab", "zoom out, back to the board (esc too)"},
+	{"ctrl+d/u", "half a page (PgDn / PgUp too): the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
-	{"m", "show / hide the live mirror of the selected pane (Lv1, wide)"},
+	{"[ ]", "previous / next prompt — the chapters of a trail"},
+	{"m", "the live tmux pane beside the trail, instead of the conversation"},
+	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
+	{"x", "hide a session — A lists it, x there brings it back"},
+	{"a", "ask: a claude grounded in this session's transcript"},
+	{"space", "reader: fold / unfold a tool output"},
+	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
+	{"esc", "one level out · on the board or a list, a standing search clears first"},
 	{"?", "this help"},
 	{"q", "quit"},
 }
 
 // helpTwoCol is the width at which the overlay splits: below it the keys would
 // be clipped to nonsense, so the legend goes compact instead.
-const helpTwoCol = 104
+const helpTwoCol = 150
+
+// helpSplitMin is the width below which two columns are never worth it.
+const helpSplitMin = 104
 
 // helpLines renders the help overlay in place of the deck body: same margins,
 // same alignment, nothing new to learn.
@@ -34,30 +46,428 @@ const helpTwoCol = 104
 // what gets cut: given the width, the legend moves alongside them; without it,
 // the legend loses its explanations rather than the keys losing their rows.
 func helpLines(w, h int) []string {
-	keys := helpKeyLines(w)
+	return helpLinesFor(w, h, true)
+}
+
+// helpOpts is what the deck tells the help about itself: whether a board
+// fits, which keys it would refuse, and the keymap its own footer is
+// carrying — the last so a body too short for every row keeps the rows for
+// the keys the person can see being offered.
+type helpOpts struct {
+	recent  bool // an archive exists: the digit row may name the band
+	board   bool
+	reader  bool // the keys are in the reader: the page keys page it, not the trail (#83, #87)
+	refused []string
+	keymap  string
+	tools   bool // the fleet runs two CLIs, so its rows wear the word (#85)
+}
+
+func helpLinesFor(w, h int, board bool, refused ...string) []string {
+	return helpLinesWith(w, h, helpOpts{board: board, refused: refused})
+}
+
+// helpOffered says whether the deck's own footer is naming this key now.
+func helpOffered(key, keymap string) bool {
+	if keymap == "" {
+		return false
+	}
+	for _, f := range map[string][]string{
+		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"},
+		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
+		"G": {"G is the present"}, "? / q": {"? help"}, "x / A": {"x hide", "x unhide", "A fleet", "A browses"},
+		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
+		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
+		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
+	}[key] {
+		if strings.Contains(keymap, f) {
+			return true
+		}
+	}
+	return false
+}
+
+func helpLinesWith(w, h int, o helpOpts) []string {
+	board, refused := o.board, o.refused
+	keys := helpKeyLinesIn(w, board, o.reader, refused...)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
-	if w >= helpTwoCol && h >= len(keys) {
-		left := w/2 - gutterWidth
+	// Two columns at a width that holds them whole, or at any width past
+	// the split where one column would have to cut the keys: a 120x34
+	// split clipped both halves, a 120x22 single column had no legend.
+	oneColumn := len(keys) + 1 + 5 // the keys, a line of air, the glyph lines a column cannot do without
+	if (w >= helpTwoCol || (w >= helpSplitMin && h < oneColumn)) && h >= len(keys) {
+		// The split follows the keys' longest line, not a fraction of the
+		// width: a fixed half pads one column while it clips the other.
+		left := helpKeysWidth(board)
+		if left > w*3/5 {
+			left = w*3/5 - gutterWidth
+		}
+		right := w - left - gutterWidth
+		legend := helpLegendWrapped(right, true, h, o.tools, board) // definitions wrap into the rows that are free
+		if !o.tools {
+			legend = dropToolGloss(legend)
+		}
+		if !board {
+			// A fleet of one on a wide terminal has no board either (#53).
+			kept := legend[:0]
+			for _, l := range dropBoardLegend(legend) {
+				kept = append(kept, l)
+			}
+			legend = kept
+		}
 		return joinColumns(h, []column{
-			{left, helpKeyLines(left)},
-			{w - left - gutterWidth, helpLegendLines(w-left-gutterWidth, true)},
+			{left, withoutRecent(helpKeyLinesIn(left, board, o.reader, refused...), o.recent)},
+			{right, legend},
 		})
 	}
-	lines := append(helpKeyLines(w), "")
-	lines = append(lines, helpLegendLines(w, false)...)
+	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, refused...), o.recent)
+	legend := helpLegendLines(w, false, o.tools, board)
+	if !o.tools {
+		legend = dropToolGloss(legend)
+	}
+	if !board {
+		// No board on this terminal: its legend line would describe a
+		// brightness the person never sees.
+		kept := legend[:0]
+		for _, l := range dropBoardLegend(legend) {
+			kept = append(kept, l)
+		}
+		legend = kept
+	}
+	if h > 0 && len(lines)+1+len(legend) > h {
+		// Too short for the whole legend: keep what a reader cannot infer —
+		// the glyphs and the class names — and drop the sentences around
+		// them and the line of air, before any key is cut. A reader who
+		// cannot reach the keys cannot leave the overlay.
+		full := legend
+		legend = helpLegendCore(legend)
+		if len(lines)+len(legend) > h {
+			// Still too tall: the lane and plan glyphs share one row, and
+			// the compaction mark rides with them. A row left over after
+			// that takes the tag's line.
+			legend = helpLegendFold(legend, w)
+		}
+		if len(lines)+len(legend) >= h && len(lines) > 1 && lines[1] == "" && len(legend) < len(full) {
+			// No row to spare and a legend line out: the air under
+			// "keys" buys the tag's line back — the 100-column help kept
+			// its blank row while ⌁ and unread went undefined.
+			lines = append(lines[:1], lines[2:]...)
+		}
+		if len(lines)+len(legend) < h {
+			// Rows to spare: the sentences come back in their own order,
+			// as many as fit — a 120x34 help had three free rows under a
+			// legend missing the marks on its own board.
+			legend = helpLegendFill(legend, full, h-len(lines))
+		}
+		if len(lines)+len(legend) > h && len(lines) > 1 && lines[1] == "" {
+			// And the line of air under "keys" goes before any glyph does.
+			lines = append(lines[:1], lines[2:]...)
+		}
+	} else {
+		lines = append(lines, "")
+	}
+	// One gloss per mark: the folded row leads with the tag only where the
+	// tag's own row did not survive, and gives that lead to the trace when
+	// it did — `↪` stood on thirty-two rows and was defined at no width
+	// below the board's.
+	if joined := strings.Join(legend, "\n"); strings.Contains(joined, "— its tmux pane") {
+		for i, l := range legend {
+			if plain := ansi.Strip(l); strings.Contains(plain, "⌁ dev:1.0 pane · unread · ") {
+				legend[i] = dimStyle.Render(shedClauses(strings.Replace(plain, "⌁ dev:1.0 pane · unread · ", "", 1), w))
+			}
+		}
+	}
+	lines = append(lines, legend...)
+	if h > 0 && len(lines) > h && o.keymap != "" {
+		// A key row the deck's own footer is not offering goes before any
+		// row it is: an 80-column help kept `g`, named on no footer there,
+		// while `a`, `space` and the search — named on nine between them —
+		// were cut for the room. The order is how guessable the key is
+		// without its row.
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space")
+		if !o.board {
+			// Below the board's width `m` is refused ("needs 110 columns"):
+			// a refused key's row is the first cut when rows are short,
+			// and it was keeping its row while `g`, a key that works,
+			// lost its own (#57).
+			order = append([]string{"m"}, order...)
+		}
+		for _, key := range order {
+			if len(lines) <= h {
+				break
+			}
+			if !refuses(o.refused, key) && helpOffered(key, o.keymap) {
+				continue
+			}
+			for i, l := range lines {
+				if plain := ansi.Strip(l); len(plain) > 10 && strings.TrimSpace(plain[:10]) == key {
+					lines = append(lines[:i], lines[i+1:]...)
+					break
+				}
+			}
+		}
+	}
 	if h > 0 && len(lines) > h {
-		// Cut from the bottom, which is the legend. A reader who cannot reach
-		// the keys cannot leave the overlay.
-		lines = lines[:h]
+		// Cut from the middle of the keys, never the tail: the way out
+		// (esc, q) and the fleet's glyph line are what a newcomer on an
+		// 80x24 split needs from this screen before anything else.
+		keep := len(lines) - h
+		var tail []string
+		for _, l := range lines {
+			plain := ansi.Strip(l)
+			keep := strings.Contains(l, "fleet:") || strings.Contains(l, "trail:  ") || strings.Contains(l, "you were here") || strings.Contains(l, "scout")
+			// The keys the deck's own footer is offering outrank the rest:
+			// an 80-column help named `g`, which no footer there offers,
+			// while `x` — on nine of them — was cut for the room.
+			for _, k := range []string{"esc ", "q ", "? "} {
+				keep = keep || strings.HasPrefix(plain, k)
+			}
+			if !keep && len(plain) > 10 {
+				keep = helpOffered(strings.TrimSpace(plain[:10]), o.keymap)
+			}
+			if keep {
+				tail = append(tail, l) // the way out, the fleet's glyphs, and the keys pressed at this width
+			}
+		}
+		for len(tail) > 0 && h-len(tail) < 3 {
+			tail = tail[1:] // the first key rows outrank the kept tail on a tiny body
+		}
+		cut := lines[:max(h-len(tail), 0)]
+		var out []string
+		for _, l := range cut {
+			if !contains(tail, l) {
+				out = append(out, l)
+			}
+		}
+		lines = append(out, tail...)
+		_ = keep
+		if len(lines) > h {
+			lines = lines[:h]
+		}
+		// The lanes' row did not survive: the trail's own row carries them
+		// in place of the bare "◈ subagent" — at 80 the board shows all
+		// three and the help defined none.
+		joined := strings.Join(lines, "\n")
+		for i, l := range lines {
+			plain := ansi.Strip(l)
+			switch {
+			case !strings.Contains(joined, "⋯ out") && strings.Contains(l, "trail:  "):
+				// One space before the lanes, not the legend's two: the
+				// row is seventy-eight cells wide with the silent glyph in it.
+				// The `✓ back` the fold row gave this row (#64) is in the
+				// lanes' own clause: it goes before the lanes come.
+				if lanes := strings.Replace(strings.TrimSuffix(plain, "  ✓ back"), "  ◈ subagent  ◍ silent agent", " ◈ ⋯ out · ◍ silent · ✓ back · ⌀ empty", 1); ansi.StringWidth(lanes) <= w {
+					lines[i] = dimStyle.Render(lanes)
+				}
+			case !strings.Contains(joined, "⌁ ") && strings.Contains(l, "you were here"):
+				// Nor the tag's: the read-line's row carries it — the first
+				// row under FLEET on every 80-column frame.
+				if tag := plain + " · ⌁ its tmux pane"; ansi.StringWidth(tag) <= w {
+					lines[i] = dimStyle.Render(tag)
+				}
+			}
+		}
+	}
+	// The lane's link is drawn at eighty since #67 and its gloss went
+	// with the folded ◌ row: the read-line's row takes it wherever the
+	// tag's own gloss already stands elsewhere and the cells are there (#68).
+	if joined := strings.Join(lines, "\n"); !strings.Contains(joined, "→3") && strings.Contains(joined, "⌁ ") {
+		for i, l := range lines {
+			if plain := ansi.Strip(l); strings.Contains(plain, "you were here") && ansi.StringWidth(plain)+ansi.StringWidth(" · →3 its session") <= w {
+				lines[i] = dimStyle.Render(plain + " · →3 its session")
+				break
+			}
+		}
 	}
 	return lines
 }
 
+func contains(list []string, s string) bool {
+	for _, l := range list {
+		if l == s {
+			return true
+		}
+	}
+	return false
+}
+
+// helpLegendCore is the legend with its prose removed: the fleet and trail
+// glyph lines and the class names, which are the lines nothing else on screen
+// explains. Everything else in the legend is a sentence a reader can live
+// without on a short terminal.
+func helpLegendCore(legend []string) []string {
+	var core []string
+	for _, l := range legend {
+		// The class names are not here: they are plain words on every leg
+		// row, and their row cost the narrow help the lanes.
+		// `▌` marks the panel the keys are in and is drawn on all but one
+		// frame at every width: a mark that constant is never the one cut.
+		for _, keep := range []string{"fleet:", "trail:  ", "⌀ back", "◌ planned", "you were here", "▌ marks"} {
+			if strings.Contains(l, keep) {
+				core = append(core, l)
+				break
+			}
+		}
+	}
+	return core
+}
+
+// helpKeysWidth is the width of the keys column when nothing in it is cut.
+func helpKeysWidth(board bool) int {
+	w := 0
+	for _, l := range helpKeyLinesFor(1000, board) {
+		if n := ansi.StringWidth(l); n > w {
+			w = n
+		}
+	}
+	return w
+}
+
+// helpLegendFold puts the ⌀ and ◌ lines on one row, with ⟲ beside them: the
+// glyphs survive, the sentences around them do not.
+func helpLegendFold(legend []string, w int) []string {
+	var out []string
+	folded := false
+	for _, l := range legend {
+		switch {
+		case strings.Contains(l, "⌀ back") || strings.Contains(l, "◌ planned"):
+			if !folded {
+				// The tag and unread first — the words every namesake and
+				// every finished row wears — and the clauses go whole.
+				// The tag and unread lead: every row wears one or says "no
+				// pane", where the lanes belong to a lead that delegates.
+				// #17 pins ⌀ and ◌ to the narrow help; the compaction mark
+				// rides from a hundred columns up, where the row has room.
+				fold := "        ⌁ dev:1.0 pane · unread · ↪ sent · ◈ ⋯ out · ⌀ empty · ◌ planned · ⟲ compacted · ✓ back · │ you were here"
+				if strings.Contains(strings.Join(legend, "\n"), "dev:1.0") {
+					// The tag's own row survived: this one need not say it
+					// twice, and the room goes to the marks below it.
+					fold = "        ◈ ⋯ out · ✓ back · ⌀ back, empty · ◌ planned · ⟲ compacted · ↪ sent · │ you were here"
+				}
+				out = append(out, dimStyle.Render(shedClauses(fold, w)))
+				folded = true
+			}
+		default:
+			out = append(out, l)
+		}
+	}
+	if joined := strings.Join(out, "\n"); folded && !strings.Contains(joined, "✓ back") {
+		// The fold shed `✓ back` for the marks #17 pins, and `✓` is on the
+		// screen the person came from: the trail's own row takes it when
+		// it has the cells (#64).
+		for i, l := range out {
+			if plain := ansi.Strip(l); strings.HasPrefix(plain, "trail:") && ansi.StringWidth(plain)+len("  ✓ back") <= w {
+				out[i] = l + "  ✓ back"
+				break
+			}
+		}
+	}
+	return out
+}
+
 func helpKeyLines(w int) []string {
+	return helpKeyLinesFor(w, true)
+}
+
+// refuses says whether the deck would refuse this key right now — a key it
+// refuses is not a key on this terminal, and on a body too short for every
+// row it is the first to go: a newcomer on a fleet of one read "g grab" and
+// "x hide" in the help and got a refusal from both, while `[ ]` and `a`,
+// which the deck's own footer offered, were cut for the room.
+func refuses(refused []string, key string) bool {
+	for _, r := range refused {
+		if r == key {
+			return true
+		}
+	}
+	return false
+}
+
+// helpKeyLinesFor is the key list for a terminal with or without a board:
+// on one too narrow for it, "zoom in: board → trail" describes a level the
+// person cannot reach.
+func helpKeyLinesFor(w int, board bool, refused ...string) []string {
+	return helpKeyLinesIn(w, board, false, refused...)
+}
+
+func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
-		lines = append(lines, dimStyle.Render(pad(k[0], 10))+textStyle.Render(clip(k[1], w-10)))
+		key, what := k[0], k[1]
+		// A key the deck would refuse still has a row where there is room:
+		// it refuses in words ("nothing archived yet", "the only session
+		// stays"), and those words name a thing the help is the only
+		// place to look up. It is the first row cut when there is not.
+		switch key {
+		case "?":
+			// One row at every width: the deck's own footer offers
+			// `? help · q quit` on one, and at 120 the row the split
+			// spent was the tool gloss's (#99).
+			key, what = "? / q", "this help · quit"
+		case "q":
+			what = ""
+		}
+		if reader {
+			switch key {
+			case "g":
+				// In the reader `g` is the start of the conversation, the
+				// other end of `G` (#231, #241) — it does not grab, and
+				// the row that said it did was the help promising an
+				// action the key does not take, three levels deep with a
+				// `▲` standing in the header. #40 gave the board's `g`
+				// row the sentence `g` acts on there; this is the same
+				// rule at the one level where the key acts differently.
+				// The grab is a level out, which the aside says where
+				// there is room for it.
+				what = "the start of the conversation, the other end of G; the grab is a level out"
+			}
+		}
+		if !board {
+			switch key {
+			case "tab":
+				// One row for both ways through the levels: below the
+				// board's width the rows are scarce, and the row the
+				// merge frees goes to a key the deck is offering.
+				key, what = "tab/⇧tab", "zoom in / out: trail → legs → reader (esc out too)"
+			case "⇧ tab":
+				what = ""
+			case "esc":
+				what = "one level out · from a list, a standing search clears first"
+			case "j / k":
+				// Paired rows below the board's width: eighteen keys do
+				// not fit fourteen rows, and a key with no row is a key
+				// the person cannot learn.
+				// The page keys name their object: on the list's own row
+				// they read as paging the list, and they page the trail (#83).
+				object := "the trail"
+				if reader {
+					object = "the reader"
+				}
+				what = "move down / up (↓ ↑ too) · ctrl+d/u pages " + object + " · G newest"
+				if w >= 90 {
+					what = "move down / up (↓ ↑ too) · ctrl+d/u or PgDn/PgUp page " + object + " · G newest"
+				}
+			case "ctrl+d/u":
+				what = ""
+			case "G":
+				what = "" // the newest row: named on the j / k row below
+			case "x":
+				key, what = "x / A", "hide a session · A browses the archive, x there brings it back"
+			case "A":
+				what = ""
+			case "m":
+				// The deck answers `m` here with a refusal, and the word
+				// "mirror" is nowhere else on a narrow screen.
+				what = "the live pane beside the trail — needs 110 columns"
+			}
+		}
+		if what == "" {
+			continue // not a key on this terminal
+		}
+		if i := strings.Index(what, "; "); i > 0 && len([]rune(what)) > w-10 {
+			what = what[:i] // the aside goes whole before the sentence is cut
+		}
+		lines = append(lines, dimStyle.Render(pad(key, 10))+textStyle.Render(clip(what, w-10)))
 	}
 	return lines
 }
@@ -65,17 +475,160 @@ func helpKeyLines(w int) []string {
 // helpLegendLines is what the glyphs and the class tints mean. Spelled out when
 // there is room; names only when there is not, because a reader who cannot see
 // which class a leg is has lost the whole point of Lv1 (SPEC §2.2).
-func helpLegendLines(w int, roomy bool) []string {
-	lines := []string{
-		dimStyle.Render(clip("compass observes; enter hands you the session.", w)),
+// helpLegendRaw is the legend's text, unclipped: the glyph lines carry their
+// indent so a wrapped continuation can hang under the glyph.
+func helpLegendRaw() []string {
+	return []string{
+		"compass observes; enter hands you the session.",
 		"",
-		dimStyle.Render(clip(focusMark+" marks the panel your keys are in — tab moves it", w)),
-		dimStyle.Render(clip("fleet:  ● working  ▲ needs you  ◍ stuck  ○ idle", w)),
-		dimStyle.Render(clip("trail:  ◉ prompt  ◆ leg  ● now  ◈ subagent", w)),
-		dimStyle.Render(clip("        ◌ planned — Claude's own next moves", w)),
+		focusMark + " marks the panel your keys are in — tab moves it",
+		"fleet:  ● working  ▲\u00a0needs\u00a0you  ◍ stuck  ↻ looping  ⊘\u00a0dead\u00a0on\u00a0the\u00a0API  ○ idle",
+		// `↪` is a fleet row's mark, and its gloss rides the fleet's row:
+		// the 120x34 help drew the mark on its board and cut the trail row
+		// that defined it (#62).
+		"        ⌁ dev:1.0 — its tmux pane · unread — finished today, not yet opened",
+		"        ↪ sent — a line compass typed · ↪ answered 2 — the menu's digit",
+		toolGloss,
+		"trail:  ◉ prompt  ◆ leg  ● now, \"for 2h\"  ◈ subagent  ◍ silent agent",
+		"        ◈ ⋯ out · ✓ back, finding beneath · ⌀ back, empty",
+		"        ◌ planned — Claude's own next moves · →3\u00a0a\u00a0live\u00a0session on this lane",
+		"        ◉ 3/12 — the 3rd of 12 prompts · [ ] steps them",
+		"        ⟲ context compacted — a summary below · 16⚑\u00a010✗\u00a02⟲\u00a0ships\u00a0·\u00a0red\u00a0·\u00a0compactions",
+		"        · 2nd\u00a0failure — the same test in two legs · ?\u00a0—\u00a0no\u00a0verdict\u00a0parsed · edited\u00a0since — touched after that run",
+		"        on\u00a0you\u00a040m\u00a0today — its waits for your next prompt (3h+\u00a0=\u00a0away) · for\u00a04m\u00a0of\u00a010m — inside its shell command's budget",
+		"        ↩ result of X — landed late; it is X's",
+		"        │\u00a0you\u00a0were\u00a0here — the read-line · ↳\u00a0what\u00a0came\u00a0after · ⚠\u00a0two\u00a0sessions, one thing",
+		"board:  columns for what owes you; the rest below",
 		"",
-		dimStyle.Render(clip("every leg is one of seven classes, named on its row:", w)),
+		"every leg is one of seven classes, named on its row:",
 	}
+}
+
+// toolGloss defines the word a row wears where the fleet runs two CLIs (#85, #89).
+const toolGloss = "        claude · opencode — which CLI runs the session, where the fleet runs two"
+
+// helpLegendFor is the legend's text for the fleet the help describes: a
+// one-CLI fleet's legend is built without the tool gloss, and a fleet with
+// no board without the board's line — not budgeted with them and stripped
+// after. The gloss and its wrapped tail cost a 152-column legend the two
+// rows it then left blank while a definition above them was shed (#92);
+// the board's line cost a fleet of one's the row `⚠ two sessions, one
+// thing` needed (#95). dropToolGloss and dropBoardLegend stay as the belt.
+func helpLegendFor(tools, board bool) []string {
+	raw := helpLegendRaw()
+	kept := raw[:0]
+	for _, l := range raw {
+		if (!tools && l == toolGloss) || (!board && strings.HasPrefix(l, "board:")) {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return kept
+}
+
+// dropToolGloss takes the tool word's line out: one CLI everywhere and no row
+// wears the word, so no line defines it — the same test the row uses.
+func dropToolGloss(lines []string) []string {
+	var out []string
+	skipping := false
+	for _, l := range lines {
+		plain := ansi.Strip(l)
+		indent := len(plain) - len(strings.TrimLeft(plain, " "))
+		switch {
+		case strings.Contains(plain, "— which CLI runs the session"):
+			skipping = true
+			continue
+		case skipping && strings.TrimSpace(plain) != "" && indent > 8:
+			continue // the wrapped tail of the line above (#55)
+		}
+		skipping = false
+		out = append(out, l)
+	}
+	return out
+}
+
+// helpCursorGloss puts the row cursor's mark on the panel mark's line, where
+// the line still stands in one row of w cells. `▸` is drawn on all but a
+// handful of the frames the deck renders — the board's cursor row, the
+// trail's, and since #300 the reader's, where the literal mark is the only
+// thing that survives colour off — and the legend named eighteen marks and
+// never this one, while `space unfold` and `j / k` are taught with nothing
+// on the page saying what they act on. It rides the `▌` line because the
+// two marks answer one question between them: which panel the keys are in,
+// and which row inside it. Taken only where the line still fits the width
+// it is drawn at, so no gloss beneath it is ever pushed off the overlay
+// (#281's rule, in the legend).
+func helpCursorGloss(l string, w int) string {
+	const clause = " \u00b7 \u25b8 its row"
+	if !strings.HasPrefix(l, focusMark+" marks") || ansi.StringWidth(strings.ReplaceAll(l, "\u00a0", " ")+clause) > w {
+		return l
+	}
+	return l + clause
+}
+
+func helpLegendLines(w int, roomy, tools, board bool) []string {
+	var lines []string
+	for _, l := range helpLegendFor(tools, board) {
+		if l == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, dimStyle.Render(shedClauses(strings.ReplaceAll(helpCursorGloss(l, w), "\u00a0", " "), w)))
+	}
+	return helpLegendClasses(lines, w, roomy)
+}
+
+// helpLegendWrapped is the legend with every line that would clip re-flowed
+// onto continuation rows, hung under its glyph.
+func helpLegendWrapped(w int, roomy bool, h int, tools, board bool) []string {
+	raw := helpLegendFor(tools, board)
+	budget := h - len(raw) - len(legClasses) // the rows free for continuations
+	var lines []string
+	for _, l := range raw {
+		if l == "" {
+			lines = append(lines, "")
+			continue
+		}
+		l = helpCursorGloss(l, w)
+		if ansi.StringWidth(l) <= w {
+			lines = append(lines, dimStyle.Render(strings.ReplaceAll(l, "\u00a0", " ")))
+			continue
+		}
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		first := l[:indent]
+		// The separator binds to the clause it introduces, so a wrapped
+		// row never ends on a hanging "·" (#58).
+		text := l[indent:]
+		if i := strings.Index(text, ":  "); i > 0 && indent == 0 {
+			// "fleet:  …" — the continuation hangs under the first glyph.
+			first, text = text[:i+3], text[i+3:]
+			indent = len([]rune(first))
+		}
+		rows := wrapPrefix(text, first, strings.Repeat(" ", indent+2), w)
+		if extra := len(rows) - 1; extra > budget {
+			// No rows left: clauses go whole — and an aside the clip
+			// would leave open goes with its clause, so the legend
+			// never ends inside a parenthesis ("(3h+…") (#87).
+			shed := shedClauses(strings.ReplaceAll(l, "\u00a0", " "), w)
+			for i := strings.LastIndex(shed, "("); i >= 0 && !strings.Contains(shed[i:], ")"); i = strings.LastIndex(shed, "(") {
+				shed = shedClauses(strings.TrimRight(shed[:i], " ·")+"…", w)
+			}
+			lines = append(lines, dimStyle.Render(shed))
+			continue
+		} else {
+			budget -= extra
+		}
+		for _, row := range rows {
+			// A wrapped row never ends on the separator: the continuation
+			// reads as one from its indent (#58).
+			row = strings.TrimRight(strings.TrimRight(row, " "), "·")
+			lines = append(lines, dimStyle.Render(strings.ReplaceAll(row, "\u00a0", " "))) // the binding is the wrap's, not the reader's
+		}
+	}
+	return helpLegendClasses(lines, w, roomy)
+}
+
+func helpLegendClasses(lines []string, w int, roomy bool) []string {
 	if !roomy {
 		var names []string
 		for _, c := range legClasses {
@@ -107,4 +660,91 @@ var legClasses = []struct {
 	{journey.Test, "checking: test runs, with their results parsed"},
 	{journey.Ship, "landing it: commits, pushes, PRs"},
 	{journey.Docs, "writing it down: markdown, comments, READMEs"},
+}
+
+// helpLegendFill puts back the legend's lines the core dropped, in the
+// legend's own order, while the rows allow.
+func helpLegendFill(core, full []string, rows int) []string {
+	kept := map[string]bool{}
+	for _, l := range core {
+		kept[l] = true
+	}
+	out := append([]string(nil), core...)
+	// The marks a person opens the help for come back first — the rail's
+	// rules and counts, the loop, the trace and the read-line — and the
+	// sentences about the panel last.
+	var order []string
+	// The trace before the compaction: `↪` is drawn on the fleet rows of
+	// every scene that replied, where `⟲` rides the trails that compacted
+	// — the mark on the panel the person is looking at comes back first (#63).
+	for _, want := range []string{"you\u00a0were\u00a0here", "⌁ dev", "↪ sent", "which CLI", "⟲ context compacted", "2nd\u00a0failure", "on\u00a0you", "board:", "▌", "compass observes"} {
+		for _, l := range full {
+			if strings.Contains(l, want) && !kept[l] {
+				order = append(order, l)
+			}
+		}
+	}
+	order = append(order, full...)
+	for _, l := range order {
+		if kept[l] || l == "" || len(out) >= rows {
+			continue
+		}
+		// Insert before the first core line that follows it in the full order.
+		pos := len(out)
+		after := false
+		for _, f := range full {
+			if f == l {
+				after = true
+				continue
+			}
+			if after && kept[f] {
+				for i, o := range out {
+					if o == f {
+						pos = i
+						break
+					}
+				}
+				break
+			}
+		}
+		out = append(out[:pos], append([]string{l}, out[pos:]...)...)
+		kept[l] = true
+	}
+	return out
+}
+
+// dropBoardLegend takes the board's legend line out, and the continuation
+// rows a wrap hung under it: an orphan "band below" was the tail of a
+// sentence whose head had gone (#55).
+func dropBoardLegend(lines []string) []string {
+	var out []string
+	skipping := false
+	for _, l := range lines {
+		plain := ansi.Strip(l)
+		switch {
+		case strings.Contains(plain, "board:"):
+			skipping = true
+			continue
+		case skipping && strings.TrimSpace(plain) != "" && strings.HasPrefix(plain, " "):
+			continue // the wrapped tail of the line above
+		}
+		skipping = false
+		out = append(out, l)
+	}
+	return out
+}
+
+// withoutRecent takes the band's clause off the digit row when nothing is
+// archived: the help teaches keys the deck binds, not regions it cannot
+// draw (#59).
+func withoutRecent(lines []string, recent bool) []string {
+	if recent {
+		return lines
+	}
+	for i, l := range lines {
+		if strings.Contains(l, "a digit under recent") {
+			lines[i] = strings.Replace(l, " · a digit under recent opens that finished one", "", 1)
+		}
+	}
+	return lines
 }

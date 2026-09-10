@@ -1,0 +1,2316 @@
+package ui
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/state"
+)
+
+// The board is Lv0: every trail that fits, side by side, with the fleet at
+// its floor on the left. It is the deck's default on any terminal wide enough
+// for it, and Shift+Tab from a single trail returns to it (decision #16).
+//
+// It exists because a wide monitor showing one trail and a column of names
+// left the person looking at it worried about everything it was not showing.
+// The mirror was one answer to that worry and turned out to be the wrong one:
+// a glimpse of one CLI's last screenful. The board is the other: the journeys
+// themselves, all the ones that are moving, at a glance.
+//
+// Columns are in the fleet's own order — needs-you first, then stuck, then
+// working, then idle by recency — so the sessions that can want you are on
+// the left and the ones that have gone quiet fall off the right. The selected
+// session always has a column. Idle sessions' trails are drawn dim: they are
+// history until someone types into them, and the eye should land on the ones
+// that are moving (SPEC §4).
+const (
+	boardColMin = 34 // narrower than this a trail row says nothing
+	boardColMax = 64 // wider than the single trail's cap: a column with the width carries its detail
+
+	// boardFresh is how long a finished session stays bright on the board
+	// while nobody has opened it: a day, the tier the person watching asked
+	// for. Past it a session is history whether or not it was read.
+	boardFresh = 24 * time.Hour
+)
+
+// boardFits says whether the terminal is wide enough for the board: the
+// level decision, made from the width alone, so a deck sized before its
+// fleet arrives still opens on the board.
+func (m *Model) boardFits() bool {
+	n, _ := boardColumns(m.width-2*edgePad, 1)
+	return m.width >= deckWideCols && n > 0
+}
+
+// boardShown says whether the board is drawn: it fits, and the view has a
+// session to put in a column.
+func (m *Model) boardShown() bool {
+	return m.boardFits() && (len(m.viewOrder()) > 0 || m.fleetQuery != "")
+}
+
+// boardColumns says how many trail columns a board of the given inner width
+// holds for count sessions, and how wide each is. Every column that fits at
+// the minimum is opened, never more than there are sessions; the width left
+// over goes to all of them evenly, up to the cap past which a row is padding
+// rather than information.
+func boardColumns(inner, count int) (n, w int) {
+	if count <= 0 || inner < boardColMin {
+		return 0, 0
+	}
+	n = (inner + gutterWidth) / (boardColMin + gutterWidth)
+	if n > count {
+		n = count
+	}
+	w = (inner - (n-1)*gutterWidth) / n
+	if w > boardColMax && n >= 2 {
+		// The cap is for a row of columns; a lone column takes the
+		// width, since a filtered column at 65 of 220 was cutting its
+		// prompt beside a field of nothing.
+		w = boardColMax
+	}
+	return n, w
+}
+
+// viewOrder is the current view's sessions in the fleet's own order —
+// needs-you, stuck, working, idle by recency — as indices into m.sessions.
+// It is the board's order, column by column and then on into the strip.
+func (m *Model) viewOrder() []int {
+	if m.archiveView {
+		// The archive is a list, never a board: its numbers run down the
+		// list as drawn, not through an order nothing else shows.
+		var out []int
+		for _, g := range m.archiveGroups() {
+			out = append(out, g.entries...)
+		}
+		return out
+	}
+	var out []int
+	for i, s := range m.sessions {
+		if m.onBoard(s) && m.matchesQuery(s) {
+			out = append(out, i)
+		}
+	}
+	// By obligation, then the fleet's own order within a rank (the longest
+	// wait first among the alarms, the freshest first among the calm).
+	sort.SliceStable(out, func(a, b int) bool {
+		return m.obligation(m.sessions[out[a]]) < m.obligation(m.sessions[out[b]])
+	})
+	return out
+}
+
+// boardKeys picks the sessions that get a column: the first n of the view in
+// its own order, with the selected session always among them — it takes the
+// last column when it would not otherwise have one, so `7` on a three-column
+// board shows session 7's trail rather than nothing.
+func (m *Model) boardKeys(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	keys := make([]string, 0, n)
+	order := m.viewOrder()
+	// Only what owes you gets a column; the shipped-and-read go to the
+	// strip, however many columns are free. A board of nothing owed shows
+	// everything, as before.
+	owed := 0
+	for _, i := range order {
+		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+			owed++
+		}
+	}
+	for _, i := range order {
+		if owed > 0 && !m.archiveView && m.obligation(m.sessions[i]) > owedRank {
+			break
+		}
+		keys = append(keys, m.sessions[i].Info.Key())
+		if len(keys) == n {
+			break
+		}
+	}
+	if _, ok := m.selected(); ok && m.selectedKey != "" {
+		present := false
+		for _, k := range keys {
+			if k == m.selectedKey {
+				present = true
+				break
+			}
+		}
+		if !present {
+			if len(keys) == n {
+				keys[n-1] = m.selectedKey
+			} else {
+				keys = append(keys, m.selectedKey)
+			}
+		}
+	}
+	return keys
+}
+
+// owedKeys is every session that earns a column of its own, in the
+// fleet's order: boardKeys without the selected session pulled in (#252).
+func (m *Model) owedKeys() []string {
+	order := m.viewOrder()
+	owed := 0
+	for _, i := range order {
+		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+			owed++
+		}
+	}
+	var keys []string
+	for _, i := range order {
+		if owed > 0 && !m.archiveView && m.obligation(m.sessions[i]) > owedRank {
+			break
+		}
+		keys = append(keys, m.sessions[i].Info.Key())
+	}
+	return keys
+}
+
+// boardMove is j/k on the board: one session along the board's own order,
+// column by column and on into the strip, so the selection walks what is on
+// screen left to right rather than the fleet list's grouping.
+func (m *Model) boardMove(delta int) {
+	order := m.viewOrder()
+	if len(order) == 0 {
+		return
+	}
+	at := -1
+	for i, idx := range order {
+		if m.sessions[idx].Info.Key() == m.selectedKey {
+			at = i
+			break
+		}
+	}
+	at += delta
+	if at < 0 {
+		at = 0
+	}
+	if at >= len(order) {
+		at = len(order) - 1
+	}
+	m.point(m.sessions[order[at]].Info.Key())
+}
+
+// boardTarget is one session the refresh polls for the board: its key and the
+// transcript behind it.
+type boardTarget struct{ key, path string }
+
+// boardTargets is what refresh polls when the board can be drawn: every
+// session with a column. The selected session is among them, so a single poll
+// serves the board and the single trail alike.
+func (m *Model) boardTargets() []boardTarget {
+	if !m.boardShown() {
+		return nil
+	}
+	n, _ := boardColumns(m.width-2*edgePad, len(m.viewOrder()))
+	var out []boardTarget
+	for _, key := range m.boardKeys(n) {
+		if s, ok := m.session(key); ok && s.Info.TranscriptPath != "" {
+			out = append(out, boardTarget{key: key, path: s.Info.TranscriptPath})
+		}
+	}
+	return out
+}
+
+// session finds a session by key in the current fleet.
+func (m *Model) session(key string) (fleet.Session, bool) {
+	for _, s := range m.sessions {
+		if s.Info.Key() == key {
+			return s, true
+		}
+	}
+	return fleet.Session{}, false
+}
+
+// boardLines lays the board: one trail column per session, each under the
+// two rows the fleet gives that session — number, glyph, name, age, then its
+// class and result — and a strip along the bottom naming the sessions that
+// did not get a column, so nothing on the fleet is out of reach. The fleet
+// list itself is not drawn: its rows are the column headers, and what it did
+// beyond selecting a session the columns do better.
+func (m *Model) boardLines(w, h int) []string {
+	order := m.viewOrder()
+	n, cw := boardColumns(w, m.drawnCount(order))
+	rowOf := m.boardRows()
+	body := h - 2 // the strip and its line of air
+	if body < 1 {
+		body = 1
+	}
+	// A tall board packs its columns into bands, each as tall as its
+	// tallest trail: a day-long trail takes the height it needs, a band of
+	// short ones takes what they need, and the strip names only what no
+	// height was left for. Sized to the screen instead, a board of short
+	// trails ended every column in eight blank rows while naming four
+	// sessions in the strip.
+	keys, heights := m.boardPack(n, cw, body)
+	// The lane heads are what the board spends its spare rows on, never
+	// what costs a session its column: pack with them, pack without, and
+	// keep them only where the same columns are drawn either way.
+	m.noLaneHeads = true
+	if bare, bareH := m.boardPack(n, cw, body); len(bare) > len(keys) {
+		keys, heights = bare, bareH
+	} else {
+		m.noLaneHeads = false
+	}
+	defer func() { m.noLaneHeads = false }()
+	if len(keys) == 0 && m.fleetQuery != "" {
+		// A search nothing answers keeps the board and says so, rather
+		// than silently turning into the deck. Under the note, the band
+		// holds what the search found among the finished (#98, #147):
+		// the miss is the live board's, and says so.
+		miss := []string{"", dimStyle.Render(clip("no session matches /"+m.fleetQuery+" · esc clears it", w))}
+		if w >= fleetWidth {
+			if band := m.strandedBand(w, h-len(miss)-1); len(band) > 1 {
+				miss[1] = dimStyle.Render(clip("no live session matches /"+m.fleetQuery+" · esc clears it", w))
+				return fit(append(append(miss, ""), band...), h)
+			}
+		}
+		// The strip's clauses carry keys — the hidden count and the
+		// archive door — and a miss is where they are needed most: the
+		// board drew `no session matches /eda` over a hidden live
+		// session that search did find, and named no way to it, while
+		// the list twenty columns narrower drew the door under the same
+		// words (#168, #169, #176).
+		if strip := m.boardStrip(nil, rowOf, w); strings.TrimSpace(ansi.Strip(strip)) != "" {
+			return fit(append(miss, "", strip), h)
+		}
+		return fit(miss, h)
+	}
+	// The head yields the ask only where the row it leaves still tells
+	// this card from every other card the frame draws. #265's own reason —
+	// "on the card the ask is three rows down and still tells them apart" —
+	// is the eye's, not the row's: the head is the row the caret marks and
+	// the digit opens, and the band caps at nine digits (#260), so on an
+	// archive of one project the yield drew five cards headed `○ api  2d`
+	// and nothing else, byte for byte the same row five times over. Where
+	// the name and the age it falls back to are another drawn card's too,
+	// the head keeps what was asked (#86: four project names cannot tell
+	// forty sessions apart).
+	keepsAsk := map[string]bool{}
+	if m.archiveView {
+		seen := map[string]int{}
+		for _, k := range keys {
+			if r, ok := rowOf[k]; ok {
+				seen[archiveHeadKey(m, r)]++
+			}
+		}
+		for _, k := range keys {
+			if r, ok := rowOf[k]; ok && seen[archiveHeadKey(m, r)] > 1 {
+				keepsAsk[k] = true
+			}
+		}
+	}
+	var lines []string
+	for b, bh := range heights {
+		var cols []column
+		var colKeys []string
+		bw := bandWidth(w, min(len(keys)-b*n, n), cw)
+		bandTop := len(lines)
+		if b > 0 {
+			bandTop++
+		}
+		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
+			if r, ok := rowOf[keys[i]]; ok {
+				cw := bw
+				x := (i % n) * (bw + gutterWidth)
+				if bx := m.replyBox; bx.on && bandTop < bx.top+bx.h && bandTop+bh > bx.top && x < bx.left && bx.left < x+bw && bx.left-x-1 >= trailWidth {
+					// The reply box begins inside this column: the column
+					// is composed at the width the box leaves, one right
+					// edge for its rows, instead of the band's width cut
+					// where the box begins — a cut that took only the
+					// right-aligned age and left a mark over blanks (#126).
+					cw = bx.left - x - 1
+				}
+				cols = append(cols, column{cw, m.boardColumn(keys[i], r, cw, bh)})
+				colKeys = append(colKeys, keys[i])
+			}
+		}
+		if len(cols) == 0 {
+			break
+		}
+		if b > 0 {
+			lines = append(lines, "")
+		}
+		// A working column shows its HEAD row anyway, so a card that fell
+		// back to the present says what a trail row below says (#107) —
+		// but only where the frame draws that row: a row the reply box
+		// covers says nothing to the person reading the board.
+		y := len(lines)
+		x := 0
+		for ci, c := range cols {
+			if len(c.rows) > 3 {
+				second := oneSpace(strings.TrimRight(ansi.Strip(c.rows[1]), " "))
+				blanked := false
+				for k := 3; k < len(c.rows) && k < bh; k++ {
+					if m.panelHides(x, c.width, y+k) {
+						continue
+					}
+					if saysSame(second, oneSpace(strings.Replace(ansi.Strip(c.rows[k]), "\u25b8", " ", 1))) || saysSame(second, wrappedLabel(c.rows, k, bh)) {
+						c.rows[1] = ""
+						blanked = true
+						break
+					}
+				}
+				// The archive's card draws what was asked on its own ◉
+				// row, and its head drew the same sentence three rows up
+				// (#64, #107 — the card yields what a row below it says).
+				// The head yields it here, where the frame is known to
+				// draw that row, and keeps the name the archive gives the
+				// session instead.
+				if m.archiveView && !keepsAsk[colKeys[ci]] {
+					ask := archiveHeadline(m.sessions[m.boardRows()[colKeys[ci]].sess])
+					for k := 3; k < len(c.rows) && k < bh; k++ {
+						if m.panelHides(x, c.width, y+k) {
+							continue
+						}
+						if !sameAsk(ask, saidAsk(c.rows[k])) {
+							continue
+						}
+						m.askBelow = true
+						head := m.columnHeader(colKeys[ci], m.boardRows()[colKeys[ci]], c.width)
+						m.askBelow = false
+						c.rows[0] = head[0]
+						break
+					}
+				}
+				// The count yields before the rungs are hoisted: where the
+				// tag row can afford the whole word, model and pane once
+				// the digest has gone, the identity stands on one row —
+				// the shape the column beside it draws (#112, #132).
+				m.yieldNewLegs(c.rows, colKeys[ci], c.width, bh)
+				if blanked {
+					m.hoistTag(c.rows, colKeys[ci], c.width)
+				}
+			}
+			x += c.width + 3
+		}
+		lines = append(lines, joinColumns(bh, cols)...)
+	}
+	// The strip sits under the last band, not on the screen's floor: a
+	// calm board is a short board, and the strip is where the eye is.
+	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
+	// The rows the board leaves blank belong to sessions, not to air
+	// (#43, #47): where every live session already has a column, no
+	// further column can ever fill them, and the same band the list
+	// draws at a hundred columns takes them, its header folding the
+	// strip's archive line as it folds the list's.
+	// The hidden count is the band's own header's clause too (#86): a strip
+	// that carries it is still the archive's line and no session's name.
+	strip := strings.TrimSpace(ansi.Strip(lines[len(lines)-1]))
+	if free := h - len(lines); free >= 2 && !m.archiveView && len(m.overlaps()) == 0 &&
+		!strings.HasPrefix(strip, "+") && strings.HasSuffix(strip, fmt.Sprintf("%d archived%s", m.archivedCount(), m.archiveDoorKey())) {
+		bw, top := w, len(lines)-1
+		// The band is a column too: where the reply box begins inside it,
+		// it is composed at the width the box leaves, as a board column
+		// is (#126).
+		if bx := m.replyBox; bx.on && top < bx.top+bx.h && top+free+1 > bx.top && bx.left < w {
+			bw = bx.left - 1
+		}
+		if bw >= fleetWidth {
+			if band := m.strandedBand(bw, free+1); len(band) > 1 {
+				lines = append(lines[:len(lines)-1], band...)
+			}
+		}
+	}
+	return fit(lines, h)
+}
+
+// boardPack packs the columns into bands for a body of the given height:
+// the keys drawn, in order, n to a band, and each band's height.
+func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
+	order := m.viewOrder()
+	var bands [][]string
+	rem := body
+	// What owes you gets a column first, in the fleet's own order. The
+	// selected session is not pulled forward here: `boardKeys` appends it
+	// to the owed so that a digit always shows its trail, and packing
+	// that list put a calm selected session at the head of the calm band,
+	// so `j` along four calm cards reshuffled the board on every press —
+	// the card the person had just read jumped to the front and the
+	// others slid. The calm band keeps the fleet's order; where the pack
+	// would trim the selected column off the end it takes the last drawn
+	// slot below, as before (#16, #90, #252).
+	owed := m.owedKeys()
+	// The shipped-and-read follow only where a whole band of them fits
+	// in the rows that are left: naming them in the strip over
+	// twenty-eight blank rows answered nothing, and the wider the
+	// terminal the more it hid.
+	all := append([]string(nil), owed...)
+	if !m.archiveView {
+		seen := map[string]bool{}
+		for _, k := range owed {
+			seen[k] = true
+		}
+		for _, i := range order {
+			if k := m.sessions[i].Info.Key(); !seen[k] {
+				all = append(all, k)
+			}
+		}
+	}
+	for pos := 0; pos < len(all); pos += n {
+		band := all[pos:min(pos+n, len(all))]
+		tallest := 0
+		for _, key := range band {
+			tallest = max(tallest, m.boardColumnRows(key, cw))
+		}
+		// A band is measured against its own trails, not against the
+		// tallest band on the board: a band of short trails was named in
+		// the strip over twenty-eight blank rows, and the wider the
+		// terminal the more it hid. What is left has to hold either a
+		// band worth reading, or this band whole.
+		whole := pos < len(owed) // a band of owed columns may be cut short; the rest may not
+		avail := rem
+		if pos+len(band) >= len(all) && !m.stripHasClauses() {
+			// The last band empties the strip, and an empty strip's row
+			// and its line of air are the band's: a session was named
+			// there over six blank rows when its column was two rows too
+			// tall for the rest (#62).
+			avail = rem + 2
+		}
+		if (avail < boardBandMin && (tallest > avail || avail < boardBandFloor)) || (!whole && tallest > avail) {
+			break
+		}
+		bh := min(tallest, avail) // as tall as its tallest trail, never padded to the minimum
+		bands = append(bands, band)
+		heights = append(heights, bh)
+		rem -= bh + 1 // and the row of air under it
+	}
+	shown := 0
+	for _, band := range bands {
+		shown += len(band)
+	}
+	// The selected column is always drawn: the owed keys put it among the
+	// first shown, and the bands were packed over this very order.
+	keys = all[:min(shown, len(all))]
+	if len(keys) > 0 && m.selectedKey != "" {
+		present, inAll := false, false
+		for _, k := range keys {
+			if k == m.selectedKey {
+				present = true
+			}
+		}
+		for _, k := range all {
+			if k == m.selectedKey {
+				inAll = true
+			}
+		}
+		if !present && inAll {
+			// The selected column is always drawn (#16): the pack trimmed
+			// it off the end, so it takes the last drawn slot (#90).
+			keys = append(append([]string(nil), keys[:len(keys)-1]...), m.selectedKey)
+		}
+	}
+	// A band is as tall as its tallest trail, one band or three: the
+	// strip follows it, rather than thirty rows of bare rail.
+	return keys, heights
+}
+
+// stripHasClauses says whether the strip under the board has anything to
+// say besides the sessions without a column: the archive, a hide, an
+// overlap — the clauses that keep its row even when every session has a
+// column.
+func (m *Model) stripHasClauses() bool {
+	if m.archiveView {
+		return true
+	}
+	return m.archivedCount() > 0 || m.hiddenCount() > 0 || len(m.overlaps()) > 0
+}
+
+// boardPlace is where the selected column stands on the board: the
+// column's left edge and its band's top row, so a panel about that
+// session can sit beside it rather than over someone else's.
+func (m *Model) boardPlace(w int) (x, y int, ok bool) {
+	x, y, _, ok = m.boardBand(w)
+	return x, y, ok
+}
+
+// boardBand is boardPlace with the height of the selected column's band.
+func (m *Model) boardBand(w int) (x, y, bh int, ok bool) {
+	x, y, bh, _, ok = m.boardBandAt(w)
+	return x, y, bh, ok
+}
+
+// boardBandAt is boardBand with one more fact: whether the selected band is
+// the board's last, so a panel knows if the rows under it are free or the
+// next band's head.
+func (m *Model) boardBandAt(w int) (x, y, bh int, last, ok bool) {
+	n, cw := boardColumns(w, m.drawnCount(m.viewOrder()))
+	if n == 0 {
+		return 0, 0, 0, false, false
+	}
+	h := m.height - 5
+	if h < 1 {
+		h = 1
+	}
+	keys, heights := m.boardPack(n, cw, h-2)
+	y = 0
+	for i, key := range keys {
+		if i > 0 && i%n == 0 {
+			y += heights[i/n-1] + 1
+		}
+		if key == m.selectedKey {
+			band := keys[(i/n)*n : min((i/n+1)*n, len(keys))]
+			bw := bandWidth(w, len(band), cw)
+			return (i % n) * (bw + gutterWidth), y, heights[i/n], i/n == (len(keys)-1)/n, true
+		}
+	}
+	return 0, 0, 0, false, false
+}
+
+// bandWidth is a column's width in a band of k columns: the board's
+// column width, or wider when the band is short of columns — a lone
+// column under a full band was 38 wide beside 80 columns of nothing.
+func bandWidth(w, k, cw int) int {
+	if k <= 0 {
+		return cw
+	}
+	_, bw := boardColumns(w, k)
+	if k == 1 && bw > boardColMax && cw <= boardColMax {
+		bw = boardColMax // a lone column under a full band: wider, capped like any other
+	}
+	if k > 1 && bw > cw+boardBandSlack {
+		// A short band keeps the board a grid: the idlest columns were
+		// given twenty-two cells of rail while the needs-you column above
+		// them truncated.
+		bw = cw + boardBandSlack
+	}
+	if bw < cw {
+		return cw
+	}
+	return bw
+}
+
+// drawnCount is how many of the view's sessions earn a column: the ones
+// that owe you, or all of them when none does. The width is shared by
+// these, not by every session: three owed columns on a 220-column board
+// were 52 wide with 57 columns of air beside them.
+func (m *Model) drawnCount(order []int) int {
+	drawn := 0
+	for _, i := range order {
+		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+			drawn++
+		}
+	}
+	if drawn == 0 {
+		drawn = len(order)
+	}
+	return drawn
+}
+
+// boardBandMin is the least height a band of columns is worth: the header's
+// three rows and enough trail to read.
+const boardBandMin = 10
+
+// boardBandSlack is how much wider than the board's own column a short
+// band may draw: enough to use a little of the room its missing columns
+// leave, not enough to stop the board reading as a grid.
+const boardBandSlack = 4
+
+// boardBandFloor is the least height a band of short trails needs to be
+// worth drawing whole: its two header rows, the tag's row, and a leg.
+const boardBandFloor = 5
+
+// boardColumnRows is how many rows a column would take to show its whole
+// trail: the header and the document.
+func (m *Model) boardColumnRows(key string, w int) int {
+	tr, ok := m.trails[key]
+	if !ok {
+		return 4
+	}
+	r, ok := m.boardRows()[key]
+	if !ok {
+		return 4
+	}
+	s := m.sessions[r.sess]
+	doc := TrailLines(tr, TrailOpts{
+		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, Agents: m.agentsFor(key),
+		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
+		Dense: true, Looked: m.looked(key), NoLaneHeads: m.noLaneHeads,
+	})
+	return 3 + len(doc)
+}
+
+// boardRows numbers the board's sessions in the board's own order — the
+// number beside a column is the key that selects it, `1` being the leftmost
+// column and the strip carrying on from the last. The fleet list numbers its
+// rows in its grouped order; a person on the board sees only these.
+func (m *Model) boardRows() map[string]fleetRow {
+	rows := map[string]fleetRow{}
+	for pos, i := range m.viewOrder() {
+		num := 0
+		if m.archiveView {
+			// As drawn, hidden rows included: a digit is a key, and a
+			// hidden row wearing its fleet digit over a row numbered by
+			// position gave one digit two sessions.
+			if pos < 9 {
+				num = pos + 1
+			}
+		} else {
+			num = m.digits[m.sessions[i].Info.Key()]
+		}
+		rows[m.sessions[i].Info.Key()] = fleetRow{sess: i, num: num}
+	}
+	return rows
+}
+
+// assignDigits gives every live session its number on first sight and
+// keeps it for the session's life: the rows re-sort as what they owe
+// changes, the digits do not. A `3` from muscle memory then lands on the
+// session it landed on this morning, however the board has moved since.
+func (m *Model) assignDigits() {
+	if m.digits == nil {
+		m.digits = map[string]int{}
+	}
+	live := map[string]bool{}
+	for _, s := range m.sessions {
+		if s.Live {
+			live[s.Info.Key()] = true
+		}
+	}
+	for key := range m.digits {
+		if !live[key] {
+			delete(m.digits, key) // archived: its digit is free again
+		}
+	}
+	taken := map[int]bool{}
+	for _, d := range m.digits {
+		taken[d] = true
+	}
+	// New sessions take the lowest free digit, in the board's own order.
+	for _, i := range m.viewOrder() {
+		key := m.sessions[i].Info.Key()
+		if _, ok := m.digits[key]; ok {
+			continue
+		}
+		for d := 1; d <= 9; d++ {
+			if !taken[d] {
+				m.digits[key], taken[d] = d, true
+				break
+			}
+		}
+	}
+}
+
+// boardSelect is `1`–`9` on the board: the column (or strip entry) wearing
+// that number.
+func (m *Model) boardSelect(i int) bool {
+	order := m.viewOrder()
+	if m.archiveView {
+		if i < 0 || i >= len(order) {
+			return false
+		}
+		m.point(m.sessions[order[i]].Info.Key())
+		return true
+	}
+	for _, idx := range order {
+		if m.digits[m.sessions[idx].Info.Key()] == i+1 {
+			m.point(m.sessions[idx].Info.Key())
+			return true
+		}
+	}
+	return false
+}
+
+// overlaps is what two live sessions are doing to the same thing: a file
+// both touched in the last twenty minutes, a test both are failing. The
+// only thing in the room reading every transcript had two columns and let
+// the person diff them by eye.
+func (m *Model) overlaps() []string {
+	const recent = 20 * time.Minute
+	files := map[string][]string{}
+	tests := map[string][]string{}
+	for _, i := range m.viewOrder() {
+		s := m.sessions[i]
+		if !s.Live {
+			continue
+		}
+		name := sessionName(s.Info)
+		tr := m.trails[s.Info.Key()]
+		seenFile := map[string]bool{}
+		for _, l := range tr.Legs {
+			end := l.End
+			if l.Current || end.IsZero() {
+				end = m.now
+			}
+			if m.now.Sub(end) > recent {
+				continue
+			}
+			for _, f := range l.Files {
+				if !seenFile[f] {
+					seenFile[f] = true
+					files[f] = append(files[f], name)
+				}
+			}
+		}
+		if test := failingNow(tr); test != "" {
+			tests[test] = append(tests[test], name)
+		}
+	}
+	var out []string
+	for _, f := range sortedKeys(files) {
+		if names := files[f]; len(names) > 1 {
+			out = append(out, "⚠ "+strings.Join(names, " and ")+" both touched "+f+" in the last 20m")
+		}
+	}
+	for _, t := range sortedKeys(tests) {
+		if names := tests[t]; len(names) > 1 {
+			out = append(out, "⚠ "+strings.Join(names, " and ")+" are both failing "+t)
+		}
+	}
+	return out
+}
+
+// failingNow is the test the trail's newest red run failed, or "".
+func failingNow(tr journey.Trail) string {
+	if test, _, ok := circling(tr); ok {
+		return test // a loop is failing its test whatever the last run said
+	}
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		badge := legBadge(tr.Legs[i])
+		if badge == "" || badge == "?" {
+			continue
+		}
+		if !strings.Contains(badge, "✗") {
+			return ""
+		}
+		for _, w := range tr.Legs[i].Waypoints {
+			if w.Kind == journey.WaypointTestFail {
+				return w.Text
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// boardStrip is the board's last row: the sessions without a column, in the
+// board's order with their fleet numbers, then the way to the other view.
+func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) string {
+	shown := map[string]bool{}
+	for _, k := range keys {
+		shown[k] = true
+	}
+	var rest []string
+	for _, i := range m.viewOrder() {
+		s := m.sessions[i]
+		key := s.Info.Key()
+		if shown[key] {
+			continue
+		}
+		glyph := m.rowGlyph(s)
+		if m.archiveView && !s.Live {
+			glyph = fleet.Glyph(state.Idle)
+		}
+		who := sessionName(s.Info)
+		if m.archiveView && !s.Live {
+			who = archiveHeadline(s) // the archive's rows headline by what was asked; four names cannot tell forty apart (#86)
+		}
+		name := glyph + " " + who + " " + m.age(s.Info.LastEventAt)
+		if r, ok := rowOf[key]; ok && r.num > 0 {
+			name = fmt.Sprintf("%d %s", r.num, name)
+		}
+		rest = append(rest, name)
+	}
+	// The clauses that carry a key — the overlaps, the hidden count, the
+	// archive — are kept whole; the names of what owes nothing take the
+	// width that is left, and are the part that is cut.
+	var fixed []string
+	if !m.archiveView {
+		fixed = append(fixed, m.overlaps()...)
+		if n := m.hiddenCount(); n > 0 {
+			fixed = append(fixed, m.hiddenClause(n))
+		}
+		if n := m.archivedCount(); n > 0 {
+			fixed = append(fixed, fmt.Sprintf("%s archived%s", m.archiveDoorCount(n), m.archiveDoorKey()))
+		}
+	} else {
+		if c := m.liveDoorClause(); c != "" {
+			fixed = append(fixed, c)
+		}
+	}
+	tail := strings.Join(fixed, "   ")
+	if len(rest) > 0 {
+		names := fmt.Sprintf("+%d more · %s", len(rest), strings.Join(rest, " · "))
+		room := w - lipgloss.Width(tail) - 3
+		if lipgloss.Width(names) > room {
+			// The overlap sentence goes compact before a session loses
+			// its name on the screen: "+N more" is never shed.
+			for i, f := range fixed {
+				if strings.HasPrefix(f, "⚠") {
+					fixed[i] = compactOverlap(f)
+				}
+			}
+			tail = strings.Join(fixed, "   ")
+			room = w - lipgloss.Width(tail) - 3
+		}
+		if room >= 12 {
+			return dimStyle.Render(shedClauses(names, room)) + "   " + dimStyle.Render(tail)
+		}
+		return dimStyle.Render(clip(fmt.Sprintf("+%d more", len(rest))+"   "+tail, w))
+	}
+	return dimStyle.Render(clip(tail, w))
+}
+
+// wrappedLabel is the sentence a leg row spells with its continuation rows
+// — `▲ design Open port 22 to` then `│  ├ the office CIDR?` — joined, so
+// the card's compare sees the question the trail wrapped, whole; the
+// options row, with its bracket, is not part of it (#116).
+func wrappedLabel(rows []string, k, h int) string {
+	head := strings.TrimRight(strings.Replace(ansi.Strip(rows[k]), "▸", " ", 1), " ")
+	if i := strings.LastIndex(head, "  "); i > 0 {
+		head = head[:i] // the span on the right — "waiting 4m" — is not the label's
+	} else if f := strings.Fields(head); len(f) > 2 && f[len(f)-1] != "" && f[len(f)-1][0] >= '0' && f[len(f)-1][0] <= '9' {
+		// A full row leaves the span one space from the label: the
+		// clock, and the word before it — "waiting 4m", "for 6m".
+		f = f[:len(f)-1]
+		if w := f[len(f)-1]; w == "waiting" || w == "for" || w == "silent" {
+			f = f[:len(f)-1]
+		}
+		head = strings.Join(f, " ")
+	}
+	text := oneSpace(head)
+	for j := k + 1; j < len(rows) && j < h; j++ {
+		plain := strings.TrimSpace(ansi.Strip(rows[j]))
+		if !(strings.HasPrefix(plain, "│  ├ ") || strings.HasPrefix(plain, "│  └ ")) {
+			break
+		}
+		cont := plain[len("│  ├ "):]
+		if i := strings.Index(cont, "["); i >= 0 {
+			// The options are not the label's, but where they begin
+			// part-way along a continuation row the words before them
+			// still are: dropping the whole row lost the question's
+			// tail, and the card above it then drew a copy of the very
+			// sentence this row says (#107, #116).
+			if head := strings.TrimSpace(cont[:i]); head != "" {
+				text += " " + oneSpace(head)
+			}
+			break
+		}
+		text += " " + oneSpace(cont)
+	}
+	return oneSpace(text)
+}
+
+// yieldNewLegs gives the tag row's cells back to the ladder where the
+// digest is only `↳ N new legs` and the column's own divider draws that
+// count five rows down — #85's reason for the look clause, applied to the
+// count: the digest yields to the highest rung that fits, so the model is
+// on a row of the frame (#117), and to the pane alone where no rung stands
+// above it (#129). Not where #112 already hoisted the rungs.
+func (m *Model) yieldNewLegs(rows []string, key string, w, h int) {
+	if len(rows) < 3 {
+		return
+	}
+	plain := strings.TrimRight(ansi.Strip(rows[2]), " ")
+	i := strings.LastIndex(plain, "  ")
+	if i < 0 {
+		return
+	}
+	digest, current := strings.TrimSpace(plain[:i]), strings.TrimSpace(plain[i:])
+	divider := ""
+	for k := 3; k < len(rows) && k < h; k++ {
+		if r := ansi.Strip(rows[k]); strings.Contains(r, "you were here") {
+			divider = oneSpace(r)
+			break
+		}
+	}
+	if divider == "" {
+		return
+	}
+	// The trailing look clause is the divider's own words (#85): where the
+	// divider carries that same age the clause is taken off before the
+	// match (#136). The match is strict — the count and nothing else — so
+	// a digest whose count comes last, "↳ 3 sent since, none back · 1 new
+	// leg", is not yielded: the divider draws neither of its clauses (#135).
+	if lk := lookRe.FindStringSubmatch(digest); lk != nil && strings.Contains(divider, "you were here · "+lk[1]+" ago") {
+		digest = strings.TrimSuffix(digest, lk[0])
+	}
+	if !newLegsOnly.MatchString(digest) {
+		// The count is not alone. It is still the divider's own words,
+		// so the clause goes and the row keeps the clauses the divider
+		// does not draw — the shape #142 gave the look (#129, #136).
+		parts := strings.Split(digest, " · ")
+		for i, c := range parts {
+			if !newLegsClause.MatchString(c) {
+				continue
+			}
+			rest := append(append([]string{}, parts[:i]...), parts[i+1:]...)
+			if strings.HasPrefix(c, "↳ ") && i < len(rest) && !strings.HasPrefix(rest[i], "↳ ") {
+				rest[i] = "↳ " + rest[i]
+			}
+			parts = rest
+			break
+		}
+		if kept := strings.Join(parts, " · "); kept != "" {
+			rows[2] = pad(dimStyle.Render(kept), w-lipgloss.Width(current)) + dimStyle.Render(current)
+			return
+		}
+	}
+	s, ok := m.sessionByKey(key)
+	if !ok {
+		return
+	}
+	if hoisted := strings.TrimSpace(ansi.Strip(rows[1])); hoisted != "" && hoisted == m.toolTag(s) {
+		// The rungs are already on the row above (#112): the count still
+		// says what the divider draws, so the tag row keeps the pane.
+		rows[2] = pad("", w-lipgloss.Width(current)) + dimStyle.Render(current)
+		return
+	}
+	for _, rung := range m.tagLadder(s) {
+		if rung == current {
+			// No rung stands above: the count still says what the
+			// divider draws, so the row keeps the pane alone — where a
+			// column lives, and nowhere else (#85, #129).
+			rows[2] = pad("", w-lipgloss.Width(current)) + dimStyle.Render(current)
+			return
+		}
+		if lipgloss.Width(rung) <= w {
+			rows[2] = pad("", w-lipgloss.Width(rung)) + dimStyle.Render(rung)
+			return
+		}
+	}
+}
+
+// newLegsOnly is a digest that is the count and nothing else (#129, #135);
+// lookRe is the look clause the digest may end on (#136).
+var (
+	newLegsOnly = regexp.MustCompile(`^↳ [0-9]+ new legs?$`)
+	// newLegsClause is that same count as one clause of a longer row (#142).
+	newLegsClause = regexp.MustCompile(`^(↳ )?[0-9]+ new legs?$`)
+	lookRe        = regexp.MustCompile(` · looked ([0-9]+[a-z0-9]*) ago$`)
+)
+
+// hoistTag moves the rungs the tag row could not afford — the tool word and
+// its model — onto the second row the card gave up (#107), right-aligned,
+// the pane staying on the tag row so where a column lives never moves. A
+// blank row over a tag that shed the model, on a board whose question is
+// which model, answered nothing (#112).
+func (m *Model) hoistTag(rows []string, key string, w int) {
+	s, ok := m.sessionByKey(key)
+	if !ok || len(rows) < 3 || strings.TrimSpace(ansi.Strip(rows[1])) != "" {
+		return
+	}
+	tool, pane := m.toolTag(s), m.boardTag(s)
+	if tool == "" {
+		return
+	}
+	plain := strings.TrimRight(ansi.Strip(rows[2]), " ")
+	current := ""
+	if i := strings.LastIndex(plain, "  "); i >= 0 {
+		current = strings.TrimSpace(plain[i:])
+	} else {
+		current = strings.TrimSpace(plain)
+	}
+	if strings.Contains(current, tool) || lipgloss.Width(tool) > w {
+		return // the tag row already says the whole word and model
+	}
+	rows[1] = pad("", w-lipgloss.Width(tool)) + dimStyle.Render(tool)
+	if pane != "" {
+		left := strings.TrimRight(strings.TrimSuffix(plain, current), " ")
+		if lipgloss.Width(left)+2+lipgloss.Width(pane) <= w {
+			rows[2] = pad(left, w-lipgloss.Width(pane)) + dimStyle.Render(pane)
+		}
+	}
+}
+
+// boardColumn is one session's column: its two fleet rows as the header, a
+// line of air, and its trail pinned to the present. A muted session's trail
+// is drawn dim, glyphs and all: the shapes still carry the classes (SPEC §4),
+// and the eye goes to the columns with something in them to read.
+func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
+	s := m.sessions[r.sess]
+	rows := m.columnHeader(key, r, w)
+	if h <= 3 {
+		return fit(rows, h)
+	}
+	tr, loaded := m.trails[key]
+	if !loaded {
+		// The feed has not been polled yet. This is not the designed empty
+		// state — that one says a session has never done anything, and a
+		// column with four hundred legs behind it must not say so for the
+		// second before its first poll lands.
+		return append(rows, dimStyle.Render(clip(glyphGhost+" reading its transcript…", w)))
+	}
+	working := s.Snap.State == state.Working && !m.archiveView
+	headClass := ""
+	if s.HasClass {
+		headClass = s.Class.String()
+	}
+	opts := TrailOpts{
+		HeadClass:    headClass,
+		HeadDead:     s.Snap.APIError,
+		HeadActivity: s.Snap.Activity,
+		Todos:        planItems(tr.Tasks),
+		Labels:       m.boardLabels[key],
+		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
+		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
+		Head:         m.headFor(s),
+		HeadState:    s.Snap.State,
+		HeadSince:    headSince(s),
+		HeadAllowed:  s.Snap.Allowed,
+		Agents:       m.agentsFor(key),
+		SessionKey:   key,
+		Now:          m.now,
+		Width:        w,
+		Height:       h - 3,
+		Level:        levelTrail,
+		Cursor:       -1,
+		Pulse:        m.pulse && working,
+		Pinned:       true,
+		Dense:        true, // the board always packs: a rail row between every leg halved what fit
+		NoLaneHeads:  m.noLaneHeads,
+		Looked:       m.looked(key),
+	}
+	frame := RenderTrail(tr, opts)
+	lines := strings.Split(frame, "\n")
+	// A column pinned to the present with a day above it says so on its
+	// first row — the rail row that would otherwise be a bare stroke — so a
+	// column that begins with ◉ and one that begins ten hours in are not
+	// one character apart.
+	if hidden := hiddenAbove(tr, opts); hidden > 0 && len(lines) > 0 {
+		began := ""
+		if len(tr.Prompts) > 0 {
+			began = " · began " + relAge(m.now, tr.Prompts[0].At) + " ago"
+		}
+		full := fmt.Sprintf("↑ %s above%s%s", plural(hidden, "leg"), began, foldTotals(tr, hidden, false))
+		if len([]rune(full)) > w {
+			full = fmt.Sprintf("↑ %s · %s%s", plural(hidden, "leg"), strings.TrimPrefix(began, " · began "), foldTotals(tr, hidden, true))
+			full = strings.Replace(full, " ago", "", 1)
+		}
+		if len(lines) > 1 && isDetailRow(lines[1]) {
+			// The fold took the row the parent stood on: the parent
+			// takes the child's, so the column does not open on a child
+			// with no name.
+			lines[1] = lines[0]
+		}
+		lines[0] = dimStyle.Render(shedClauses(full, w))
+	}
+	if m.boardMuted(s) {
+		for i, line := range lines {
+			lines[i] = dimStyle.Render(ansi.Strip(line))
+		}
+	}
+	return append(rows, lines...)
+}
+
+// columnHeader is a session's three-row card: the fleet row, the verdict
+// (or the sentence a needs-you or stuck session owes), and what is new
+// since the last look or where it lives. The board's columns wear it, and
+// so does the session view, so the view reads as the column expanded.
+func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
+	s := m.sessions[r.sess]
+	// The tag is decided before the row that stands over it: a hidden live
+	// session's row names where it lives (#53), and on the board the tag
+	// row below draws that same pane, so the column said its address
+	// twice, two rows apart (#64 — a line answers a question once). The
+	// tag row is the invariant here ("always", below); the row yields the
+	// address to it and keeps the branch, which the tag cannot say.
+	tag := m.columnTag(key, s, w)
+	entry := m.entryLinesUnder(r, w, tag)
+	second := entry[1]
+	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
+		// A working column shows its HEAD row anyway — pinned, it is always
+		// the last row of the trail — so the header says what HEAD cannot:
+		// how the suite stands, what shipped, what is still out.
+		if parts := verdictPartsWith(tr, m.now, true, m.agentsFor(key)); len(parts) > 0 {
+			second = "    " + dimStyle.Render(fitWithBack(parts, w-4))
+		}
+	}
+	// The third row is the tag's row, always: the digest or the trace
+	// takes the left of it and the tmux session the right, so where a
+	// column lives never moves and is never evicted by what is new. The
+	// tool and its model stand with the tag where the digest leaves room
+	// (#50), and go first when it does not.
+	// The tag takes the longest rung that costs the digest no clause;
+	// where none does, the last rung (#59): a 120 column dropped
+	// "· 0s ago" to draw a pane the header and footer already named,
+	// while the 152 column beside it kept the clock.
+	room := w
+	if tag != "" {
+		room = w - lipgloss.Width(tag) - 2
+	}
+	third := ""
+	if room >= 12 {
+		third = m.boardDelta(key, s, room)
+	}
+	if tag != "" {
+		third = pad(third, w-lipgloss.Width(tag)) + dimStyle.Render(tag)
+	}
+	return []string{entry[0], second, third}
+}
+
+// columnTag is the tag the column's third row draws — the pane, or the
+// tool and its model where the digest leaves room (#50, #59, #90).
+func (m *Model) columnTag(key string, s fleet.Session, w int) string {
+	ladder := m.tagLadder(s)
+	tag := tagBesideDigest(ladder, w, func(room int) string { return m.boardDelta(key, s, room) })
+	if tag != "" && !strings.Contains(tag, mirrorMark) && m.liveCount() == 1 && m.boardDelta(key, s, w-lipgloss.Width(tag)-2) != m.boardDelta(key, s, w) {
+		// A fleet of one: the header names the tool on every frame, so a
+		// bare tool word that costs the trace its clock says a thing the
+		// frame already says and loses one it does not (#90). The pane
+		// is nowhere else and stays (#85).
+		return ""
+	}
+	if len(ladder) > 0 && tag != "" && tag == ladder[len(ladder)-1] && tag == m.boardTag(s) && m.headerDrawsTag(tag) {
+		// The last rung is a bare pane, and #85's reason for it — "the
+		// pane is nowhere else on the board" — is false where the
+		// identity header draws this very pane. #59's last-rung fallback
+		// took it anyway: at 120 the selected column spent " · 0s ago",
+		// the send's clock and on no other row of the column, to draw
+		// "⌁ harness:1.0" a second time, one cell short. #90's device,
+		// from the tool word to the bare pane: the tag yields to the
+		// trace's clock where the frame says the tag elsewhere (#167,
+		// #189, #196, #197 gate a row against the header).
+		// The trace is drawn dim, so the words are read back through the
+		// style: with colour on, dimStyle wraps the clause in escapes and
+		// the three tests below all miss, which put the clock back on the
+		// frame the fold was measured to take it off (#215: the frame is
+		// the one a person sees, colour and all).
+		full := ansi.Strip(m.boardDelta(key, s, w))
+		if beside := ansi.Strip(m.boardDelta(key, s, w-lipgloss.Width(tag)-2)); beside != full &&
+			strings.HasPrefix(full, "↪ ") && strings.HasSuffix(full, " ago") && strings.HasPrefix(full, beside) {
+			return ""
+		}
+	}
+	return tag
+}
+
+// boardVerdict is how a journey came out, in words, from its own tail: what
+// shipped, whether the suite is green, what is still out. It is the answer to
+// "did it work" with zero keys and zero inference, which for eleven of twelve
+// sessions on an afternoon board is the only thing anyone needed.
+func boardVerdict(s fleet.Session, tr journey.Trail, now time.Time) string {
+	return boardVerdictWith(s, tr, now, nil)
+}
+
+// boardVerdictWith is boardVerdict with what the open lanes' own files say,
+// so a parked HEAD's clause counts the agents' silence, not the lead's.
+func boardVerdictWith(s fleet.Session, tr journey.Trail, now time.Time, agents map[string]agentLive) string {
+	parts := verdictPartsWith(tr, now, s.Snap.State != state.Idle, agents)
+	if len(parts) == 0 {
+		// Nothing countable: the newest completed leg, so a quiet column
+		// still says what it last did.
+		for i := len(tr.Legs) - 1; i >= 0; i-- {
+			if l := tr.Legs[i]; !l.Current {
+				label := l.Label
+				if label == "" {
+					label = l.Class.String()
+				}
+				parts = append(parts, l.Class.String()+" "+label)
+				break
+			}
+		}
+	}
+	if promptWaits(tr) >= waitNotable {
+		// The day's wait on you, the open one included: the number that
+		// says which session your own turns are the bottleneck of. Only
+		// when there is a day to add up — an idle session's open wait
+		// alone is the age two rows above, and saying it twice taught
+		// the eye to skip the clause. Last, so it is the first clause a
+		// narrow column sheds.
+		parts = append(parts, "on you "+relDuration(youWaited(tr, now, s))+" today")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// circling reports whether a trail is going round the same failure: its
+// newest run is red and the test it fails has failed in three legs or
+// more. Stuck covers the session that went quiet; this is the one that
+// fails loudly and keeps going, which the state machine calls healthy.
+func circling(tr journey.Trail) (test string, runs int, ok bool) {
+	// The last three runs with a verdict: a red one among them whose test
+	// has failed in three legs is a loop, whatever a narrower green run
+	// beside it says — "pytest tests/auth 312✓" between two red full
+	// suites was reading as the loop ending.
+	seen, greenest, greenArgs := 0, 0, 0
+	for i := len(tr.Legs) - 1; i >= 0 && seen < 3; i-- {
+		l := tr.Legs[i]
+		badge := legBadge(l)
+		if badge == "" || badge == "?" {
+			continue
+		}
+		seen++
+		if !strings.Contains(badge, "✗") {
+			// A green run as big as the red one ends the loop; a smaller
+			// one is a subset and says nothing about the failing test.
+			if n := badgeCount(badge); n > greenest {
+				greenest, greenArgs = n, len(strings.Fields(l.Label))
+			}
+			continue
+		}
+		if badgeCount(badge) <= greenest && greenArgs <= len(strings.Fields(l.Label)) {
+			// The green run was as big and no narrower: "pytest
+			// tests/auth 312✓" over a red "pytest" is a subset whatever
+			// its count says, and the loop is still on.
+			return "", 0, false
+		}
+		for _, w := range l.Waypoints {
+			if w.Kind == journey.WaypointTestFail && w.Runs > runs {
+				test, runs = w.Text, w.Runs
+			}
+		}
+		if runs >= 3 {
+			return test, runs, true
+		}
+	}
+	return "", 0, false
+}
+
+// circlingSince is when a loop began: the first leg the failing test
+// failed in. A loop's clock is its age, not its last write's.
+func circlingSince(tr journey.Trail) time.Time {
+	test, _, ok := circling(tr)
+	if !ok {
+		return time.Time{}
+	}
+	for _, l := range tr.Legs {
+		for _, w := range l.Waypoints {
+			if w.Kind == journey.WaypointTestFail && w.Text == test {
+				return l.Start
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// badgeCount is how many tests a badge counts: "310✓ 2✗" is 312.
+func badgeCount(badge string) int {
+	n := 0
+	for _, f := range strings.Fields(badge) {
+		digits := strings.TrimRight(f, "✓✗")
+		if v, err := strconv.Atoi(digits); err == nil {
+			n += v
+		}
+	}
+	return n
+}
+
+// unfinished reports whether the session's plan has steps left.
+func unfinished(tr journey.Trail) bool {
+	for _, t := range tr.Tasks {
+		if t.Status == "pending" || t.Status == "in_progress" {
+			return true
+		}
+	}
+	return false
+}
+
+// redNow reports whether the trail's newest verdict is red.
+func redNow(tr journey.Trail) bool {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		badge := legBadge(tr.Legs[i])
+		if badge == "" || badge == "?" {
+			continue
+		}
+		return strings.Contains(badge, "✗")
+	}
+	return false
+}
+
+// obligation ranks a live session by what it owes you, for the board's
+// order: a question, a hang, a loop, work in flight, an idle session that
+// stopped red or with steps left, one you have not read, and the rest.
+// The header's alarms sort first; among the calm, what stopped short of
+// done comes before what shipped clean — "all calm" should mean nothing
+// owes you, not merely nothing is amber.
+func (m *Model) obligation(s fleet.Session) int {
+	tr := m.trails[s.Info.Key()]
+	switch s.Snap.State {
+	case state.NeedsYou:
+		if s.Snap.APIError {
+			// Dead on the API: nothing you type clears it, so it sorts
+			// under the question and the loop, which a keypress ends.
+			return rankAPIError
+		}
+		return rankNeedsYou
+	case state.Stuck:
+		return rankStuck
+	}
+	if _, _, ok := circling(tr); ok {
+		return rankCircling
+	}
+	if s.Snap.State == state.Working {
+		if headWaits(tr) > 0 && parkedFor(tr, m.now) >= parkedNotable {
+			return rankParked // a lead sitting on its agents past the quiet mark
+		}
+		return rankWorking
+	}
+	if !s.Info.LastEventAt.IsZero() && m.now.Sub(s.Info.LastEventAt) > boardFresh {
+		return rankRest // a day old owes nothing today, red or not
+	}
+	if redNow(tr) || unfinished(tr) {
+		return rankOwed
+	}
+	if m.unread(s) {
+		return rankUnread
+	}
+	return rankRest
+}
+
+// The obligation ranks, in board order: what a keypress ends first, then
+// what only time or a person elsewhere can clear, then work in flight, then
+// what stopped short of done.
+const (
+	rankNeedsYou = iota
+	rankStuck
+	rankCircling
+	rankAPIError
+	rankParked
+	rankWorking
+	rankOwed
+	rankUnread
+	rankRest
+)
+
+// owedRank is the last obligation rank that earns a column of its own;
+// past it a session is named in the strip.
+const owedRank = rankUnread
+
+// parkedNotable is how long a lead may sit on its agents before that is
+// what it owes you: "◈3 out 20m · quiet 15m" above a session that is fine.
+const parkedNotable = 10 * time.Minute
+
+// parkedFor is how long HEAD has been quiet on its open lanes.
+func parkedFor(tr journey.Trail, now time.Time) time.Duration {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		if tr.Legs[i].Current {
+			return now.Sub(tr.Legs[i].End)
+		}
+	}
+	return 0
+}
+
+// repeatRuns is how many legs the leg's most-repeated failing test has now
+// failed in — 0 when nothing in it has failed before.
+func repeatRuns(l journey.Leg) int {
+	runs := 0
+	for _, w := range l.Waypoints {
+		if w.Kind == journey.WaypointTestFail && w.Runs > runs {
+			runs = w.Runs
+		}
+	}
+	return runs
+}
+
+// verdictParts is the verdict without its fallback: only what the trail
+// can count. A working column's header uses this — its HEAD row already
+// says what it is doing, and "test pytest" over it said less.
+func verdictParts(tr journey.Trail, now time.Time, live bool) []string {
+	return verdictPartsWith(tr, now, live, nil)
+}
+
+// verdictPartsWith is verdictParts with the lanes' own files (#49).
+func verdictPartsWith(tr journey.Trail, now time.Time, live bool, agents map[string]agentLive) []string {
+	var parts []string
+
+	// Agents still out, oldest first: the number that changes what you do.
+	out, oldest := 0, time.Time{}
+	for _, b := range tr.Branches {
+		if !b.Done {
+			out++
+			if oldest.IsZero() || b.Start.Before(oldest) {
+				oldest = b.Start
+			}
+		}
+	}
+	switch {
+	case out > 0 && !live:
+		// The turn is over: what never came back is lost, not out.
+		parts = append(parts, fmt.Sprintf("◈%d lost", out))
+	case out > 0:
+		// The same words HEAD uses, parked or not: "◈3 out 20m · quiet
+		// 15m" is the header's to say as much as the trail's.
+		parts = append(parts, strings.TrimPrefix(headTail(tr, now, true, agents), "for "))
+		if !strings.HasPrefix(parts[len(parts)-1], "◈") {
+			parts[len(parts)-1] = fmt.Sprintf("◈%d out %s", out, relAge(now, oldest))
+		}
+		// And the lanes back, beside the ones out, before the verdict:
+		// "◈3 out 20m · 2 silent 18m · 1 back" — the finding in hand was
+		// invisible on the card a delegator reads first (#65).
+		back, empty := 0, 0
+		for _, b := range tr.Branches {
+			if b.Done {
+				back++
+				if strings.TrimSpace(b.Report) == "" {
+					empty++
+				}
+			}
+		}
+		if back > 0 {
+			line := fmt.Sprintf("%d back", back)
+			if empty > 0 {
+				line += fmt.Sprintf(" · %d empty", empty)
+			}
+			parts = append(parts, line)
+		}
+	}
+
+	// The newest completed leg: shipped, or what it was.
+	var last *journey.Leg
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		if !tr.Legs[i].Current {
+			last = &tr.Legs[i]
+			break
+		}
+	}
+	shipped := ""
+	if last != nil && last.Class == journey.Ship {
+		shipped = "✓ shipped " + relAge(now, last.End) + " ago"
+	}
+
+	// The newest test verdict, and what has happened to it since: edits it
+	// has not been rerun over, a rerun in progress, or — the one to catch —
+	// a commit made on top of a red run.
+	verdict := ""
+	// A loop leads with its red: the newest run may be a narrower green
+	// that did not end it, and a circling row over "✓ green" gave
+	// opposite advice about interrupting.
+	start, greenSince := len(tr.Legs)-1, ""
+	if _, _, ok := circling(tr); ok {
+		newest := -1
+		for i := len(tr.Legs) - 1; i >= 0; i-- {
+			badge := legBadge(tr.Legs[i])
+			if badge == "" || badge == "?" {
+				continue
+			}
+			if strings.Contains(badge, "✗") {
+				if newest >= 0 {
+					greenSince = strings.TrimSpace(tr.Legs[newest].Label) + " " + legBadge(tr.Legs[newest]) + " since"
+				}
+				start = i
+				break
+			}
+			if newest < 0 {
+				newest = i
+			}
+		}
+	}
+	for i := start; i >= 0; i-- {
+		l := tr.Legs[i]
+		badge := legBadge(l)
+		if badge == "" || badge == "?" {
+			continue // no verdict is not a verdict
+		}
+		red := strings.Contains(badge, "✗")
+		word := "✓ green"
+		if red {
+			word = "✗ red"
+		}
+		verdict = word + " " + badge
+		edited, shippedSince, rerunning := false, false, time.Time{}
+		end := len(tr.Legs)
+		if greenSince != "" {
+			// The loop's red leads; what happened after the narrower
+			// green run is that run's story, not the red's.
+			for j := i + 1; j < len(tr.Legs); j++ {
+				if b := legBadge(tr.Legs[j]); b != "" && b != "?" && !strings.Contains(b, "✗") {
+					end = j
+					break
+				}
+			}
+		}
+		for j := i + 1; j < end; j++ {
+			switch c := tr.Legs[j]; {
+			case c.Class == journey.Fix || c.Class == journey.Build:
+				edited = true
+			case c.Class == journey.Ship:
+				shippedSince = true
+			case c.Class == journey.Test && c.Current:
+				rerunning = c.Start
+			}
+		}
+		// The caveat is a clause of its own, so a narrow row sheds it whole
+		// rather than cutting "edited sin…".
+		suffix := ""
+		switch {
+		case red && shippedSince:
+			suffix = "shipped on red"
+			shipped = "" // the same fact, and this is the way to say it
+		case !rerunning.IsZero():
+			suffix = "rerunning for " + relAge(now, rerunning)
+		case edited:
+			suffix = "edited since"
+		}
+		if shipped != "" {
+			parts = append(parts, shipped)
+			shipped = ""
+		}
+		parts = append(parts, verdict)
+		if runs := repeatRuns(l); red && runs >= 2 {
+			// The same test red again: the loop is the column's news,
+			// and a board column has no room for the test's name.
+			// "· 3rd failure" — ten runes shorter than "same test 3rd
+			// failure", which is what a 35-column board column shed. It
+			// comes before the caveat: the count is what makes it a loop.
+			parts = append(parts, ordinal(runs)+" failure")
+		}
+		if suffix != "" {
+			parts = append(parts, suffix)
+		}
+		if greenSince != "" {
+			parts = append(parts, greenSince) // the subset that ran green, last to stay
+		}
+		break
+	}
+	if shipped != "" {
+		parts = append(parts, shipped) // no run to stand beside: the ship alone
+	}
+	// Agents all back: how many, and how many said nothing — the return
+	// that never reached a fleet row.
+	back, empty := 0, 0
+	for _, b := range tr.Branches {
+		if b.Done {
+			back++
+			if strings.TrimSpace(b.Report) == "" {
+				empty++
+			}
+		}
+	}
+	if back > 0 && out == 0 {
+		line := fmt.Sprintf("◈%d back", back)
+		if empty > 0 {
+			line += fmt.Sprintf(" · %d empty", empty)
+		}
+		parts = append(parts, line)
+	}
+
+	return parts
+}
+
+// boardSecondLine is the fleet's second row for the session with, where the
+// fleet's grouping would have said it, the tmux session it lives in on the
+// right: the one fact the list carried that the column otherwise loses.
+func (m *Model) boardTag(s fleet.Session) string {
+	if pane, ok := m.panes[s.Info.Key()]; ok && pane.Target != "" {
+		group := tmuxSessionName(pane.Target)
+		if m.sharesTmux(s) {
+			// Two live sessions in one tmux session: the name alone is
+			// the same string on both, and the pane is what tells them
+			// apart — "⌁ harness:1.0", the address enter spends.
+			group = pane.Target
+		}
+		if group == "" {
+			return ""
+		}
+		return mirrorMark + " " + group // the pane mark, so "work" does not read as a state word
+	}
+	if s.Live && !m.archiveView {
+		// No pane at all: said, not left as a blank where the tag goes.
+		return "no pane"
+	}
+	return ""
+}
+
+// tookReply says whether a session's transcript shows a prompt at or after
+// the moment a line was sent to it: the reply landed, and the trail says
+// it better than the trace would.
+func (m *Model) tookReply(key string, sent sentReply) bool {
+	tr, ok := m.trails[key]
+	if !ok {
+		return false
+	}
+	for _, p := range tr.Prompts {
+		if !p.At.Before(sent.at) {
+			return true
+		}
+	}
+	return false
+}
+
+// boardDelta is the header's third row: how much a column has grown since the
+// person last opened it, when both halves of that are known. It is what makes
+// the brightness a quantity — "bright" says there is something unread, this
+// says how much and how far back. A column never opened has no baseline and
+// says nothing (the whole trail is new, and the brightness already says so);
+// a column with nothing new keeps the row as air.
+func (m *Model) boardDelta(key string, s fleet.Session, w int) string {
+	if m.archiveView {
+		return ""
+	}
+	if sent, ok := m.sent[key]; ok && !m.tookReply(key, sent) {
+		// A line compass typed and the session has not yet answered: the
+		// row says so until the transcript shows the prompt landed — and
+		// says which key it pressed: a menu's digit is not a typed line.
+		verb := "↪ sent "
+		if sent.answer > 0 {
+			verb = fmt.Sprintf("↪ answered %d · ", sent.answer)
+		}
+		// The quote is the proof of what went and the clock says whether
+		// it landed. Both when they fit. Narrow, a typed line keeps its
+		// bytes over the clock (three dead rows reading "↪ sent · 0s ago"
+		// could not tell /login from the resume turn) and an answer keeps
+		// its digit and the clock; the quote is never cut inside.
+		age := " · " + relAge(m.now, sent.at) + " ago"
+		quote := `"` + sent.text + `"`
+		trace := ""
+		switch {
+		case len([]rune(verb+quote+age)) <= w:
+			trace = verb + quote + age
+		case sent.answer == 0 && fitQuoteMin(verb+quote, w-len([]rune(age)), 8) != "":
+			// The clock is the other half of the fact: a line sent and
+			// not taken is read by how long it has stood, and the row
+			// beside it draws every other clock the column has (#90).
+			// #33 kept the bytes over the clock against a bare "↪ sent ·
+			// 0s ago"; the quote's tail is not the bytes — it yields for
+			// the clock while eight cells of it survive, the cut
+			// fitQuoteMin already calls readable, and below that the
+			// bytes stay whole as #33 has it.
+			trace = fitQuoteMin(verb+quote, w-len([]rune(age)), 8) + age
+		case sent.answer == 0 && len([]rune(verb+quote)) <= w:
+			trace = verb + quote
+		case sent.answer == 0 && fitQuoteMin(verb+quote, w, 3) != "":
+			trace = fitQuoteMin(verb+quote, w, 3) // a stub of the bytes beats no bytes
+		default:
+			head := strings.TrimSuffix(strings.TrimSuffix(verb, " · "), " ")
+			// The clock goes whole or not at all: "0s a…" is not a time,
+			// and every other clock in the column is bare ("4m", "for 12m") (#89).
+			if bare := " · " + relAge(m.now, sent.at); len([]rune(head+age)) > w && len([]rune(head+bare)) <= w {
+				age = bare
+			}
+			trace = clip(head+age, w)
+		}
+		// What is new rides after it when the row has room: the trace was
+		// evicting the digest for as long as it stood.
+		if digest := ansi.Strip(m.boardDigest(key, s, w)); digest != "" {
+			for _, clause := range strings.Split(digest, " · ") {
+				if len([]rune(trace+" · "+clause)) > w {
+					break // the digest's clauses ride whole, as many as fit
+				}
+				trace += " · " + clause
+			}
+		}
+		return dimStyle.Render(trace)
+	}
+	return m.boardDigest(key, s, w)
+}
+
+// boardDigest is the digest half of the third row: what came after the
+// look, when both halves of that are known.
+func (m *Model) boardDigest(key string, s fleet.Session, w int) string {
+	seen, ok := m.seen[key]
+	if at, had := m.lastLook[key]; had && key == m.selectedKey {
+		seen, ok = at, true // the look before this one, while the session is open
+	}
+	if !ok {
+		// No baseline: the brightness already says it is unread, and "↳ 4
+		// legs · never opened" on every column of a fresh launch was a
+		// constant wearing a row.
+		return ""
+	}
+	if !seen.Before(s.Info.LastEventAt) {
+		return ""
+	}
+	legs, ships, red, same := sinceLooked(m.trails[key], seen)
+	if legs == 0 {
+		return ""
+	}
+	// "↳ 38 legs · 1 ship · 6 red, all test_x · looked 4h ago": the
+	// sentence a person back from lunch assembles by hand. The lanes
+	// come first when there are any: a delegator reads the digest for
+	// the agent that came back, and a narrow column shed that clause.
+	var parts []string
+	laneAt, laneLong := -1, "" // the lane clause's longer form, tried first (#60, #67)
+	if out, back := lanesSince(m.trails[key], seen); out+back > 0 {
+		switch {
+		case out > 0 && back == 0:
+			// "sent since": the digest counts the lanes dispatched after
+			// the look, and the card's "1 back" a row above counts them
+			// all — one word for two scopes on rows that touch (#66).
+			lanes := fmt.Sprintf("↳ %d sent since, none back", out)
+			if n, d, _, _ := lanesLive(m.agentsFor(key), openLanes(m.trails[key]), m.now); n > 0 && !strings.Contains(headTail(m.trails[key], m.now, true, m.agentsFor(key)), "silent") {
+				// The row above already counts the lanes out: the digest
+				// carries the one fact it does not, whole (#52) — and
+				// since #49 the row above says the silence itself, so the
+				// digest keeps "none back", the answer the row above has
+				// no room for (#65).
+				lanes = fmt.Sprintf("↳ %d silent %s", n, state.ShortDuration(d))
+			}
+			parts = append(parts, lanes)
+		case out > 0:
+			parts = append(parts, fmt.Sprintf("↳ %d sent since · %d back", out, back))
+		default:
+			// "back" alone means a finding beneath (the help's own
+			// glossary): a lane that came back with nothing is "back,
+			// empty", the trail's word for it (#66).
+			// And "back since" where it costs the digest no clause: the
+			// card's "◈3 back" a row above counts every lane, the digest
+			// the ones since the look, and one word for two scopes read
+			// as a contradiction (#66, #67).
+			laneAt = len(parts)
+			switch empty := emptyLanesSince(m.trails[key], seen); {
+			case empty == back:
+				parts = append(parts, fmt.Sprintf("↳ %d back, empty", back))
+				laneLong = fmt.Sprintf("↳ %d back since, empty", back)
+			case empty > 0:
+				parts = append(parts, fmt.Sprintf("↳ %d back · %d empty", back, empty))
+				laneLong = fmt.Sprintf("↳ %d back since · %d empty", back, empty)
+			default:
+				parts = append(parts, "↳ "+plural(back, "agent")+" back")
+				laneLong = fmt.Sprintf("↳ %d back since", back)
+			}
+		}
+		parts = append(parts, plural(legs, "new leg"))
+	} else {
+		parts = append(parts, "↳ "+plural(legs, "new leg"))
+	}
+	if ships > 0 {
+		parts = append(parts, plural(ships, "ship"))
+	}
+	if red > 0 {
+		clause := fmt.Sprintf("%d red", red)
+		if same != "" && red > 1 {
+			clause += ", all " + same
+		}
+		parts = append(parts, clause)
+	}
+	parts = append(parts, "looked "+state.ShortDuration(m.now.Sub(seen))+" ago")
+	fit := joinFit(parts, w)
+	if laneAt >= 0 && laneLong != "" {
+		long := append([]string(nil), parts...)
+		long[laneAt] = laneLong
+		if try := joinFit(long, w); strings.Count(try, " · ") >= strings.Count(fit, " · ") && !strings.HasSuffix(try, "…") {
+			fit = try
+		}
+	}
+	return dimStyle.Render(fit)
+}
+
+// fitWithBack joins the card's clauses to w — and where that sheds the
+// lanes-back clause, tries the header's own form of the out clause first
+// (`◈3 out · 2 silent 18m`, the dispatch age the lane rows carry anyway):
+// at 120 the clause was a single cell short, and a lane back with a
+// finding is the fact nowhere else on the column (#66).
+func fitWithBack(parts []string, w int) string {
+	fit := joinFit(parts, w)
+	back := -1
+	for i, p := range parts {
+		if i > 0 && strings.HasSuffix(p, " back") || strings.Contains(p, " back · ") {
+			back = i
+		}
+	}
+	if back < 0 || strings.Contains(fit, parts[back]) || !strings.HasPrefix(parts[0], "◈") {
+		return fit
+	}
+	short := append([]string(nil), parts...)
+	if head := strings.SplitN(short[0], " · ", 2); strings.HasPrefix(head[0], "◈") {
+		if f := strings.Fields(head[0]); len(f) == 3 && f[1] == "out" {
+			head[0] = f[0] + " out"
+			short[0] = strings.Join(head, " · ")
+		}
+	}
+	if try := joinFit(short, w); strings.Contains(try, short[back]) {
+		return try
+	}
+	return fit
+}
+
+// emptyLanesSince counts the lanes dispatched after the look that came
+// back with no report.
+func emptyLanesSince(tr journey.Trail, looked time.Time) int {
+	n := 0
+	for _, b := range tr.Branches {
+		if b.Done && b.End.After(looked) && strings.TrimSpace(b.Report) == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// lanesSince counts the lanes dispatched after the look: still out, and
+// back.
+func lanesSince(tr journey.Trail, looked time.Time) (out, back int) {
+	for _, b := range tr.Branches {
+		if b.Done {
+			// By its return, not its dispatch: a lane sent before lunch
+			// that came back while you were out is the digest's news (#67).
+			if b.End.After(looked) {
+				back++
+			}
+			continue
+		}
+		if b.Start.After(looked) {
+			out++
+		}
+	}
+	return out, back
+}
+
+// sinceLooked adds up what happened after the last look: legs, ships, red
+// runs — and the one test every red run failed, when it was one.
+func sinceLooked(tr journey.Trail, looked time.Time) (legs, ships, red int, sameTest string) {
+	tests := map[string]bool{}
+	for _, l := range tr.Legs {
+		if !l.Start.After(looked) {
+			continue
+		}
+		legs++
+		switch {
+		case l.Class == journey.Ship:
+			ships++
+		case strings.Contains(legBadge(l), "✗"):
+			red++
+			for _, w := range l.Waypoints {
+				if w.Kind == journey.WaypointTestFail {
+					tests[w.Text] = true
+				}
+			}
+		}
+	}
+	if len(tests) == 1 {
+		for t := range tests {
+			sameTest = t
+		}
+	}
+	return legs, ships, red, sameTest
+}
+
+// foldTotals is what the day adds up to — the ships and the red runs of
+// the whole trail — so a day that scrolled off still answers "what did it
+// ship", with the same numbers the trail's title gives (counting only the
+// hidden legs made the figures change with the terminal's width).
+func foldTotals(tr journey.Trail, hidden int, compact bool) string {
+	ships, red := 0, 0
+	for _, l := range tr.Legs {
+		switch {
+		case l.Class == journey.Ship:
+			ships++
+		case strings.Contains(legBadge(l), "✗"):
+			red++
+		}
+	}
+	out := ""
+	if compact {
+		// "· 14⚑ 9✗ 2⟲" where "· 14 ships · 9 red · 2 compactions" does
+		// not fit a column.
+		if ships > 0 {
+			out += fmt.Sprintf(" · %d⚑", ships)
+		}
+		if red > 0 {
+			out += fmt.Sprintf(" %d✗", red)
+		}
+		if n := len(tr.Compactions); n > 0 {
+			out += fmt.Sprintf(" %d%s", n, glyphCompact)
+		}
+		if d := promptWaits(tr); d >= waitNotable {
+			out += " · on you " + relDuration(d)
+		}
+		return out
+	}
+	if ships > 0 {
+		out += " · " + plural(ships, "ship")
+	}
+	if red > 0 {
+		out += fmt.Sprintf(" · %d red", red)
+	}
+	if n := len(tr.Compactions); n > 0 {
+		out += " · " + plural(n, "compaction")
+	}
+	if d := promptWaits(tr); d >= waitNotable {
+		out += " · waited on you " + relDuration(d)
+	}
+	return out
+}
+
+// dayParts is the day's totals as clauses, for a row that sheds them whole:
+// "3h", "16 ships", "10 red", "2 compactions", "waited on you 40m" — or the
+// compact "16⚑ 10✗ 2⟲ · on you 40m".
+func dayParts(tr journey.Trail, now time.Time, compact bool) []string {
+	day := strings.TrimPrefix(trailDay(tr, now, compact), " · ")
+	if day == "" {
+		return nil
+	}
+	return strings.Split(day, " · ")
+}
+
+// headSince is the clock HEAD's figure counts from: for a hung session the
+// last thing it wrote — "silent 4m" beside "no output for 4m" — and for the
+// rest the state's own start.
+func headSince(s fleet.Session) time.Time {
+	if s.Snap.State == state.Stuck && !s.Info.LastEventAt.IsZero() {
+		return s.Info.LastEventAt
+	}
+	return s.Snap.Since
+}
+
+// hiddenAbove counts the legs a pinned column keeps above its first row.
+func hiddenAbove(tr journey.Trail, o TrailOpts) int {
+	doc, sel := trailDoc(tr, o)
+	return legsHiddenAbove(tr, o.Level, sel, trailTop(len(doc), o))
+}
+
+// boardMuted says whether a column is drawn dim. Bright means there is
+// something in it to read: a session that is working, or waiting on you, or
+// one that finished within the day and has not been opened since — "done
+// two minutes ago and already dim" was the first thing the board got wrong.
+// Opening the trail (Tab) or the pane (Enter) marks it read. Every archived
+// column is dim: the archive is history by definition.
+func (m *Model) boardMuted(s fleet.Session) bool {
+	if m.archiveView {
+		return true
+	}
+	switch s.Snap.State {
+	case state.Working, state.NeedsYou, state.Stuck:
+		return false
+	}
+	last := s.Info.LastEventAt
+	if last.IsZero() || m.now.Sub(last) > boardFresh {
+		return true
+	}
+	seen, ok := m.seen[s.Info.Key()]
+	return ok && !seen.Before(last)
+}
+
+// markSeen records that the person opened this session — its trail or its
+// pane — as of the deck's clock, so a column it has read can go quiet.
+func (m *Model) markSeen(key string) {
+	if key == "" {
+		return
+	}
+	if m.seen == nil {
+		m.seen = make(map[string]time.Time)
+	}
+	if m.lastLook == nil {
+		m.lastLook = map[string]time.Time{}
+	}
+	if prev, ok := m.seen[key]; ok && !prev.Equal(m.now) {
+		// The look before this one is the read-line while the trail is
+		// open: marking the look on the way in erased the line the way in
+		// was for.
+		m.lastLook[key] = prev
+	}
+	m.seen[key] = m.now
+	if m.opened == nil {
+		m.opened = map[string]bool{}
+	}
+	m.opened[key] = true
+	m.saveSeen()
+}
+
+// refreshBoard folds a refresh's trails into the board: the trails themselves,
+// and the narrated labels that have landed for each. Narration is requested
+// for every column — one batch at a time, the narrator's own rule — so a
+// column reads in prose rather than file names once it has been on screen a
+// while, the same as the single trail does.
+func (m *Model) refreshBoard(trails map[string]journey.Trail) {
+	if trails == nil {
+		return
+	}
+	// Merge, never replace: a column that leaves the poll for a tick — the
+	// selection moved, the terminal narrowed — keeps the journey it had
+	// rather than reverting to "reading its transcript…".
+	if m.trails == nil {
+		m.trails = make(map[string]journey.Trail, len(trails))
+	}
+	if m.boardLabels == nil {
+		m.boardLabels = make(map[string]map[string]string, len(trails))
+	}
+	for key, tr := range trails {
+		m.trails[key] = tr
+	}
+	if m.narrator == nil {
+		return
+	}
+	// In the board's order, not the map's: the selected session was asked
+	// first by the caller, and the columns nearest the left are the ones a
+	// person is reading, so they are asked next.
+	if m.boardShapes == nil {
+		m.boardShapes = make(map[string]string, len(trails))
+	}
+	for _, i := range m.viewOrder() {
+		key := m.sessions[i].Info.Key()
+		tr, ok := trails[key]
+		if !ok {
+			continue
+		}
+		// Reading labels walks every leg of the trail. Once per shape, not
+		// once per tick: a column with thousands of legs was costing
+		// milliseconds and megabytes a second for the twenty rows it draws.
+		if shape := trailShape(key, tr); shape != m.boardShapes[key] || m.boardLabels[key] == nil {
+			m.boardLabels[key] = m.narrator.Labels(key, tr)
+			m.boardShapes[key] = shape
+		}
+		if key != m.selectedKey {
+			m.narrator.Request(key, tr, "")
+		}
+	}
+}
+
+// toolTag is which CLI runs the session and which model last answered —
+// "claude · opus-4-1", "opencode · mock-1" — so two sessions in one
+// directory are told apart by more than a name, and a fleet of two tools
+// says which is which (#50) — live or archived, by everything compass holds (#82).
+func (m *Model) toolTag(s fleet.Session) string {
+	var parts []string
+	// One fleet, one rule: a row — live or archived — wears the word where
+	// everything compass holds runs two tools, so the one live session
+	// does not stand wordless over a band that names two (#79, #80, #82).
+	if s.Info.ToolName() != "claude" || m.toolsAnywhere() > 1 {
+		// A fleet of claudes needs no word; a fleet of two tools needs
+		// the word on every row, and another tool's row always.
+		parts = append(parts, s.Info.ToolName())
+	}
+	if model := shortModel(s.Info.Model); model != "" {
+		parts = append(parts, model)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// toolsInFleet counts the CLIs the live fleet runs under.
+func (m *Model) toolsInFleet() int {
+	seen := map[string]bool{}
+	for _, s := range m.sessions {
+		if s.Live {
+			seen[s.Info.ToolName()] = true
+		}
+	}
+	return len(seen)
+}
+
+// shortModel is the model's name without the vendor's prefix and date:
+// "claude-opus-4-1-20250805" → "opus-4-1", "mock/mock-1" → "mock-1".
+func shortModel(model string) string {
+	model = strings.TrimSpace(model)
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		model = model[i+1:]
+	}
+	model = strings.TrimPrefix(model, "claude-")
+	if i := strings.LastIndex(model, "-"); i > 0 && len(model)-i-1 == 8 && strings.Trim(model[i+1:], "0123456789") == "" {
+		model = model[:i] // the release date
+	}
+	return model
+}
+
+// tagLadder is the tag row's forms, longest first: the tool, its model
+// and the pane; the tool and the pane; the pane; the tool and its model;
+// the tool. A row takes the first that leaves its other clause the floor
+// it needs (#50): the digest keeps twelve cells, the card's verdict
+// twenty-four, and the model goes before the tool word or the pane, since
+// the word is what tells two rows apart and the pane is what attaches.
+func (m *Model) tagLadder(s fleet.Session) []string {
+	tool, pane := m.toolTag(s), m.boardTag(s)
+	word := ""
+	if tool != "" {
+		word = strings.SplitN(tool, " · ", 2)[0]
+		if word == shortModel(s.Info.Model) {
+			word = "" // the model alone: no tool word was earned
+		}
+	}
+	rungs := []string{joinTag(tool, pane), joinTag(word, pane), pane, tool, word}
+	if word != "" {
+		// The word was earned — the fleet runs two tools, or this is the
+		// other one — so a ladder that dropped it at the third rung and
+		// took it back at the fifth said less on a wider column (#56):
+		// the bare pane comes last.
+		rungs = []string{joinTag(tool, pane), joinTag(word, pane), tool, word, pane}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, c := range rungs {
+		if c != "" && !seen[c] {
+			out = append(out, c)
+			seen[c] = true
+		}
+	}
+	return out
+}
+
+// tagBesideDigest picks the rung a row w wide draws beside its digest:
+// the longest that costs the digest no clause; else the longest that
+// draws the digest the shortest rung would; else the last (#59, #60). A
+// rule that fell straight to the last rung threw the tool word away on
+// both opening boards for a digest the longer rung drew the same.
+func tagBesideDigest(ladder []string, w int, digest func(room int) string) string {
+	if len(ladder) == 0 {
+		return ""
+	}
+	full := digest(w)
+	if full == "" {
+		for _, c := range ladder {
+			if lipgloss.Width(c) <= w {
+				return c
+			}
+		}
+		return ladder[len(ladder)-1]
+	}
+	best := -1
+	for i, c := range ladder {
+		if digest(w-lipgloss.Width(c)-2) == full {
+			best = i
+			break
+		}
+	}
+	// The look is the digest's last and least clause, and the column's own
+	// "you were here" divider draws it again five rows down; the pane is
+	// what attaches and is nowhere else on the board. A rung the ladder
+	// ranks higher, carrying the word and the pane, takes that clause's
+	// cells (#85).
+	if i := strings.LastIndex(full, " · looked "); i > 0 {
+		short := full[:i]
+		for j, c := range ladder {
+			if best >= 0 && j >= best {
+				break
+			}
+			if strings.Contains(c, " · ⌁ ") && digest(w-lipgloss.Width(c)-2) == short {
+				return c
+			}
+		}
+	}
+	if best >= 0 {
+		return ladder[best]
+	}
+	last := ladder[len(ladder)-1]
+	least := digest(w - lipgloss.Width(last) - 2)
+	for _, c := range ladder {
+		if digest(w-lipgloss.Width(c)-2) == least {
+			return c
+		}
+	}
+	return last
+}
+
+// tagFor picks the tag a row w wide draws beside a clause that needs
+// floor cells: the longest form of the ladder that leaves it, else the
+// shortest form. "" when the session has no tag at all.
+func (m *Model) tagFor(s fleet.Session, w, floor int, clause string) string {
+	ladder := m.tagLadder(s)
+	if len(ladder) == 0 {
+		return ""
+	}
+	if clause == "" {
+		for _, c := range ladder {
+			if lipgloss.Width(c) <= w {
+				return c
+			}
+		}
+		return ladder[len(ladder)-1]
+	}
+	// The longest rung beside the whole clause first: a column widened by
+	// a hide spent its new cells on the model and clipped "answered 1 ·
+	// 0s ago" that a narrower column had drawn whole (#55). Then the
+	// longest rung that leaves the clause its floor.
+	for _, c := range ladder {
+		if w-lipgloss.Width(c)-2 >= lipgloss.Width(clause) {
+			return c
+		}
+	}
+	for _, c := range ladder {
+		if w-lipgloss.Width(c)-2 >= floor {
+			return c
+		}
+	}
+	return ladder[len(ladder)-1]
+}
+
+// joinTag is the tool tag and the pane tag on one row, either alone
+// when the other is empty.
+func joinTag(tool, pane string) string {
+	switch {
+	case tool == "":
+		return pane
+	case pane == "":
+		return tool
+	}
+	return tool + " · " + pane
+}
+
+// sharesTmux says whether another session on the board lives in the same
+// tmux session as this one: when it does, the tag names the pane.
+func (m *Model) sharesTmux(s fleet.Session) bool {
+	pane, ok := m.panes[s.Info.Key()]
+	if !ok || pane.Target == "" {
+		return false
+	}
+	name := tmuxSessionName(pane.Target)
+	for _, o := range m.sessions {
+		if o.Info.Key() == s.Info.Key() || !o.Live {
+			continue // hidden or not: the namesake is still in that tmux session
+		}
+		if p, ok := m.panes[o.Info.Key()]; ok && tmuxSessionName(p.Target) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// shedClauses fits a " · "-joined line to w by dropping its trailing
+// clauses whole, and clips only a lone clause that is still too long.
+func shedClauses(s string, w int) string {
+	for lipgloss.Width(s) > w {
+		i := strings.LastIndex(s, " · ")
+		if i < 0 {
+			return clip(s, w)
+		}
+		s = s[:i]
+	}
+	return s
+}
+
+// headerDrawsTag reports whether the identity header draws this tag whole
+// — the device #167's tagTheHeaderSays uses, asked of one clause.
+func (m *Model) headerDrawsTag(tag string) bool {
+	return tag != "" && strings.Contains(ansi.Strip(m.headerLine(m.width)), tag)
+}
+
+// saidClock is the right-aligned relative clock a ◉ row ends on — "3h
+// ago", "10h ago" — however few spaces are left between it and the
+// sentence at the width the row is drawn at (§4).
+var saidClock = regexp.MustCompile(`\s+\S+ ago$`)
+
+// saidAsk is the sentence a drawn ◉ row says: the prompt a card's trail
+// opens on, less its glyph, its quotes and its right-aligned clock.
+func saidAsk(row string) string {
+	bare := strings.TrimSpace(strings.TrimRight(ansi.Strip(row), " "))
+	rest, ok := strings.CutPrefix(bare, glyphPrompt+" ")
+	if !ok {
+		return ""
+	}
+	rest = saidClock.ReplaceAllString(rest, "")
+	// A relayed prompt wears its verb outside the quotes (#97) — `◉
+	// relayed "the encoder is in…` — and the sentence the head draws
+	// beside the name is what is inside them. Without dropping the verb
+	// the prefix compare below can never match, so the one card whose
+	// prompt came from another session kept a head that said its own ◉
+	// row over again, both copies clipped, while the live card beside it
+	// yielded (#265, #266).
+	rest = strings.TrimPrefix(strings.TrimSpace(rest), relayVerb)
+	return strings.Trim(strings.TrimSpace(rest), `"`)
+}
+
+// sameAsk reports whether two drawn copies of one sentence say the same
+// thing — whole, or one clipped where the other is whole (#107's compare,
+// on two rows that are the sentence and nothing else). The floor is two
+// words, as saysSame's is (#110): one word is not a sentence said twice.
+func sameAsk(a, b string) bool {
+	a = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(a), "…"))
+	b = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(b), "…"))
+	if len(strings.Fields(a)) < 2 || len(strings.Fields(b)) < 2 {
+		return false
+	}
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
+
+// archiveHeadKey is the row a yielded archive card head draws, less its
+// digit and its glyph: the name the archive gives the session (#79, #11)
+// and the right-aligned age beside it (§4). Two cards that agree on both
+// draw the same head row, and one of them has to keep the ask.
+func archiveHeadKey(m *Model, r fleetRow) string {
+	s := m.sessions[r.sess]
+	return sessionName(s.Info) + "\x00" + m.age(s.Info.LastEventAt)
+}

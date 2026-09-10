@@ -82,6 +82,19 @@ func assistantTool(offset time.Duration, id, name, input string) transcript.Even
 	}
 }
 
+// assistantTools is one assistant event carrying several calls, as a
+// batched turn is written.
+func assistantTools(offset time.Duration, uses ...transcript.ToolUse) transcript.Event {
+	return transcript.Event{
+		Type: transcript.EventAssistant, UUID: "a", SessionID: "s",
+		Timestamp: at(offset), ToolUses: uses,
+	}
+}
+
+func tool(id, name, input string) transcript.ToolUse {
+	return transcript.ToolUse{ID: id, Name: name, Input: json.RawMessage(input)}
+}
+
 func toolResult(offset time.Duration, id string) transcript.Event {
 	return transcript.Event{
 		Type: transcript.EventUser, UUID: "u", SessionID: "s",
@@ -314,9 +327,11 @@ func TestStuckAfterBoundary(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run("pending tool "+tc.name, func(t *testing.T) {
+			// A Read has no budget of its own; a Bash does (see
+			// TestABashInsideItsTimeoutIsWorking).
 			m := machineWith(
 				userPrompt(0, "build it"),
-				assistantTool(0, "toolu_x", "Bash", `{"command":"go build ./..."}`),
+				assistantTool(0, "toolu_x", "Read", `{"file_path":"main.go"}`),
 			)
 			assertState(t, m.Evaluate(at(tc.quiet)), tc.want)
 		})
@@ -627,5 +642,116 @@ func TestTheHarnessDoesNotStartATurn(t *testing.T) {
 	got := m.Evaluate(ev.Timestamp.Add(10 * time.Minute))
 	if got.State != state.Idle {
 		t.Errorf("state is %v after ten quiet minutes, want idle: nobody asked for anything", got.State)
+	}
+}
+
+// An open AskUserQuestion is the question itself, with its options, not the
+// tool's name: "AskUserQuestion" on a needs-you row told the person they had
+// to go and look; the question tells them what to decide.
+func TestAskedQuestionIsTheActivity(t *testing.T) {
+	input := `{"questions":[{"question":"Open port 22 to the office CIDR only, or keep the bastion?\nSecond line nobody sees","header":"SSH","options":[{"label":"office CIDR","description":"x"},{"label":"keep bastion","description":"y"}]}]}`
+	m := machineWith(
+		userPrompt(0, "tighten the security groups"),
+		assistantTool(time.Second, "toolu_q", "AskUserQuestion", input),
+	)
+	snap := m.Evaluate(at(5 * time.Second))
+	assertState(t, snap, state.NeedsYou)
+	assertActivity(t, snap, "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]")
+
+	// A malformed or empty input falls back to the tool's name.
+	m = machineWith(
+		userPrompt(0, "go"),
+		assistantTool(time.Second, "toolu_q", "AskUserQuestion", `{"questions":[]}`),
+	)
+	assertActivity(t, m.Evaluate(at(5*time.Second)), "AskUserQuestion")
+}
+
+// A shell command is allowed the budget the harness gave it before its
+// silence means anything: "stuck" over a deliberate `sleep 420` was the word
+// losing its meaning (#45).
+func TestABashInsideItsTimeoutIsWorking(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "wait for the run"),
+		assistantTool(0, "toolu_x", "Bash", `{"command":"sleep 420","timeout":600000}`),
+	)
+	snap := m.Evaluate(at(2 * time.Minute))
+	assertState(t, snap, state.Working)
+	assertReason(t, snap, "Bash allowed 10m")
+	if snap.Allowed != 10*time.Minute {
+		t.Fatalf("Allowed = %v, want 10m", snap.Allowed)
+	}
+	// Past the budget the harness has killed it and the silence is real.
+	snap = m.Evaluate(at(11 * time.Minute))
+	assertState(t, snap, state.Stuck)
+	if snap.Allowed != 0 {
+		t.Fatalf("Allowed = %v past the budget, want 0", snap.Allowed)
+	}
+}
+
+// A Bash that names no timeout has the harness's two minutes; ninety
+// seconds of silence inside them is still working, and past them stuck.
+func TestABashWithNoTimeoutHasTwoMinutes(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_x", "Bash", `{"command":"go build ./..."}`),
+	)
+	assertState(t, m.Evaluate(at(100*time.Second)), state.Working)
+	assertState(t, m.Evaluate(at(3*time.Minute)), state.Stuck)
+}
+
+// The budget is the latest of every call in flight: Claude Code batches
+// calls, and a Read issued beside the sleep is the oldest pending one (#51).
+func TestTheBudgetIsTheLatestOfEveryPendingCall(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "wait for the run"),
+		assistantTools(0, tool("toolu_r", "Read", `{"file_path":"main.go"}`), tool("toolu_b", "Bash", `{"command":"sleep 420","timeout":600000}`)),
+	)
+	for _, tc := range []struct {
+		at   time.Duration
+		want state.State
+	}{{100 * time.Second, state.Working}, {5 * time.Minute, state.Working}, {11 * time.Minute, state.Stuck}} {
+		snap := m.Evaluate(at(tc.at))
+		assertState(t, snap, tc.want)
+		if tc.want == state.Working && snap.Allowed != 10*time.Minute {
+			t.Errorf("at %v Allowed = %v, want 10m", tc.at, snap.Allowed)
+		}
+	}
+	// The budget is carried from the first second, so the row never blinks.
+	if snap := m.Evaluate(at(10 * time.Second)); snap.Allowed != 10*time.Minute {
+		t.Errorf("before the silence threshold Allowed = %v, want 10m", snap.Allowed)
+	}
+}
+
+// The harness grants ten minutes at most, and a background call nothing:
+// it returns at once, and its budget is not a promise the harness keeps.
+func TestTheBudgetIsCappedAndABackgroundCallHasNone(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_x", "Bash", `{"command":"make","timeout":3600000}`),
+	)
+	if snap := m.Evaluate(at(5 * time.Minute)); snap.State != state.Working || snap.Allowed != 10*time.Minute {
+		t.Errorf("an hour's timeout = %v %v, want working with 10m", snap.State, snap.Allowed)
+	}
+	assertState(t, m.Evaluate(at(12*time.Minute)), state.Stuck)
+	bg := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_y", "Bash", `{"command":"make","run_in_background":true,"timeout":600000}`),
+	)
+	assertState(t, bg.Evaluate(at(3*time.Minute)), state.Stuck)
+}
+
+// The row counts from the call the budget belongs to: a Read pending since
+// the turn began beside a sleep sent forty minutes in says "for 5m of
+// 10m", not "for 45m of 10m" (#52).
+func TestTheBudgetsClockIsItsOwnCalls(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "wait for the run"),
+		assistantTool(0, "toolu_r", "Read", `{"file_path":"main.go"}`),
+		assistantTool(40*time.Minute, "toolu_b", "Bash", `{"command":"sleep 420","timeout":600000}`),
+	)
+	snap := m.Evaluate(at(45 * time.Minute))
+	assertState(t, snap, state.Working)
+	if !snap.Since.Equal(at(40 * time.Minute)) {
+		t.Errorf("Since = %v, want the sleep's own start %v", snap.Since, at(40*time.Minute))
 	}
 }

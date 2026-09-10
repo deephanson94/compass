@@ -18,6 +18,16 @@ type config struct {
 	Readonly   bool   // readonly = true (enter no longer attaches)
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
+
+	// Replies are the quick replies `r` offers, one `reply = "…"` line each,
+	// in order; up to nine. None configured means compass's own three.
+	Replies []string
+
+	// Hook is a command run on the moments that matter while nobody is
+	// looking: `hook = "tmux display-message \"$COMPASS_SESSION: $COMPASS_EVENT\""`.
+	// COMPASS_EVENT is needs_you, api_error, stuck, circling or agents_back;
+	// COMPASS_SESSION, COMPASS_TMUX and COMPASS_DETAIL say which and what.
+	Hook string
 }
 
 // loadConfig reads the config file if there is one. $COMPASS_CONFIG overrides
@@ -56,6 +66,12 @@ func loadConfig() config {
 			c.LiveWithin = value
 		case "mirror":
 			c.Mirror = value == "true"
+		case "reply":
+			if len(c.Replies) < 9 {
+				c.Replies = append(c.Replies, value)
+			}
+		case "hook":
+			c.Hook = value
 		}
 	}
 	return c

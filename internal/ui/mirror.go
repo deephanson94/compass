@@ -29,7 +29,13 @@ func (m *Model) mirrorColumn(w, h int) []string {
 	// and a frame is only ever drawn while the pane it came from is still there.
 	pane, live := m.selectedPane()
 	header := mirrorMark + " no pane · from transcript"
-	if live {
+	switch {
+	case live && strings.TrimSpace(m.mirror) == "":
+		// The pane is there and its screen is not here yet: what is
+		// drawn is the transcript, and a panel titled "live" over
+		// compass's own fold marks was taken for the pane itself.
+		header = mirrorMark + " " + pane.Target + " · the transcript, until the pane is captured"
+	case live:
 		header = mirrorMark + " " + pane.Target + " · live"
 	}
 
@@ -88,7 +94,9 @@ func (m *Model) transcriptBody(w, h int) []string {
 	// which is exactly what is wanted here.
 	frame := RenderReader(m.events, ReaderOpts{
 		Width: w, Height: h, Scroll: readerEnd,
-		Unfolded: m.unfolded,
+		Unfolded: m.unfolded, Anchor: -1,
+		Now: m.now, CWD: m.readerCWD(), // the same document the reader draws, clocks and all
+		Lanes: m.laneClauses(),
 	})
 	if strings.TrimSpace(frame) == "" {
 		return m.transcriptFacts(w)
@@ -102,7 +110,7 @@ func (m *Model) transcriptFacts(w int) []string {
 	s, _ := m.selected()
 	var rows []string
 	if s.Info.Title != "" {
-		rows = append(rows, dimStyle.Render(clip(`"`+s.Info.Title+`"`, w)), "")
+		rows = append(rows, dimStyle.Render(clip(askQuote(s.Info.Title, s.Info.Relayed), w)), "")
 	}
 	rows = append(rows, dimStyle.Render(clip(verdict(s), w)))
 	if s.Snap.Activity != "" {

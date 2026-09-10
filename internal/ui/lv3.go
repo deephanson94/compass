@@ -1,13 +1,19 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // doc is the flattened reader document, cached between keypresses — scrolling,
@@ -15,12 +21,135 @@ import (
 // once per change, not once per key.
 func (m *Model) doc(width int) []readerLine {
 	c := &m.docCache
-	if c.valid && c.n == len(m.events) && c.w == width && c.ver == m.docVer {
+	cwd := m.readerCWD()
+	events := m.readerEvents()
+	lanes := fmt.Sprint(m.laneClauses()) + "|" + m.laneSilenceWord()
+	if c.valid && c.n == len(events) && c.w == width && c.ver == m.docVer && c.cwd == cwd && c.lane == m.readerLane && c.lanes == lanes {
 		return c.lines
 	}
-	lines := readerDoc(m.events, width, m.unfolded)
-	m.docCache = readerCache{lines: lines, valid: true, n: len(m.events), w: width, ver: m.docVer}
+	lines := readerDoc(events, ReaderOpts{Width: width, Unfolded: m.unfolded, CWD: cwd, Now: m.now, Lanes: m.laneClauses(), Lane: m.readerLane != "", LaneSilence: m.laneSilenceWord()})
+	m.docCache = readerCache{lines: lines, valid: true, n: len(events), w: width, ver: m.docVer, cwd: cwd, lane: m.readerLane, lanes: lanes}
 	return lines
+}
+
+// readerEvents is the conversation the reader renders: the lead's, or the
+// agent's own when the reader was opened on a lane (#49).
+func (m *Model) readerEvents() []transcript.Event {
+	if m.readerLane != "" {
+		if a, ok := m.agentsFor(m.selectedKey)[m.readerLane]; ok {
+			return a.Events
+		}
+		return nil
+	}
+	return m.events
+}
+
+// laneSilenceWord is the open lane's silence as its row says it — "silent
+// 12m" — or "" for a lane that is writing, done, or not the reader's.
+func (m *Model) laneSilenceWord() string {
+	if m.readerLane == "" {
+		return ""
+	}
+	b, ok := m.laneOpen()
+	if !ok || b.Done {
+		return ""
+	}
+	a, has := m.agentsFor(m.selectedKey)[m.readerLane]
+	if !has {
+		return ""
+	}
+	if d, silent := laneSilence(a, b, m.now); silent {
+		word := "silent " + state.ShortDuration(d)
+		// Wherever no row beside the reader carries the lane's "→N", the
+		// stub under the hung call takes the fresher reading: below the
+		// deck's width there is no trail panel at all, and at 120 the
+		// trail's sub-row sheds the clause for want of cells, so the
+		// silence stood alone on the whole frame (#66, #68, #69).
+		if !m.trailRowSaysWrote(b) {
+			tr := m.trails[m.selectedKey]
+			agents := m.agentsFor(m.selectedKey)
+			if n, ok := m.laneLinks(tr, agents)[b.Label]; ok && n > 0 {
+				if at, ok := m.laneLinkWrote(tr, agents)[b.Label]; ok && !at.IsZero() {
+					word += fmt.Sprintf(" · →%d wrote %s ago", n, relAge(m.now, at))
+				}
+			}
+		}
+		return word
+	}
+	return ""
+}
+
+// trailRowSaysWrote says whether the trail panel beside the reader already
+// carries the lane's "→N wrote …" on its sub-row — the same arithmetic
+// trailBody uses (#68), so the stub adds the clause only where that row
+// cannot: at 120 the trail is drawn and the clause does not fit it.
+func (m *Model) trailRowSaysWrote(b journey.Branch) bool {
+	if m.width < deckWideCols {
+		return false // the reader owns the screen: no trail panel beside it
+	}
+	inner := m.width - 2*edgePad
+	if inner < 10 {
+		inner = m.width
+	}
+	_, _, trailW := m.layout(inner)
+	if trailW <= 0 {
+		return false
+	}
+	tr := m.trails[m.selectedKey]
+	agents := m.agentsFor(m.selectedKey)
+	n, ok := m.laneLinks(tr, agents)[b.Label]
+	if !ok || n <= 0 {
+		return false
+	}
+	at, had := m.laneLinkWrote(tr, agents)[b.Label]
+	if !had || at.IsZero() {
+		return false
+	}
+	live, known := agents[b.ToolUseID]
+	g, text, clock := laneHead(live, b, known, m.now)
+	if text == "" || clock == "" {
+		return false
+	}
+	body := trailW - trailWayWidth
+	if body < trailMinLabel {
+		return false
+	}
+	long := clock + fmt.Sprintf(" · →%d wrote %s ago", n, relAge(m.now, at))
+	return body-len([]rune(long))-2 >= len([]rune(g+" "+text))
+}
+
+// nameAndBracket says whether a clause is the name with only a bracket
+// after it — "fix the 401 on token refresh (commit)": the leg's bracket is
+// not worth a second copy of the name on the row (#64, #66).
+func nameAndBracket(name, clause string) bool {
+	return strings.HasPrefix(clause, name+" (") && strings.HasSuffix(clause, ")")
+}
+
+// laneOpen is the lane the reader is on, if it is one the trail still has.
+func (m *Model) laneOpen() (journey.Branch, bool) {
+	if m.readerLane == "" {
+		return journey.Branch{}, false
+	}
+	for _, b := range m.trail.Branches {
+		if b.ToolUseID == m.readerLane {
+			return b, true
+		}
+	}
+	return journey.Branch{}, false
+}
+
+// readerCWD is the directory the reader shortens paths against: where the
+// selected session was opened, which is where its paths are rooted however
+// far it has since wandered.
+func (m *Model) readerCWD() string {
+	s, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	if s.Info.OriginCWD != "" {
+		return s.Info.OriginCWD
+	}
+	return s.Info.CWD
 }
 
 // readerWidth is the column the reader currently owns — the same arithmetic
@@ -41,6 +170,13 @@ func (m *Model) readerWidth() int {
 	switch {
 	case inner < minDeckCols:
 		return inner // one column, and at Lv3 it is the reader's
+	case m.boardFits() && !m.archiveView:
+		companion, _ := sessionSplit(inner) // the session view, at Lv2 or Lv3
+		return companion
+	case m.width < deckWideCols:
+		return inner // the reader alone at Lv3 (layout): the deck is too narrow for a middle panel
+	case m.width >= deckWideCols && m.width < readerRoomCols:
+		return inner - trailWidth - gutterWidth // the fleet's width is the reader's (layout)
 	case m.width >= deckWideCols:
 		fleet, trail := sidePanelWidths(inner)
 		return inner - fleet - trail - 2*gutterWidth
@@ -52,38 +188,415 @@ func (m *Model) readerWidth() int {
 // readerColumn is the deck's Lv3 middle panel: whose conversation this is, the
 // search when one is live, and the document.
 func (m *Model) readerColumn(w, h int) []string {
-	rows := []string{m.readerTitle(w), ""}
+	rows := []string{m.readerTitle(w), m.readerAbove(w)}
+	events := m.readerEvents()
+	if br, ok := m.laneOpen(); ok && h > 2 && len(events) == 0 {
+		// An agent whose file was read and holds no turn: the reader
+		// says so, with the lead's assignment as the one thing known,
+		// and how long the file has been empty (#53).
+		// One clock, the title's: "· 18m out" is the silence of a file
+		// that has nothing in it. The assignment wears the lane's own
+		// glyph, not ❯ — the person did not type it.
+		empty := "◍ the agent has written nothing since it was sent"
+		if a, has := m.agentsFor(m.selectedKey)[br.ToolUseID]; has {
+			_, hung := laneSilence(a, br, m.now)
+			switch {
+			case !a.Wrote.IsZero():
+				// The file has been written and holds no turn to draw:
+				// the page says that, with the clock the lane's own head
+				// carries — "written nothing" contradicted the head two
+				// panels left, which said it wrote forty seconds ago.
+				if hung {
+					empty = "◍ nothing to read yet · silent " + relAge(m.now, a.Wrote)
+				} else {
+					empty = "⋯ nothing to read yet · wrote " + relAge(m.now, a.Wrote) + " ago"
+				}
+			case !hung:
+				empty = "⋯ the agent has written nothing yet"
+			}
+		}
+		rows = append(rows, dimStyle.Render(clip(empty, w)))
+		// The page owns the screen: no trail panel is on the frame to say
+		// the call the lane is inside, and the row the person pressed Tab
+		// on said it. The clock stays above, said once (#60, #66).
+		if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 {
+			if a, has := m.agentsFor(m.selectedKey)[br.ToolUseID]; has {
+				if g, text, _ := laneHead(a, br, true, m.now); text != "" && !a.Wrote.IsZero() {
+					rows = append(rows, dimStyle.Render(clip(g+" "+text, w)))
+				}
+			}
+		}
+		rows = append(rows, "")
+		rows = append(rows, textStyle.Render(clip(glyphBranch+" "+branchName(br.Label), w)), dimStyle.Render(clip("  the assignment, from "+m.readerName(), w)))
+		for len(rows) < h {
+			rows = append(rows, "") // the gutter runs the panel's height, as every other page
+		}
+		return rows
+	}
+	if h > 2 && len(events) == 0 && len(m.trail.Legs) > 0 {
+		// The trail is in hand and the conversation is not yet: it is being
+		// read, not absent. "nothing to read yet … as it happens" claimed a
+		// session with a day of legs had not started.
+		rows = append(rows, dimStyle.Render(clip(glyphSaid+" reading the transcript…", w)))
+		for len(rows) < h {
+			rows = append(rows, "")
+		}
+		return rows
+	}
 	if h > 2 {
-		frame := RenderReader(m.events, ReaderOpts{
-			Width:    w,
-			Height:   h - 2,
-			Scroll:   m.scroll,
-			Unfolded: m.unfolded,
-			Query:    m.query,
-			Anchor:   m.anchor,
+		wDoc := m.doc(w)
+		frame := RenderReader(events, ReaderOpts{
+			Width:       w,
+			Height:      h - 2,
+			Scroll:      readerTopIn(wDoc, m.scroll, h-2), // never a result row without its owner
+			Unfolded:    m.unfolded,
+			Query:       m.query,
+			Anchor:      m.readerAnchorAt(wDoc),
+			CWD:         m.readerCWD(),
+			Now:         m.now,
+			Lanes:       m.laneClauses(),
+			Lane:        m.readerLane != "",
+			LaneSilence: m.laneSilenceWord(),
 		})
-		rows = append(rows, strings.Split(frame, "\n")...)
+		page := strings.Split(frame, "\n")
+		rows = append(rows, page...)
+		if len(rows) > 0 && m.anchorText != "" {
+			// The title's copy of the anchored row goes where the page
+			// draws that row and holds no other turn to tell it from:
+			// "READER · hello    add a --version flag · 17:59" stood two
+			// rows over "❯ add a --version flag    17:59" (#65).
+			turns, said := 0, ""
+			for _, l := range page {
+				if r := ansi.Strip(l); isDrawnTurnRow(r) {
+					turns++
+					said = oneSpace(strings.TrimRight(r, " "))
+				}
+			}
+			if turns == 1 && saysSame(oneSpace(m.anchorText), said) {
+				rows[0] = m.readerTitleWith(w, false)
+			}
+			// The anchored row is not always a turn. A leg's is drawn as
+			// its tool call — `⏺ AskUserQuestion(Open port 22 to the
+			// office CIDR? [office CIDR / keep bastion])`, wrapped over
+			// the lines it needs — and #110's reason is the same there:
+			// the title's copy stood two rows over the page's own, with
+			// the leg's own highlighted row between them. Only where no
+			// turn row says the anchor: a turn is #110's case and its
+			// count guard rules it, whatever this one would say. The page
+			// is read as one sentence so a wrapped call still says it,
+			// and `saysSame` keeps #110's floor of two words.
+			onTurn := false
+			for _, l := range page {
+				if r := ansi.Strip(l); isDrawnTurnRow(r) && saysSame(oneSpace(m.anchorText), oneSpace(strings.TrimRight(r, " "))) {
+					onTurn = true
+					break
+				}
+			}
+			if !onTurn && saysSame(oneSpace(m.anchorText), oneSpace(strings.Join(strippedRows(page), " "))) {
+				rows[0] = m.readerTitleWith(w, false)
+			}
+			if s, ok := m.selected(); ok && m.archiveView && !s.Live {
+				// The archive's title names the session alone where the
+				// turn row draws the ask, as the trail's does (#105) — at
+				// eighty and a hundred, where the reader has the screen
+				// and no trail title stands to be repeated (#120).
+				drawn := false
+				for _, l := range page {
+					if r := ansi.Strip(l); isDrawnTurnRow(r) && saysSame(oneSpace(archiveHeadline(s)), oneSpace(strings.TrimRight(r, " "))) {
+						drawn = true
+						break
+					}
+				}
+				if !drawn {
+					// Or the header row draws it. #105 kept the ask on the
+					// title only where the page has scrolled past the turn
+					// row — "the one case where it is the only copy" — and
+					// at eighty it is not the only copy: the identity
+					// header two rows above titles the archived row by its
+					// ask (#56, #59), whole. Where the header says the
+					// clause the row sheds it (#167), and the title spends
+					// its cells on the session and the day, as the same
+					// route draws them twenty columns wider (#120).
+					head := oneSpace(ansi.Strip(m.headerLine(max(m.width-2*edgePad, 10))))
+					drawn = strings.Contains(head, oneSpace(archiveHeadline(s)))
+				}
+				if drawn {
+					// The title names the session wherever the turn row
+					// draws the ask. #122 kept the ask at 120 and up
+					// because a bare title would repeat the trail's
+					// beside it — but the day is the half that repeats,
+					// not the name: the live reader's `READER · hello`
+					// stands beside its own card's `1 ● hello` at every
+					// width (#115). The day goes to the trail's title,
+					// #138's device one column over (#105, #110, #120).
+					rows[0] = m.readerTitleBare(w)
+				}
+			}
+		}
+	}
+	if fw, mw, _ := m.layout(m.width); fw == 0 && mw == 0 && len(m.trail.Legs) == 0 && m.readerLane == "" {
+		// The reader owns the screen: no trail panel and no fleet row is
+		// on it to say the session is alive, and "⎿ ⋯ no reply yet" over
+		// twenty blank rows was an abandoned session's screen too. The
+		// tail carries the present the trail draws (§4; the shape of
+		// #62, #66).
+		if row := bareHeadRow(m.trailOpts(w, h), w); row != "" {
+			last := -1
+			for i, r := range rows {
+				if lipgloss.Width(strings.TrimSpace(r)) > 0 {
+					last = i
+				}
+			}
+			if last >= 0 && last+2 < len(rows) {
+				rows[last+2] = row
+			}
+		}
 	}
 	return rows
 }
 
+// readerTop is the first row of the page: the scroll, clamped — and never a
+// result row whose owner is the row above. A tail page that opened on a
+// bare "⎿ 20 passed" had its "↩ result of Bash(…)" as the last line above,
+// and the first thing on the page was a test result with no owner.
+func (m *Model) readerTop(doc []readerLine) int {
+	return readerTopIn(doc, m.scroll, m.readerHeight())
+}
+
+// readerTopIn is the first row of a page h rows tall at this scroll: never
+// a transcript blank, and never a result whose owner is the row above —
+// except on the tail page, whose last row is the present and outranks its
+// first. There the blank is stepped over forwards and the owner is named
+// in the row above the page (readerAbove).
+func readerTopIn(doc []readerLine, scroll, h int) int {
+	top := clampScroll(scroll, len(doc), h)
+	if top >= len(doc)-h {
+		for top < len(doc)-1 && doc[top].kind == readerBlank {
+			top++
+		}
+		return top
+	}
+	for top > 0 && isResultRow(doc[top]) && doc[top-1].kind == readerCall {
+		top--
+	}
+	for top > 0 && doc[top].kind == readerBlank {
+		top-- // a landing, like a step, opens on a line and not on air
+	}
+	return top
+}
+
+// isResultRow says whether a row is a call's "⎿" result.
+func isResultRow(l readerLine) bool {
+	return strings.HasPrefix(strings.TrimLeft(l.text, " "), glyphResult)
+}
+
+// readerAbove is the row under the reader's title: what the page is not
+// showing above its first line, so a conversation opened on its tail says
+// it is a tail — "↑ 212 lines above · 3 turns" — and air when nothing is.
+func (m *Model) readerAbove(w int) string {
+	if len(m.readerEvents()) == 0 {
+		if m.readerLane != "" {
+			return dimStyle.Render(clip(" the agent's own conversation", w))
+		}
+		return ""
+	}
+	doc := m.doc(w)
+	top := readerTopIn(doc, m.scroll, m.readerHeight())
+	if top == 0 {
+		// The row that says where you are says it here too: the answer is
+		// "the beginning", and a blank said nothing — at the widths where
+		// a conversation fits whole, least of all.
+		if m.readerLane != "" {
+			return dimStyle.Render(clip(" the start of the agent's own conversation", w))
+		}
+		return dimStyle.Render(clip(" the start of the conversation", w))
+	}
+	turns := 0
+	for i := 0; i < top; i++ {
+		if doc[i].kind == readerSaid && (i == 0 || doc[i-1].kind != readerSaid) {
+			turns++
+		}
+	}
+	text := "↑ " + plural(top, "line") + " above"
+	if m.readerLane != "" {
+		// Not turns of yours: the person has no turns in an agent's
+		// conversation. The first turn is the lead's assignment.
+		text += " · the agent's own conversation"
+	} else if turns > 0 {
+		text += " · " + plural(turns, "turn") + " of yours"
+	}
+	if isResultRow(doc[top]) && doc[top-1].kind == readerCall {
+		// The page opens on a result whose owner is the last line above:
+		// the owner is named here, so "⎿ 20 passed" has one. It is the
+		// one clause the row cannot shed — a result with no owner is what
+		// the row is for — so a tight row clips it and drops the count.
+		owner := " · " + strings.TrimSpace(doc[top-1].text)
+		if lipgloss.Width(" "+text+owner) > w {
+			text = "↑ " + plural(top, "line") + " above"
+		}
+		return dimStyle.Render(clip(" "+text+owner, w))
+	}
+	return dimStyle.Render(shedClauses(" "+text, w))
+}
+
 // readerTitle mirrors the trail's: READER · <name>, with the search state —
 // the query being typed, or the one in force — on the right.
-func (m *Model) readerTitle(w int) string {
+func (m *Model) readerTitle(w int) string { return m.readerTitleWith(w, true) }
+
+// readerTitleWith draws the title with or without the anchored row's own
+// words: where the page below draws that row and no other turn to tell it
+// from, the clause is a second copy of a line two rows under it and the
+// title keeps its clock alone (#65's record, the shape of #100 and #105).
+func (m *Model) readerTitleWith(w int, anchorClause bool) string {
+	return m.readerTitleAs(w, anchorClause, false)
+}
+
+// readerTitleBare names an archived session as the trail's title does —
+// the session and the day it added up — where the page below draws the ask
+// on its turn row (#120, #59 narrowed as #105 narrowed it).
+func (m *Model) readerTitleBare(w int) string {
+	return m.readerTitleAs(w, false, true)
+}
+
+func (m *Model) readerTitleAs(w int, anchorClause, bare bool) string {
 	name := "—"
 	if s, ok := m.selected(); ok {
 		name = sessionName(s.Info)
+		if m.archiveView && !s.Live && !bare {
+			name = archiveHeadline(s) // as the trail beside it and the header above name it (#59)
+		} else if m.archiveView && !s.Live {
+			day := trailDay(m.trail, m.now, false)
+			if fw, mw, _ := m.layout(m.width); fw != 0 || mw != 0 {
+				day = "" // a trail title stands beside this one and carries it
+			}
+			reserve := 0
+			if m.level >= levelReader && (m.sessionView() || m.boardFits()) {
+				reserve = lipgloss.Width("[reader]") + 2
+			}
+			if lipgloss.Width("READER · "+name+day) > w-1-reserve {
+				day = trailDay(m.trail, m.now, true)
+			}
+			name += day
+		}
 	}
 	right := ""
+	if br, ok := m.laneOpen(); ok && !m.searching && m.query == "" {
+		// The lane as drawn, led by its glyph so the title cannot be read
+		// as the lead's own conversation, clocked by the lane (#49).
+		glyph, clock := glyphBranch, relAge(m.now, br.Start)+" out"
+		switch {
+		case br.Done:
+			// Back: the lane's own mark and when, as the trail draws it.
+			back := br.End
+			if back.IsZero() {
+				back = br.Start
+			}
+			glyph, clock = branchDone, relAge(m.now, back)+" ago"
+			if strings.TrimSpace(br.Report) == "" {
+				glyph = branchEmpty
+			}
+			right = glyph + " " + branchName(br.Label) + " · " + clock
+		default:
+			if a, ok := m.agentsFor(m.selectedKey)[br.ToolUseID]; ok {
+				if _, hung := laneSilence(a, br, m.now); hung {
+					glyph = fleet.Glyph(state.Stuck)
+				}
+			}
+			right = glyph + " " + branchName(br.Label) + " · " + clock
+		}
+	}
 	switch {
-	case m.searching:
-		right = "/" + m.draft + "▏"
+	case right != "":
+	case m.searching && !m.searchFleet:
+		right = "/" + m.draft + "▏" // the fleet's query is the header's to echo, not the reader's
 	case m.query != "":
 		right = "/" + m.query
+	case m.anchor >= 0 && !m.anchorAt.IsZero():
+		// Where the reader is: the row it was anchored to and its moment,
+		// so a reader scrolled to an hour can tell it is the hour. The row
+		// gets whatever the name leaves, not half the panel. Where the
+		// page draws the anchored turn beneath (#110) the clock goes with
+		// the clause: the turn's row carries its own, and the note a
+		// third — the title is the panel and the name, as the trail's is
+		// over its subject (#115).
+		if !anchorClause {
+			break
+		}
+		right = m.anchorAt.Local().Format("15:04")
+		if m.anchorText != "" {
+			room := w - 1 - len([]rune("READER · "+name)) - 3 - len([]rune(right)) - 3
+			note := clipQuestion(m.anchorText, room)
+			said := strings.HasPrefix(name, strings.TrimSuffix(note, "…")) || nameAndBracket(name, note)
+			switch {
+			case room >= 8 && !said:
+				// The bracket clause whole or gone; clip marks the cut
+				// with …. And the clause goes when what survives the cut
+				// is the name already on the row: "fix the 401 on token
+				// refresh (commit)" cut before its bracket said the
+				// title's name twice and the leg never (#64).
+				right = note + " · " + right
+			case said:
+				// #64 dropped the clause because it was the name already
+				// on the row — and the clock goes with the clause (#115).
+				// Alone it is read against the name beside it: "READER ·
+				// fix the 401 on token refresh   15:31" over an ask its
+				// own turn row times 15:00.
+				right = ""
+			}
+		}
+	}
+	tag := ""
+	if m.level >= levelReader && (m.sessionView() || m.boardFits()) {
+		// The keys are here, and the card across the gutter has stopped
+		// saying so: the word goes where the bar is — in the archive as
+		// in the live view, since the trail's title gave it up on every
+		// deck with a board (#20, #63).
+		tag = "[reader]"
+	}
+	// The name is never clipped for the row: "▌READE… the question…" lost
+	// which of two sessions was open. The anchored row gets what the name
+	// and the tag leave; the tag goes before the row does.
+	body := w - 1
+	title := "READER · " + name
+	room := body - lipgloss.Width(title) - 3 // three of air: "porter Another Claude…" read as one name
+	if tag != "" {
+		room -= lipgloss.Width(tag) + 2
+	}
+	if br, ok := m.laneOpen(); ok && lipgloss.Width(right) > room && !m.searching && m.query == "" {
+		// The lane's own title, clipped at the label: the glyph and the
+		// clock are what tell it from the lead's.
+		glyph, clock := right[:strings.Index(right, " ")], right[strings.LastIndex(right, " · "):]
+		if keep := room - lipgloss.Width(glyph) - 1 - lipgloss.Width(clock); keep >= 8 {
+			right = glyph + " " + clip(branchName(br.Label), keep) + clock
+		} else {
+			right = clip(right, max(room, 0))
+		}
+	} else if lipgloss.Width(right) > room {
+		if m.anchor >= 0 && !m.searching && m.query == "" {
+			// The row's text, clipped to fit; the clock stays.
+			clock := m.anchorAt.Local().Format("15:04")
+			if room >= len(clock)+3+8 {
+				// The card's rule: a question's bracket clause goes whole
+				// or not at all, then the question is truncated — "[office
+				// CIDR / keep bas…" read as options the menu does not have.
+				right = clipQuestion(m.anchorText, room-len(clock)-3) + " · " + clock
+			} else if room >= len(clock) {
+				right = clock
+			} else {
+				right = ""
+			}
+		} else {
+			right = clip(right, max(room, 0))
+		}
+	}
+	if tag != "" {
+		if right != "" {
+			right += "  "
+		}
+		right += tag
 	}
 	mark := m.titleMark(panelReader)
-	body := w - 1
-	left := m.titleStyleFor(panelReader).Render(clip("READER · "+name, body-lipgloss.Width(right)-1))
+	left := m.titleStyleFor(panelReader).Render(clip(title, body-lipgloss.Width(right)-1))
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
@@ -91,12 +604,299 @@ func (m *Model) readerTitle(w int) string {
 	return mark + left + strings.Repeat(" ", gap) + dimStyle.Render(right)
 }
 
+// clipQuestion truncates a question to w cells, its bracket clause of
+// options whole or gone: cut inside, the brackets named options that were
+// not there.
+func clipQuestion(text string, w int) string {
+	if i := strings.Index(text, " ["); i > 0 && lipgloss.Width(text) > w {
+		text = strings.TrimSpace(text[:i])
+	}
+	return clip(text, w)
+}
+
 // enterReader is Tab on a Lv2 row: the reader is already open on that moment —
 // the middle panel has been following the cursor since Lv2 — so all this does
 // is hand it the keys.
 func (m *Model) enterReader() {
+	lane := m.laneWanted() // read where the cursor is before the level moves
 	m.level = levelReader
+	m.readerLane = ""
+	if lane != "" {
+		if _, ok := m.agentsFor(m.selectedKey)[lane]; ok {
+			// The cursor is on a lane whose own file was read: the reader
+			// shows the agent's conversation in place of the lead's, and
+			// opens on its newest line — what it is doing now (#49).
+			m.readerLane = lane
+			m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
+			m.scroll = 0
+			m.scrollBy(1 << 30)
+			m.markNewestLine()
+			return
+		}
+	}
 	m.anchorReader()
+}
+
+// nonBlankRow walks the document from i in the given direction (+1 or -1),
+// i itself included, and returns the index of the first row that is not
+// blank filler — the cursor never stands on the air between blocks. -1 when
+// the walk runs off the document without finding one.
+func nonBlankRow(doc []readerLine, i, dir int) int {
+	for i >= 0 && i < len(doc) {
+		if doc[i].kind != readerBlank {
+			return i
+		}
+		i += dir
+	}
+	return -1
+}
+
+// nonBlankNear is nonBlankRow's other shape: the row nearest i, i itself
+// included, rather than one found by stepping in a walk already under way.
+// It prefers the row at or after i — the direction a shift pushes a row
+// that used to stand later — and only then looks before it, so a raw index
+// left stale by a fold's re-render or a document rewrapped at a different
+// width still lands on words, not air. -1 for a document with no row at all.
+func nonBlankNear(doc []readerLine, i int) int {
+	if len(doc) == 0 {
+		return -1
+	}
+	if i < 0 {
+		i = 0
+	} else if i >= len(doc) {
+		i = len(doc) - 1
+	}
+	if j := nonBlankRow(doc, i, 1); j >= 0 {
+		return j
+	}
+	return nonBlankRow(doc, i-1, -1)
+}
+
+// readerAnchorAt resolves the stored anchor against doc, the document as it
+// is actually about to be drawn. m.anchor is an index into the reader's own
+// width (readerWidth, chosen so a Lv3 landing does not jump when Lv2 took
+// it there — see readerWidth); but Lv2's companion panel can draw the same
+// conversation narrower still (the fleet and trail beside it spend cells
+// the anticipated Lv3 width did not), and a document rewrapped at a
+// different width moves every row after the difference, so the raw index
+// can land on the air between blocks (`second-day` at 120: the reader's own
+// width said 77, the companion drew 44; #313's gap, widened). -1 (no
+// anchor) passes through unchanged.
+func (m *Model) readerAnchorAt(doc []readerLine) int {
+	if m.anchor < 0 {
+		return -1
+	}
+	return nonBlankNear(doc, m.anchor)
+}
+
+// markNewestLine puts the reader's cursor on the last line of the document:
+// the newest thing the agent has written, which is the line the page was
+// just scrolled to.
+//
+// A lane's reader opens at its end rather than on the trail row the cursor
+// stands on (#49), and the path that does it cleared the anchor — so that
+// page alone came up with no cursor at all: #300's mark stood on every other
+// Lv3 page and on none of these, while the footer beside them named `j/k
+// rows` and `space unfold` with nothing on the frame saying which row they
+// act on, and `space` fell back to its top-down scan for want of a cursor
+// rather than by #300's rule, unfolding the first result from the top of a
+// page opened at the other end. The cursor stands where the page stands.
+func (m *Model) markNewestLine() {
+	doc := m.doc(m.readerWidth())
+	if i := nonBlankRow(doc, len(doc)-1, -1); i >= 0 {
+		m.anchor, m.anchorAt, m.anchorText = i, doc[i].at, readerRowText(doc, i)
+		return
+	}
+	// A lane whose file holds no turn draws no document at all (#53): no
+	// row, so no cursor, and its footer names no key that walks one.
+}
+
+// markOldestLine puts the reader's cursor on the first line of the
+// document: `g`'s target, the mirror of markNewestLine's `G` (#313).
+func (m *Model) markOldestLine() {
+	doc := m.doc(m.readerWidth())
+	if i := nonBlankRow(doc, 0, 1); i >= 0 {
+		m.anchor, m.anchorAt, m.anchorText = i, doc[i].at, readerRowText(doc, i)
+	}
+}
+
+// reanchorRewrapped is the row the mark stands on once the document has
+// been rewrapped at a new width: the row of the same moment whose text it
+// was, or failing that the first row of that moment. An index that still
+// says the same thing is left alone, so a height-only change costs nothing.
+func reanchorRewrapped(doc []readerLine, at int, when time.Time, text string) int {
+	if at >= 0 && at < len(doc) && doc[at].at.Equal(when) && readerRowText(doc, at) == text {
+		return at
+	}
+	if when.IsZero() {
+		return -1
+	}
+	first := -1
+	for i, l := range doc {
+		if l.kind == readerBlank || !l.at.Equal(when) {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		if readerRowText(doc, i) == text {
+			return i
+		}
+	}
+	return first
+}
+
+// keepReaderCursorOnPage brings the reader's page back to its cursor after
+// the terminal has changed size.
+//
+// A window dragged narrower draws fewer rows, and the page kept the scroll
+// it had: the cursor the person left down the page fell off the bottom of
+// it, so the frame came back with no `▸` anywhere while the footer beside
+// it named `j/k rows` and `space unfold` — #300's own defect, the one #313
+// cut for the lane's opening and #317 for the search walk, reached this
+// time by the window and not by a key. `space` there fell back to the
+// top-down scan for want of a visible cursor rather than by #300's rule,
+// and the next `j` stepped from the page's top, not from the row the mark
+// was on, so the cursor jumped backwards up the conversation.
+//
+// The viewport follows the mark, the rule `readerCursorMove` already keeps
+// for `j`, `k`, `ctrl+d` and `ctrl+u`: the page scrolls only far enough to
+// put the cursor's row back on it, and where the cursor is already on the
+// page nothing moves. The mark itself is not touched — the row the person
+// left it on is the row it comes back on, re-resolved off the air by
+// `readerAnchorAt` as every other redraw does (#314).
+func (m *Model) keepReaderCursorOnPage(was readerSeat) {
+	if m.level < levelReader || m.anchor < 0 {
+		return
+	}
+	doc := m.doc(m.readerWidth())
+	// The seat read before the width changed puts the mark back on its
+	// own row of its own event — the last row of a block stays the last
+	// (#322); where no seat was read, the mark is found again by its
+	// moment and its text (#321).
+	m.reseatAnchor(doc, was)
+	// A row number belongs to one wrapping. A width change rewraps the
+	// document, and the same index is then a different line: the mark came
+	// back two rows and twenty minutes early — ` ▸⎿ edited · +1 −1` became
+	// ` ▸Writing loader.py.` — under a note, `end of the conversation`,
+	// that the frame now drew rows below, so the row the person was reading
+	// was not the row that came back (#319's residue). The mark is found
+	// again by what it stood on rather than by where it stood.
+	if row := reanchorRewrapped(doc, m.anchor, m.anchorAt, m.anchorText); !was.ok && row >= 0 && row != m.anchor {
+		m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
+	}
+	row := m.readerAnchorAt(doc)
+	if row < 0 {
+		return
+	}
+	h := m.readerHeight()
+	switch top := m.readerTop(doc); {
+	case row < top:
+		m.scroll = clampScroll(row, len(doc), h)
+	case row > top+h-1:
+		m.scroll = scrollShowing(doc, row, h)
+	}
+}
+
+// readerSeat is where the reader's cursor stands, said in terms that survive
+// a rewrap: the transcript event whose block the row belongs to, how many
+// rows down that block the row is, and how many rows the block had.
+//
+// A row number alone belongs to one wrapping. #319 brought the page back to
+// `m.anchor` after a size change and left the number itself alone, so a
+// terminal dragged to another *width* re-drew the same index over a
+// re-wrapped document and the mark came back on a different line of the
+// conversation — a different moment, with the reader's own note about the
+// one it left still beside it.
+type readerSeat struct {
+	event  int
+	offset int
+	rows   int
+	ok     bool
+}
+
+// readerSeat reads the cursor's seat off the document the current size draws.
+func (m *Model) readerSeat() readerSeat {
+	if m.level < levelReader || m.anchor < 0 {
+		return readerSeat{}
+	}
+	doc := m.doc(m.readerWidth())
+	row := m.readerAnchorAt(doc)
+	if row < 0 || row >= len(doc) || doc[row].event < 0 {
+		return readerSeat{}
+	}
+	block := readerBlockOf(doc, doc[row].event)
+	for i, j := range block {
+		if j == row {
+			return readerSeat{event: doc[row].event, offset: i, rows: len(block), ok: true}
+		}
+	}
+	return readerSeat{}
+}
+
+// readerBlockOf is the rows a transcript event owns in this document, in
+// order: one row for a call, several for a turn the width has wrapped.
+func readerBlockOf(doc []readerLine, event int) []int {
+	if event < 0 {
+		return nil
+	}
+	var rows []int
+	for i, l := range doc {
+		if l.event == event && l.kind != readerBlank {
+			rows = append(rows, i)
+		}
+	}
+	return rows
+}
+
+// reseatAnchor puts the cursor back on the row it stood on before the
+// terminal changed size — its own row, not its old row *number*.
+//
+// The seat was read off the old document; the event it names is the same
+// event in the new one, whatever the width did to the wrapping, so the mark
+// lands in the block it was in and as far down it as it was, clamped to the
+// rows the new width gives that block. Where the number still names the same
+// row — a height-only change, or a block the rewrap did not touch — nothing
+// moves. `anchorAt` and `anchorText` follow the mark, because the reader's
+// title clause and its end-note are statements *about the cursor's row*
+// (#115, #309) and a stale pair leaves the frame saying two things.
+func (m *Model) reseatAnchor(doc []readerLine, was readerSeat) {
+	if !was.ok || m.anchor < 0 {
+		return
+	}
+	block := readerBlockOf(doc, was.event)
+	if len(block) == 0 {
+		return
+	}
+	off := min(was.offset, len(block)-1)
+	if was.offset == was.rows-1 {
+		// A cursor at the end of its block comes back at the end of it:
+		// the reader's note tells the ends of the conversation apart
+		// (#309, #310), and a mark that slid up a re-wrapped last turn
+		// left `end of the conversation` over a row with rows below it.
+		off = len(block) - 1
+	}
+	row := block[off]
+	if row == m.anchor {
+		return
+	}
+	m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
+}
+
+// scrollShowing is the scroll that puts row on the page the frame will
+// actually draw.
+//
+// The drawn top is not the scroll: a page opens on a line and not on the
+// air between blocks, and never on a result whose call is the row above
+// (readerTopIn), so the obvious landing — row minus a screenful — can slide
+// back up and leave the row one under the page. The offset steps down until
+// the drawn page carries the row, and stops at the last screenful.
+func scrollShowing(doc []readerLine, row, h int) int {
+	s := clampScroll(row-h+1, len(doc), h)
+	for readerTopIn(doc, s, h)+h-1 < row && s < len(doc)-h {
+		s++
+	}
+	return s
 }
 
 // anchorReader points the reader at the row the Lv2 cursor stands on: the
@@ -112,16 +912,273 @@ func (m *Model) anchorReader() {
 	if m.cursor >= len(rows) {
 		return
 	}
-	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded}
+	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD(), Now: m.now, Lanes: m.laneClauses()}
 	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
-		m.scroll, m.anchor = line, line
+		// The scroll is clamped to the last screenful at once: an offset
+		// past it drew the same frame, and the first j after it moved the
+		// number and nothing else.
+		doc := m.doc(opts.Width)
+		m.scroll, m.anchor, m.anchorAt = clampScroll(line, len(doc), m.readerHeight()), line, rows[m.cursor].Time
+		m.anchorText = rows[m.cursor].Text
+		if row := rows[m.cursor]; row.Kind == "leg" && row.Leg >= 0 && row.Leg < len(m.trail.Legs) {
+			// The row as drawn — the commit a ship leg is named by, the
+			// plan's name for HEAD — not the heuristic label beneath it.
+			w, h := m.trailBox()
+			m.anchorText, _ = legLabel(m.trail.Legs[row.Leg], m.trailOpts(w, h))
+			if o := m.trailOpts(w, h); m.trail.Legs[row.Leg].Current && o.HeadState == state.NeedsYou && o.Head != "" {
+				// HEAD's row carries the first clause of the question and
+				// spells the rest beneath it; the title gets the whole
+				// question and clips it with a mark, not the row's cut.
+				m.anchorText = o.Head
+			}
+		}
 	}
 }
 
-// scrollBy moves the reader, clamped to the document.
-func (m *Model) scrollBy(delta int) {
+// scrollBy moves the reader, clamped to the document. It reports whether
+// the viewport moved at all, so a key at either end can say so.
+func (m *Model) scrollBy(delta int) bool {
 	doc := m.doc(m.readerWidth())
-	m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
+	if len(doc) <= m.readerHeight() {
+		m.note = "all of it is on screen"
+		return true // said; nothing more to say
+	}
+	was := m.readerTop(doc)
+	m.scroll = clampScroll(was+delta, len(doc), m.readerHeight())
+	// A single step never lands the top of the page on a line of air: the
+	// press that only pushed a blank in and a line out revealed nothing.
+	if (delta == 1 || delta == -1) && m.scroll < len(doc) && doc[m.scroll].kind == readerBlank {
+		m.scroll = clampScroll(m.scroll+delta, len(doc), m.readerHeight())
+	}
+	// Nor does a step down stall on a call whose result is the next row:
+	// the page kept its top on the call and `j` moved nothing.
+	for delta > 0 && m.readerTop(doc) == was && m.scroll < len(doc)-m.readerHeight() {
+		m.scroll++
+	}
+	// And what the step past that block lands on is a line, not the air
+	// after it: a page whose first row is blank opened on nothing.
+	for (delta == 1 || delta == -1) && m.scroll > 0 && m.scroll < len(doc)-m.readerHeight() && doc[m.readerTop(doc)].kind == readerBlank {
+		m.scroll += delta
+	}
+	return m.readerTop(doc) != was
+}
+
+// readerCursorMove is `j`/`k`/`ctrl+d`/`ctrl+u`: the reader's own cursor,
+// drawn as the trail's is (markAnchor) and Space's target (toggleFold), steps
+// delta rows — never landing on the air between blocks — and the viewport
+// follows only far enough to keep it on screen, the way a pager's cursor
+// does. It reports whether the cursor actually moved, so a key at either end
+// can say so, as `scrollBy` already does for the viewport alone.
+//
+// Where the cursor stands before the step is `m.anchor` — the same field a
+// Lv2 landing or `[`/`]` sets — unless that row is not on the page being
+// drawn (stale from a `g`/`G`/search jump that moved the viewport without
+// it, or from a document that has since changed shape): then the step starts
+// from the page's own top, so the first press after such a jump moves from
+// where the reader is now looking, not from where the cursor was left.
+//
+// A conversation that already shows every line keeps `scrollBy`'s own word
+// for it, "all of it is on screen" (#83) — but only where the press moved
+// nothing, which is the fact that word is about. Since the cursor (#300)
+// these four keys step the mark on such a page too, and the sentence stood
+// over a press that moved the mark exactly as it stood over one that could
+// not, so the row said the same thing for both and the person could not
+// tell from it whether the key had done anything (#221; SPEC's round-one
+// rule against a key that acts unremarked). A press that moves the mark
+// says so by moving it: the frame is not the same frame, and the note is
+// the refusal's, not the move's.
+func (m *Model) readerCursorMove(delta int) bool {
+	doc := m.doc(m.readerWidth())
+	if len(doc) == 0 {
+		return false
+	}
+	height := m.readerHeight()
+	fits := len(doc) <= height
+	top := m.readerTop(doc)
+	cur := m.anchor
+	if cur < top || cur >= top+height || cur >= len(doc) {
+		cur = top
+	}
+	step, n := 1, delta
+	if delta < 0 {
+		step, n = -1, -delta
+	}
+	target, moved := cur, false
+	for i := 0; i < n; i++ {
+		next := nonBlankRow(doc, target+step, step)
+		if next < 0 {
+			break
+		}
+		target, moved = next, true
+	}
+	m.anchor, m.anchorAt = target, doc[target].at
+	m.anchorText = readerRowText(doc, target)
+	switch {
+	case target < top:
+		m.scroll = clampScroll(target, len(doc), height)
+	case target > top+height-1:
+		// The page the frame draws, not the offset: a landing whose top
+		// falls on air or on a result slides back up, and the row the
+		// cursor just stepped onto was left one under the page with no
+		// mark drawn on the frame at all (scrollShowing).
+		m.scroll = scrollShowing(doc, target, height)
+	}
+	if fits {
+		if !moved {
+			// Which end the cursor stands at is the question the press
+			// asked; #83's word answers the page's, and the row said only
+			// the page's — one sentence for two opposite refusals, so `k`
+			// on the first row and `j` on the last drew the very same
+			// footer and the person could not read from it which end had
+			// been reached (#221; #304's own rule one level down). At the
+			// top the frame answers on its own face: `readerAbove` draws
+			// " the start of the conversation" directly over the cursor,
+			// so #83's word stands there as #304 left it — a note leaving
+			// to the row what the row already draws (#128, #134). No row
+			// draws the other end, so there the note takes the reader's
+			// own word for it, the one `j` and `ctrl+d` already get on
+			// every page that scrolls, so one fact keeps one name (#24,
+			// #228, #307).
+			m.note = "all of it is on screen"
+			if delta > 0 {
+				m.note = "end of the conversation"
+			}
+		}
+		return true
+	}
+	return moved
+}
+
+// isDrawnTurnRow reports whether a stripped, drawn reader row opens as a
+// turn — `glyphSaid+" "`, the way one always drew before the reader had a
+// cursor to put on it. The cursor's own mark (markAnchor) can now stand in
+// that same cell — `❯▸add a --version flag` — when the row it lands on is a
+// turn; a turn under the cursor is still a turn.
+func isDrawnTurnRow(r string) bool {
+	return strings.HasPrefix(r, glyphSaid+" ") || strings.HasPrefix(r, glyphSaid+"▸")
+}
+
+// readerRowText is a document row's own words, stripped of the glyph and the
+// relay mark that lead a turn (the same trim `landOnTurn` gives a turn it
+// lands on) so the title's clause can name whichever row the cursor stands
+// on, turn or not.
+func readerRowText(doc []readerLine, i int) string {
+	text := doc[i].text
+	if doc[i].kind == readerSaid && doc[i].dim > 0 {
+		text = string([]rune(text)[:doc[i].dim]) // without the clock
+	}
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, glyphSaid)
+	text = strings.TrimPrefix(text, glyphBranch)
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, strings.TrimSpace(relayMark))
+	return strings.TrimSpace(text)
+}
+
+// turnStand is where the reader's turn keys stand: the document, the
+// lines its ❯ rows begin on, the turn `[ ]` last landed on (-1 when the
+// page is not standing on one) and `at`, the line the page is anchored to.
+//
+// Where the reader is: the turn it is standing on, if `[ ]` put it there;
+// otherwise the line it is anchored to — HEAD's moment, or the row the
+// trail cursor chose — or the top of the page. `[` from a fresh page
+// lands on the turn governing that line: on a short conversation that
+// fits the panel, "no earlier turn" with a turn in plain sight was false
+// on its face.
+//
+// `readerChapter` moves from this stand and `turnKeysMove` asks whether
+// there is anywhere to move to, so the key the footer offers and the
+// answer the press gives are one thing (#210's device, in the reader).
+func (m *Model) turnStand() ([]readerLine, []int, int, int) {
+	doc := m.doc(m.readerWidth())
+	var turns []int
+	for i, l := range doc {
+		if l.kind == readerSaid && (i == 0 || doc[i-1].kind != readerSaid) {
+			turns = append(turns, i)
+		}
+	}
+	cur := -1
+	for i, t := range turns {
+		if t == m.anchor {
+			cur = i
+		}
+	}
+	at := m.readerTop(doc)
+	if m.anchor > at {
+		at = m.anchor
+	}
+	return doc, turns, cur, at
+}
+
+// turnKeysMove reports whether `[` or `]` moves the reader from where it
+// stands: another turn of yours to land on. Standing on the only turn,
+// both keys refuse; off any turn, one of them lands on it, since every
+// turn is either after the anchored line or on or before it.
+func (m *Model) turnKeysMove() bool {
+	_, turns, cur, _ := m.turnStand()
+	if len(turns) == 0 {
+		return false
+	}
+	if cur < 0 {
+		return true
+	}
+	return len(turns) > 1
+}
+
+// readerChapter is `[` / `]` in the reader: the previous or next turn of
+// yours — the ❯ rows — which are the conversation's chapters as the
+// prompts are the trail's.
+func (m *Model) readerChapter(key string) {
+	doc, turns, cur, at := m.turnStand()
+	if len(turns) == 0 {
+		m.note = "no turns of yours in this conversation"
+		return
+	}
+	if key == "]" {
+		for i, t := range turns {
+			if (cur >= 0 && i > cur) || (cur < 0 && t > at) {
+				m.landOnTurn(doc, turns, i)
+				return
+			}
+		}
+		m.note = "no later turn"
+		return
+	}
+	for i := len(turns) - 1; i >= 0; i-- {
+		if (cur >= 0 && i < cur) || (cur < 0 && turns[i] <= at) {
+			m.landOnTurn(doc, turns, i)
+			return
+		}
+	}
+	m.note = "no earlier turn"
+}
+
+// landOnTurn scrolls the reader to the i-th of your turns and marks it: the
+// inverse bar the trail's cursor uses, the title naming it, and a note
+// saying which turn of how many — `[` and `]` moved the page before, and
+// nothing on the page said what they had moved to.
+func (m *Model) landOnTurn(doc []readerLine, turns []int, i int) {
+	t := turns[i]
+	m.scroll = clampScroll(t, len(doc), m.readerHeight())
+	m.anchor, m.anchorAt = t, doc[t].at
+	text := doc[t].text
+	if doc[t].dim > 0 {
+		text = string([]rune(text)[:doc[t].dim]) // without the clock
+	}
+	m.anchorText = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(text), glyphSaid), glyphBranch))
+	m.anchorText = strings.TrimSpace(strings.TrimPrefix(m.anchorText, strings.TrimSpace(relayMark))) // the mark is the row's, not the turn's (#109)
+	if t+1 < len(doc) && doc[t+1].kind == readerSaid && doc[t+1].event == doc[t].event {
+		m.anchorText += "…" // the first row of a wrapped turn: the cut is marked (#57)
+	}
+	glyph := glyphSaid
+	if m.readerLane != "" && i == 0 {
+		glyph = glyphBranch // the assignment, not a turn of yours (#56)
+	}
+	// The count and the quote (#20), without the clock: the note stands
+	// only while the turn it landed on is drawn, and that row carries its
+	// clock at every width — the note's copy was never the only one, and
+	// at 220 it was the clipped one over the whole (#128).
+	m.note = fmt.Sprintf("%s %d/%d · %s", glyph, i+1, len(turns), `"`+m.anchorText+`"`) // the footer clips the quote to its room
 }
 
 // readerHeight is the rows the document gets: the deck body minus the
@@ -138,25 +1195,170 @@ func (m *Model) readerHeight() int {
 	return body
 }
 
-// toggleFold is Space: the first folded result on screen opens (or the first
-// open one closes) — the document's own order decides, top of the screen down.
+// toggleFold is Space: the tool result the reader's cursor stands on opens
+// or closes, whichever row of the screen that is. Off a foldable row — the
+// cursor is on prose, a call, or has not been placed on the page at all —
+// Space falls back to the first folded result on screen, the document's own
+// order deciding, so the key still does something on a page it can act on
+// (#79's original rule, narrowed to a fallback now the reader has a cursor
+// to prefer).
 func (m *Model) toggleFold() {
 	width := m.readerWidth()
 	doc := m.doc(width)
-	top := clampScroll(m.scroll, len(doc), m.readerHeight())
-	for i := top; i < len(doc) && i < top+m.readerHeight(); i++ {
-		if !doc[i].foldable() {
-			continue
+	top := m.readerTop(doc)
+	height := m.readerHeight()
+	i, onCursor := -1, false
+	if c := m.anchor; c >= top && c < top+height && c < len(doc) && doc[c].foldable() {
+		i, onCursor = c, true
+	} else {
+		for j := top; j < len(doc) && j < top+height; j++ {
+			if doc[j].foldable() {
+				i = j
+				break
+			}
 		}
-		m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
-		m.docVer++
-		m.docCache.valid = false
+	}
+	if i < 0 {
+		m.note = "nothing to unfold on screen"
 		return
 	}
-	m.note = "nothing to unfold on screen"
+	toggledEvent := doc[i].event
+	was := len(doc)
+	m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
+	m.docVer++
+	m.docCache.valid = false
+	// The cursor keeps its own row across the reshape. A fold above the
+	// mark inserts (or takes back) rows before it, and the anchor is an
+	// index into the document those rows just renumbered: left alone it
+	// names whatever now sits at that number. On `two-tools` at 120x34 the
+	// mark stood on the ask's own second line, `CIDR / keep bastion])`,
+	// and `space` — falling back to the first folded result on screen,
+	// seven rows above it (#300) — left the mark on ` 5    func main() {`,
+	// a line of main.tf the person never walked to, while the note named
+	// `unfolded Read(main.tf)` and said nothing of the cursor. The row
+	// under the mark moves by exactly the rows the fold added or removed
+	// above it; a cursor above the fold is untouched, as it always was.
+	if grew := len(m.doc(width)) - was; grew != 0 && m.anchor > i {
+		m.anchor += grew
+	}
+	// Folding or unfolding renumbers every row after it: the anchor is a
+	// document position, and the document just changed shape under it. Left
+	// alone, a cursor above the fold that toggled stays exactly where it
+	// was — still correct, nothing shifted before it — but one below it now
+	// names a different row, sometimes the blank filler between two blocks
+	// (`very-long` at 100×30, unfolding a call above the cursor: #313's
+	// second gap). The repair prefers the toggled row itself — a foldable
+	// row, never blank, and the nearest thing to "the cursor was watching
+	// this fold" — then the nearest row at or below the stale index, then
+	// the nearest above; only an anchor already valid and undisturbed is
+	// left untouched.
+	if m.anchor >= 0 {
+		if newDoc := m.doc(width); m.anchor >= len(newDoc) || newDoc[m.anchor].kind == readerBlank {
+			landed := -1
+			for j, l := range newDoc {
+				if l.event == toggledEvent && l.foldable() {
+					landed = j
+					break
+				}
+			}
+			if landed < 0 {
+				landed = nonBlankNear(newDoc, m.anchor)
+			}
+			if landed >= 0 {
+				m.anchor, m.anchorAt, m.anchorText = landed, newDoc[landed].at, readerRowText(newDoc, landed)
+			} else {
+				m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
+			}
+		}
+	}
+	// And where the mark stands on the row the fold itself rewrote, the
+	// title's copy of that row is re-read from it: `⎿ 215 passed in 4.21s
+	// · 1 more line` stayed in the title over a row the press had just
+	// opened to `⎿ 2 lines`, naming a line the frame no longer draws and
+	// a `1 more line` nothing was hiding any more.
+	if nd := m.doc(width); m.anchor >= 0 && m.anchor < len(nd) && nd[m.anchor].event == toggledEvent {
+		m.anchorAt, m.anchorText = nd[m.anchor].at, readerRowText(nd, m.anchor)
+	}
+	// And the page follows the cursor, the rule #300 gave the movement keys
+	// in this same panel: the viewport moves only far enough to keep the
+	// mark on screen. Space alone did not have it. Unfolding a result the
+	// cursor stood on at the end of a long conversation added rows below
+	// the page's last one and left `scroll` where it was, so the anchor —
+	// correct, and resolved against the new document — sat below the drawn
+	// page: the frame drew no cursor at all while its footer named
+	// `j/k rows · space unfold`, and the note said `unfolded Edit(loader.py)`
+	// over a page whose last row was that call, the lines it opened all
+	// below the fold of the screen. The next `j` was worse than lost: with
+	// the anchor off the page `readerCursorMove` restarts from the page's
+	// own top, so the key named for the next row down stepped the mark
+	// twenty-odd rows *backwards*.
+	m.scrollToAnchor(m.doc(width), height)
+	// Which one: the note names the call it opened — a person pressing
+	// Space did not know which row it had acted on (#79).
+	verb := "unfolded"
+	if !m.unfolded[doc[i].event] {
+		verb = "folded"
+	}
+	call := ""
+	for j := i - 1; j >= 0 && j > i-4; j-- {
+		if doc[j].kind == readerCall {
+			call = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(doc[j].text), glyphCall)) // the call, not its glyph (#80)
+			break
+		}
+	}
+	switch {
+	case call != "":
+		m.note = verb + " " + call
+	case onCursor:
+		m.note = verb + " the result under the cursor"
+	default:
+		m.note = verb + " the first result on screen"
+	}
+}
+
+// scrollToAnchor moves the reader's page just far enough to draw the row the
+// cursor stands on, and no further — #300's own rule for the movement keys
+// in this panel, applied where the document changed shape under a still-valid
+// anchor rather than where the cursor stepped.
+//
+// The offset alone is not the page: readerTopIn takes a scroll and then pulls
+// the top back off a blank line and off a result whose call is the row above,
+// so a top computed as "the anchor at the bottom" can come back one or two
+// rows earlier and leave the anchor below the last drawn row after all. The
+// page is therefore asked, not assumed: the offset steps until the top the
+// reader will actually draw from holds the anchor, bounded by the document's
+// own ends.
+func (m *Model) scrollToAnchor(doc []readerLine, height int) {
+	if m.anchor < 0 || m.anchor >= len(doc) || height < 1 {
+		return
+	}
+	last := len(doc) - height
+	if top := readerTopIn(doc, m.scroll, height); m.anchor < top {
+		m.scroll = clampScroll(m.anchor, len(doc), height)
+		for m.scroll > 0 && m.anchor < readerTopIn(doc, m.scroll, height) {
+			m.scroll--
+		}
+		return
+	} else if m.anchor <= top+height-1 {
+		return
+	}
+	m.scroll = clampScroll(m.anchor-height+1, len(doc), height)
+	for m.scroll < last && m.anchor > readerTopIn(doc, m.scroll, height)+height-1 {
+		m.scroll++
+	}
 }
 
 // jumpMatch is n/N: the next (or previous) document row the query appears in.
+//
+// The walk keeps its own place in the run and says it, every press:
+// `match 3/9`, the turn note's form without a quote, because the row the
+// page opens on is the match (#20, #236). Reading that place back off the
+// page instead — the shape #235 and #236 left — stopped the walk dead
+// wherever `clampScroll` pinned the page: the matches sharing the last
+// screenful could not be stepped between, `n` never reached the wrap
+// `walkTo` says it has, and the seventh press of `n` on `many-idle`'s
+// reader came back byte for byte the same, the dead key SPEC's round-one
+// rule bans.
 func (m *Model) jumpMatch(dir int) {
 	if m.query == "" {
 		m.note = "no search — / starts one"
@@ -168,48 +1370,159 @@ func (m *Model) jumpMatch(dir int) {
 		m.note = "no matches"
 		return
 	}
+	at := m.walkTo(doc, matches, dir)
+	// The walk says which match of how many it is standing on, every
+	// press, as `[` and `]` name the turn they landed on and count it
+	// (#20, #236). The count is the answer #235's `the match is on
+	// screen` was reaching for and a fuller one: it says which of the
+	// matches on that screen the walk is standing on, it changes under
+	// every press, and at nine cells it is thirteen shorter than the
+	// sentence it replaces — at eighty on `many-idle` the row keeps
+	// `A archive` where that sentence shed it.
+	m.note = fmt.Sprintf("match %d/%d", at+1, len(matches))
+}
+
+// markMatch puts the reader's cursor on the row the search just landed on.
+//
+// `/`, `n` and `N` move the page to a match and the note counts it (`match
+// 3/4`, #236), but the mark that says which row that is stayed where it
+// was: on 447 of the corpus's 452 search stands the cursor stood on a row
+// that is not the match the note counts, and on 333 of them it was off the
+// page altogether, so the reader drew no cursor at all while the footer
+// beside it named `j/k rows` and `space unfold` — #300's own defect, and
+// the one #313 cut for the lane's opening. Space there fell back to the
+// top-down scan for want of a cursor rather than by #300's rule, and the
+// match's own highlight is a style (`matchStyle`), which no capture, no
+// NO_COLOR terminal and no faint-reverse terminal carries (§4), so on a
+// monochrome deck nothing on the frame said which row `match 3/4` meant.
+// The key that moves the page takes the mark with it, as `g` and `G` do
+// (#314) and as `[` and `]` have since #20.
+func (m *Model) markMatch(doc []readerLine, row int) {
+	if row < 0 || row >= len(doc) {
+		return
+	}
+	m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
+}
+
+// landFirstMatch is where the search you just typed opens: the first match
+// in the run, not the first one below the top of the page.
+//
+// `jumpMatch` starts the walk from where the page stands, and a fresh
+// search stands at row nought — so `walkStep`'s strictly-greater step
+// walked straight past a match on row nought, which is the opening prompt
+// the person themselves typed. `/the` on the second day's reader answered
+// `match 2/3` with `❯ fix the 401 on token refresh` two rows above the
+// page and the row above the page counting them (#20): the search named a
+// match it had skipped and did not show. Where the walk has no place yet
+// the first press is a landing, not a step (#239).
+func (m *Model) landFirstMatch() {
+	doc := m.doc(m.readerWidth())
+	matches := readerMatches(doc, m.query)
+	if len(matches) == 0 {
+		m.note = "no matches"
+		return
+	}
+	m.walkRow = matches[0] + 1
+	m.scroll = clampScroll(matches[0], len(doc), m.readerHeight())
+	m.markMatch(doc, matches[0])
+	m.note = fmt.Sprintf("match 1/%d", len(matches))
+}
+
+// walkTo steps the walk one match on (or back), wrapping at the ends, and
+// reports which match it is now standing on.
+//
+// The step is the walk's own, not the page's. `clampScroll` pins the page
+// at the last screenful, so a walk that read its place back off `m.scroll`
+// stopped dead the moment the rest of the run shared one screen: on
+// `many-idle`'s reader `n` reached the fourth of nine matches and then
+// stood there for good, and on 552 of the corpus's 588 search stands it
+// never reached the wrap this function says it has.
+func (m *Model) walkTo(doc []readerLine, matches []int, dir int) int {
+	at := m.walkStep(matches, dir)
+	m.walkRow = matches[at] + 1
+	m.scroll = clampScroll(matches[at], len(doc), m.readerHeight())
+	m.markMatch(doc, matches[at])
+	return at
+}
+
+// walkStep is the match the walk moves to: one on from where it stands,
+// and from the page where it stands nowhere yet — a fresh search, or a
+// document that has moved under it (a fold, a new width).
+func (m *Model) walkStep(matches []int, dir int) int {
+	for i, line := range matches {
+		if line == m.walkRow-1 {
+			return ((i+dir)%len(matches) + len(matches)) % len(matches)
+		}
+	}
 	if dir > 0 {
-		for _, line := range matches {
+		for i, line := range matches {
 			if line > m.scroll {
-				m.scroll = clampScroll(line, len(doc), m.readerHeight())
-				return
+				return i
 			}
 		}
-		m.scroll = clampScroll(matches[0], len(doc), m.readerHeight()) // wrap
-		return
+		return 0 // wrap
 	}
 	for i := len(matches) - 1; i >= 0; i-- {
 		if matches[i] < m.scroll {
-			m.scroll = clampScroll(matches[i], len(doc), m.readerHeight())
-			return
+			return i
 		}
 	}
-	m.scroll = clampScroll(matches[len(matches)-1], len(doc), m.readerHeight())
+	return len(matches) - 1
 }
 
 // searchKey handles a keypress while the query is being typed.
 func (m *Model) searchKey(msg tea.KeyMsg) {
 	switch msg.String() {
 	case "enter":
+		if m.searchFleet {
+			// The query narrowed the fleet as it was typed; enter keeps it.
+			m.fleetQuery = strings.TrimSpace(m.draft)
+			m.draft, m.searching, m.searchFleet = "", false, false
+			m.fleetScroll = 0
+			m.clampSelection()
+			if m.fleetQuery == "" {
+				m.clearQuery()
+			}
+			return
+		}
 		m.query = strings.TrimSpace(m.draft)
 		m.draft = ""
 		m.searching = false
 		if m.query != "" {
-			m.scroll = 0
-			m.jumpMatch(1)
+			m.scroll, m.walkRow = 0, 0
+			m.landFirstMatch()
 		}
 	case "esc":
 		m.draft = ""
+		if m.searchFleet {
+			m.searching, m.searchFleet = false, false
+			m.clearQuery()
+			return
+		}
 		m.searching = false
 	case "backspace":
 		if r := []rune(m.draft); len(r) > 0 {
 			m.draft = string(r[:len(r)-1])
 		}
+		m.narrowLive()
 	default:
 		if msg.Type == tea.KeyRunes {
 			m.draft += string(msg.Runes)
 		}
+		m.narrowLive()
 	}
+}
+
+// narrowLive applies the fleet search as it is typed, so the header's
+// count is the feedback: six keystrokes with nothing on screen was a typo
+// found only by its wrong result.
+func (m *Model) narrowLive() {
+	if !m.searchFleet {
+		return
+	}
+	m.fleetQuery = strings.TrimSpace(m.draft)
+	m.fleetScroll = 0
+	m.clampSelection()
 }
 
 // requestNarration asks the narrator to name the trail's closed legs, at most
@@ -225,12 +1538,16 @@ func (m *Model) requestNarration() {
 		m.refreshLabels()
 		return
 	}
-	m.narrated = shape
 	prompt := ""
 	if n := len(m.trail.Prompts); n > 0 {
 		prompt = m.trail.Prompts[n-1].Text
 	}
-	m.narrator.Request(m.selectedKey, m.trail, prompt)
+	// Remember the shape only once it is spoken for. A refusal — the one
+	// batch in flight was a board column's — used to be remembered as if it
+	// were an answer, and the trail being read was never asked for again.
+	if m.narrator.Request(m.selectedKey, m.trail, prompt) {
+		m.narrated = shape
+	}
 	m.refreshLabels()
 }
 
@@ -254,4 +1571,23 @@ func trailShape(key string, tr journey.Trail) string {
 		last = tr.Legs[closed-1].Start.String()
 	}
 	return key + "|" + strconv.Itoa(closed) + "|" + last
+}
+
+// readerName is the selected session's name, for the reader's sentences.
+func (m *Model) readerName() string {
+	if s, ok := m.selected(); ok {
+		return sessionName(s.Info)
+	}
+	return "the lead"
+}
+
+// strippedRows is the page's rows without their styling, for reading the
+// page as text: a tool call the reader wrapped is one sentence again once
+// the rows are joined.
+func strippedRows(page []string) []string {
+	out := make([]string, 0, len(page))
+	for _, l := range page {
+		out = append(out, strings.TrimSpace(ansi.Strip(l)))
+	}
+	return out
 }
