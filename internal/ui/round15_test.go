@@ -190,6 +190,7 @@ func TestAQueryHidingTheOpenSessionClears(t *testing.T) {
 // The help splits into two columns only where they hold whole, or where
 // one column would have to cut the keys.
 func TestTheHelpSplitsOnlyWhereItHolds(t *testing.T) {
+	forceASCII(t) // the join detector reads the bytes before a bar: with colour on, a style code is not air
 	// A column join carries text before its bar; the legend's read-line row
 	// (│ you were here) has only air before its own.
 	split := func(lines []string) bool {
