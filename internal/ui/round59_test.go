@@ -17200,3 +17200,144 @@ func TestTheReaderCursorStaysOnThePageTheFrameDraws(t *testing.T) {
 		lipgloss.SetColorProfile(prev)
 	}
 }
+
+// ---- round 112, fleet-hygiene, the rewrap ----
+// r112fhbFrom is the deck's own width ladder: every shape a reader can be
+// standing in when the window changes.
+var r112fhbFrom = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r112fhbTo are shapes it can change to — one wider, two narrower, two
+// shorter — so the rewrap goes both ways and a height-only change is
+// covered too.
+var r112fhbTo = [][2]int{{80, 24}, {90, 12}, {120, 20}, {152, 18}, {220, 16}}
+
+// r112fhbMarked is the drawn reader line carrying the cursor. The reader is
+// the frame's last panel at every width — beside the trail's companion from
+// 120 up, alone below it — so the mark is looked for after the row's last
+// panel rule and never in the trail's own cursor.
+func r112fhbMarked(frame string) (string, bool) {
+	for _, l := range strings.Split(frame, "\n") {
+		cells := strings.Split(ansi.Strip(l), "│")
+		if col := cells[len(cells)-1]; strings.Contains(col, "▸") {
+			return strings.TrimSpace(strings.ReplaceAll(col, "▸", " ")), true
+		}
+	}
+	return "", false
+}
+
+// r112fhbLastRow is the document's last row that is not a transcript blank
+// — the row `end of the conversation` is a word about.
+func r112fhbLastRow(doc []readerLine) int {
+	for i := len(doc) - 1; i >= 0; i-- {
+		if doc[i].kind != readerBlank {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestTheReaderMarkKeepsItsRowWhenTheWidthChanges pins the reader's cursor
+// across a rewrap.
+//
+// #319 brought the page back to the mark when the window changed size, and
+// #300's `▸` is on the frame again — but the mark it comes back on is found
+// by its row *number*, and a row number belongs to one wrapping. Rewrap the
+// document at another width and the same index is a different line: on
+// `many-idle` the reader standing on ` ▸⎿ edited · +1 −1`, the conversation's
+// last row, came back at another width on ` ▸Writing loader.py.` — two rows
+// and twenty minutes earlier — under the note `end of the conversation`,
+// which the frame then drew rows below. 43 of 360 resize pairs, both colour
+// profiles (#215, #218). The mark is found again by what it stood on: its
+// own moment, and among that moment's rows the one whose text it was.
+//
+// Four sides, nine scenes, five widths, five shapes to change into:
+//
+//  1. the resized frame draws a cursor at all (#319's own ground);
+//  2. it stands on a row of the moment it stood on before;
+//  3. where that moment's row still says what it said, on that very row;
+//  4. and a note the resize carries over is still true of it — where the
+//     row says `end of the conversation` the mark has not left the last
+//     moment the conversation has.
+func TestTheReaderMarkKeepsItsRowWhenTheWidthChanges(t *testing.T) {
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		pairs, ends := 0, 0
+		for _, sc := range allScenes() {
+			for _, from := range r112fhbFrom {
+				for _, to := range r112fhbTo {
+					w, h := from[0], from[1]
+					m := sceneModel(sc, w, h)
+					toLv3(m)
+					if len(m.doc(m.readerWidth())) == 0 {
+						continue // a lane whose agent has written nothing
+					}
+					pressKey(m, "G") // the conversation's end: a row the note names
+					was, ok := r112fhbMarked(m.View())
+					if !ok {
+						continue
+					}
+					stood, stoodText, note := m.anchorAt, m.anchorText, m.note
+					m.Update(tea.WindowSizeMsg{Width: to[0], Height: to[1]})
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 {
+						continue
+					}
+					pairs++
+					where := prof.name + " " + sc.name
+					// (1) the frame draws a cursor
+					now, ok := r112fhbMarked(m.View())
+					if !ok {
+						t.Errorf("%s %dx%d resized to %dx%d: the reader draws no cursor at all; note %q",
+							where, w, h, to[0], to[1], m.note)
+						continue
+					}
+					at := m.anchor
+					if at < 0 || at >= len(doc) {
+						t.Errorf("%s %dx%d resized to %dx%d: the cursor stands on row %d of a document of %d",
+							where, w, h, to[0], to[1], at, len(doc))
+						continue
+					}
+					// (2) on a row of the moment it stood on
+					if !stood.IsZero() && !doc[at].at.Equal(stood) {
+						t.Errorf("%s %dx%d resized to %dx%d: the mark stood on %q at %s and came back on %q at %s",
+							where, w, h, to[0], to[1], was, stood.Format("15:04"), now, doc[at].at.Format("15:04"))
+						continue
+					}
+					// (3) and on the very row, where that row still exists
+					if stoodText != "" && readerRowText(doc, at) != stoodText {
+						found := false
+						for i := range doc {
+							if doc[i].at.Equal(stood) && readerRowText(doc, i) == stoodText {
+								found = true
+								break
+							}
+						}
+						if found {
+							t.Errorf("%s %dx%d resized to %dx%d: the mark left %q for %q though the row is still drawn",
+								where, w, h, to[0], to[1], was, now)
+						}
+					}
+					// (4) and where the moment it stood on is the last the
+					// document has, the mark is still inside it, so a row
+					// saying `end of the conversation` is not drawn over a
+					// mark that has left the end
+					if strings.Contains(m.note, "end of the conversation") && note == m.note {
+						ends++
+						if last := r112fhbLastRow(doc); last >= 0 && !doc[last].at.Equal(doc[at].at) {
+							t.Errorf("%s %dx%d resized to %dx%d: the row says %q and the mark stands on %q, of an earlier moment than the last row %q",
+								where, w, h, to[0], to[1], m.note, now, strings.TrimSpace(doc[last].text))
+						}
+					}
+				}
+			}
+		}
+		if pairs < 150 || ends < 40 {
+			t.Errorf("%s: the pin measured %d resize pairs and %d ends — too few to mean anything", prof.name, pairs, ends)
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+}

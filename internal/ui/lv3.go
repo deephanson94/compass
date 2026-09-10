@@ -720,6 +720,32 @@ func (m *Model) markOldestLine() {
 	}
 }
 
+// reanchorRewrapped is the row the mark stands on once the document has
+// been rewrapped at a new width: the row of the same moment whose text it
+// was, or failing that the first row of that moment. An index that still
+// says the same thing is left alone, so a height-only change costs nothing.
+func reanchorRewrapped(doc []readerLine, at int, when time.Time, text string) int {
+	if at >= 0 && at < len(doc) && doc[at].at.Equal(when) && readerRowText(doc, at) == text {
+		return at
+	}
+	if when.IsZero() {
+		return -1
+	}
+	first := -1
+	for i, l := range doc {
+		if l.kind == readerBlank || !l.at.Equal(when) {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		if readerRowText(doc, i) == text {
+			return i
+		}
+	}
+	return first
+}
+
 // keepReaderCursorOnPage brings the reader's page back to its cursor after
 // the terminal has changed size.
 //
@@ -744,6 +770,16 @@ func (m *Model) keepReaderCursorOnPage() {
 		return
 	}
 	doc := m.doc(m.readerWidth())
+	// A row number belongs to one wrapping. A width change rewraps the
+	// document, and the same index is then a different line: the mark came
+	// back two rows and twenty minutes early — ` ▸⎿ edited · +1 −1` became
+	// ` ▸Writing loader.py.` — under a note, `end of the conversation`,
+	// that the frame now drew rows below, so the row the person was reading
+	// was not the row that came back (#319's residue). The mark is found
+	// again by what it stood on rather than by where it stood.
+	if row := reanchorRewrapped(doc, m.anchor, m.anchorAt, m.anchorText); row >= 0 && row != m.anchor {
+		m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
+	}
 	row := m.readerAnchorAt(doc)
 	if row < 0 {
 		return
