@@ -16304,3 +16304,179 @@ func TestTheReaderCursorNeverStandsInsideAWord(t *testing.T) {
 		t.Errorf("this pin stood on %d rows opening on a one-rune word, too few to be about the defect it names", oneRuneRows)
 	}
 }
+
+// ---- round 111, fleet-hygiene ----
+// r111fhWidths is the deck's own width ladder, so the search's landing is
+// pinned at every shape the deck draws.
+var r111fhWidths = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r111fhQuery is a word the scene's own conversation says more than once, so
+// the walk has somewhere to walk to. Read off the document rather than
+// hard-coded, so the pin does not go vacuous when a fixture is reworded.
+func r111fhQuery(doc []readerLine) string {
+	count := map[string]int{}
+	for _, l := range doc {
+		if l.kind == readerBlank {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, w := range strings.Fields(strings.ToLower(l.text)) {
+			w = strings.Trim(w, "()[].,:;\"'·⎿⏺❯◆◍◈▸")
+			if len([]rune(w)) < 5 || seen[w] {
+				continue
+			}
+			seen[w] = true
+			count[w]++
+		}
+	}
+	best, bestN := "", 0
+	for w, n := range count {
+		if n > bestN || (n == bestN && w < best) {
+			best, bestN = w, n
+		}
+	}
+	if bestN < 2 {
+		return ""
+	}
+	return best
+}
+
+// r111fhRowsWith is an independent read of "the document rows the query
+// appears in": the pin does not take readerMatches' own answer on trust.
+func r111fhRowsWith(doc []readerLine, q string) []int {
+	var out []int
+	for i, l := range doc {
+		if l.kind == readerBlank {
+			continue
+		}
+		if strings.Contains(strings.ToLower(l.text), strings.ToLower(q)) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// r111fhMarkedLine is the drawn line carrying the reader's cursor. The
+// reader is the frame's last column at every width — beside the trail's
+// companion from 120 up, alone below it — so the mark is looked for after
+// the row's last panel rule, never in the trail's own cursor.
+func r111fhMarkedLine(frame string) (string, bool) {
+	for _, l := range strings.Split(frame, "\n") {
+		cells := strings.Split(ansi.Strip(l), "│")
+		if strings.Contains(cells[len(cells)-1], "▸") {
+			return cells[len(cells)-1], true
+		}
+	}
+	return "", false
+}
+
+// r111fhSaysRow reports whether the drawn, cursor-bearing line carries the
+// document row's own opening words — the mark replaces a cell rather than
+// hiding one (#305), so the words survive it.
+func r111fhSaysRow(line, text string) bool {
+	flat := strings.ReplaceAll(line, "▸", " ")
+	want := strings.TrimSpace(text)
+	if r := []rune(want); len(r) > 12 {
+		want = string(r[:12])
+	}
+	return want != "" && strings.Contains(flat, want)
+}
+
+// TestTheSearchWalkTakesTheReaderCursorToTheMatch pins the search's landing
+// against #300's rule and #314's: `/`, `n` and `N` move the reader's page to
+// a match and the note counts it (`match 3/4`, #236), and the mark that says
+// which row that is must go with them.
+//
+// Before this, the mark stayed where the page left it: on 447 of the
+// corpus's 452 search stands it stood on a row that is not the match the
+// note counts, and on 333 of those it was off the page altogether, so the
+// reader drew no cursor at all while the footer beside it named `j/k rows`
+// and `space unfold`, and Space fell back to the top-down scan for want of
+// one (#300, #313). The match's own highlight is a style (matchStyle), which
+// no capture, no NO_COLOR terminal and no faint-reverse terminal carries
+// (§4) — so on a monochrome deck nothing on the frame said which row
+// `match 3/4` meant. Four sides, both colour profiles (#215, #218):
+//
+//  1. the mark is on the frame, in the reader's own column;
+//  2. it stands on the row the walk counts, and that row is a match;
+//  3. it is inside the drawn viewport, so the frame is not a page with no
+//     cursor on it;
+//  4. `N` walks back the way `n` came, mark and all.
+func TestTheSearchWalkTakesTheReaderCursorToTheMatch(t *testing.T) {
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		forward, back := 0, 0
+		for _, sc := range []scene{sceneManyIdle(), sceneFleetHygiene()} {
+			for _, size := range r111fhWidths {
+				w, h := size[0], size[1]
+				m := sceneModel(sc, w, h)
+				toLv3(m)
+				q := r111fhQuery(m.doc(m.readerWidth()))
+				if q == "" {
+					t.Fatalf("%s %s %dx%d: no word this conversation says twice", prof.name, sc.name, w, h)
+				}
+				pressKey(m, "/")
+				pressKey(m, q)
+				pressKey(m, "enter")
+				doc := m.doc(m.readerWidth())
+				want := r111fhRowsWith(doc, q)
+				if len(want) < 2 {
+					t.Fatalf("%s %s %dx%d: %q appears on %d rows, want at least two", prof.name, sc.name, w, h, q, len(want))
+				}
+				seen := map[int]bool{}
+				for step := 0; step <= len(want); step++ {
+					if step > 0 {
+						pressKey(m, "n")
+					}
+					doc = m.doc(m.readerWidth())
+					at := m.anchor
+					where := prof.name + " " + sc.name + " " + m.note
+					// (2) the mark stands on a row the query appears in
+					if at < 0 || at >= len(doc) || !strings.Contains(strings.ToLower(doc[at].text), strings.ToLower(q)) {
+						t.Errorf("%s %dx%d /%s step %d: the note says %q and the cursor stands on row %d, which is not a match", where, w, h, q, step, m.note, at)
+						continue
+					}
+					seen[at] = true
+					// (3) and it is on the page the frame draws
+					top, height := m.readerTop(doc), m.readerHeight()
+					if at < top || at >= top+height {
+						t.Errorf("%s %dx%d /%s step %d: the note says %q with the cursor on row %d, off the drawn page [%d,%d)", where, w, h, q, step, m.note, at, top, top+height)
+					}
+					// (1) and the frame draws it, in the reader's column
+					line, ok := r111fhMarkedLine(m.View())
+					if !ok {
+						t.Errorf("%s %dx%d /%s step %d: the note says %q and the reader draws no cursor at all", where, w, h, q, step, m.note)
+						continue
+					}
+					if !r111fhSaysRow(line, doc[at].text) {
+						t.Errorf("%s %dx%d /%s step %d: the drawn cursor is on %q, not on the match %q", where, w, h, q, step, strings.TrimSpace(line), strings.TrimSpace(doc[at].text))
+					}
+					forward++
+				}
+				if len(seen) < 2 {
+					t.Errorf("%s %s %dx%d /%s: the walk stood on %d distinct matches of %d", prof.name, sc.name, w, h, q, len(seen), len(want))
+				}
+				// (4) the walk comes back the way it went
+				for step := 0; step < len(want); step++ {
+					wasAt := m.anchor
+					pressKey(m, "N")
+					doc = m.doc(m.readerWidth())
+					at := m.anchor
+					if at == wasAt || at < 0 || at >= len(doc) || !strings.Contains(strings.ToLower(doc[at].text), strings.ToLower(q)) {
+						t.Errorf("%s %s %dx%d /%s back-step %d: `N` left the cursor on row %d (was %d), which is not the previous match", prof.name, sc.name, w, h, q, step, at, wasAt)
+						continue
+					}
+					back++
+				}
+			}
+		}
+		if forward < 20 || back < 20 {
+			t.Errorf("%s: the pin measured %d forward stands and %d back — too few to mean anything", prof.name, forward, back)
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+}

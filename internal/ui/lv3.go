@@ -1130,6 +1130,28 @@ func (m *Model) jumpMatch(dir int) {
 	m.note = fmt.Sprintf("match %d/%d", at+1, len(matches))
 }
 
+// markMatch puts the reader's cursor on the row the search just landed on.
+//
+// `/`, `n` and `N` move the page to a match and the note counts it (`match
+// 3/4`, #236), but the mark that says which row that is stayed where it
+// was: on 447 of the corpus's 452 search stands the cursor stood on a row
+// that is not the match the note counts, and on 333 of them it was off the
+// page altogether, so the reader drew no cursor at all while the footer
+// beside it named `j/k rows` and `space unfold` — #300's own defect, and
+// the one #313 cut for the lane's opening. Space there fell back to the
+// top-down scan for want of a cursor rather than by #300's rule, and the
+// match's own highlight is a style (`matchStyle`), which no capture, no
+// NO_COLOR terminal and no faint-reverse terminal carries (§4), so on a
+// monochrome deck nothing on the frame said which row `match 3/4` meant.
+// The key that moves the page takes the mark with it, as `g` and `G` do
+// (#314) and as `[` and `]` have since #20.
+func (m *Model) markMatch(doc []readerLine, row int) {
+	if row < 0 || row >= len(doc) {
+		return
+	}
+	m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
+}
+
 // landFirstMatch is where the search you just typed opens: the first match
 // in the run, not the first one below the top of the page.
 //
@@ -1150,6 +1172,7 @@ func (m *Model) landFirstMatch() {
 	}
 	m.walkRow = matches[0] + 1
 	m.scroll = clampScroll(matches[0], len(doc), m.readerHeight())
+	m.markMatch(doc, matches[0])
 	m.note = fmt.Sprintf("match 1/%d", len(matches))
 }
 
@@ -1166,6 +1189,7 @@ func (m *Model) walkTo(doc []readerLine, matches []int, dir int) int {
 	at := m.walkStep(matches, dir)
 	m.walkRow = matches[at] + 1
 	m.scroll = clampScroll(matches[at], len(doc), m.readerHeight())
+	m.markMatch(doc, matches[at])
 	return at
 }
 
