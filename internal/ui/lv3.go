@@ -720,6 +720,59 @@ func (m *Model) markOldestLine() {
 	}
 }
 
+// keepReaderCursorOnPage brings the reader's page back to its cursor after
+// the terminal has changed size.
+//
+// A window dragged narrower draws fewer rows, and the page kept the scroll
+// it had: the cursor the person left down the page fell off the bottom of
+// it, so the frame came back with no `▸` anywhere while the footer beside
+// it named `j/k rows` and `space unfold` — #300's own defect, the one #313
+// cut for the lane's opening and #317 for the search walk, reached this
+// time by the window and not by a key. `space` there fell back to the
+// top-down scan for want of a visible cursor rather than by #300's rule,
+// and the next `j` stepped from the page's top, not from the row the mark
+// was on, so the cursor jumped backwards up the conversation.
+//
+// The viewport follows the mark, the rule `readerCursorMove` already keeps
+// for `j`, `k`, `ctrl+d` and `ctrl+u`: the page scrolls only far enough to
+// put the cursor's row back on it, and where the cursor is already on the
+// page nothing moves. The mark itself is not touched — the row the person
+// left it on is the row it comes back on, re-resolved off the air by
+// `readerAnchorAt` as every other redraw does (#314).
+func (m *Model) keepReaderCursorOnPage() {
+	if m.level < levelReader || m.anchor < 0 {
+		return
+	}
+	doc := m.doc(m.readerWidth())
+	row := m.readerAnchorAt(doc)
+	if row < 0 {
+		return
+	}
+	h := m.readerHeight()
+	switch top := m.readerTop(doc); {
+	case row < top:
+		m.scroll = clampScroll(row, len(doc), h)
+	case row > top+h-1:
+		m.scroll = scrollShowing(doc, row, h)
+	}
+}
+
+// scrollShowing is the scroll that puts row on the page the frame will
+// actually draw.
+//
+// The drawn top is not the scroll: a page opens on a line and not on the
+// air between blocks, and never on a result whose call is the row above
+// (readerTopIn), so the obvious landing — row minus a screenful — can slide
+// back up and leave the row one under the page. The offset steps down until
+// the drawn page carries the row, and stops at the last screenful.
+func scrollShowing(doc []readerLine, row, h int) int {
+	s := clampScroll(row-h+1, len(doc), h)
+	for readerTopIn(doc, s, h)+h-1 < row && s < len(doc)-h {
+		s++
+	}
+	return s
+}
+
 // anchorReader points the reader at the row the Lv2 cursor stands on: the
 // middle panel is that moment of the conversation, and it re-anchors on every
 // cursor move (M7 contract). A row the document does not reach yet leaves the
@@ -838,7 +891,11 @@ func (m *Model) readerCursorMove(delta int) bool {
 	case target < top:
 		m.scroll = clampScroll(target, len(doc), height)
 	case target > top+height-1:
-		m.scroll = clampScroll(target-height+1, len(doc), height)
+		// The page the frame draws, not the offset: a landing whose top
+		// falls on air or on a result slides back up, and the row the
+		// cursor just stepped onto was left one under the page with no
+		// mark drawn on the frame at all (scrollShowing).
+		m.scroll = scrollShowing(doc, target, height)
 	}
 	if fits {
 		if !moved {

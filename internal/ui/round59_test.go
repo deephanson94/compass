@@ -16672,3 +16672,189 @@ func TestTheJumpToTheStartLetsTheMarkSayIt(t *testing.T) {
 	}
 	t.Logf("Lv3 stands %d · `g` walked the mark on %d · the word kept for a key on %d", stands, walked, kept)
 }
+
+// ---- round 112, second-day ----
+// TestTheReaderPageFollowsItsCursorWhenTheWindowChangesSize pins #300's mark
+// against the one thing that can still take it off the page: the window.
+//
+// A terminal dragged narrower draws fewer reader rows, and SetSize moved
+// neither the page nor the mark: the cursor the person left down the page
+// fell under it, so the frame came back with no `▸` anywhere while the
+// footer beside it named `j/k rows` and `space unfold` — the same defect
+// #313 cut for the lane's opening and #317 for the search walk, reached by
+// the window instead of by a key. `j` there stepped from the page's top and
+// not from the mark, thirteen rows back up the conversation.
+//
+// Three sides: the frame it was found on (`second-day`, the archive's `api`
+// reader, 100x30 dragged to 80x24), the rule over every Lv3 stand of both
+// second-day scenes at five widths resized to each of the other four under
+// both colour profiles (#215, #218), and the price — the page moves only
+// where the cursor would otherwise be off it, and the resize never moves the
+// mark itself.
+func TestTheReaderPageFollowsItsCursorWhenTheWindowChangesSize(t *testing.T) {
+	forceASCII(t)
+
+	sizes := [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+	// standAt drives one scene to a stand and hands back the model.
+	standAt := func(sc scene, w, h int, keys []string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	// markedRow is the one row of the frame carrying the cursor, and how
+	// many rows carry one; at eighty and a hundred the reader owns the
+	// screen, so the frame's marks are the reader's.
+	markedRow := func(m *Model) (string, int) {
+		row, n := "", 0
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if strings.Contains(l, "▸") {
+				row, n = strings.TrimRight(l, " "), n+1
+			}
+		}
+		return row, n
+	}
+	// drawnFooter is the frame's own last row.
+	drawnFooter := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// onPage says whether the cursor's row is inside the page the frame is
+	// about to draw, and hands back the row and the page for the message.
+	onPage := func(m *Model) (bool, int, int, int) {
+		doc := m.doc(m.readerWidth())
+		if len(doc) == 0 {
+			return true, -1, 0, 0
+		}
+		row := m.readerAnchorAt(doc)
+		top, h := m.readerTop(doc), m.readerHeight()
+		if row < 0 {
+			return true, row, top, top + h - 1
+		}
+		return row >= top && row <= top+h-1, row, top, top + h - 1
+	}
+
+	var secondDay, firstSession scene
+	for _, sc := range allScenes() {
+		switch sc.name {
+		case "second-day":
+			secondDay = sc
+		case "first-session":
+			firstSession = sc
+		}
+	}
+
+	// 1 · the frame it was found on: the walkthrough's own way into the
+	// archive's `api` reader, at a hundred, and the window dragged to eighty.
+	toArchiveReader := append(append(append([]string(nil), canonicalKeys...), "esc"), "tab", "2", "tab", "tab")
+	m := standAt(secondDay, 100, 30, toArchiveReader)
+	if m.level != levelReader {
+		t.Fatalf("the walkthrough's prefix no longer stands in the reader (Lv%d)", m.level)
+	}
+	was, wasRow := m.anchor, ""
+	if doc := m.doc(m.readerWidth()); was >= 0 && was < len(doc) {
+		wasRow = readerRowText(doc, was)
+	}
+	if row, n := markedRow(m); n != 1 || wasRow == "" {
+		t.Fatalf("the stand this is measured on does not draw one cursor: %d marks, row %q", n, row)
+	}
+	m.SetSize(80, 24)
+	row, n := markedRow(m)
+	if n != 1 {
+		t.Errorf("second-day 100x30 → 80x24 in the archive's reader: the frame draws %d cursor marks, want exactly one:\n%s", n, ansi.Strip(m.View()))
+	}
+	if n == 1 && !strings.Contains(row, wasRow) {
+		t.Errorf("second-day 100x30 → 80x24: the mark came back on %q, the row it stood on was %q", row, wasRow)
+	}
+	if m.anchor != was {
+		t.Errorf("the resize moved the mark itself: row %d → %d", was, m.anchor)
+	}
+	if foot := drawnFooter(m); !strings.Contains(foot, "j/k rows") {
+		t.Errorf("the row under the resized reader no longer names the key that steps the cursor: %q", foot)
+	}
+	// And the next `j` steps from the mark, not from the top of the page.
+	doc := m.doc(m.readerWidth())
+	next := nonBlankRow(doc, m.anchor+1, 1)
+	pressKey(m, "j")
+	if next >= 0 && m.anchor != next {
+		t.Errorf("after the resize `j` stepped to row %d, the row under the mark is %d", m.anchor, next)
+	}
+	if _, marks := markedRow(m); marks != 1 {
+		t.Errorf("after the resize `j` left %d marks on the frame, want one:\n%s", marks, ansi.Strip(m.View()))
+	}
+
+	// 2 · the rule: every Lv3 stand of both second-day scenes at five widths,
+	// resized to each of the other four, under both colour profiles.
+	pairs, followed, still := 0, 0, 0
+	for _, sc := range []scene{secondDay, firstSession} {
+		keys := append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...)
+		for _, size := range sizes {
+			w, h := size[0], size[1]
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				for i := range keys {
+					prefix := keys[:i+1]
+					base := standAt(sc, w, h, prefix)
+					if base.level != levelReader || len(base.doc(base.readerWidth())) == 0 {
+						continue
+					}
+					for _, ns := range sizes {
+						if ns == size {
+							continue
+						}
+						after := standAt(sc, w, h, prefix)
+						before, wasScroll := after.anchor, after.scroll
+						after.SetSize(ns[0], ns[1])
+						pairs++
+						ok, r, top, bottom := onPage(after)
+						if !ok {
+							t.Errorf("%s %dx%d → %dx%d %v after %q: the cursor stands on row %d and the page draws %d..%d, so the frame carries no mark:\n  %q",
+								sc.name, w, h, ns[0], ns[1], prof, prefix[len(prefix)-1], r, top, bottom, drawnFooter(after))
+						}
+						if after.anchor != before {
+							t.Errorf("%s %dx%d → %dx%d %v: the resize moved the mark itself, row %d → %d", sc.name, w, h, ns[0], ns[1], prof, before, after.anchor)
+						}
+						if ns[0] <= 100 && r >= 0 {
+							if _, marks := markedRow(after); marks != 1 {
+								t.Errorf("%s %dx%d → %dx%d %v: the resized reader draws %d marks, want one", sc.name, w, h, ns[0], ns[1], prof, marks)
+							}
+						}
+						// The price: the page moves only where the cursor
+						// would otherwise have fallen off it.
+						if after.scroll != wasScroll {
+							followed++
+							// What the page would have been had the resize
+							// left the scroll where it was.
+							doc, height := after.doc(after.readerWidth()), after.readerHeight()
+							stood := readerTopIn(doc, wasScroll, height)
+							if r >= stood && r <= stood+height-1 {
+								t.Errorf("%s %dx%d → %dx%d %v: the page moved (scroll %d → %d) with the cursor already on it (row %d, page %d..%d)",
+									sc.name, w, h, ns[0], ns[1], prof, wasScroll, after.scroll, r, stood, stood+height-1)
+							}
+						} else {
+							still++
+						}
+						// And the first step after the resize lands on the
+						// page the frame draws, not one row under it.
+						pressKey(after, "j")
+						if ok, r, top, bottom := onPage(after); !ok {
+							t.Errorf("%s %dx%d → %dx%d %v: the `j` after the resize left the cursor on row %d with the page drawing %d..%d", sc.name, w, h, ns[0], ns[1], prof, r, top, bottom)
+						}
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	if pairs < 1000 {
+		t.Errorf("only %d (stand, new size) pairs were reached, want at least 1000 — the walk is not reaching the reader any more", pairs)
+	}
+	if still == 0 {
+		t.Errorf("every resize moved the page: the fold is not the narrow one it claims to be")
+	}
+	t.Logf("resize pairs %d · the page followed the cursor on %d · stood still on %d", pairs, followed, still)
+}

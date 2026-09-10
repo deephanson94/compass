@@ -445,6 +445,9 @@ func (m *Model) SetSize(width, height int) {
 		// the view it took away.
 		m.level, m.boardForced = levelBoard, false
 	}
+	// A window that changed size is still looking at the row it was
+	// looking at: the reader's page comes back to its cursor (#319).
+	m.keepReaderCursorOnPage()
 }
 
 // SetSessions installs a fleet snapshot as of now, without polling.
