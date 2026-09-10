@@ -8486,11 +8486,11 @@ func TestNoBandRowRefusesTheDigitItWears(t *testing.T) {
 	forceASCII(t)
 	drawn, refusedRight := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				w, h := wh[0], wh[1]
@@ -9148,11 +9148,11 @@ func TestNoDigitOffTheFrameOpensTheArchive(t *testing.T) {
 	stands := [][]string{nil, {"x"}, {"tab"}}
 	off, bandDigits := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				w, h := wh[0], wh[1]
@@ -9618,11 +9618,11 @@ func TestTheArchivesHideRefusalKeepsTheWayDeeper(t *testing.T) {
 	for _, sc := range allScenes() {
 		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-				old := lipgloss.ColorProfile()
-				lipgloss.SetColorProfile(prof)
 				if prof == termenv.TrueColor && !sweepColour() {
 					continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 				}
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
 				for _, route := range routes {
 					m := sceneModel(sc, size[0], size[1])
 					for _, k := range route {
@@ -11819,11 +11819,11 @@ func TestTheDigitRefusalKeepsTheWayDeeper(t *testing.T) {
 
 	// The frame it was found on, under both profiles (#215, #218).
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		sc := sceneSecondDay()
 		m := walk(sc, 80, 24, "A")
 		if !strings.Contains(footerOf(m), "tab deeper") {
@@ -11859,11 +11859,11 @@ func TestTheDigitRefusalKeepsTheWayDeeper(t *testing.T) {
 	for _, sc := range allScenes() {
 		for _, wh := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-				old := lipgloss.ColorProfile()
-				lipgloss.SetColorProfile(prof)
 				if prof == termenv.TrueColor && !sweepColour() {
 					continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 				}
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
 				for _, route := range [][]string{{"1"}, {"3"}, {"A", "1"}} {
 					m := walk(sc, wh[0], wh[1], route[:len(route)-1]...)
 					was := footerOf(m)
@@ -11946,11 +11946,11 @@ func TestTheSessionViewAndTheReaderNameTheHideKey(t *testing.T) {
 	}
 	deep, acted, named, full := 0, 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				w, h := size[0], size[1]
@@ -12209,11 +12209,11 @@ func TestTheArchiveNamesTheHideKeyOnTheRowItKeeps(t *testing.T) {
 	}
 	kept, whole, named, offered := 0, 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				w, h := size[0], size[1]
@@ -12800,11 +12800,11 @@ func TestTheReadersMirrorKeyIsNotASilentToggle(t *testing.T) {
 	forceASCII(t)
 	standing, first, toggles := 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r102ttMirrorSizes {
 				w, h := size[0], size[1]
@@ -13248,11 +13248,11 @@ func TestTheReadersRowNamesTheMirrorKey(t *testing.T) {
 	forceASCII(t)
 	stands, roomy, named, standing := 0, 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r103ttRowSizes {
 				w, h := size[0], size[1]
@@ -13557,11 +13557,11 @@ func TestTheSessionViewsRowNamesTheGrabKey(t *testing.T) {
 	forceASCII(t)
 	stands, roomy, named, readers := 0, 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r104ttGrabSizes {
 				w, h := size[0], size[1]
@@ -13755,10 +13755,10 @@ func TestTheArchivesHideRefusalNamesTheWayDeeper(t *testing.T) {
 	defer lipgloss.SetColorProfile(old)
 	stands, refused := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, sz := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				w, h := sz[0], sz[1]
@@ -13871,11 +13871,11 @@ func TestTheNoPaneRefusalKeepsTheWayDeeper(t *testing.T) {
 	routes := [][]string{{"A", "tab"}, {"A"}}
 	stands, refusals := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				for _, route := range routes {
@@ -14297,11 +14297,11 @@ func TestTheBoardsMirrorKeySaysTheFlagBothWays(t *testing.T) {
 	forceASCII(t)
 	boards, deeps := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r106ttOffSizes {
 				w, h := size[0], size[1]
@@ -14455,11 +14455,11 @@ func TestThePresentNoteKeepsTheWayDeeper(t *testing.T) {
 	// The rule, over every scene at five widths under both profiles.
 	stands, refusals := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				for _, route := range [][]string{{"tab"}, {"A", "tab"}} {
@@ -14732,11 +14732,11 @@ func TestTheReaderMoveSaysWhatItDid(t *testing.T) {
 	// says something.
 	moves, stucks := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 				for _, key := range []string{"j", "k", "ctrl+d", "ctrl+u"} {
@@ -16343,11 +16343,11 @@ func TestTheReaderCursorNeverStandsInsideAWord(t *testing.T) {
 	sweep(t)
 	stands, marked, oneRuneRows := 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r111ttWordSizes {
 				w, h := size[0], size[1]
@@ -17006,11 +17006,11 @@ func TestSpaceKeepsTheReaderCursorOnThePage(t *testing.T) {
 	sweep(t)
 	presses, atEnd, marked := 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r112ttEndSizes {
 				w, h := size[0], size[1]
@@ -17903,11 +17903,11 @@ func TestTheFoldKeepsTheReaderCursorOnItsOwnRow(t *testing.T) {
 
 	presses, above := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(prof)
 		if prof == termenv.TrueColor && !sweepColour() {
 			continue // the colour pass is TestTheCorpusSaysTheSameWordsWithColourOn's
 		}
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
 		for _, sc := range allScenes() {
 			for _, size := range r113ttFoldSizes {
 				w, h := size[0], size[1]
