@@ -21,6 +21,16 @@ func sweep(t *testing.T) {
 	if testing.Short() {
 		t.Skip("a panel sweep: run without -short to hold the rule")
 	}
+	if sweepColour() {
+		return // the colour walk flips the one process-wide profile: sweeps take turns
+	}
+	// The sweeps run side by side (#325). Nothing they touch is shared: a
+	// scene is built afresh by allScenes(), a model by sceneModel(), and
+	// the one process-wide thing — lipgloss's colour profile — is Ascii
+	// for every one of them, set here after the sequential tests have
+	// finished and restored whatever they flipped.
+	t.Parallel()
+	forceASCII(t)
 }
 
 // sweepColour says whether a sweep walks its frames a second time with
