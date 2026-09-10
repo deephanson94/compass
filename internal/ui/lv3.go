@@ -1223,9 +1223,24 @@ func (m *Model) toggleFold() {
 		return
 	}
 	toggledEvent := doc[i].event
+	was := len(doc)
 	m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
 	m.docVer++
 	m.docCache.valid = false
+	// The cursor keeps its own row across the reshape. A fold above the
+	// mark inserts (or takes back) rows before it, and the anchor is an
+	// index into the document those rows just renumbered: left alone it
+	// names whatever now sits at that number. On `two-tools` at 120x34 the
+	// mark stood on the ask's own second line, `CIDR / keep bastion])`,
+	// and `space` — falling back to the first folded result on screen,
+	// seven rows above it (#300) — left the mark on ` 5    func main() {`,
+	// a line of main.tf the person never walked to, while the note named
+	// `unfolded Read(main.tf)` and said nothing of the cursor. The row
+	// under the mark moves by exactly the rows the fold added or removed
+	// above it; a cursor above the fold is untouched, as it always was.
+	if grew := len(m.doc(width)) - was; grew != 0 && m.anchor > i {
+		m.anchor += grew
+	}
 	// Folding or unfolding renumbers every row after it: the anchor is a
 	// document position, and the document just changed shape under it. Left
 	// alone, a cursor above the fold that toggled stays exactly where it
@@ -1255,6 +1270,14 @@ func (m *Model) toggleFold() {
 				m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
 			}
 		}
+	}
+	// And where the mark stands on the row the fold itself rewrote, the
+	// title's copy of that row is re-read from it: `⎿ 215 passed in 4.21s
+	// · 1 more line` stayed in the title over a row the press had just
+	// opened to `⎿ 2 lines`, naming a line the frame no longer draws and
+	// a `1 more line` nothing was hiding any more.
+	if nd := m.doc(width); m.anchor >= 0 && m.anchor < len(nd) && nd[m.anchor].event == toggledEvent {
+		m.anchorAt, m.anchorText = nd[m.anchor].at, readerRowText(nd, m.anchor)
 	}
 	// And the page follows the cursor, the rule #300 gave the movement keys
 	// in this same panel: the viewport moves only far enough to keep the

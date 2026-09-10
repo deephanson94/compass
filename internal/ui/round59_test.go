@@ -17734,3 +17734,179 @@ func r113sdNear(doc []readerLine, row int, head string) bool {
 	}
 	return false
 }
+
+// ---- round 113, two-tools ----
+// ---- round 113, two-tools ----
+// TestTheFoldKeepsTheReaderCursorOnItsOwnRow holds Space to the last of the
+// reader cursor's rules: a key that is not a movement key does not move the
+// cursor.
+//
+// The anchor is an index into the document, and a fold above it renumbers
+// every row after the fold. toggleFold repaired that index only where it
+// came to rest on air (#314) — anywhere else the mark stayed at the same
+// number and the number now named a different row. On `two-tools` at 120x34
+// the mark stood on the ask's own second line, ` ▸CIDR / keep bastion])`,
+// and `space` — with no fold under the cursor, falling back to the first
+// folded result on screen seven rows above it (#300) — left the mark on
+// `  ▸  5    func main() {`, a line of main.tf, while the note said
+// `unfolded Read(main.tf)` and nothing said the cursor had moved.
+//
+// The row under the mark moves by exactly the rows the fold added or took
+// back above it; a cursor above the fold is untouched, as it always was;
+// and where the mark stands on the row the fold itself rewrote, the title's
+// copy of that row is re-read from it, so `⎿ 215 passed in 4.21s · 1 more
+// line` does not stand in the title over a row the same press opened to
+// `⎿ 2 lines`.
+//
+// Four sides, under both colour profiles (#215, #218):
+//   - the fault: after Space the marked row carries the words it carried
+//     before, wherever the fold was not the cursor's own row;
+//   - the frame agrees: exactly one mark is drawn, on the page (#320);
+//   - the title says the row it is on: the anchored row's own words;
+//   - it costs the frame nothing: no drawn row exceeds its terminal, and
+//     Space still says what it did.
+//
+// It refuses to be vacuous two ways: at least 100 Space presses are walked,
+// and at least 8 of them fold above the cursor — the case the fix is about.
+func TestTheFoldKeepsTheReaderCursorOnItsOwnRow(t *testing.T) {
+	forceASCII(t)
+
+	presses, above := 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r113ttFoldSizes {
+				w, h := size[0], size[1]
+				for _, route := range r113ttFoldRoutes {
+					m := r113ttFoldStand(sc, w, h, route)
+					if m.level < levelReader {
+						continue
+					}
+					for _, walk := range r113ttFoldWalks {
+						for _, k := range walk {
+							pressKey(m, k)
+							poll(m, sc)
+						}
+						doc := m.doc(m.readerWidth())
+						a0 := m.readerAnchorAt(doc)
+						if a0 < 0 || a0 >= len(doc) {
+							continue
+						}
+						wasText, wasEvent := strings.TrimSpace(readerRowText(doc, a0)), doc[a0].event
+						wasRow, wasMarks := r113ttFoldMarkedRow(ansi.Strip(m.View()))
+						if wasMarks != 1 {
+							continue // only stands the frame already marks once
+						}
+						top, height := m.readerTop(doc), m.readerHeight()
+						folded := -1
+						if a0 >= top && a0 < top+height && doc[a0].foldable() {
+							folded = a0
+						} else {
+							for j := top; j < len(doc) && j < top+height; j++ {
+								if doc[j].foldable() {
+									folded = j
+									break
+								}
+							}
+						}
+						pressKey(m, "space")
+						poll(m, sc)
+						presses++
+						if folded >= 0 && folded < a0 {
+							above++
+						}
+						nd := m.doc(m.readerWidth())
+						a1 := m.readerAnchorAt(nd)
+						if a1 < 0 || a1 >= len(nd) {
+							continue
+						}
+						nowText := strings.TrimSpace(readerRowText(nd, a1))
+						frame := ansi.Strip(m.View())
+						row, marks := r113ttFoldMarkedRow(frame)
+
+						// 1 · the cursor did not move: the row it stands on
+						// carries the words it carried, unless the press
+						// rewrote that row itself.
+						if nd[a1].event != wasEvent && nowText != wasText {
+							t.Errorf("%v %s %dx%d after %v: Space moved the cursor off its own row — it stood on %q and now stands on %q (note %q)",
+								prof, sc.name, w, h, append(append([]string(nil), route...), walk...), wasText, nowText, m.note)
+						}
+						// 2 · and the frame draws it, once, on the page.
+						if marks != 1 {
+							t.Errorf("%v %s %dx%d after %v: the reader draws %d cursor marks after Space, want one (it stood on %q)", prof, sc.name, w, h, route, marks, strings.TrimSpace(wasRow))
+						}
+						if drawn := readerTopIn(nd, m.scroll, m.readerHeight()); a1 < drawn || a1 > drawn+m.readerHeight()-1 {
+							t.Errorf("%v %s %dx%d: after Space the cursor's row %d is off the page the frame draws (%d..%d)", prof, sc.name, w, h, a1, drawn, drawn+m.readerHeight()-1)
+						}
+						// 3 · the title's copy of the row is the row's own
+						// words, not the ones the press has just replaced.
+						if nd[a1].event == wasEvent && nowText != wasText && strings.TrimSpace(m.anchorText) == wasText {
+							t.Errorf("%v %s %dx%d: the title still names %q, the row's words before the press, while that row now reads %q", prof, sc.name, w, h, wasText, nowText)
+						}
+						// 4 · and it costs the frame nothing.
+						for _, l := range strings.Split(frame, "\n") {
+							if lipgloss.Width(l) > w {
+								t.Errorf("%v %s %dx%d: a row of %d cells after Space: %q", prof, sc.name, w, h, lipgloss.Width(l), l)
+								break
+							}
+						}
+						if m.note == "" {
+							t.Errorf("%v %s %dx%d: Space says nothing about what it did", prof, sc.name, w, h)
+						}
+						if marks == 1 && strings.TrimSpace(strings.ReplaceAll(row, "▸", "")) == "" {
+							t.Errorf("%v %s %dx%d: the mark stands on a row with no words after Space", prof, sc.name, w, h)
+						}
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+	if presses < 100 {
+		t.Errorf("only %d Space presses were walked, want at least 100 — the walk is not reaching the reader", presses)
+	}
+	if above < 8 {
+		t.Errorf("only %d of the Space presses folded above the cursor, want at least 8 — the case the fold is about is not being reached", above)
+	}
+	t.Logf("Space presses %d · folds above the cursor %d", presses, above)
+}
+
+var r113ttFoldSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+var r113ttFoldRoutes = [][]string{
+	{"1", "tab", "tab", "tab"},
+	{"A", "tab", "tab", "tab"},
+}
+
+var r113ttFoldWalks = [][]string{{}, {"j", "j"}}
+
+// r113ttFoldStand drives one scene to a stand and hands back the model.
+func r113ttFoldStand(sc scene, w, h int, keys []string) *Model {
+	m := sceneModel(sc, w, h)
+	for _, k := range keys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	return m
+}
+
+// r113ttFoldReaderCell is the frame row's reader column: the reader is the
+// last panel at every width — beside the trail's companion from 120 up,
+// alone below it — so the trail's own cursor is never read as the reader's.
+func r113ttFoldReaderCell(line string) string {
+	cells := strings.Split(line, "│")
+	return strings.TrimRight(cells[len(cells)-1], " ")
+}
+
+// r113ttFoldMarkedRow is the reader's own cursor row and how many of its
+// rows carry a mark.
+func r113ttFoldMarkedRow(frame string) (string, int) {
+	row, n := "", 0
+	for _, l := range strings.Split(frame, "\n") {
+		if cell := r113ttFoldReaderCell(l); strings.Contains(cell, "▸") {
+			row, n = cell, n+1
+		}
+	}
+	return row, n
+}
