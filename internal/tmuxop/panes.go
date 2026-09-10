@@ -163,7 +163,7 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 		if !ok {
 			continue // a pane with no claude in it is not a location
 		}
-		cp := claudePane{pane: pane, cwd: cwd, since: p.StartTime(pid)}
+		cp := claudePane{pane: pane, cwd: cwd, since: p.StartTime(pid), tool: toolOf(p, pid)}
 		found = append(found, cp)
 		byCwd[cwd] = append(byCwd[cwd], cp)
 	}
@@ -208,6 +208,9 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 		for _, s := range contenders[cp.cwd] {
 			if taken[s.Key()] {
 				continue
+			}
+			if cp.tool != "" && s.ToolName() != cp.tool {
+				continue // a claude session never lives in an opencode's pane, nor the reverse
 			}
 			if plausible && !couldBeIn(s, cp) {
 				continue
@@ -256,6 +259,7 @@ type claudePane struct {
 	pane  Pane
 	cwd   string // the cwd of the claude inside it, as /proc reports it
 	since time.Time
+	tool  string // "claude" or "opencode": which CLI the pane is running
 }
 
 // procSlack forgives the last tick of arithmetic between a transcript's own

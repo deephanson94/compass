@@ -1,13 +1,14 @@
-◉ "fix the 401 bug"                38m
+◉ "fix the 401 bug"            38m ago
 ╷
 ◆ scout  middleware.py              5m
 │
 ◆ build  tokens.py                 12m
 │
 ◆ test   pytest              18✓ 2✗ 8m
-├─◈ scout the payments module        ✓
-● fix    fix the token refresh    ← 2m
-┊
+├─◈ scout the payments module ⌀ 7m ago
+│  └ came back with no report
+● fix    fix the token refresh  for 3m
+┊ 2 to go · 1 doing · 1 done
 ◌ add a regression test
 ┊
 ◌ update the changelog

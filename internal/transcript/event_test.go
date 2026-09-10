@@ -347,3 +347,21 @@ func TestParseLineShapesFixtureFailsSoft(t *testing.T) {
 		}
 	}
 }
+
+// A "custom-title" or "agent-name" line carries the name the person gave
+// the session (/rename); every other line carries none (#79).
+func TestParseLineCarriesTheSessionsName(t *testing.T) {
+	for line, want := range map[string]string{
+		`{"type":"custom-title","customTitle":"tinker-cut1","sessionId":"s1"}`:      "tinker-cut1",
+		`{"type":"agent-name","agentName":"tinker-cut1","sessionId":"s1"}`:          "tinker-cut1",
+		`{"type":"user","message":{"role":"user","content":"hi"},"sessionId":"s1"}`: "",
+	} {
+		ev, err := transcript.ParseLine([]byte(line))
+		if err != nil {
+			t.Fatalf("ParseLine(%s): %v", line, err)
+		}
+		if ev.Name != want {
+			t.Errorf("Name = %q, want %q for %s", ev.Name, want, line)
+		}
+	}
+}

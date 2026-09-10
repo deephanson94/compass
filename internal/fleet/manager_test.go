@@ -12,6 +12,7 @@ import (
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // liveManager is the M0-era Manager these tests were written against: every
@@ -797,4 +798,132 @@ func TestAnArchivedSessionClaimsNoClass(t *testing.T) {
 			t.Errorf("a sleeping session still claims to be doing %v", asleep[0].Class)
 		}
 	})
+}
+
+// A source's sessions join the fleet as discovered ones do — keyed by
+// their scheme path, tailed through it, judged by the same machine — and
+// the model that last answered is kept on the session (#50).
+func TestASourceJoinsTheFleet(t *testing.T) {
+	root := t.TempDir()
+	m := liveManager(root)
+	src := &fakeSource{events: []transcript.Event{
+		{Type: transcript.EventUser, Timestamp: ago(3 * time.Minute), Text: "run the gates", CWD: "/home/user/ocproj"},
+		{Type: transcript.EventAssistant, Timestamp: ago(time.Minute), Text: "Running them.", Model: "mock-1", CWD: "/home/user/ocproj",
+			ToolUses: []transcript.ToolUse{{ID: "call_1", Name: "Bash", Input: json.RawMessage(`{"command":"pytest -q"}`)}}},
+	}}
+	transcript.RegisterScheme("fake", func(path string) transcript.Source { return src })
+	m.AddSource(func() ([]fleet.SessionInfo, error) {
+		return []fleet.SessionInfo{{ID: "ses_x", TranscriptPath: "fake://ses_x", ProjectSlug: "fake", CWD: "/home/user/ocproj", OriginCWD: "/home/user/ocproj",
+			Title: "run the gates", StartedAt: ago(3 * time.Minute), LastEventAt: ago(2 * time.Minute), Tool: "opencode", Model: "mock/mock-1"}}, nil
+	})
+	sessions, err := m.Refresh(fleetNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *fleet.Session
+	for i := range sessions {
+		if sessions[i].Info.Key() == "fake://ses_x" {
+			got = &sessions[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("the source's session is not in the fleet: %+v", sessions)
+	}
+	if !got.Live || got.Snap.State != state.Working || got.Snap.Activity != "Bash: pytest -q" {
+		t.Errorf("the source's session = live %v %v %q, want a working session with its call in flight", got.Live, got.Snap.State, got.Snap.Activity)
+	}
+	if got.Info.Tool != "opencode" || got.Info.Model != "mock-1" || got.Info.ToolName() != "opencode" {
+		t.Errorf("tool/model = %q/%q, want opencode and the model that answered", got.Info.Tool, got.Info.Model)
+	}
+	if !got.HasClass || got.Class != journey.Test {
+		t.Errorf("the session's class = %v %v, want test from the pytest call", got.HasClass, got.Class)
+	}
+}
+
+// fakeSource hands its events out once.
+type fakeSource struct {
+	events []transcript.Event
+	served bool
+}
+
+func (f *fakeSource) Poll() ([]transcript.Event, error) {
+	if f.served {
+		return nil, nil
+	}
+	f.served = true
+	return f.events, nil
+}
+
+// A /rename lands as a "custom-title" line, and the fleet takes the name
+// from the tail at scan time and from the live tail as it happens (#79).
+func TestARenameNamesTheSession(t *testing.T) {
+	root := t.TempDir()
+	const slug = "-home-user-alpha"
+	id := "ee000009-0000-4000-8000-000000000009"
+	newTranscript(t, id, "/home/user/alpha", "main").
+		prompt(ago(30*time.Second), "run the auth tests").
+		tool(ago(10*time.Second), "toolu_ee", "Bash", map[string]any{"command": "pytest -x"}).
+		write(root, slug)
+	mgr := liveManager(root)
+	first, err := mgr.Refresh(fleetNow)
+	if err != nil || len(first) != 1 || first[0].Info.Name != "" {
+		t.Fatalf("before the rename: %v, %d sessions, name %q", err, len(first), first[0].Info.Name)
+	}
+	path := filepath.Join(root, "projects", slug, id+".jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"type":"custom-title","customTitle":"alpha-auth-fix","sessionId":"` + id + `"}` + "\n")
+	f.Close()
+	second, err := mgr.Refresh(fleetNow.Add(time.Second))
+	if err != nil || len(second) != 1 || second[0].Info.Name != "alpha-auth-fix" {
+		t.Fatalf("after the rename: %v, %d sessions, name %q", err, len(second), second[0].Info.Name)
+	}
+	// A fresh scan reads it from the tail.
+	fresh, err := liveManager(root).Refresh(fleetNow.Add(2 * time.Second))
+	if err != nil || len(fresh) != 1 || fresh[0].Info.Name != "alpha-auth-fix" {
+		t.Fatalf("a fresh scan: %v, %d sessions, name %q", err, len(fresh), fresh[0].Info.Name)
+	}
+}
+
+// The scan alone finds a rename, in the head and in the tail of a transcript
+// no live tail has read (#81): the archive is where the name is promised.
+func TestTheScanFindsARenameInTheHeadAndTheTail(t *testing.T) {
+	root := t.TempDir()
+	const slug = "-home-user-alpha"
+	head := "ee000010-0000-4000-8000-000000000010"
+	// Big enough that the tail's window never reaches the head: the head
+	// scan alone must find the name there.
+	hb := newTranscript(t, head, "/home/user/alpha", "main").prompt(ago(30*time.Second), "run the auth tests")
+	for i := 0; i < 300; i++ {
+		hb = hb.tool(ago(20*time.Second), fmt.Sprintf("toolh_%03d", i), "Read", map[string]any{"file_path": "/home/user/alpha/" + strings.Repeat("y", 400) + ".go"})
+	}
+	hb.write(root, slug)
+	headPath := filepath.Join(root, "projects", slug, head+".jsonl")
+	body, _ := os.ReadFile(headPath)
+	os.WriteFile(headPath, append([]byte(`{"type":"custom-title","customTitle":"alpha-head","sessionId":"`+head+`"}`+"\n"), body...), 0o644)
+
+	tail := "ee000011-0000-4000-8000-000000000011"
+	b := newTranscript(t, tail, "/home/user/alpha", "main").prompt(ago(30*time.Second), "run the auth tests")
+	for i := 0; i < 200; i++ {
+		b = b.tool(ago(20*time.Second), fmt.Sprintf("toolu_%03d", i), "Read", map[string]any{"file_path": "/home/user/alpha/" + strings.Repeat("x", 400) + ".go"})
+	}
+	b.write(root, slug)
+	tailPath := filepath.Join(root, "projects", slug, tail+".jsonl")
+	f, _ := os.OpenFile(tailPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"custom-title","customTitle":"alpha-tail","sessionId":"` + tail + `"}` + "\n")
+	f.Close()
+
+	infos, err := fleet.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, in := range infos {
+		got[in.ID] = in.Name
+	}
+	if got[head] != "alpha-head" || got[tail] != "alpha-tail" {
+		t.Errorf("Discover names = %v, want alpha-head and alpha-tail", got)
+	}
 }

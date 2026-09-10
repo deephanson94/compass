@@ -103,6 +103,7 @@ func groupedModel(w, h int) *Model {
 	m.point(sessionKey("s-api"))
 	m.SetTrail(fixtureTrail(fixtureBase))
 	m.SetMirror(fixtureFrame)
+	openTrail(m)
 	return m
 }
 
@@ -121,6 +122,30 @@ func pressTab(m *Model) {
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
 }
 
+// openTrail takes a deck that opened on the board (the default on a wide
+// terminal, decision #16) to the single trail, the level the M1–M7 goldens
+// and contracts were written against. A narrow deck is already there.
+func openTrail(m *Model) {
+	if m.level == levelBoard {
+		pressTab(m)
+	}
+}
+
+// toLv2 and toLv3 press Tab until the deck is at that depth: on a terminal
+// with a board the first Tab is already the session view (Lv2), on a
+// narrower one it is the single trail.
+func toLv2(m *Model) {
+	for m.level < levelWaypoints {
+		pressTab(m)
+	}
+}
+
+func toLv3(m *Model) {
+	for m.level < levelReader {
+		pressTab(m)
+	}
+}
+
 // pressCtrl sends a control key — ctrl+d and ctrl+u are no runes either.
 func pressCtrl(m *Model, k tea.KeyType) {
 	m.Update(tea.KeyMsg{Type: k})
@@ -133,26 +158,29 @@ func pressCtrl(m *Model, k tea.KeyType) {
 func TestT58LiveFleetGolden(t *testing.T) {
 	forceASCII(t)
 
-	m := groupedModel(120, 30)
+	m := groupedModel(100, 30) // the fleet list: a deck too narrow for the board
 	got := m.View()
-	compareGolden(t, "fleet-live-120x30.txt", got)
+	compareGolden(t, "fleet-live-100x30.txt", got)
 	if *update {
 		return
 	}
 
 	for _, want := range []string{
-		" dev",                     // the tmux session, unnumbered and dim
-		" ops",                     // …in the order the pane list names them
-		" elsewhere",               // …and the live sessions tmux cannot place
-		"◆ test   1216✓ 2✗",        // the result, in the trail's own words
-		"◆ design AskUserQuestion", // the call in flight, when nothing has finished
-		"◆ build  1190✓",           // and a quiet row still says how it went
-		"5 archived · A browses",   // the last fleet row
-		"FLEET · live",             // which fleet this is
+		" dev",                   // the tmux session, unnumbered and dim
+		" ops",                   // …in the order the pane list names them
+		" elsewhere",             // …and the live sessions tmux cannot place
+		"◆ test   1216✓ 2✗",      // the result, in the trail's own words
+		"    AskUserQuestion",    // the question, whole: no class in front of a sentence you must read
+		"◆ build  1190✓",         // and a quiet row still says how it went
+		"5 archived · A browses", // the last fleet row
+		"FLEET · live",           // which fleet this is
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("live view is missing %q", want)
 		}
+	}
+	if strings.Contains(got, "◆ design AskUserQuestion") {
+		t.Error("a needs-you row spends its width on the class instead of the question")
 	}
 	if strings.Contains(got, " misc") {
 		t.Error("a tmux session compass has nothing in must not become a group")
@@ -169,9 +197,11 @@ func TestT58LiveFleetGolden(t *testing.T) {
 	}
 	// The header's right edge is the age, in the column the session rows put
 	// theirs; the echo sits just left of it. Both facts, neither displaced.
+	// The clock is the row beneath's — infra, floated to the top at 2m —
+	// so the header carries the echo and no clock of its own.
 	opsHeader := strings.TrimRight(fleetCol[ops], " ")
-	if !strings.HasSuffix(opsHeader, "2m") {
-		t.Errorf("the ops header should end with its freshest age: %q", opsHeader)
+	if strings.HasSuffix(opsHeader, "2m") {
+		t.Errorf("the ops header repeats the clock of the row beneath it: %q", opsHeader)
 	}
 	if !strings.Contains(opsHeader, fleet.Glyph(state.NeedsYou)) {
 		t.Errorf("the ops header should echo its needs-you session: %q", opsHeader)
@@ -195,7 +225,7 @@ func TestT59ArchiveViewGolden(t *testing.T) {
 	if !*update {
 		for _, want := range []string{
 			"FLEET · archive", // the header names the view
-			"A live fleet",    // and the footer names the way back
+			"A fleet",         // and the footer names the way back
 			" docs",           // project groups, newest member first
 			" api",
 			" scratch",
@@ -292,22 +322,55 @@ func TestT60FleetScrolling(t *testing.T) {
 				if !m.archiveView && m.archivedCount() > 0 {
 					tail = 2
 					if !strings.Contains(lines[len(lines)-1], "archived · A browses") {
-						t.Fatalf("step %d: the archive row was scrolled away: %q", step, lines[len(lines)-1])
+						// The band takes the rows the fold could not use
+						// and folds the archive's line into its header
+						// (#47): the count and the key are still said,
+						// and the band is the column's last word.
+						head := -1
+						for i, l := range lines {
+							if strings.Contains(l, "archived · A") {
+								head = i
+							}
+						}
+						if head < 0 {
+							t.Fatalf("step %d: the archive row was scrolled away: %q", step, lines[len(lines)-1])
+						}
+						tail = len(lines) - head + 1
 					}
 				}
 				visible := len(lines) - tail
+				for visible > 1 && lines[visible-1] == "" {
+					visible-- // the slack a folded list leaves under its window is not the list
+				}
 				if visible > h-tail || visible < 1 {
 					t.Fatalf("step %d: column rendered %d list lines in a height of %d", step, visible, h)
 				}
-				for i := 0; i < visible; i++ {
-					if lines[i] != full[off+i] {
+				// A cut list frames itself: "▴ N more above" on its first
+				// row when it is scrolled, "▾ N more below" on its last when
+				// it does not reach the end. Neither is a row of the list.
+				first, last := 0, visible
+				if strings.HasPrefix(lines[0], "▴") {
+					if off == 0 {
+						t.Fatalf("step %d: a list at its top claims rows above: %q", step, lines[0])
+					}
+					first = 1
+				} else if off > 0 {
+					t.Fatalf("step %d: a scrolled list does not say what is above it: %q", step, lines[0])
+				}
+				if strings.HasPrefix(lines[visible-1], "▾") {
+					last = visible - 1
+				} else if off+visible-first < len(full) {
+					t.Fatalf("step %d: a cut list does not say what is below it: %q", step, lines[visible-1])
+				}
+				for i := first; i < last; i++ {
+					if lines[i] != full[off+i-first] {
 						t.Fatalf("step %d line %d: window is not the list at offset %d\n got %q\nwant %q",
-							step, i, off, lines[i], full[off+i])
+							step, i, off, lines[i], full[off+i-first])
 					}
 				}
-				if selStart < off || selEnd >= off+visible {
+				if selStart < off || selEnd >= off+last-first {
 					t.Fatalf("step %d: selected rows %d-%d fall outside the window %d-%d",
-						step, selStart, selEnd, off, off+visible-1)
+						step, selStart, selEnd, off, off+last-first-1)
 				}
 				marked := 0
 				for _, l := range lines[:visible] {
@@ -469,7 +532,7 @@ func TestT58PanesMsgCarriesTmuxOrder(t *testing.T) {
 
 	m.Update(msg)
 	rows := m.fleetRows()
-	if len(rows) < 2 || !rows[0].header || rows[0].label != "ops" {
+	if len(rows) < 2 || !rows[0].header || rows[0].label != "⌁ ops" {
 		t.Errorf("the live view should group in pane-list order, got %+v", rows)
 	}
 }
@@ -515,26 +578,28 @@ func TestT61GroupAndPaneOrder(t *testing.T) {
 		}
 		got = append(got, m.sessions[r.sess].Info.ID)
 	}
-	want := []string{"[ops]", "s-ops", "[dev]", "s-w9", "s-w10"}
+	want := []string{"[⌁ ops]", "s-ops", "[⌁ dev]", "s-w10", "s-w9"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("rendered order = %v, want %v", got, want)
 	}
 
-	// Numbering runs flat down the sessions, groups ignored.
+	// Numbering is the board's — the view order, which is the fleet's own
+	// priority order — not the pane order the groups draw in. `3` has to mean
+	// the same session at every level, and the board has no groups.
 	nums := map[string]int{}
 	for _, r := range rows {
 		if !r.header {
 			nums[m.sessions[r.sess].Info.ID] = r.num
 		}
 	}
-	for id, want := range map[string]int{"s-ops": 1, "s-w9": 2, "s-w10": 3} {
+	for id, want := range map[string]int{"s-w10": 1, "s-w9": 2, "s-ops": 3} {
 		if nums[id] != want {
 			t.Errorf("%s is numbered %d, want %d", id, nums[id], want)
 		}
 	}
-	m.selectIndex(2) // the third rendered session
-	if m.selectedKey != sessionKey("s-w10") {
-		t.Errorf("3 selected %q, want s-w10", m.selectedKey)
+	m.selectIndex(2) // the third in view order, drawn first under [ops]
+	if m.selectedKey != sessionKey("s-ops") {
+		t.Errorf("3 selected %q, want s-ops", m.selectedKey)
 	}
 }
 
@@ -679,7 +744,7 @@ func TestT67EnterAttaches(t *testing.T) {
 		if *got != nil {
 			t.Fatalf("a session with no pane must build no command: %v", (*got).cmd.Args)
 		}
-		if m.note != "no tmux pane for this session" {
+		if m.note != "attach needs a pane" {
 			t.Errorf("note = %q, want the no-pane note", m.note)
 		}
 	})
@@ -757,7 +822,7 @@ func indexOfLine(lines []string, sub string) int {
 func TestScrolledTrailSaysItIsBehind(t *testing.T) {
 	forceASCII(t)
 
-	m := followModel(120, 14)
+	m := followModel(100, 14) // Lv1 is a narrow deck's: wide ones open on the session
 	if strings.Contains(m.trailTitle(30), "G") {
 		t.Error("a pinned trail must not advertise the way back to where it already is")
 	}
@@ -767,10 +832,8 @@ func TestScrolledTrailSaysItIsBehind(t *testing.T) {
 		t.Fatal("ctrl+u did not unpin the panel; nothing to announce")
 	}
 	title := m.trailTitle(30)
-	for _, want := range []string{"G", "[Lv1]"} {
-		if !strings.Contains(title, want) {
-			t.Errorf("a scrolled trail's title %q is missing %q", title, want)
-		}
+	if !strings.Contains(title, "↓ G") {
+		t.Errorf("a scrolled trail's title %q is missing the way back", title)
 	}
 	if got := lipgloss.Width(title); got != 30 {
 		t.Errorf("the cue broke the title's width: %d columns, want 30", got)
@@ -788,7 +851,7 @@ func TestScrolledTrailSaysItIsBehind(t *testing.T) {
 func TestLv1ScrollsTheTrail(t *testing.T) {
 	forceASCII(t)
 
-	m := followModel(120, 14)
+	m := followModel(100, 14) // Lv1 is a narrow deck's
 	w, h := m.trailBox()
 	if len(TrailLines(m.trail, m.trailOpts(w, h))) <= h {
 		t.Fatalf("the fixture trail fits its panel (%d rows); nothing to scroll", h)
@@ -839,9 +902,9 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 		tabs  int
 		level int
 	}{
-		{"Lv1", 0, levelTrail},
-		{"Lv2", 1, levelWaypoints},
-		{"Lv3", 2, levelReader},
+		{"Lv0", -1, levelBoard},
+		{"Lv2", 0, levelWaypoints}, // a wide deck opens on the session view
+		{"Lv3", 1, levelReader},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := groupedModel(120, 30)
@@ -849,6 +912,9 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 			m.spawn = func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd {
 				got = cmd
 				return nil
+			}
+			if tc.tabs < 0 {
+				m.zoomOut() // back to the board the deck opened on
 			}
 			for i := 0; i < tc.tabs; i++ {
 				pressTab(m)
@@ -884,13 +950,26 @@ func TestT77EnterAttachesAtEveryLevel(t *testing.T) {
 	// clipped to the deck's inner width, and eighty columns is the floor.
 	t.Run("the footers promise it", func(t *testing.T) {
 		m := groupedModel(80, 24)
-		for _, want := range []string{
-			"j/k move · enter attach (prefix d returns) · g grab · ? help · q quit",
-			"j/k rows · enter attach · tab deeper · a ask · esc back",
-			"j/k scroll · space fold · / search · n/N · a ask · enter attach · esc back",
-		} {
-			if got := m.View(); !strings.Contains(got, want) {
-				t.Errorf("the Lv%d footer does not fit an 80-column deck: %q", m.level, want)
+		// Each level keeps at least one of its own keys, whole, beside the
+		// way out: which one depends on what the width leaves.
+		// The reader's own keys are `space unfold`, `[ ] turns` and the
+		// search pair: where the page holds nothing to unfold and the
+		// conversation is one turn, the first two are keys that cannot
+		// move and the search is what the level keeps (#210, #211).
+		for _, own := range [][]string{{"tab deeper"}, {"[ ] chapters", "r reply"}, {"space unfold", "[ ] turns", "/ search"}} {
+			lines := strings.Split(m.View(), "\n")
+			foot := strings.TrimSpace(lines[len(lines)-1])
+			kept := false
+			for _, k := range own {
+				kept = kept || strings.Contains(foot, k)
+			}
+			// `enter` attaches at every level and the help says so; the
+			// row promises it wherever the width leaves room, and at the
+			// deepest level of an 80-column deck the level's own keys and
+			// the way out come first (#39).
+			way := strings.Contains(foot, "enter attach") || strings.Contains(foot, "esc back")
+			if lipgloss.Width(foot) > 78 || !way || !strings.HasSuffix(foot, "? help · q quit") || !kept {
+				t.Errorf("the Lv%d footer does not fit an 80-column deck whole: %q", m.level, foot)
 			}
 			pressTab(m)
 		}
@@ -1030,32 +1109,34 @@ func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
 		m.SetPaneOrder(list)
 		m.point(sessionKey("s-api"))
 		m.SetTrail(fixtureTrail(fixtureBase))
+		openTrail(m)
 		return m
 	}
 
-	// 90 rather than 118: by 118 the two-column fleet is already at its cap.
+	// 90 is a narrow deck (fleet and trail); 200 is the session view
+	// (companion and trail): both two columns, and both panels grow.
 	narrow := columnWidths(t, build(90).View())
 	wide := columnWidths(t, build(200).View())
 	if len(narrow) != 2 || len(wide) != 2 {
 		t.Fatalf("expected two columns, got %v and %v", narrow, wide)
 	}
 	if wide[0] <= narrow[0] {
-		t.Errorf("the fleet stayed at %d columns on a 200-column terminal", wide[0])
+		t.Errorf("the left panel stayed at %d columns on a 200-column terminal", wide[0])
 	}
 	if wide[1] <= narrow[1] {
 		t.Errorf("the trail stayed at %d columns on a 200-column terminal", wide[1])
 	}
 
-	// With the mirror on, the middle takes the growth first and the sides
-	// still grow past their floors.
+	// With the live pane in the companion's place: still two columns, and
+	// the pane grows with the terminal.
 	withMirror := func(w int) *Model { m := build(w); press(m, "m"); return m }
 	narrow3 := columnWidths(t, withMirror(118).View())
 	wide3 := columnWidths(t, withMirror(200).View())
-	if len(narrow3) != 3 || len(wide3) != 3 {
-		t.Fatalf("with the mirror on, expected three columns, got %v and %v", narrow3, wide3)
+	if len(narrow3) != 2 || len(wide3) != 2 {
+		t.Fatalf("with the live pane on, expected two columns, got %v and %v", narrow3, wide3)
 	}
-	if wide3[0] <= narrow3[0] || wide3[2] <= narrow3[2] {
-		t.Errorf("the side panels did not grow with the mirror on: %v → %v", narrow3, wide3)
+	if wide3[0] <= narrow3[0] || wide3[1] <= narrow3[1] {
+		t.Errorf("the panels did not grow with the live pane on: %v → %v", narrow3, wide3)
 	}
 }
 
@@ -1063,18 +1144,42 @@ func TestAWideDeckDrawsWiderSidePanels(t *testing.T) {
 // them — what is actually on screen, not what the arithmetic intended.
 func columnWidths(t *testing.T, frame string) []int {
 	t.Helper()
-	for _, line := range strings.Split(frame, "\n") {
-		if !strings.Contains(line, "FLEET") {
+	lines := strings.Split(frame, "\n")
+	n := 0
+	for _, line := range lines {
+		if strings.Contains(line, "FLEET") || strings.Contains(line, "READER") || strings.Contains(line, mirrorMark+" ") {
+			n = len(strings.Split(line, "│")) // the panels' title row says how many there are
+			break
+		}
+	}
+	if n == 0 {
+		t.Fatal("no panel header in the frame")
+	}
+	// Every column but the last is padded to its width; the last is as wide
+	// as its content, so its width is whatever the deck's full row leaves
+	// after the others and the hairlines between them.
+	out := make([]int, n)
+	total := 0
+	for _, line := range lines {
+		parts := strings.Split(line, "│")
+		if w := lipgloss.Width(line); w > total {
+			total = w // the header's rule runs the whole width
+		}
+		if len(parts) != n {
 			continue
 		}
-		var out []int
-		for _, part := range strings.Split(line, "│") {
-			out = append(out, lipgloss.Width(part))
+		for i, part := range parts[:n-1] {
+			if w := lipgloss.Width(part); w > out[i] {
+				out[i] = w
+			}
 		}
-		return out
 	}
-	t.Fatal("no fleet header in the frame")
-	return nil
+	last := total - (n - 1)
+	for _, w := range out[:n-1] {
+		last -= w
+	}
+	out[n-1] = last
+	return out
 }
 
 // A session the API refused still carries whatever it last finished. That
@@ -1107,6 +1212,7 @@ func TestTheFleetShowsTheAPIErrorRatherThanTheStaleOutcome(t *testing.T) {
 	m := New(nil)
 	m.SetSize(120, 24)
 	m.SetSessions([]fleet.Session{blocked}, base.Add(40*time.Minute))
+	openTrail(m)  // the session view: its card is the fleet row
 	press(m, "m") // the mirror's no-pane fallback is where the words are read
 
 	got := m.View()
@@ -1145,7 +1251,7 @@ func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
 		}
 	}
 	m := New(nil)
-	m.SetSize(120, 30)
+	m.SetSize(100, 30)
 	// Pane order puts the stalest first, exactly as tmux would.
 	m.SetSessions([]fleet.Session{
 		sess("s-old", now.Add(-7*24*time.Hour)),
@@ -1157,6 +1263,7 @@ func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
 	}
 	m.SetPaneOrder(list)
 	m.SetPanes(map[string]tmuxop.Pane{sessionKey("s-old"): list[0], sessionKey("s-new"): list[1]})
+	openTrail(m) // the fleet list is a Lv1 panel; the board does not draw it
 
 	var header fleetRow
 	for _, r := range m.fleetRows() {
@@ -1165,7 +1272,7 @@ func TestAGroupHeaderCarriesItsFreshestAge(t *testing.T) {
 			break
 		}
 	}
-	if header.label != "tinker" {
+	if header.label != "⌁ tinker" {
 		t.Fatalf("first header is %q, want the tmux session", header.label)
 	}
 	if want := "9h"; header.age != want {

@@ -1080,3 +1080,19 @@ func TestAQueuedNotificationClosesTheBranch(t *testing.T) {
 		t.Errorf("branch = %+v; the queued notification did not close it", br)
 	}
 }
+
+// A relayed message opens a chapter like a person's prompt, with the
+// message as its text and the relay marked (#97).
+func TestARelayedMessageOpensAChapter(t *testing.T) {
+	tr := segment(
+		transcript.Event{Type: transcript.EventUser, Text: "Another Claude session sent a message: the encoder is in, run the gates", Timestamp: base},
+		transcript.Event{Type: transcript.EventAssistant, Text: "Running them.", Timestamp: base.Add(time.Second)},
+	)
+	if len(tr.Prompts) != 1 || tr.Prompts[0].Text != "the encoder is in, run the gates" || !tr.Prompts[0].Relayed {
+		t.Fatalf("Prompts = %+v; want one relayed chapter with the message as its text", tr.Prompts)
+	}
+	echo := segment(transcript.Event{Type: transcript.EventUser, Text: `Background agent "measure, do not summarize" finished`, Timestamp: base})
+	if len(echo.Prompts) != 0 {
+		t.Errorf("a background agent's echo opened a chapter: %+v", echo.Prompts)
+	}
+}

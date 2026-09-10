@@ -240,6 +240,11 @@ func procPath(pid int, name string) string {
 // and only its argv says what it is — see isClaude.
 const claudeComm = "claude"
 
+// opencodeComm is the other CLI a pane can be running a session in. Its
+// sessions come from its own store, and a pane is theirs by the same cwd
+// rule — see ToolIn.
+const opencodeComm = "opencode"
+
 // interpreters are the runtimes a script-installed CLI hides behind.
 var interpreters = map[string]bool{"node": true, "bun": true, "deno": true}
 
@@ -252,32 +257,50 @@ var interpreters = map[string]bool{"node": true, "bun": true, "deno": true}
 // must not look like a session — so it asks for an argument that is the CLI
 // itself: a path ending in /claude, or the package's own script.
 func isClaude(p Proc, pid int) bool {
+	return toolOf(p, pid) != ""
+}
+
+// ToolIn is the CLI the pane's session runs under — "claude" or
+// "opencode" — found the way ClaudeIn finds the process; "" when neither.
+func ToolIn(p Proc, pid int) string {
+	_, found, ok := ClaudeIn(p, pid)
+	if !ok {
+		return ""
+	}
+	return toolOf(p, found)
+}
+
+// toolOf names the CLI a process is, or "" when it is neither.
+func toolOf(p Proc, pid int) string {
 	comm := p.Comm(pid)
-	if comm == claudeComm {
-		return true
+	if comm == claudeComm || comm == opencodeComm {
+		return comm
 	}
 	args := strings.Fields(p.Cmdline(pid))
 	if len(args) == 0 {
-		return false
+		return ""
 	}
-	if filepath.Base(args[0]) == claudeComm {
-		return true // a wrapper exec'd under another name
+	if base := filepath.Base(args[0]); base == claudeComm || base == opencodeComm {
+		return base // a wrapper exec'd under another name
 	}
 	if !interpreters[comm] {
-		return false // only a runtime can be hiding a CLI in its argv
+		return "" // only a runtime can be hiding a CLI in its argv
 	}
 	for _, arg := range args[1:] {
 		if strings.HasPrefix(arg, "-") {
 			continue
 		}
 		if strings.Contains(arg, "claude-code") {
-			return true // the package's own script, whatever it is called
+			return claudeComm // the package's own script, whatever it is called
 		}
 		if strings.Contains(arg, "/") && filepath.Base(arg) == claudeComm {
-			return true // a path to the CLI, not somebody saying the word
+			return claudeComm // a path to the CLI, not somebody saying the word
+		}
+		if strings.Contains(arg, "opencode") {
+			return opencodeComm
 		}
 	}
-	return false
+	return ""
 }
 
 // claudeDepth bounds the descendant walk. A pane's shell wraps the CLI in a

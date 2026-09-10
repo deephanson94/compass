@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"github.com/charmbracelet/x/ansi"
+	"github.com/deephanson94/compass/internal/fleet"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -20,13 +22,15 @@ const (
 	// you can already look at. Past mirrorEnough the surplus is split between
 	// them instead, up to these caps: a fleet row wants its name, its state and
 	// its work legible, and a trail row wants its class, its label and its age.
-	fleetWidthMax = 42
-	trailWidthMax = 52
-	mirrorEnough  = 72 // the mirror keeps at least this before anyone else grows
-	gutterWidth   = 3
-	edgePad       = 1
-	minDeckCols   = 62  // below this the second column is dropped, fleet only
-	deckWideCols  = 110 // at or above this the mirror opens in the middle
+	fleetWidthMax   = 56
+	trailWidthMax   = 52
+	sessionTrailMax = 96 // the trail's share of a session view, past which a row is padding
+	mirrorEnough    = 72 // the mirror keeps at least this before anyone else grows
+	gutterWidth     = 3
+	edgePad         = 1
+	minDeckCols     = 62  // below this the second column is dropped, fleet only
+	deckWideCols    = 110 // at or above this the mirror opens in the middle
+	readerRoomCols  = 150 // below this the reader takes the fleet's width at Lv3
 
 	// readerMinCols is the design floor for the Lv3 reader: a conversation
 	// narrower than this is unreadable, so when the fixed columns would push it
@@ -161,13 +165,105 @@ func clip(s string, w int) string {
 	// branches and tmux window names are all arbitrary user text.
 	var b strings.Builder
 	used := 0
-	for _, r := range s {
+	runes := []rune(s)
+	kept := 0
+	for _, r := range runes {
 		cw := lipgloss.Width(string(r))
 		if used+cw > w-1 {
 			break
 		}
 		b.WriteRune(r)
 		used += cw
+		kept++
 	}
-	return strings.TrimRight(b.String(), " ") + "…"
+	if kept < len(runes) && kept > 0 && isDigit(runes[kept-1]) && isDigit(runes[kept]) {
+		// Never cut a number in half: "API Error: 4…" read as a one-digit
+		// status, and 403 against 429 is the difference the row is for.
+		// The whole number goes instead (#53) — and only then: a number
+		// whole on screen stays, however the row ends after it (#59).
+		for kept > 0 && isDigit(runes[kept-1]) {
+			kept--
+		}
+	}
+	// "go test ./...…", "go test ./…": a mark after a dot or a slash reads
+	// as more of the token it cut, whichever rune the cut fell on. The
+	// trailing run of dots and slashes goes — "backfill." is "backfill…",
+	// "go test ./..." is "go test…" — never the token, which cost a
+	// wider column the name of the hung run (#58, #59, #61). The
+	// separator, a bracket and the spaces they stood on go with it.
+	// A dash that stands alone is a separator too ("porter_tui —…"
+	// promised a phrase), where a hyphen inside a token is the token's
+	// (`--all`, `-run`): the spaced dashes go, the hyphen stays (#63).
+	// A comma or a semicolon promises the clause after it the same way (#64).
+	// And a flag's leading dash with nothing after it: "--model x -…"
+	// promised a flag; the hyphen inside a token stays (#72).
+	head := strings.TrimRight(string(runes[:kept]), " ·(./—–,;")
+	for strings.HasSuffix(head, " -") || strings.HasSuffix(head, " --") {
+		head = strings.TrimRight(strings.TrimRight(head, "-"), " ·(./—–,;")
+	}
+	// An opening quote with nothing after it promises the words it was
+	// about to hold: `checkout-flake-hunt · "…` spent four cells on no
+	// prompt at all. The quote goes with the separator that led it, and
+	// only while it is unclosed (#80).
+	for strings.HasSuffix(head, `"`) && strings.Count(head, `"`)%2 == 1 {
+		head = strings.TrimRight(strings.TrimSuffix(head, `"`), " ·(./—–,;")
+	}
+	return head + "…"
+}
+
+func isDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// truncateWhole is ansi.Truncate that never cuts a number in half and
+// never leaves a bare separator before the mark (#54).
+func truncateWhole(line string, n int) string {
+	full := []rune(ansi.Strip(line))
+	for n > 0 {
+		t := ansi.Truncate(line, n, "")
+		kept := []rune(ansi.Strip(t))
+		k := len(kept)
+		if k < len(full) && k > 0 && isDigit(kept[k-1]) && isDigit(full[k]) {
+			n--
+			continue
+		}
+		if k > 0 && (kept[k-1] == '·' || kept[k-1] == ' ') && k < len(full) {
+			n--
+			continue
+		}
+		// The cut at the box's left edge is a clip like any other: a mark
+		// after a dot, a slash, a bracket or a comma reads as more of the
+		// token it cut, and an unclosed quote promises the words it was
+		// about to hold — the very cutset `clip` has carried since #58,
+		// #61, #63, #64 and #80. Without it the border drew
+		// `● scout  Red-teaming plugin/…` and `◉ "…`.
+		if k > 0 && k < len(full) && strings.ContainsRune("(./—–,;", kept[k-1]) {
+			n--
+			continue
+		}
+		if k > 0 && k < len(full) && kept[k-1] == '"' && strings.Count(string(kept), `"`)%2 == 1 {
+			n--
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// askQuote is an ask the way a row quotes it: `"the prompt"`, or `relayed
+// "the prompt"` when the ask was another session's message — a word, not a
+// glyph, and outside the quotes so the quote is still the ask (#97).
+func askQuote(text string, relayed bool) string {
+	if relayed {
+		return relayVerb + `"` + text + `"`
+	}
+	return `"` + text + `"`
+}
+
+// relayVerb is the word a relayed ask wears before its quotes (#97): the
+// verb is the row's, the sentence inside the quotes is the session's.
+const relayVerb = "relayed "
+
+// askRelayed says whether an archived headline is the session's relayed
+// title, rather than a state word the headline fell back to.
+func askRelayed(s fleet.Session) bool {
+	return s.Info.Relayed && s.Info.Title != "" && archiveHeadline(s) == s.Info.Title
 }

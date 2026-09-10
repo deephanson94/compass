@@ -12,8 +12,9 @@ import (
 // Prompt is one human turn — the moments the journey changed direction because
 // somebody asked it to.
 type Prompt struct {
-	Text string // first line, max 60 runes, "…" if cut
-	At   time.Time
+	Text    string // first line, max 60 runes, "…" if cut
+	At      time.Time
+	Relayed bool // another session's message, relayed by the harness (#97)
 }
 
 // Leg is a contiguous span of one class of work: the unit the trail draws.
@@ -67,6 +68,11 @@ type Trail struct {
 	Legs     []Leg    // oldest first
 	Branches []Branch // oldest first
 	Tasks    []Task   // creation order; deleted ones stay, marked
+
+	// Compactions are the moments the conversation ran out of context and
+	// was folded into a summary: after each one the session works from
+	// what the summary kept. Oldest first.
+	Compactions []time.Time
 }
 
 // maxFiles caps how many distinct basenames a leg remembers. Five is already
@@ -104,11 +110,12 @@ type legState struct {
 // Segmenter folds a session's events into legs. Feed it events in file order;
 // it holds only the running leg plus the little pressure gauge rule 4 needs.
 type Segmenter struct {
-	prompts  []Prompt
-	legs     []legState
-	branches []Branch
-	byBranch map[string]int // Agent tool_use id → index into branches
-	open     bool           // the last leg is still accepting votes
+	prompts     []Prompt
+	compactions []time.Time
+	legs        []legState
+	branches    []Branch
+	byBranch    map[string]int // Agent tool_use id → index into branches
+	open        bool           // the last leg is still accepting votes
 
 	// Runner memory (M2 rule 2): the tool_use ids of Test and Ship votes, so
 	// their results — and only theirs — get parsed as test runs and commits.
@@ -168,10 +175,17 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		}
 	}
 
+	// A compaction is machinery, not a prompt — it marks no ◉ and closes no
+	// leg — but it is the moment the session lost its memory, and the trail
+	// marks it.
+	if ev.Compaction() {
+		s.compactions = append(s.compactions, ev.Timestamp)
+	}
+
 	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
 	// that never reached three stays with the leg it interrupted.
 	if substantivePrompt(ev) {
-		s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp})
+		s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()})
 		s.flushPress()
 		s.closeLeg()
 	}
@@ -200,6 +214,9 @@ func (s *Segmenter) Trail() Trail {
 	var tr Trail
 	if len(s.prompts) > 0 {
 		tr.Prompts = append(make([]Prompt, 0, len(s.prompts)), s.prompts...)
+	}
+	if len(s.compactions) > 0 {
+		tr.Compactions = append(make([]time.Time, 0, len(s.compactions)), s.compactions...)
 	}
 	if len(s.branches) > 0 {
 		tr.Branches = append(make([]Branch, 0, len(s.branches)), s.branches...)
@@ -416,6 +433,9 @@ func promptText(ev transcript.Event) string {
 	if cmd, ok := transcript.SlashCommand(ev.Text); ok {
 		return cmd
 	}
+	if ev.Relayed() {
+		return firstLine(ev.RelayBody()) // the message, not its envelope (#97)
+	}
 	return firstLine(ev.Text)
 }
 
@@ -435,6 +455,7 @@ func (s *Segmenter) attach(res transcript.ToolResult, at time.Time) {
 		switch r.kind {
 		case Test:
 			leg.addWaypoints(testWaypoints(res.Text, r.keyword, res.IsError, at))
+			s.countRuns(leg)
 		case Ship:
 			leg.addWaypoints(shipWaypoints(res.Text, at))
 		}
@@ -444,6 +465,35 @@ func (s *Segmenter) attach(res transcript.ToolResult, at time.Time) {
 	if res.IsError && (leg.class == Build || leg.class == Fix) {
 		leg.addBug(firstNonEmptyLine(res.Text), at)
 	}
+}
+
+// countRuns sets Runs on the leg's failing tests: one more than the number
+// of earlier legs the same test failed in. A leg is one run for this
+// purpose however many times its suite was invoked, so "3rd time" means
+// the session has been back to this failure across three legs of work.
+func (s *Segmenter) countRuns(leg *legState) {
+	for i := range leg.waypoints {
+		w := &leg.waypoints[i]
+		if w.Kind != WaypointTestFail {
+			continue
+		}
+		w.Runs = 1
+		for j := range s.legs {
+			if earlier := &s.legs[j]; earlier != leg && earlier.failed(w.Text) {
+				w.Runs++
+			}
+		}
+	}
+}
+
+// failed reports whether this leg recorded the named test failing.
+func (l *legState) failed(test string) bool {
+	for _, w := range l.waypoints {
+		if w.Kind == WaypointTestFail && w.Text == test {
+			return true
+		}
+	}
+	return false
 }
 
 // remember records a Test or Ship vote's tool_use id so the result that comes

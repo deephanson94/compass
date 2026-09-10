@@ -1,16 +1,15 @@
-◉ "fix the 401 bug"                38m
+◉ "fix the 401 bug"            38m ago
 ╷
 ◆ scout  middleware.py              5m
 │
 ◆ test   pytest             18✓ 2✗ 12m
-│  ├ 18 passed · 2 failed
 │  ├ ✗ test_refresh_expired_token
 │  └ ✗ test_refresh_revoked_token
-├─◈ scout the payments module        ✓
+├─◈ scout the payments modu… ✓ 19m ago
 │  └ payments never touches refresh
 ◆ fix    token refresh              8m
 │  ├ bug1 syntax error in tokens.py:88
 │  ├ bug2 expiry compared in localtime
 │  └ touched middleware.py · tokens.p…
 │
-● build  tokens.py                ← 2m
+● build  tokens.py              for 3m
