@@ -22,7 +22,8 @@ the same way again.
 
 ```sh
 # the suite (go.mod pins 1.24.7; the local toolchain must be used)
-GOTOOLCHAIN=local go test ./...
+GOTOOLCHAIN=local go test -short ./...   # the developer run: under two minutes
+GOTOOLCHAIN=local go test ./... -timeout 40m   # the whole suite, sweeps included, as CI runs it
 GOTOOLCHAIN=local go vet ./...
 
 # regenerate goldens after a deliberate frame change
