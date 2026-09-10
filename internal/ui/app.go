@@ -1312,7 +1312,17 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		// and said nothing, and on 87 of those the frame came back byte
 		// for byte the same, the dead key SPEC's round-one rule bans,
 		// while `k` and `ctrl+u` on that very frame both answered.
-		if !m.scrollBy(-(1 << 30)) { // clamped to the first screenful
+		//
+		// The key named for an end takes the mark there too (#313): `g` is
+		// the start, so the cursor goes to the document's first row —
+		// markOldestLine, the mirror of `G`'s markNewestLine below — reusing
+		// the same walk `j`/`k` already do rather than a fresh one. Before
+		// this the viewport moved and the mark did not: on a page that
+		// fits, `G` said "end of the conversation" while the only `▸` stood
+		// under "the start of the conversation" a screen above it.
+		moved := m.scrollBy(-(1 << 30)) // clamped to the first screenful
+		m.markOldestLine()
+		if !moved {
 			m.note = "start of the conversation"
 		}
 	case "G":
@@ -1333,7 +1343,12 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		// #83's word, as #309 left it — the frame draws " the start of
 		// the conversation" over it — and the width trade is #309's own,
 		// measured in footerLine.
-		if !m.scrollBy(1<<30) || m.readerPageFits() { // clamped to the last screenful
+		//
+		// The mark goes with it: markNewestLine, the same landing a lane's
+		// reader opens on (#313).
+		moved := m.scrollBy(1 << 30) // clamped to the last screenful
+		m.markNewestLine()
+		if !moved || m.readerPageFits() {
 			m.note = "end of the conversation"
 		}
 	case " ", "space":

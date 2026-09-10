@@ -15522,14 +15522,6 @@ func TestTheReaderJumpKeySaysWhichEndItReached(t *testing.T) {
 					}
 					where := fmt.Sprintf("%s %s %v %dx%d", prof.name, sc.name, route, w, h)
 					page := base.readerPageFits()
-					// The trade is read on the stand the press comes to
-					// rest on, before anything is pressed — and after the
-					// frame is drawn, because the note's reserve is
-					// measured against the rows the frame drew.
-					base.View()
-					bare := r109fhJumpNoted(base, w, r109fhJumpPage)
-					with := r109fhJumpNoted(base, w, r109fhJumpEnd)
-					room := footerNamesAll(bare, with)
 
 					// Twice: on a page that scrolls the first press
 					// travels and the second is the one that must answer;
@@ -15538,6 +15530,20 @@ func TestTheReaderJumpKeySaysWhichEndItReached(t *testing.T) {
 					// it, so each key is the last thing the frame saw.
 					down := r109fhJumpPress(base, sc, "G", 2)
 					keysG, noteG := r109fhJumpFoot(down)
+
+					// The trade is read on the stand the press actually
+					// comes to rest on — after it, not before: since #313
+					// `G` carries the cursor to the document's last row,
+					// not only the viewport, and a row's own key list can
+					// depend on where the cursor stands (`[ ] turns`,
+					// `enter attach` and the like), not just on the note's
+					// width. Measuring `bare` and `with` here, on `base`
+					// exactly as the two presses above left it, compares
+					// the note's own reserve at the stand it is actually
+					// drawn on, the same stand `keysG` came from.
+					bare := r109fhJumpNoted(base, w, r109fhJumpPage)
+					with := r109fhJumpNoted(base, w, r109fhJumpEnd)
+					room := footerNamesAll(bare, with)
 					mg := sceneModel(sc, w, h)
 					for _, k := range route {
 						pressKey(mg, k)

@@ -244,13 +244,14 @@ func (m *Model) readerColumn(w, h int) []string {
 		return rows
 	}
 	if h > 2 {
+		wDoc := m.doc(w)
 		frame := RenderReader(events, ReaderOpts{
 			Width:       w,
 			Height:      h - 2,
-			Scroll:      readerTopIn(m.doc(w), m.scroll, h-2), // never a result row without its owner
+			Scroll:      readerTopIn(wDoc, m.scroll, h-2), // never a result row without its owner
 			Unfolded:    m.unfolded,
 			Query:       m.query,
-			Anchor:      m.anchor,
+			Anchor:      m.readerAnchorAt(wDoc),
 			CWD:         m.readerCWD(),
 			Now:         m.now,
 			Lanes:       m.laneClauses(),
@@ -636,6 +637,58 @@ func (m *Model) enterReader() {
 	m.anchorReader()
 }
 
+// nonBlankRow walks the document from i in the given direction (+1 or -1),
+// i itself included, and returns the index of the first row that is not
+// blank filler — the cursor never stands on the air between blocks. -1 when
+// the walk runs off the document without finding one.
+func nonBlankRow(doc []readerLine, i, dir int) int {
+	for i >= 0 && i < len(doc) {
+		if doc[i].kind != readerBlank {
+			return i
+		}
+		i += dir
+	}
+	return -1
+}
+
+// nonBlankNear is nonBlankRow's other shape: the row nearest i, i itself
+// included, rather than one found by stepping in a walk already under way.
+// It prefers the row at or after i — the direction a shift pushes a row
+// that used to stand later — and only then looks before it, so a raw index
+// left stale by a fold's re-render or a document rewrapped at a different
+// width still lands on words, not air. -1 for a document with no row at all.
+func nonBlankNear(doc []readerLine, i int) int {
+	if len(doc) == 0 {
+		return -1
+	}
+	if i < 0 {
+		i = 0
+	} else if i >= len(doc) {
+		i = len(doc) - 1
+	}
+	if j := nonBlankRow(doc, i, 1); j >= 0 {
+		return j
+	}
+	return nonBlankRow(doc, i-1, -1)
+}
+
+// readerAnchorAt resolves the stored anchor against doc, the document as it
+// is actually about to be drawn. m.anchor is an index into the reader's own
+// width (readerWidth, chosen so a Lv3 landing does not jump when Lv2 took
+// it there — see readerWidth); but Lv2's companion panel can draw the same
+// conversation narrower still (the fleet and trail beside it spend cells
+// the anticipated Lv3 width did not), and a document rewrapped at a
+// different width moves every row after the difference, so the raw index
+// can land on the air between blocks (`second-day` at 120: the reader's own
+// width said 77, the companion drew 44; #313's gap, widened). -1 (no
+// anchor) passes through unchanged.
+func (m *Model) readerAnchorAt(doc []readerLine) int {
+	if m.anchor < 0 {
+		return -1
+	}
+	return nonBlankNear(doc, m.anchor)
+}
+
 // markNewestLine puts the reader's cursor on the last line of the document:
 // the newest thing the agent has written, which is the line the page was
 // just scrolled to.
@@ -650,15 +703,21 @@ func (m *Model) enterReader() {
 // page opened at the other end. The cursor stands where the page stands.
 func (m *Model) markNewestLine() {
 	doc := m.doc(m.readerWidth())
-	for i := len(doc) - 1; i >= 0; i-- {
-		if doc[i].kind == readerBlank {
-			continue // the cursor never stands on the air between blocks
-		}
+	if i := nonBlankRow(doc, len(doc)-1, -1); i >= 0 {
 		m.anchor, m.anchorAt, m.anchorText = i, doc[i].at, readerRowText(doc, i)
 		return
 	}
 	// A lane whose file holds no turn draws no document at all (#53): no
 	// row, so no cursor, and its footer names no key that walks one.
+}
+
+// markOldestLine puts the reader's cursor on the first line of the
+// document: `g`'s target, the mirror of markNewestLine's `G` (#313).
+func (m *Model) markOldestLine() {
+	doc := m.doc(m.readerWidth())
+	if i := nonBlankRow(doc, 0, 1); i >= 0 {
+		m.anchor, m.anchorAt, m.anchorText = i, doc[i].at, readerRowText(doc, i)
+	}
 }
 
 // anchorReader points the reader at the row the Lv2 cursor stands on: the
@@ -767,11 +826,8 @@ func (m *Model) readerCursorMove(delta int) bool {
 	}
 	target, moved := cur, false
 	for i := 0; i < n; i++ {
-		next := target + step
-		for next >= 0 && next < len(doc) && doc[next].kind == readerBlank {
-			next += step // the cursor never stands on the air between blocks
-		}
-		if next < 0 || next >= len(doc) {
+		next := nonBlankRow(doc, target+step, step)
+		if next < 0 {
 			break
 		}
 		target, moved = next, true
@@ -983,9 +1039,40 @@ func (m *Model) toggleFold() {
 		m.note = "nothing to unfold on screen"
 		return
 	}
+	toggledEvent := doc[i].event
 	m.unfolded[doc[i].event] = !m.unfolded[doc[i].event]
 	m.docVer++
 	m.docCache.valid = false
+	// Folding or unfolding renumbers every row after it: the anchor is a
+	// document position, and the document just changed shape under it. Left
+	// alone, a cursor above the fold that toggled stays exactly where it
+	// was — still correct, nothing shifted before it — but one below it now
+	// names a different row, sometimes the blank filler between two blocks
+	// (`very-long` at 100×30, unfolding a call above the cursor: #313's
+	// second gap). The repair prefers the toggled row itself — a foldable
+	// row, never blank, and the nearest thing to "the cursor was watching
+	// this fold" — then the nearest row at or below the stale index, then
+	// the nearest above; only an anchor already valid and undisturbed is
+	// left untouched.
+	if m.anchor >= 0 {
+		if newDoc := m.doc(width); m.anchor >= len(newDoc) || newDoc[m.anchor].kind == readerBlank {
+			landed := -1
+			for j, l := range newDoc {
+				if l.event == toggledEvent && l.foldable() {
+					landed = j
+					break
+				}
+			}
+			if landed < 0 {
+				landed = nonBlankNear(newDoc, m.anchor)
+			}
+			if landed >= 0 {
+				m.anchor, m.anchorAt, m.anchorText = landed, newDoc[landed].at, readerRowText(newDoc, landed)
+			} else {
+				m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
+			}
+		}
+	}
 	// Which one: the note names the call it opened — a person pressing
 	// Space did not know which row it had acted on (#79).
 	verb := "unfolded"

@@ -496,6 +496,13 @@ func TestT76Lv3KeysDriveTheReader(t *testing.T) {
 	}
 	still(t, "j")
 
+	// Two presses, not one: since #313 `g` above carries the cursor to the
+	// document's own first row, not only the viewport, so `j j` left it
+	// only two rows down — a single half page from there does not yet
+	// leave this fixture's first screenful (23 rows against a 33-row
+	// document), where before the fix `g` left the cursor whichever row
+	// `walkTo` had put it on and one press already did.
+	pressCtrl(m, tea.KeyCtrlD)
 	pressCtrl(m, tea.KeyCtrlD)
 	if m.scroll <= 2 {
 		t.Errorf("ctrl+d at Lv3 = line %d, want half a page further down", m.scroll)
