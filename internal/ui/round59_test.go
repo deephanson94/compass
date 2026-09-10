@@ -5072,6 +5072,7 @@ func TestTheTrailsEndIsTheLastRowTheDeckDraws(t *testing.T) {
 // of every scene and width, `j` and `G` must change the frame — a note is a
 // drawn cell, and a key that changes nothing at all is the dead key.
 func TestNoLv2MoveKeyIsSilentlyDead(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
@@ -5385,6 +5386,7 @@ func TestTheReadersPresentIsTheEndOfTheConversation(t *testing.T) {
 // the frame — a note is a drawn cell, and a key that changes nothing at
 // all is the dead key SPEC's round-one rule bans.
 func TestNoReaderPageKeyIsSilentlyDead(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
@@ -5851,6 +5853,7 @@ func TestTheSearchWalkSaysWhereItLanded(t *testing.T) {
 // running, `n` and `N` must change the frame — a note is a drawn cell,
 // and a key that changes nothing at all is the dead key round one bans.
 func TestNoReaderWalkKeyIsSilentlyDead(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
@@ -5972,6 +5975,7 @@ func TestTheSearchWalkNamesTheMatchItLandedOn(t *testing.T) {
 // canonical reader stand of every scene at every width: a walk that moves
 // the page says which match of how many it went to.
 func TestNoReaderWalkKeyMovesInSilence(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
@@ -8476,6 +8480,7 @@ func TestTheBoardsBandOpensOnItsDigit(t *testing.T) {
 // scene and width: a digit the frame draws on its band opens that row, and
 // a digit no row wears is still refused.
 func TestNoBandRowRefusesTheDigitItWears(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	drawn, refusedRight := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -9133,6 +9138,7 @@ func TestTheListsBandOpensOnlyTheRowsItDraws(t *testing.T) {
 // of the band's three drawers draws it — the list, the board's stranded
 // band, and the session view's rule under the trail.
 func TestNoDigitOffTheFrameOpensTheArchive(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	stands := [][]string{nil, {"x"}, {"tab"}}
 	off, bandDigits := 0, 0
@@ -9572,6 +9578,7 @@ func TestTheSentRowInTheArchiveDoesNotKeepAMoveThatCannotMove(t *testing.T) {
 // hidden`, sixteen cells — which is what keeps `tab deeper` there at
 // eighty.
 func TestTheArchivesHideRefusalKeepsTheWayDeeper(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	levelKey := func(foot string) bool {
 		for _, k := range []string{"tab deeper", "enter attach", "tab session", "tab reader"} {
@@ -10676,6 +10683,7 @@ func TestTheArchiveRefusesADigitNoRowWears(t *testing.T) {
 // one — #265's cut at the archive board's card head and #269's at the ship
 // row, on the row that is drawn at every level.
 func TestTheHeaderSaysTheAskOnceAndKeepsTheToolWord(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	defer lipgloss.SetColorProfile(prev)
 
@@ -11202,6 +11210,7 @@ func r98fhKeyWords(foot string) map[string]bool {
 // so the count is never the only copy. And the other side: a note counting
 // more than one chapter keeps its quote.
 func TestAChapterNoteOfOneChapterIsTheCountAlone(t *testing.T) {
+	sweep(t)
 	chapterOneRoutes := [][]string{
 		{"A", "1", "tab", "tab", "["},
 		{"tab", "tab", "["},
@@ -11423,6 +11432,7 @@ func TestTheChapterNoteLeavesItsQuoteToTheRow(t *testing.T) {
 // answer at every level and stays; the way back to the list is `esc back`,
 // which those footers already name (#232, #250).
 func TestTheFleetFoldNamesTheKeyOnlyWhereItMoves(t *testing.T) {
+	sweep(t)
 	foldRow := func(view string) string {
 		for _, ln := range strings.Split(ansi.Strip(view), "\n") {
 			if strings.Contains(ln, "more below") || strings.Contains(ln, "more above") {
@@ -11755,6 +11765,7 @@ func TestTheFleetFoldDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
 // digit and the name are the header's (#233, #238), and eighteen cells leave
 // the way deeper standing.
 func TestTheDigitRefusalKeepsTheWayDeeper(t *testing.T) {
+	sweep(t)
 	const said = "the one you are on"
 	const wasSaid = "the session you are on"
 	levelKeys := []string{"tab deeper", "tab session", "tab reader"}
@@ -11882,6 +11893,7 @@ func r100ttHideActs(sc scene, w, h int, route []string) (bool, string) {
 }
 
 func TestTheSessionViewAndTheReaderNameTheHideKey(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	routes := [][]string{
 		{"tab"},
@@ -12143,6 +12155,7 @@ func r101ttPressX(sc scene, w, h int, route []string) (bool, string) {
 //   - where the archive's footer names a hide clause, `x` acts or says
 //     why in its own words (#227).
 func TestTheArchiveNamesTheHideKeyOnTheRowItKeeps(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	routes := [][]string{
 		{"A", "x", "x"},
@@ -12735,6 +12748,7 @@ func r102ttMirrorOverruns(m *Model, w int) string {
 // pressed with the mirror standing it draws the conversation and says so —
 // and at the board the flag still flips.
 func TestTheReadersMirrorKeyIsNotASilentToggle(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	standing, first, toggles := 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -13179,6 +13193,7 @@ const r103ttRowWide = " · m live pane"
 //     `m conversation` to offer, on either side of the flag — the way back is
 //     the key the session view names (#62, #290).
 func TestTheReadersRowNamesTheMirrorKey(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	stands, roomy, named, standing := 0, 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -13484,6 +13499,7 @@ func r104ttGrabKeys(foot string) string {
 //   - the reader's row never names it, because one level deeper `g` is the
 //     start of the conversation and not the grab (#241, #246).
 func TestTheSessionViewsRowNamesTheGrabKey(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	stands, roomy, named, readers := 0, 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -13616,6 +13632,7 @@ func TestTheSessionViewsRowNamesTheGrabKey(t *testing.T) {
 // `archive 12` chip and the row's own `○` (#24, #52, #175, #187, #190,
 // #194, #198, #201, #210, #264, #283, #287).
 func TestTheArchivesHideRefusalNamesTheWayDeeper(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	r104sdWayDeeper := func(foot string) bool {
 		for _, k := range []string{"tab deeper", "tab reader", "tab session", "enter attach"} {
@@ -13734,6 +13751,7 @@ func TestTheArchivesHideRefusalNamesTheWayDeeper(t *testing.T) {
 // keypress earlier had one; and the naming form still stands where it
 // costs nothing, on the canonical walkthrough that carries it.
 func TestTheNoPaneRefusalKeepsTheWayDeeper(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	r105sdLevelKey := func(row string) bool {
 		for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
@@ -14061,6 +14079,7 @@ func r105fhFooter(m *Model) string {
 // walk actually reaches such frames, so a yield that never draws the note
 // fails too.
 func TestTheAttachRefusalSaysTheNoPaneOnce(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	scenes := allScenes()
@@ -14208,6 +14227,7 @@ func r106ttOffClauses(keys string) []string {
 //     says `the conversation` and the reader `the live pane` on either
 //     press (#290) — and no frame off the board ever says `mirror off`.
 func TestTheBoardsMirrorKeySaysTheFlagBothWays(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	boards, deeps := 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
@@ -14303,6 +14323,7 @@ func TestTheBoardsMirrorKeySaysTheFlagBothWays(t *testing.T) {
 // `j/k rows` — wherever the clause would cost the row a key naming a
 // level that the row named one keypress earlier, and only there.
 func TestThePresentNoteKeepsTheWayDeeper(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	r106sdLevelKey := func(row string) bool {
 		for _, k := range []string{"enter attach", "tab deeper", "tab session", "tab reader"} {
@@ -14473,6 +14494,7 @@ func r106fhNamed(row string) map[string]bool {
 // key it named one keypress earlier (#264); and the walk reaches the refusal
 // at all, so a yield that stopped drawing the note fails too.
 func TestTheReplyRefusalSaysTheNoPaneOnce(t *testing.T) {
+	sweep(t)
 	prev := lipgloss.ColorProfile()
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	reached := 0
@@ -14538,6 +14560,7 @@ func TestTheReplyRefusalSaysTheNoPaneOnce(t *testing.T) {
 // anything (#221). A press that moves the mark says so by moving it and
 // draws no note; a press that cannot keeps #83's word.
 func TestTheReaderMoveSaysWhatItDid(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 
 	r107sdScene := func(name string) scene {
@@ -15349,6 +15372,7 @@ func r108fhEndStand(m *Model, sc scene, step int) []string {
 //
 // Four sides, at five widths under both colour profiles (#215, #218).
 func TestTheReaderSaysWhichEndTheCursorIsAt(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	fits, scrolls, roomy, tight := 0, 0, 0, 0
 	for _, prof := range []struct {
@@ -15511,6 +15535,7 @@ func r109fhJumpPress(m *Model, sc scene, key string, n int) []string {
 // #83's word stands; `g` keeps #83's word at the top, whose marker the
 // frame draws over the cursor, as #309 left it.
 func TestTheReaderJumpKeySaysWhichEndItReached(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 	fits, scrolls, roomy, tight := 0, 0, 0, 0
 	for _, prof := range []struct {
@@ -16231,6 +16256,7 @@ func r111ttMarkInsideWord(cells []string) (string, bool) {
 // at least 8 of them are anchored on a row whose first word is one rune
 // long — the case the fix is about.
 func TestTheReaderCursorNeverStandsInsideAWord(t *testing.T) {
+	sweep(t)
 	stands, marked, oneRuneRows := 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
 		old := lipgloss.ColorProfile()
@@ -16890,6 +16916,7 @@ func TestTheReaderPageFollowsItsCursorWhenTheWindowChangesSize(t *testing.T) {
 // and at least 8 of them act with the cursor inside the document's last
 // screenful — the case the fix is about.
 func TestSpaceKeepsTheReaderCursorOnThePage(t *testing.T) {
+	sweep(t)
 	presses, atEnd, marked := 0, 0, 0
 	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
 		old := lipgloss.ColorProfile()
@@ -17081,6 +17108,7 @@ func r112fhSaysRow(line, text string) bool {
 //     forward rather than back to the page's top (#316, recorded);
 //  5. and a terminal resized under an open reader keeps it too (#319).
 func TestTheReaderCursorStaysOnThePageTheFrameDraws(t *testing.T) {
+	sweep(t)
 	for _, prof := range []struct {
 		name string
 		p    termenv.Profile
@@ -17259,6 +17287,7 @@ func r112fhbLastRow(doc []readerLine) int {
 //     row says `end of the conversation` the mark has not left the last
 //     moment the conversation has.
 func TestTheReaderMarkKeepsItsRowWhenTheWidthChanges(t *testing.T) {
+	sweep(t)
 	for _, prof := range []struct {
 		name string
 		p    termenv.Profile
@@ -17416,6 +17445,7 @@ func r113fhSaysRow(line, text string) bool {
 //  4. where the note says `end of the conversation` the mark is on the
 //     document's last row, so the frame does not say two things at once.
 func TestTheReaderCursorComesBackOnItsOwnRowWhenTheWindowChangesSize(t *testing.T) {
+	sweep(t)
 	for _, prof := range []struct {
 		name string
 		p    termenv.Profile
@@ -17769,6 +17799,7 @@ func r113sdNear(doc []readerLine, row int, head string) bool {
 // It refuses to be vacuous two ways: at least 100 Space presses are walked,
 // and at least 8 of them fold above the cursor — the case the fix is about.
 func TestTheFoldKeepsTheReaderCursorOnItsOwnRow(t *testing.T) {
+	sweep(t)
 	forceASCII(t)
 
 	presses, above := 0, 0
