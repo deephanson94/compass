@@ -127,6 +127,12 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 	return strings.Join(fit(rows, h), "\n")
 }
 
+// startsAWord reports whether c belongs to the row's own words rather than
+// to its shape. markAnchor spends the cell right after the first rune —
+// "❯▸", "⏺▸", "  ▸⎿" — and that cell is free only when the rune before it
+// is a glyph or an indent, never a letter of the line the model wrote.
+func startsAWord(c rune) bool { return unicode.IsLetter(c) || unicode.IsDigit(c) }
+
 // markAnchor inverts the anchored line across the panel, the way the trail
 // inverts its cursor row (trailBuilder.cursored) — and, like that row, cuts a
 // literal ▸ into it rather than trusting the inversion alone: Reverse is a
@@ -148,7 +154,15 @@ func markAnchor(line string, w int) string {
 	// already the reader's full width drew "I'll take the narrower one"
 	// as "the narrower on", a different sentence with nothing on the
 	// frame to say a cell had been taken (SPEC §4 — a truncation says so).
-	if r := []rune(plain); len(r) > 1 && r[1] == ' ' {
+	//
+	// "A leading glyph or an indent" is what the cell after the first rune
+	// is, and only then: prose can open on a one-letter word, and there
+	// that space belongs to the sentence. "I need a decision before I
+	// change the rule." was drawn "I▸need a decision before I change the
+	// rule." — the mark inside the model's own words, on 42 canonical rows
+	// (`two-tools`, `alarm-storm`, `few-ongoing`, every width) — so the
+	// row is asked what its first rune is, not merely what its second is.
+	if r := []rune(plain); len(r) > 1 && r[1] == ' ' && !startsAWord(r[0]) {
 		r[1] = '▸'
 		plain = string(r)
 	} else {

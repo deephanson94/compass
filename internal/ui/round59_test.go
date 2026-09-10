@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+	"unicode"
 
 	"github.com/deephanson94/compass/internal/transcript"
 	"strings"
@@ -16148,4 +16149,158 @@ func r110ttBDoorKeys(foot string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// ---- round 111, two-tools ----
+// ---- round 111, two-tools ----
+// r111ttWordSizes is the deck's own width ladder.
+var r111ttWordSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r111ttWordWalk is the walk this pin stands on, checked at every step:
+// the deck's own way down to the reader — a session, its trail, the
+// companion the trail hands over, the end of the conversation, the keys —
+// and then the reader's own movement keys pressed on that landing.
+func r111ttWordWalk() []string {
+	return []string{"1", "tab", "tab", "G", "tab", "j", "g", "G", "space"}
+}
+
+// r111ttMarkedCells are the reader panel's own drawn rows carrying the
+// cursor: at 80 and 100 the reader owns the screen, wider it stands right
+// of the last panel rule.
+func r111ttMarkedCells(frame string) []string {
+	var out []string
+	for _, l := range strings.Split(ansi.Strip(frame), "\n") {
+		parts := strings.Split(l, "│")
+		cell := strings.TrimRight(parts[len(parts)-1], " ")
+		if strings.Contains(cell, "▸") {
+			out = append(out, cell)
+		}
+	}
+	return out
+}
+
+// r111ttMarkInsideWord reports the first drawn cell whose `▸` has a letter
+// or a digit immediately before it — the mark standing inside the row's own
+// words instead of in the cell its shape leaves free.
+func r111ttMarkInsideWord(cells []string) (string, bool) {
+	for _, cell := range cells {
+		r := []rune(cell)
+		for i, c := range r {
+			if c == '▸' && i > 0 && (unicode.IsLetter(r[i-1]) || unicode.IsDigit(r[i-1])) {
+				return cell, true
+			}
+		}
+	}
+	return "", false
+}
+
+// TestTheReaderCursorNeverStandsInsideAWord holds the reader's cursor mark
+// to the row's shape and out of its words.
+//
+// markAnchor spends the cell right after a row's first rune — "❯▸", "⏺▸",
+// "  ▸⎿" — and its own comment says that cell is "a leading glyph or an
+// indent … never a letter of the row's own words". The test it made was
+// positional and not that: it asked only whether the *second* rune was a
+// space. Prose the model wrote can open on a one-letter word, and there
+// the space after it belongs to the sentence — so "I need a decision
+// before I change the rule." was drawn "I▸need a decision before I change
+// the rule." on 42 canonical rows (`two-tools`, `alarm-storm`,
+// `few-ongoing`, at all five widths, at Lv2 and Lv3 alike), the mark
+// reading as a rune of the transcript the reader exists to quote (#19).
+// The `else` branch markAnchor already carries — the mark pushed in front,
+// a cell off the far end when the row is full — is the right one there.
+//
+// Three sides, under both colour profiles (#215, #218):
+//   - the fault: on no stand is a drawn `▸` preceded by a letter or digit;
+//   - the mark is still there and still true: every Lv3 stand whose
+//     document has a row draws exactly one, on the anchor's own row;
+//   - it costs the row nothing new: the marked row is no wider than its
+//     terminal, and carries its whole text unless it ends on a cut mark.
+//
+// It refuses to be vacuous two ways: at least 200 stands are walked, and
+// at least 8 of them are anchored on a row whose first word is one rune
+// long — the case the fix is about.
+func TestTheReaderCursorNeverStandsInsideAWord(t *testing.T) {
+	stands, marked, oneRuneRows := 0, 0, 0
+	for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+		old := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof)
+		for _, sc := range allScenes() {
+			for _, size := range r111ttWordSizes {
+				w, h := size[0], size[1]
+				m := sceneModel(sc, w, h)
+				for step, k := range r111ttWordWalk() {
+					pressKey(m, k)
+					poll(m, sc)
+					stands++
+					cells := r111ttMarkedCells(m.View())
+
+					// Side 1 — the fault, at whatever level the walk stands on.
+					if cell, bad := r111ttMarkInsideWord(cells); bad {
+						t.Errorf("%v %s %dx%d after %d keys (%q, lv%d): the cursor mark stands inside the row's own words: %q",
+							prof, sc.name, w, h, step+1, k, m.level, cell)
+					}
+
+					if m.level != levelReader {
+						continue
+					}
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 || m.anchor < 0 || m.anchor >= len(doc) {
+						continue // the lane with nothing written: no row to stand on (#313)
+					}
+					want := readerRowText(doc, m.anchor)
+					if f := strings.Fields(want); len(f) > 0 && len([]rune(f[0])) == 1 {
+						oneRuneRows++
+					}
+
+					// Side 2 — the mark is still there, on the anchor's row.
+					// A stand whose anchored row has scrolled off the drawn
+					// page draws none, which is a fault of its own and not
+					// this one (raised, not cut, in round 111); the mark is
+					// never doubled, and the vacuity floor below holds this
+					// side to a real count of stands that do draw one.
+					if len(cells) > 1 {
+						t.Errorf("%v %s %dx%d after %d keys: the reader draws %d cursor marks, want at most one",
+							prof, sc.name, w, h, step+1, len(cells))
+						continue
+					}
+					if len(cells) == 0 {
+						continue
+					}
+					marked++
+					cell := cells[0]
+					spaced := strings.Replace(cell, "▸", " ", 1)
+					pushed := strings.Replace(cell, "▸", "", 1)
+					if f := strings.Fields(want); len(f) > 0 &&
+						!strings.Contains(spaced, f[0]) && !strings.Contains(pushed, f[0]) {
+						t.Errorf("%v %s %dx%d after %d keys: the marked row %q does not carry the anchored row's own words (%q)",
+							prof, sc.name, w, h, step+1, cell, want)
+					}
+
+					// Side 3 — the cost.
+					if lipgloss.Width(cell) > w {
+						t.Errorf("%v %s %dx%d after %d keys: the marked row is %d cells in a %d-cell terminal: %q",
+							prof, sc.name, w, h, step+1, lipgloss.Width(cell), w, cell)
+					}
+					if !strings.Contains(spaced, want) && !strings.Contains(pushed, want) && !strings.Contains(cell, "…") {
+						t.Errorf("%v %s %dx%d after %d keys: the marked row lost part of its text with nothing to say so: drew %q, the row is %q",
+							prof, sc.name, w, h, step+1, cell, want)
+					}
+				}
+			}
+		}
+		lipgloss.SetColorProfile(old)
+	}
+
+	t.Logf("stands walked: %d · Lv3 stands with a mark: %d · anchored rows opening on a one-rune word: %d",
+		stands, marked, oneRuneRows)
+	if stands < 200 {
+		t.Errorf("this pin walked %d stands, too few to hold anything", stands)
+	}
+	if marked < 100 {
+		t.Errorf("this pin saw the mark drawn on %d stands, too few to hold anything about it", marked)
+	}
+	if oneRuneRows < 8 {
+		t.Errorf("this pin stood on %d rows opening on a one-rune word, too few to be about the defect it names", oneRuneRows)
+	}
 }
