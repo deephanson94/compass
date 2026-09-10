@@ -6664,8 +6664,18 @@ func TestTheReaderStartKeyAnswersLikeItsPair(t *testing.T) {
 				t.Fatalf("%s %dx%d: `k` said nothing at the start", c.name, w, h)
 			}
 			g := top()
-			pressKey(g, "g")
-			poll(g, c.sc)
+			// `g` is the cursor's key too since #313, and since the fold
+			// that followed it answers this end on the same terms `k`
+			// above does: the press that carries the mark to the start
+			// says so by moving it, and the press after it — the one
+			// asked at the end it names — draws the word (#304).
+			for i := 0; i < 4000; i++ {
+				pressKey(g, "g")
+				poll(g, c.sc)
+				if strings.Contains(ansi.Strip(g.View()), want) {
+					break
+				}
+			}
 			if g.note == "" {
 				t.Errorf("%s %dx%d: `g` on a page already at the start said nothing (`k` said %q)", c.name, w, h, want)
 			}
@@ -16479,4 +16489,186 @@ func TestTheSearchWalkTakesTheReaderCursorToTheMatch(t *testing.T) {
 		}
 		lipgloss.SetColorProfile(prev)
 	}
+}
+
+// ---- round 111, second-day ----
+// TestTheJumpToTheStartLetsTheMarkSayIt pins #304's rule at the reader's top
+// end, where #314 left a note standing over a press that acted.
+//
+// Since #314 `g` walks the cursor to the document's first row. On a page that
+// fits, `scrollBy` answers the page's own question on the way and the row came
+// back saying "all of it is on screen" — the sentence #304 took off `j`, `k`,
+// `ctrl+d` and `ctrl+u` for standing over a press that moved the mark, and
+// #309 left at this end only where the press moved nothing. `k` landing the
+// mark on that same first row of that same page says nothing and keeps `a ask`
+// and `enter attach`; under `g` the note cost the row both.
+//
+// Three sides: the frame it was found on (`second-day` at eighty, the
+// walkthrough's own reader stand), the rule over every Lv3 stand of both
+// second-day scenes at five widths and both colour profiles (#215, #218), and
+// the price — the note is not lost, only outranked: where `g` moves nothing it
+// still says its word, where the row would pay a key for the shed it keeps the
+// word instead (#281, #308), and `G` at the other end is untouched (#310).
+func TestTheJumpToTheStartLetsTheMarkSayIt(t *testing.T) {
+	forceASCII(t)
+
+	pageWord := "all of it is on screen"
+
+	// standAt drives one scene to a stand and hands back the model.
+	standAt := func(sc scene, w, h int, keys []string) *Model {
+		m := sceneModel(sc, w, h)
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	// drawnFooter is the frame's own last row.
+	drawnFooter := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	// footerSaying is the row this stand draws with that note on it — the
+	// keymap's own trades and nothing else, which is the row as it stood
+	// before the fold, and the row the frame draws when the note stays.
+	footerSaying := func(m *Model, note string) string {
+		inner := m.width - 2*edgePad
+		if inner < 10 {
+			inner = m.width
+		}
+		was := m.note
+		m.note = note
+		row := strings.TrimRight(ansi.Strip(m.footerTraded(m.keymap(), inner)), " ")
+		m.note = was
+		return row
+	}
+	// markedRow is the one row of the reader panel carrying the cursor, and
+	// how many rows carry one; at eighty the reader owns the screen.
+	markedRow := func(m *Model) (string, int) {
+		row, n := "", 0
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if strings.Contains(l, "▸") {
+				row, n = strings.TrimRight(l, " "), n+1
+			}
+		}
+		return row, n
+	}
+
+	var secondDay, firstSession scene
+	for _, sc := range allScenes() {
+		switch sc.name {
+		case "second-day":
+			secondDay = sc
+		case "first-session":
+			firstSession = sc
+		}
+	}
+
+	// 1 · the frame it was found on: `second-day` at eighty, the canonical
+	// walkthrough's own reader stand, the cursor one row down.
+	toReader := []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G", "tab", "[", "]", "k", "k", "j"}
+	before := standAt(secondDay, 80, 24, toReader)
+	if before.level != levelReader {
+		t.Fatalf("the walkthrough's prefix no longer stands in the reader (Lv%d)", before.level)
+	}
+	at := before.anchor
+	withG := standAt(secondDay, 80, 24, append(append([]string(nil), toReader...), "g"))
+	withK := standAt(secondDay, 80, 24, append(append([]string(nil), toReader...), "k"))
+	if withG.anchor == at {
+		t.Fatalf("`g` moved no mark on the stand this is measured on (row %d)", at)
+	}
+	if withG.anchor != withK.anchor {
+		t.Fatalf("`g` and `k` land the mark on different rows (%d and %d): the frames are not comparable", withG.anchor, withK.anchor)
+	}
+	gRow, gMarks := markedRow(withG)
+	if kRow, kMarks := markedRow(withK); gRow != kRow || gMarks != 1 || kMarks != 1 {
+		t.Errorf("the two presses draw the mark differently: `g` %q (%d marks), `k` %q (%d marks)", gRow, gMarks, kRow, kMarks)
+	}
+	gFoot, kFoot := drawnFooter(withG), drawnFooter(withK)
+	if strings.Contains(gFoot, pageWord) {
+		t.Errorf("second-day 80x24, `g` walked the mark to row %d and the row still says the page's word:\n  %q", withG.anchor, gFoot)
+	}
+	for _, key := range []string{"a ask", "enter attach"} {
+		if !strings.Contains(kFoot, key) {
+			t.Fatalf("the stand's own `k` row no longer names %q: %q", key, kFoot)
+		}
+		if !strings.Contains(gFoot, key) {
+			t.Errorf("second-day 80x24: the note under `g` costs the row %q, which `k` on the same landing names:\n  g: %q\n  k: %q", key, gFoot, kFoot)
+		}
+	}
+
+	// 2 · the rule: at every Lv3 stand of the canonical walkthrough over both
+	// second-day scenes, five widths, both colour profiles, the row `g` draws
+	// is the row without the page's word wherever that row still names every
+	// key the row with it named, and the row with it wherever it does not.
+	stands, walked, kept := 0, 0, 0
+	for _, sc := range []scene{secondDay, firstSession} {
+		keys := append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...)
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			for _, prof := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
+				old := lipgloss.ColorProfile()
+				lipgloss.SetColorProfile(prof)
+				for i := range keys {
+					prefix := keys[:i+1]
+					m := standAt(sc, w, h, prefix)
+					if m.level != levelReader || len(m.doc(m.readerWidth())) == 0 {
+						continue
+					}
+					stands++
+					was, fits := m.anchor, m.readerPageFits()
+					after := standAt(sc, w, h, append(append([]string(nil), prefix...), "g"))
+					foot := strings.TrimSpace(drawnFooter(after))
+					if !fits || after.anchor == was {
+						// The price: a press that moved no mark keeps its
+						// word, and so does a page that scrolls.
+						if foot == "" || (after.note == "" && after.anchor == was) {
+							t.Errorf("%s %dx%d %v after %q: `g` moved nothing and said nothing", sc.name, w, h, prof, prefix[len(prefix)-1])
+						}
+						continue
+					}
+					walked++
+					with := strings.TrimSpace(footerSaying(after, pageWord))
+					without := strings.TrimSpace(footerSaying(after, ""))
+					want := with
+					if footerNamesAll(with, without) {
+						want = without
+					} else {
+						kept++
+					}
+					if foot != want {
+						t.Errorf("%s %dx%d %v after %q: `g` walked the mark %d→%d and drew\n  %q\nwant\n  %q", sc.name, w, h, prof, prefix[len(prefix)-1], was, after.anchor, foot, want)
+					}
+					if !footerNamesAll(with, foot) {
+						t.Errorf("%s %dx%d %v after %q: the row `g` draws names fewer keys than the row with the note:\n  %q\n  %q", sc.name, w, h, prof, prefix[len(prefix)-1], foot, with)
+					}
+				}
+				lipgloss.SetColorProfile(old)
+			}
+		}
+	}
+	if stands < 300 {
+		t.Errorf("only %d Lv3 stands were reached, want at least 300 — the walk is not reaching the reader any more", stands)
+	}
+	if walked < 100 {
+		t.Errorf("`g` walked the mark on only %d stands, want at least 100 — the case this pins is not being reached", walked)
+	}
+
+	// 3 · the price: `G` at the other end still says the end it reached
+	// (#310), and the mark is on the document's last row (#314).
+	gg := standAt(secondDay, 120, 34, []string{"r", "1", "/", "pytest", "enter", "esc", "tab", "ctrl+u", "ctrl+u", "[", "]", "G"})
+	if got := drawnFooter(gg); !strings.Contains(got, "end of the conversation") {
+		t.Errorf("`G` no longer says the end it reached: %q", got)
+	}
+	doc := gg.doc(gg.readerWidth())
+	last := -1
+	for i := range doc {
+		if doc[i].kind != readerBlank {
+			last = i
+		}
+	}
+	if gg.anchor != last {
+		t.Errorf("`G` left the mark on row %d, the document's last row is %d", gg.anchor, last)
+	}
+	t.Logf("Lv3 stands %d · `g` walked the mark on %d · the word kept for a key on %d", stands, walked, kept)
 }

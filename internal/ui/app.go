@@ -320,6 +320,10 @@ type Model struct {
 	showMirror bool
 	inTmux     bool   // $TMUX was set: Enter switches the client instead of suspending
 	note       string // one line of consequence, cleared by the next keypress
+	// noteYields marks a note the mark's own move outranks: `g` walked the
+	// cursor and the page's word stood over it (#304). The footer spends
+	// it, because only there can the trade be measured (#281, #308).
+	noteYields bool
 
 	// spawn is how a built command reaches the world. The deck leaves it nil
 	// and runs the command itself; a harness installs one to read the command
@@ -828,7 +832,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.replyKey(msg)
 	}
 
-	m.note = "" // a keypress answers the last note
+	m.note, m.noteYields = "", false // a keypress answers the last note
 
 	switch key {
 	case "ctrl+c", "q":
@@ -1328,9 +1332,26 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 		// this the viewport moved and the mark did not: on a page that
 		// fits, `G` said "end of the conversation" while the only `▸` stood
 		// under "the start of the conversation" a screen above it.
+		//
+		// What it says is the move's, not the page's (#304). On a page
+		// that fits `scrollBy` answers the page's question itself, and
+		// with a mark to move that word stood over a press that had just
+		// walked the cursor: `k` landing the mark on the same first row
+		// of the same page says nothing, `g` said "all of it is on
+		// screen" — the very sentence #304 took off `j`, `k`, `ctrl+d`
+		// and `ctrl+u` for standing over a press that acted, and #309
+		// left at this end only where the press moved nothing. The mark
+		// says it by moving; the note yields to it in footerLine, where
+		// the row can be measured under both (#281, #308). A page that
+		// scrolls is untouched: there `g` says the end it reached, as
+		// `G` does at the other one (#310).
+		before := m.anchor
 		moved := m.scrollBy(-(1 << 30)) // clamped to the first screenful
 		m.markOldestLine()
-		if !moved {
+		switch {
+		case m.readerPageFits() && m.anchor != before:
+			m.noteYields = true
+		case !moved:
 			m.note = "start of the conversation"
 		}
 	case "G":
@@ -3672,6 +3693,22 @@ func (m *Model) statusChips() string {
 // because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
 	keys := m.keymap()
+	// A note the mark's own move outranks yields to it (#304): `g` on a
+	// page that fits walked the cursor and kept `scrollBy`'s word for the
+	// page over the press that acted. It yields only where the row without
+	// it still names every key it named with it — a word costs no key
+	// (#281, #308) — and the row keeps the word rather than a key.
+	if m.level >= levelReader && m.noteYields && m.note != "" {
+		with := m.footerTraded(keys, w)
+		said := m.note
+		m.note = ""
+		without := m.footerTraded(keys, w)
+		m.note = said
+		if footerNamesAll(with, without) {
+			return without
+		}
+		return with
+	}
 	// The end's own word is one cell longer than #83's, which the same key
 	// draws at the other end of the same page, and a word costs no key
 	// (#308): where the finished row under it names fewer keys than under
