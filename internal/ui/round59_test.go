@@ -17341,3 +17341,396 @@ func TestTheReaderMarkKeepsItsRowWhenTheWidthChanges(t *testing.T) {
 		lipgloss.SetColorProfile(prev)
 	}
 }
+
+// ---- round 113, fleet-hygiene (the reseat) and second-day (kept as a guard) ----
+// r113fhSizes are the terminals a reader is opened in before the window is
+// dragged; r113fhDrags are the sizes it is dragged through, in order, so the
+// mark is asked to survive a chain of changes and not just one.
+var r113fhSizes = [][2]int{{80, 24}, {120, 34}, {220, 48}}
+
+var r113fhDrags = [][2]int{{70, 24}, {90, 30}, {110, 18}, {152, 40}, {200, 20}, {100, 30}, {90, 12}, {152, 44}}
+
+// r113fhWalks put the cursor somewhere worth losing: where it opens, low on
+// a scrolling page, and on the conversation's very last row.
+var r113fhWalks = [][]string{{"ctrl+d", "j"}, {"G"}}
+
+// r113fhReaderColumn is the frame's reader column: the reader is the last
+// panel at every width, so the mark is looked for after the row's last panel
+// rule and never in the trail's own cursor.
+func r113fhReaderColumn(line string) string {
+	cells := strings.Split(ansi.Strip(line), "│")
+	return cells[len(cells)-1]
+}
+
+// r113fhMarkedRows is every drawn reader line carrying the cursor.
+func r113fhMarkedRows(frame string) []string {
+	var out []string
+	for _, l := range strings.Split(frame, "\n") {
+		if col := r113fhReaderColumn(l); strings.Contains(col, "▸") {
+			out = append(out, col)
+		}
+	}
+	return out
+}
+
+// r113fhLastRow is the document's last row a cursor can stand on.
+func r113fhLastRow(doc []readerLine) int {
+	for i := len(doc) - 1; i >= 0; i-- {
+		if doc[i].kind != readerBlank {
+			return i
+		}
+	}
+	return -1
+}
+
+// r113fhSaysRow reports whether the drawn, cursor-bearing line carries the
+// document row's own opening words: the mark replaces a cell rather than
+// hiding one (#305), so the row's words survive it.
+func r113fhSaysRow(line, text string) bool {
+	flat := strings.ReplaceAll(line, "▸", " ")
+	want := strings.TrimSpace(text)
+	if r := []rune(want); len(r) > 12 {
+		want = string(r[:12])
+	}
+	return want != "" && strings.Contains(flat, want)
+}
+
+// TestTheReaderCursorComesBackOnItsOwnRowWhenTheWindowChangesSize pins the
+// reader's cursor against the rewrap.
+//
+// #319 brought the reader's *page* back to its cursor after a size change
+// and left the cursor's row number alone. A row number belongs to one
+// wrapping: dragged to another width, the same index is a different line of
+// the conversation, so the mark came back on a different moment — on
+// `many-idle` at 100×30 dragged to 90 wide it left ` ▸⎿ edited · +1 −1`
+// (17:02) and came back on ` ⏺▸Edit(loader.py)` (16:42), with `⎿ edited ·
+// +1 −1` drawn *below* it and the note beside it still reading `end of the
+// conversation`. Four sides, both colour profiles (#215, #218), every scene
+// the deck has:
+//
+//  1. after every size change the mark stands on the same transcript event
+//     it stood on before the window moved;
+//  2. the frame draws exactly one mark, in the reader's own column, on the
+//     row the model counts as the cursor;
+//  3. the mark is inside the page the frame draws;
+//  4. where the note says `end of the conversation` the mark is on the
+//     document's last row, so the frame does not say two things at once.
+func TestTheReaderCursorComesBackOnItsOwnRowWhenTheWindowChangesSize(t *testing.T) {
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+		drags, ends, rewraps := 0, 0, 0
+		for _, sc := range allScenes() {
+			for _, size := range r113fhSizes {
+				for _, walk := range r113fhWalks {
+					w, h := size[0], size[1]
+					m := sceneModel(sc, w, h)
+					toLv3(m)
+					doc := m.doc(m.readerWidth())
+					if len(doc) == 0 {
+						continue // a lane whose agent has written nothing (#313)
+					}
+					for _, k := range walk {
+						pressKey(m, k)
+						poll(m, sc)
+					}
+					doc = m.doc(m.readerWidth())
+					at := m.readerAnchorAt(doc)
+					if at < 0 || at >= len(doc) || doc[at].event < 0 {
+						continue
+					}
+					want, wantText := doc[at].event, readerRowText(doc, at)
+					rows := len(doc)
+					where := prof.name + " " + sc.name
+					for _, to := range r113fhDrags {
+						m.SetSize(to[0], to[1])
+						poll(m, sc)
+						frame := m.View()
+						doc = m.doc(m.readerWidth())
+						if len(doc) == 0 {
+							break
+						}
+						if len(doc) != rows {
+							rewraps++
+							rows = len(doc)
+						}
+						drags++
+						got := m.readerAnchorAt(doc)
+						if got < 0 || got >= len(doc) {
+							t.Errorf("%s %dx%d %v dragged to %dx%d: the model has no cursor row at all",
+								where, w, h, walk, to[0], to[1])
+							continue
+						}
+						// (1) the same moment of the conversation
+						if doc[got].event != want {
+							t.Errorf("%s %dx%d %v dragged to %dx%d: the cursor left %q and came back on %q — a different moment",
+								where, w, h, walk, to[0], to[1], wantText, readerRowText(doc, got))
+						}
+						// (2) one mark, in the reader's column, on that row
+						marks := r113fhMarkedRows(frame)
+						if len(marks) != 1 {
+							t.Errorf("%s %dx%d %v dragged to %dx%d: the frame draws %d cursor marks in the reader column, want exactly one; note %q",
+								where, w, h, walk, to[0], to[1], len(marks), m.note)
+							continue
+						}
+						if !r113fhSaysRow(marks[0], readerRowText(doc, got)) {
+							t.Errorf("%s %dx%d %v dragged to %dx%d: the drawn mark is on %q, the model counts row %d %q",
+								where, w, h, walk, to[0], to[1], strings.TrimSpace(marks[0]), got, readerRowText(doc, got))
+						}
+						// (3) on the page the frame draws
+						top, height := m.readerTop(doc), m.readerHeight()
+						if got < top || got >= top+height {
+							t.Errorf("%s %dx%d %v dragged to %dx%d: the cursor stands on row %d, off the drawn page [%d,%d)",
+								where, w, h, walk, to[0], to[1], got, top, top+height)
+						}
+						// (4) the end-note is about the cursor's row (#309)
+						if m.note == "end of the conversation" {
+							ends++
+							if last := r113fhLastRow(doc); got != last {
+								t.Errorf("%s %dx%d %v dragged to %dx%d: the note says %q and the mark stands on row %d %q, with row %d %q drawn below it",
+									where, w, h, walk, to[0], to[1], m.note, got, readerRowText(doc, got), last, readerRowText(doc, last))
+							}
+						}
+					}
+				}
+			}
+		}
+		if drags < 300 {
+			t.Errorf("%s: only %d size changes measured — the sweep went vacuous", prof.name, drags)
+		}
+		if rewraps < 60 {
+			t.Errorf("%s: only %d of those re-wrapped the document — the sweep never tested the rewrap", prof.name, rewraps)
+		}
+		if ends < 5 {
+			t.Errorf("%s: only %d stands carried the end-note — side 4 went vacuous", prof.name, ends)
+		}
+		lipgloss.SetColorProfile(prev)
+	}
+}
+
+// TestTheReaderCursorIsARowOfTheDocumentTheFrameDraws pins the reader's
+// stored cursor to the document the frame is about to draw (#319's site).
+//
+// A window that grows rewraps the conversation into fewer rows — the commit
+// call that takes two lines at 152 takes one at 220 — so a document read to
+// its end loses a row under a mark standing on its last. `readerAnchorAt`
+// clamped for the drawing, so the `▸` came back on the row it stood on and
+// the frame looked right; the stored index kept its old value, one past the
+// end. Only the keys knew: `readerCursorMove` throws an out-of-range cursor
+// away and restarts from the page's own top, so the `j` the frame's own row
+// named stepped the mark nineteen rows *backwards* up the conversation, and
+// `space` took #300's top-down fallback and said `unfolded Read(sched.go)`
+// over a frame whose mark stood on the commit's result — 547 of the
+// corpus's 4 824 (stand, new size) pairs, 4 of my two scenes' 1 424.
+//
+// Three sides, both colour profiles (#215, #218):
+//
+//  1. the frame it was found on — the archive's `api` reader at 152x40 read
+//     to its end and widened to 220x48: the mark on the row it stood on, the
+//     model counting that same row, `j` stepping forward from it and `space`
+//     naming the call the mark stands on;
+//  2. the rule — every Lv3 stand of the canonical walkthrough over
+//     `second-day` and `first-session` at five widths, read to its end and
+//     resized to each of the other four: the stored cursor is a row of the
+//     new document and is the row the frame draws the mark on, and the
+//     first `j` after the resize never steps backwards;
+//  3. the price — where the new size rewraps the conversation into the same
+//     number of rows, the mark does not move at all: the words the cursor
+//     stood on before the resize are the words it stands on after. (Where
+//     the rewrap splits or joins a row the index cannot mean the same row,
+//     and side 2 is what holds there.)
+func TestTheReaderCursorIsARowOfTheDocumentTheFrameDraws(t *testing.T) {
+	for _, prof := range []struct {
+		name string
+		p    termenv.Profile
+	}{{"mono", termenv.Ascii}, {"colour", termenv.TrueColor}} {
+		prev := lipgloss.ColorProfile()
+		lipgloss.SetColorProfile(prof.p)
+
+		// (1) the frame it was found on.
+		sc, ok := r113sdSceneNamed("second-day")
+		if !ok {
+			t.Fatalf("%s: the deck has no second-day scene", prof.name)
+		}
+		keys := r113sdWalk(sc)
+		m := r113sdStandAt(sc, 152, 40, 47, keys)
+		pressKey(m, "G")
+		doc := m.doc(m.readerWidth())
+		stood := ""
+		if m.anchor >= 0 && m.anchor < len(doc) {
+			stood = strings.TrimSpace(doc[m.anchor].text)
+		}
+		if !strings.Contains(stood, "commit") {
+			t.Fatalf("%s: `G` on the archive's api reader at 152x40 left the mark on %q, not on the commit's result", prof.name, stood)
+		}
+		m.Update(tea.WindowSizeMsg{Width: 220, Height: 48})
+		doc = m.doc(m.readerWidth())
+		if m.anchor < 0 || m.anchor >= len(doc) {
+			t.Errorf("%s: widened to 220x48 the reader's cursor is row %d of a %d-row document", prof.name, m.anchor, len(doc))
+		} else {
+			if drawn := m.readerAnchorAt(doc); drawn != m.anchor {
+				t.Errorf("%s: widened to 220x48 the frame draws the mark on row %d and the model counts row %d", prof.name, drawn, m.anchor)
+			}
+			if got := strings.TrimSpace(doc[m.anchor].text); got != stood {
+				t.Errorf("%s: widened to 220x48 the cursor stands on %q, not on the row it was left on, %q", prof.name, got, stood)
+			}
+			line, found := r113sdMarkedRow(m.View())
+			if !found {
+				t.Errorf("%s: widened to 220x48 the reader draws no cursor at all", prof.name)
+			} else if !r113sdSaysRow(line, doc[m.anchor].text) {
+				t.Errorf("%s: widened to 220x48 the drawn mark is on %q, not on row %d %q", prof.name, strings.TrimSpace(line), m.anchor, stood)
+			}
+		}
+		was := m.anchor
+		after := *m
+		pressKey(&after, "j")
+		if after.anchor < was {
+			t.Errorf("%s: widened to 220x48 `j` stepped the cursor from row %d back to row %d", prof.name, was, after.anchor)
+		}
+		folded := *m
+		pressKey(&folded, "space")
+		if verb := folded.note; strings.HasPrefix(verb, "unfolded ") || strings.HasPrefix(verb, "folded ") {
+			name := strings.TrimSpace(strings.SplitN(verb, " ", 2)[1])
+			if head := strings.SplitN(name, "(", 2)[0]; head != "" && !r113sdNear(doc, was, head) {
+				t.Errorf("%s: widened to 220x48 `space` said %q over a mark standing on %q", prof.name, verb, stood)
+			}
+		}
+
+		// (2) the rule, and (3) the price.
+		pairs, moved := 0, 0
+		for _, name := range []string{"second-day", "first-session"} {
+			sc, ok := r113sdSceneNamed(name)
+			if !ok {
+				continue
+			}
+			keys := r113sdWalk(sc)
+			for _, from := range r113sdReaderSizes {
+				w, h := from[0], from[1]
+				probe := sceneModel(sc, w, h)
+				var stands []int
+				for i, k := range keys {
+					pressKey(probe, k)
+					poll(probe, sc)
+					if probe.level >= levelReader {
+						stands = append(stands, i+1)
+					}
+				}
+				for _, n := range stands {
+					for _, to := range r113sdReaderSizes {
+						if to == from {
+							continue
+						}
+						m := r113sdStandAt(sc, w, h, n, keys)
+						pressKey(m, "G")
+						doc := m.doc(m.readerWidth())
+						if len(doc) == 0 || m.anchor < 0 || m.anchor >= len(doc) {
+							continue
+						}
+						stood, wasLen := strings.TrimSpace(doc[m.anchor].text), len(doc)
+						m.Update(tea.WindowSizeMsg{Width: to[0], Height: to[1]})
+						doc = m.doc(m.readerWidth())
+						if len(doc) == 0 || m.level < levelReader {
+							continue
+						}
+						pairs++
+						where := prof.name + " " + name
+						if m.anchor < 0 || m.anchor >= len(doc) {
+							t.Errorf("%s %dx%d step %d resized to %dx%d: the cursor is row %d of a %d-row document",
+								where, w, h, n, to[0], to[1], m.anchor, len(doc))
+							continue
+						}
+						if drawn := m.readerAnchorAt(doc); drawn != m.anchor {
+							t.Errorf("%s %dx%d step %d resized to %dx%d: the frame draws the mark on row %d, the model counts row %d",
+								where, w, h, n, to[0], to[1], drawn, m.anchor)
+							continue
+						}
+						if got := strings.TrimSpace(doc[m.anchor].text); len(doc) == wasLen && got != stood {
+							moved++
+							t.Errorf("%s %dx%d step %d resized to %dx%d: the document kept its %d rows and the cursor still moved, to %q from %q",
+								where, w, h, n, to[0], to[1], wasLen, got, stood)
+						}
+						was := m.anchor
+						pressKey(m, "j")
+						if m.anchor < was {
+							t.Errorf("%s %dx%d step %d resized to %dx%d: `j` stepped the cursor from row %d back to row %d",
+								where, w, h, n, to[0], to[1], was, m.anchor)
+						}
+					}
+				}
+			}
+		}
+		if pairs < 300 {
+			t.Errorf("%s: the pin measured %d (stand, new size) pairs — too few to mean anything", prof.name, pairs)
+		}
+		t.Logf("%s: %d (stand, new size) pairs measured, %d moved the mark", prof.name, pairs, moved)
+		lipgloss.SetColorProfile(prev)
+	}
+}
+
+// r113sdReaderSizes are the five terminals the walkthrough is drawn at.
+var r113sdReaderSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r113sdSceneNamed finds one of the deck's scenes by name.
+func r113sdSceneNamed(name string) (scene, bool) {
+	for _, sc := range allScenes() {
+		if sc.name == name {
+			return sc, true
+		}
+	}
+	return scene{}, false
+}
+
+// r113sdWalk is the canonical walkthrough plus the scene's own tail.
+func r113sdWalk(sc scene) []string {
+	return append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...)
+}
+
+// r113sdStandAt replays n keys of the walk on a fresh model.
+func r113sdStandAt(sc scene, w, h, n int, keys []string) *Model {
+	m := sceneModel(sc, w, h)
+	for i := 0; i < n && i < len(keys); i++ {
+		pressKey(m, keys[i])
+		poll(m, sc)
+	}
+	return m
+}
+
+// r113sdMarkedRow is the drawn reader line carrying the cursor. The reader
+// is the frame's last panel at every width, so the mark is looked for after
+// the row's last column rule and never in the trail's own cursor.
+func r113sdMarkedRow(frame string) (string, bool) {
+	for _, l := range strings.Split(frame, "\n") {
+		cells := strings.Split(ansi.Strip(l), "│")
+		if col := cells[len(cells)-1]; strings.Contains(col, "▸") {
+			return col, true
+		}
+	}
+	return "", false
+}
+
+// r113sdSaysRow reports whether the drawn, cursor-bearing line carries the
+// document row's own opening words: the mark replaces a cell rather than
+// hiding one (#305), so the row's words survive it.
+func r113sdSaysRow(line, text string) bool {
+	flat := strings.ReplaceAll(line, "▸", " ")
+	want := strings.TrimSpace(text)
+	if r := []rune(want); len(r) > 12 {
+		want = string(r[:12])
+	}
+	return want != "" && strings.Contains(flat, want)
+}
+
+// r113sdNear reports whether the call the fold's note names is the row the
+// cursor stands on or the call that row belongs to — a result's own call is
+// the row above it.
+func r113sdNear(doc []readerLine, row int, head string) bool {
+	for i := row; i >= 0 && i > row-3 && i < len(doc); i-- {
+		if strings.Contains(doc[i].text, head) {
+			return true
+		}
+	}
+	return false
+}

@@ -765,11 +765,16 @@ func reanchorRewrapped(doc []readerLine, at int, when time.Time, text string) in
 // page nothing moves. The mark itself is not touched — the row the person
 // left it on is the row it comes back on, re-resolved off the air by
 // `readerAnchorAt` as every other redraw does (#314).
-func (m *Model) keepReaderCursorOnPage() {
+func (m *Model) keepReaderCursorOnPage(was readerSeat) {
 	if m.level < levelReader || m.anchor < 0 {
 		return
 	}
 	doc := m.doc(m.readerWidth())
+	// The seat read before the width changed puts the mark back on its
+	// own row of its own event — the last row of a block stays the last
+	// (#322); where no seat was read, the mark is found again by its
+	// moment and its text (#321).
+	m.reseatAnchor(doc, was)
 	// A row number belongs to one wrapping. A width change rewraps the
 	// document, and the same index is then a different line: the mark came
 	// back two rows and twenty minutes early — ` ▸⎿ edited · +1 −1` became
@@ -777,7 +782,7 @@ func (m *Model) keepReaderCursorOnPage() {
 	// that the frame now drew rows below, so the row the person was reading
 	// was not the row that came back (#319's residue). The mark is found
 	// again by what it stood on rather than by where it stood.
-	if row := reanchorRewrapped(doc, m.anchor, m.anchorAt, m.anchorText); row >= 0 && row != m.anchor {
+	if row := reanchorRewrapped(doc, m.anchor, m.anchorAt, m.anchorText); !was.ok && row >= 0 && row != m.anchor {
 		m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
 	}
 	row := m.readerAnchorAt(doc)
@@ -791,6 +796,91 @@ func (m *Model) keepReaderCursorOnPage() {
 	case row > top+h-1:
 		m.scroll = scrollShowing(doc, row, h)
 	}
+}
+
+// readerSeat is where the reader's cursor stands, said in terms that survive
+// a rewrap: the transcript event whose block the row belongs to, how many
+// rows down that block the row is, and how many rows the block had.
+//
+// A row number alone belongs to one wrapping. #319 brought the page back to
+// `m.anchor` after a size change and left the number itself alone, so a
+// terminal dragged to another *width* re-drew the same index over a
+// re-wrapped document and the mark came back on a different line of the
+// conversation — a different moment, with the reader's own note about the
+// one it left still beside it.
+type readerSeat struct {
+	event  int
+	offset int
+	rows   int
+	ok     bool
+}
+
+// readerSeat reads the cursor's seat off the document the current size draws.
+func (m *Model) readerSeat() readerSeat {
+	if m.level < levelReader || m.anchor < 0 {
+		return readerSeat{}
+	}
+	doc := m.doc(m.readerWidth())
+	row := m.readerAnchorAt(doc)
+	if row < 0 || row >= len(doc) || doc[row].event < 0 {
+		return readerSeat{}
+	}
+	block := readerBlockOf(doc, doc[row].event)
+	for i, j := range block {
+		if j == row {
+			return readerSeat{event: doc[row].event, offset: i, rows: len(block), ok: true}
+		}
+	}
+	return readerSeat{}
+}
+
+// readerBlockOf is the rows a transcript event owns in this document, in
+// order: one row for a call, several for a turn the width has wrapped.
+func readerBlockOf(doc []readerLine, event int) []int {
+	if event < 0 {
+		return nil
+	}
+	var rows []int
+	for i, l := range doc {
+		if l.event == event && l.kind != readerBlank {
+			rows = append(rows, i)
+		}
+	}
+	return rows
+}
+
+// reseatAnchor puts the cursor back on the row it stood on before the
+// terminal changed size — its own row, not its old row *number*.
+//
+// The seat was read off the old document; the event it names is the same
+// event in the new one, whatever the width did to the wrapping, so the mark
+// lands in the block it was in and as far down it as it was, clamped to the
+// rows the new width gives that block. Where the number still names the same
+// row — a height-only change, or a block the rewrap did not touch — nothing
+// moves. `anchorAt` and `anchorText` follow the mark, because the reader's
+// title clause and its end-note are statements *about the cursor's row*
+// (#115, #309) and a stale pair leaves the frame saying two things.
+func (m *Model) reseatAnchor(doc []readerLine, was readerSeat) {
+	if !was.ok || m.anchor < 0 {
+		return
+	}
+	block := readerBlockOf(doc, was.event)
+	if len(block) == 0 {
+		return
+	}
+	off := min(was.offset, len(block)-1)
+	if was.offset == was.rows-1 {
+		// A cursor at the end of its block comes back at the end of it:
+		// the reader's note tells the ends of the conversation apart
+		// (#309, #310), and a mark that slid up a re-wrapped last turn
+		// left `end of the conversation` over a row with rows below it.
+		off = len(block) - 1
+	}
+	row := block[off]
+	if row == m.anchor {
+		return
+	}
+	m.anchor, m.anchorAt, m.anchorText = row, doc[row].at, readerRowText(doc, row)
 }
 
 // scrollShowing is the scroll that puts row on the page the frame will

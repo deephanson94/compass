@@ -433,6 +433,11 @@ func (m *Model) SetEvents(events []transcript.Event) {
 // SetSize sets the render dimensions (bubbletea does this via WindowSizeMsg;
 // exported so a harness can render a fixed-size view).
 func (m *Model) SetSize(width, height int) {
+	// Where the reader's cursor stands, said in terms the next width will
+	// still understand: the transcript event its row belongs to and how far
+	// down that event's rows it is. A row number belongs to one wrapping,
+	// and the size about to be set may be another (#321, #322).
+	seat := m.readerSeat()
 	m.width, m.height = width, height
 	// The board needs width. A deck that opened on it and then found itself
 	// in a narrow terminal is a single trail from here on, so the first Tab
@@ -447,7 +452,7 @@ func (m *Model) SetSize(width, height int) {
 	}
 	// A window that changed size is still looking at the row it was
 	// looking at: the reader's page comes back to its cursor (#319).
-	m.keepReaderCursorOnPage()
+	m.keepReaderCursorOnPage(seat)
 }
 
 // SetSessions installs a fleet snapshot as of now, without polling.
