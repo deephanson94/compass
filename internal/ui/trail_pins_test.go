@@ -1491,6 +1491,65 @@ func TestAStuckKeyKeepsNoCellsARowHasAlreadyPaid(t *testing.T) {
 		t.Errorf("only %d rows gave the refusing walk key up; the other side is unmeasured", paid)
 	}
 	t.Logf("rows standing a refusing walk key: %d · rows that paid its cells over: %d", stood, paid)
+
+	// And the fact under the fold, asked of the key itself (round 117,
+	// the two-tools operator). The fold let `j/k rows` onto fourteen
+	// reader rows at 152 and took `x hide` off them, and the operator
+	// read the hide key as one that acts there: "`x hide` is bought at
+	// one stand and sold at another." It is bought where `x` acts and
+	// sold where it refuses, and nowhere else — `stuckKeys` is what says
+	// which, so `stuckKeys` is what is asked. On every stand where the
+	// hide clause is among the keys that cannot move, `x` answers in
+	// words and takes nothing off the board; and wherever it is not, the
+	// press acts.
+	refused, acted := 0, 0
+	for _, sc := range allScenes() {
+		for _, route := range routes {
+			for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				m := stand(sc, w, h, route)
+				if !m.sessionView() || m.level < levelWaypoints {
+					continue
+				}
+				sel, ok := m.selected()
+				if !ok || !strings.Contains(m.keymap(), " · x hide") {
+					continue
+				}
+				key := sel.Info.Key()
+				where := sc.name + " " + itoaPin(w) + "x" + itoaPin(h) + " Lv" + itoaPin(m.level)
+				if m.hideKeyStuck(m.keymap()) != "" {
+					want := m.hideRefusal(sel)
+					pressKey(m, "x")
+					poll(m, sc)
+					if m.hidden[key] {
+						t.Errorf("%s: the row gave `x hide`'s cells over and `x` took the session off the board (#331)", where)
+					}
+					if want == "" || m.note != want {
+						t.Errorf("%s: the row gave `x hide`'s cells over and `x` did not refuse in words: note=%q", where, m.note)
+					}
+					refused++
+					continue
+				}
+				if !m.hideKeyMoves() {
+					continue // the note is the key's own: it stays, and says so (#24, #57)
+				}
+				was := m.hidden[key]
+				pressKey(m, "x")
+				poll(m, sc)
+				if m.hidden[key] == was {
+					t.Errorf("%s: the row keeps `x hide` for a key that did nothing (#284)", where)
+				}
+				acted++
+			}
+		}
+	}
+	if refused < 10 {
+		t.Errorf("only %d stands gave the hide key's cells over; the fact is unmeasured", refused)
+	}
+	if acted < 10 {
+		t.Errorf("only %d stands kept a hide key that acts; the other side is unmeasured", acted)
+	}
+	t.Logf("stands where `x` refuses in words and the row may spend its cells: %d · stands where `x` acts and the row keeps it: %d", refused, acted)
 }
 
 // Round eighty-five, the two-tools operator's one thing: the trace note
@@ -2645,7 +2704,18 @@ func r329DoorBought(m *Model, foot string, w int, lost []string) []string {
 		// start` gave `/ search` up for it, the counterfactual named one
 		// acting key fewer than the row standing the door, and the trade
 		// read a swap and kept the door.
-		without = ansi.Strip(m.footerTraded(r331Gone(bare, m.stuckKeys(m.keymap())), w-2*edgePad))
+		//
+		// #332: and the row standing the door gives them up too. The
+		// payment is the trade's, not one side's — measured with a
+		// refusing `n/N` still holding its six cells on the row that
+		// stands the door, `fleet-hygiene`'s reader at 152 under `the
+		// deepest level` stood the door while `x`, which hides porter,
+		// and `j/k`, which walks the reader's mark, were both off the
+		// row: the counterfactual named one key fewer, that one, and the
+		// trade read a swap.
+		stuck := m.stuckKeys(m.keymap())
+		without = ansi.Strip(m.footerTraded(r331Gone(bare, stuck), w-2*edgePad))
+		shut = r331Gone(shut, stuck)
 	}
 	if !footerNamesMore(shut, without) {
 		// A clause is given up for a key and never for a swap (#281,
@@ -2688,6 +2758,37 @@ func r330PageHeld(m *Model, w int) bool {
 	held := ansi.Strip(m.footerCursorTraded(pageKeyGone(bare), inner))
 	shut := doorGone(pageKeyGone(with))
 	return footerNamesMore(shut, pageKeyGone(held)) && !footerNamesMore(shut, pageKeyGone(free))
+}
+
+// r332StuckPaid says whether this row gives the door up only once the
+// keys that cannot move have paid on both sides of the door's own trade
+// (#332) — the row the fleet-hygiene operator named: the door standing
+// while `x hide` and `j/k rows`, which both act on it, were off, held
+// there by six cells of an `n/N` with no search entered.
+func r332StuckPaid(m *Model, w int) bool {
+	keys := m.keymap()
+	if !strings.Contains(keys, " · A archive") {
+		return false // this frame names the archive on a row, not the footer
+	}
+	inner := w - 2*edgePad
+	with := ansi.Strip(m.footerCursorTraded(keys, inner))
+	bare := strings.Replace(keys, " · A archive", "", 1)
+	if pageKeyGone(with) == with {
+		bare = pageKeyGone(bare)
+	}
+	without := ansi.Strip(m.footerCursorTraded(bare, inner))
+	shut := doorGone(pageKeyGone(with))
+	if footerNamesMore(shut, pageKeyGone(without)) {
+		return false // the door goes with nobody paying
+	}
+	cost := m.footerStuckCost(shut, pageKeyGone(without))
+	if len(cost) == 0 {
+		return false // a key that acts is what the door is kept by
+	}
+	paid := ansi.Strip(m.footerCursorTraded(r331Gone(keys, cost), inner))
+	over := ansi.Strip(m.footerCursorTraded(r331Gone(bare, cost), inner))
+	return footerNamesMore(doorGone(pageKeyGone(paid)), pageKeyGone(over)) &&
+		len(r331Keys(over)) >= len(r331Keys(with))
 }
 
 // TestTheArchiveDoorYieldsToEveryKeyThatActs pins #328. #327 stopped
@@ -2747,10 +2848,14 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	// #331 adds the second `ctrl+u`, the press the second-day operator
 	// quoted: it moves nothing, so the row carries `at the start` and the
 	// note's reserve is what the keys are shed against.
-	routes := [][]string{nil, {"ctrl+u"}, {"ctrl+u", "ctrl+u"}, {"]"}, {"j"}, {"tab"}, {"tab", "]"}, {"tab", "j"}}
+	// #332 adds the second `tab`, the press the fleet-hygiene operator
+	// quoted: it is already the deepest level, so the row carries `the
+	// deepest level` and the shed is measured against that note's reserve.
+	routes := [][]string{nil, {"ctrl+u"}, {"ctrl+u", "ctrl+u"}, {"]"}, {"j"}, {"tab"}, {"tab", "]"}, {"tab", "j"}, {"tab", "tab"}}
 	stood, went, roomOnly, deep152 := 0, 0, 0, 0 // #329: and the rows a shed door bought a key back for
 	pageHeld := 0                                // #330: the rows the door goes on only once the page key is held off
 	noted := 0                                   // #331: the stands the door is decided on with a note on the row
+	stuckPaid := 0                               // #332: the rows the keys that cannot move pay the door's way out on
 	for _, sc := range allScenes() {
 		for _, route := range routes {
 			wide := stand(sc, 220, 48, route)
@@ -2808,6 +2913,9 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 				if w == 152 && r330PageHeld(m, w) {
 					pageHeld++
 				}
+				if r332StuckPaid(m, w) {
+					stuckPaid++
+				}
 				if m.note != "" {
 					noted++ // #331: measured with the note on the row
 				}
@@ -2846,8 +2954,13 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	if noted < 20 {
 		t.Errorf("only %d rows carried a note while the door was decided; #331 is unmeasured", noted)
 	}
-	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d · rows that took a key back from it: %d (Lv2 at 152: %d) · rows at 152 the page key was deciding: %d · rows decided under a note: %d",
-		stood, went, roomOnly, deep152, pageHeld, noted)
+	// #332's own side: the row the door was standing on because a key
+	// that cannot move held the cells the keys that act would take.
+	if stuckPaid < 1 {
+		t.Errorf("no row gave the door up once the keys that cannot move had paid; #332 is unmeasured")
+	}
+	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d · rows that took a key back from it: %d (Lv2 at 152: %d) · rows at 152 the page key was deciding: %d · rows decided under a note: %d · rows the refusing keys paid the door's way out on: %d",
+		stood, went, roomOnly, deep152, pageHeld, noted, stuckPaid)
 }
 
 // r328Keys is the footer's key clauses as the frame draws them: the row's
