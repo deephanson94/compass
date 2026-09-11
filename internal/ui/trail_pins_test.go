@@ -1355,6 +1355,144 @@ func TestAStuckKeyGoesFromARowAlreadyShed(t *testing.T) {
 	}
 }
 
+// r331Keys is the keys a drawn footer row names, read as the deck's own
+// trades read them: past the note, which stands after the gap the keymap
+// never contains (#134's reserve), and past the attach aside, which is
+// not a key (#55).
+func r331Keys(row string) []string {
+	s := strings.ReplaceAll(ansi.Strip(row), attachHint, "")
+	if i := strings.Index(s, "  "); i >= 0 {
+		s = s[:i]
+	}
+	var out []string
+	for _, frag := range strings.Split(s, " · ") {
+		if f := strings.TrimSpace(frag); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// r331Gone is a keymap with these clauses taken out of it.
+func r331Gone(keys string, clauses []string) string {
+	for _, c := range clauses {
+		keys = strings.Replace(keys, c, "", 1)
+	}
+	return keys
+}
+
+// ---- round 116, the two-tools operator ----
+// A stuck key keeps no cells a row has already paid. #193's gate holds a
+// key that cannot move on a row that has shed nothing, so that a wide
+// footer still names what `[` and `]` are — but what a clause new to the
+// row costs was counted key for key one layer out, with the refusing key
+// among them. At 152 `fleet-hygiene`'s reader stood `space unfold ·
+// / search · n/N · [ ] turns · h/l session · r reply · a ask · x hide ·
+// enter attach · esc back · ? help · q quit  no later turn`: `j/k rows`,
+// which walks the reader's mark and is the only key that reaches the row
+// `space` unfolds (#300), had gone under the note, while six cells stood
+// on an `n/N` that answers `no search — / starts one` to both halves at
+// every width (#210, #216, #223) — and those six cells were what the
+// mirror key was refused for, on a row fourteen cells short of naming it.
+//
+// The keys that cannot move pay for a clause that acts
+// (`footerClauseTraded`, #331). So wherever a refusing `n/N` still
+// stands, its cells buy nothing: the same stand drawn with the walk key
+// given up names no key that acts which this row does not — the widest
+// row of the stand says which keys those are. Both sides are walked: the
+// rows that keep the key and the rows that have paid it over.
+func TestAStuckKeyKeepsNoCellsARowHasAlreadyPaid(t *testing.T) {
+	forceASCII(t)
+	stand := func(sc scene, w, h int, route []string) *Model {
+		m := sceneModel(sc, w, h)
+		if !m.sessionView() {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		for _, k := range route {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		return m
+	}
+	// The stands the walk key is measured on: the session view as the
+	// deck opens it and the reader one press deeper, with the presses
+	// that put a note on the row and move the shed with it.
+	routes := [][]string{nil, {"ctrl+u"}, {"ctrl+u", "ctrl+u"}, {"]"}, {"j"},
+		{"tab"}, {"tab", "]"}, {"tab", "j"}, {"tab", "[", "]"}, {"tab", "tab"}}
+	stood, paid := 0, 0
+	for _, sc := range allScenes() {
+		for _, route := range routes {
+			wide := stand(sc, 220, 48, route)
+			if !wide.sessionView() {
+				continue
+			}
+			var acting []string
+			for _, k := range r328Keys(ansi.Strip(wide.View())) {
+				if r328Acting(k) && k != "n/N" {
+					acting = append(acting, k)
+				}
+			}
+			for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				m := stand(sc, w, h, route)
+				if !m.sessionView() || m.level < levelWaypoints {
+					continue // the narrow deck keeps its list
+				}
+				walk := m.walkKeyStuck(m.keymap())
+				if walk == "" || len(m.stuckKeys(m.keymap())) > 1 {
+					// The key acts here, the note is its own, or the row
+					// refuses more than one key — where two refusals hold
+					// cells between them what a clause is refused for is
+					// both their business, and this pin measures the walk
+					// key's own six cells.
+					continue
+				}
+				frame := ansi.Strip(m.View())
+				rows := strings.Split(frame, "\n")
+				where := sc.name + " " + itoaPin(w) + "x" + itoaPin(h) + " Lv" + itoaPin(m.level)
+				have := map[string]bool{}
+				for _, k := range r328Keys(frame) {
+					have[k] = true
+				}
+				if !have["n/N"] {
+					paid++ // the row gave the refusing key up for one that acts
+					continue
+				}
+				stood++
+				// The cells it holds buy no key that acts: the row drawn
+				// with the walk key given up names nothing this one does
+				// not (#331). The door stands where this row stands it —
+				// what the archive's twelve cells cost is its own trade's
+				// question (#328, #329, #330), not the refusing key's.
+				draw := m.footerTraded
+				if have["A archive"] {
+					draw = m.footerCursorTraded
+				}
+				freed := map[string]bool{}
+				for _, k := range r331Keys(ansi.Strip(draw(r331Gone(m.keymap(), []string{walk}), w-2*edgePad))) {
+					freed[k] = true
+				}
+				for _, k := range acting {
+					if !have[k] && freed[k] {
+						t.Errorf("%s: a walk key with no search to walk stands on six cells that name %q (#193, #216, #331)\n  foot=%q",
+							where, k, strings.TrimSpace(rows[len(rows)-1]))
+					}
+				}
+			}
+		}
+	}
+	// Both sides measured: the rows that keep the refusing key, and the
+	// rows that have paid its cells over to a key that acts.
+	if stood < 20 {
+		t.Errorf("only %d rows stood a walk key with no search to walk; the rule is unmeasured", stood)
+	}
+	if paid < 10 {
+		t.Errorf("only %d rows gave the refusing walk key up; the other side is unmeasured", paid)
+	}
+	t.Logf("rows standing a refusing walk key: %d · rows that paid its cells over: %d", stood, paid)
+}
+
 // Round eighty-five, the two-tools operator's one thing: the trace note
 // leaves the destination to the row that draws it.
 //
@@ -2496,7 +2634,20 @@ func r329DoorBought(m *Model, foot string, w int, lost []string) []string {
 	}
 	without := ansi.Strip(m.footerTraded(bare, w-2*edgePad))
 	shut := strings.Replace(ansi.Strip(foot), " · A archive", "", 1)
-	if !footerNamesAll(shut, without) || footerNamesAll(without, shut) {
+	if !footerNamesMore(shut, without) {
+		// #331: and the counterfactual names the room-only keys that fit
+		// once the door is gone. A clause that acts is not refused by a
+		// key that cannot move from where the row stands
+		// (`footerClauseTraded`), so the row without the door is drawn
+		// with those keys given up as well: measured with a
+		// `[ ] chapters` that refuses at every width still holding its
+		// fifteen cells, `few-ongoing`'s Lv2 row at 152 under `at the
+		// start` gave `/ search` up for it, the counterfactual named one
+		// acting key fewer than the row standing the door, and the trade
+		// read a swap and kept the door.
+		without = ansi.Strip(m.footerTraded(r331Gone(bare, m.stuckKeys(m.keymap())), w-2*edgePad))
+	}
+	if !footerNamesMore(shut, without) {
 		// A clause is given up for a key and never for a swap (#281,
 		// #329): where the row without the door gives a key up of its
 		// own, the door is not what the missing key went to.
@@ -2593,9 +2744,13 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	// opens it, one press deeper in the reader, and the presses that put a
 	// note on the row and move the shed with it (#329: the Lv2 rows at 152
 	// the operators quoted are one `ctrl+u` and one `]` in).
-	routes := [][]string{nil, {"ctrl+u"}, {"]"}, {"j"}, {"tab"}, {"tab", "]"}, {"tab", "j"}}
+	// #331 adds the second `ctrl+u`, the press the second-day operator
+	// quoted: it moves nothing, so the row carries `at the start` and the
+	// note's reserve is what the keys are shed against.
+	routes := [][]string{nil, {"ctrl+u"}, {"ctrl+u", "ctrl+u"}, {"]"}, {"j"}, {"tab"}, {"tab", "]"}, {"tab", "j"}}
 	stood, went, roomOnly, deep152 := 0, 0, 0, 0 // #329: and the rows a shed door bought a key back for
 	pageHeld := 0                                // #330: the rows the door goes on only once the page key is held off
+	noted := 0                                   // #331: the stands the door is decided on with a note on the row
 	for _, sc := range allScenes() {
 		for _, route := range routes {
 			wide := stand(sc, 220, 48, route)
@@ -2653,6 +2808,9 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 				if w == 152 && r330PageHeld(m, w) {
 					pageHeld++
 				}
+				if m.note != "" {
+					noted++ // #331: measured with the note on the row
+				}
 				if len(lost) > 0 && r329DoorRoom(m, rows[len(rows)-1], w) {
 					t.Errorf("%s: the door is gone, %v are gone and the row had room for it (#203, #328, #329)\n  foot=%q",
 						where, lost, strings.TrimSpace(rows[len(rows)-1]))
@@ -2682,8 +2840,14 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	if pageHeld < 5 {
 		t.Errorf("only %d rows at 152 gave the door up with the page key held off; #330 is unmeasured", pageHeld)
 	}
-	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d · rows that took a key back from it: %d (Lv2 at 152: %d) · rows at 152 the page key was deciding: %d",
-		stood, went, roomOnly, deep152, pageHeld)
+	// #331's own side: the door is decided on rows a note's reserve has
+	// already shed against, where a key that cannot move holds cells a
+	// key that acts would take.
+	if noted < 20 {
+		t.Errorf("only %d rows carried a note while the door was decided; #331 is unmeasured", noted)
+	}
+	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d · rows that took a key back from it: %d (Lv2 at 152: %d) · rows at 152 the page key was deciding: %d · rows decided under a note: %d",
+		stood, went, roomOnly, deep152, pageHeld, noted)
 }
 
 // r328Keys is the footer's key clauses as the frame draws them: the row's
