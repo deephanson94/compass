@@ -3990,10 +3990,7 @@ func (m *Model) footerCursorTraded(keys string, w int) string {
 	// against. Where the width is not there the row comes back exactly as
 	// it stood, `space unfold` at its head.
 	if clause := "j/k rows · "; m.level >= levelReader && m.readerPageFits() && strings.HasPrefix(keys, clause) {
-		bare := strings.Replace(keys, clause, "", 1)
-		if !footerNamesAll(m.footerMirrorTraded(bare, w), m.footerMirrorTraded(keys, w)) {
-			keys = bare
-		}
+		keys = m.footerClauseTraded(keys, clause, w, m.footerMirrorTraded)
 	}
 	if m.level >= levelReader && !m.readerPageFits() && strings.HasPrefix(keys, "j/k rows · ") {
 		// The word is two cells shorter than the one it replaced (#307),
@@ -4022,10 +4019,12 @@ func (m *Model) footerMirrorTraded(keys string, w int) string {
 	// row stands 145 cells of 220; at 152 and 120 the fourteen cells the
 	// clause needs come out of `n/N`, `[ ] turns` and `x hide`, so the
 	// row keeps its keys and the clause waits for the width.
-	if clause := " · m live pane"; m.level >= levelReader && strings.Contains(keys, clause) {
-		if bare := strings.Replace(keys, clause, "", 1); !footerNamesAll(m.footerGuarded(bare, w), m.footerGuarded(keys, w)) {
-			keys = bare
-		}
+	// The fourteen cells came out of a `n/N` the next press refuses,
+	// besides, and the clause waited for a width the row already had:
+	// what a clause that acts is refused for is read past the keys that
+	// cannot move now (`footerClauseTraded`, #331).
+	if clause := " · m live pane"; m.level >= levelReader {
+		keys = m.footerClauseTraded(keys, clause, w, m.footerGuarded)
 	}
 	// The grab key is new to the session view's row for the same reason
 	// as the hide key, the search key and the reader's mirror key, and
@@ -4039,11 +4038,8 @@ func (m *Model) footerMirrorTraded(keys string, w int) string {
 	// (#295's own measure, one view over): the trade is the row's, not
 	// the level's, so it is measured wherever the clause is new to the
 	// row — the archive's board and list included.
-	if clause := " · g grab"; m.level < levelReader && (m.level >= levelWaypoints || m.archiveView) && strings.Contains(keys, clause) {
-		bare := strings.Replace(keys, clause, "", 1)
-		if !footerNamesAll(m.footerSearchTraded(bare, w), m.footerSearchTraded(keys, w)) {
-			keys = bare
-		}
+	if clause := " · g grab"; m.level < levelReader && (m.level >= levelWaypoints || m.archiveView) {
+		keys = m.footerClauseTraded(keys, clause, w, m.footerSearchTraded)
 	}
 	return m.footerSearchTraded(keys, w)
 }
@@ -4051,23 +4047,19 @@ func (m *Model) footerMirrorTraded(keys string, w int) string {
 // footerSearchTraded draws the row for this keymap with the search
 // clause's own trade measured on it (#289).
 func (m *Model) footerSearchTraded(keys string, w int) string {
-	row := m.footerGuarded(keys, w)
 	// The search key is new to the session view's row for the same reason
 	// as the hide key and pays the same price: it is taken only where the
 	// finished row still names every key it named without it (#281, #284).
 	// The reader named it before either of them and is not measured here.
-	if clause := " · / search"; m.level >= levelWaypoints && m.level < levelReader && strings.Contains(keys, clause) {
-		if bare := m.footerGuarded(strings.Replace(keys, clause, "", 1), w); !footerNamesAll(bare, row) {
-			return bare
-		}
+	if clause := " · / search"; m.level >= levelWaypoints && m.level < levelReader {
+		keys = m.footerClauseTraded(keys, clause, w, m.footerGuarded)
 	}
-	return row
+	return m.footerGuarded(keys, w)
 }
 
 // footerGuarded draws the row for this keymap with the hide clause's own
 // trade measured on it (#284).
 func (m *Model) footerGuarded(keys string, w int) string {
-	row := m.footerWith(keys, w)
 	guarded := []string{" · x hide", " · x unhide"}
 	if m.level < levelWaypoints {
 		// Below the session view the two views' own rows have named
@@ -4075,20 +4067,14 @@ func (m *Model) footerGuarded(keys string, w int) string {
 		// one the archive's live row takes, which is new to the row for
 		// the same reason and pays the same price (#284).
 		if !m.archiveView {
-			return row
+			return m.footerWith(keys, w)
 		}
 		guarded = []string{" · x hide"}
 	}
 	for _, clause := range guarded {
-		if !strings.Contains(keys, clause) {
-			continue
-		}
-		bare := m.footerWith(strings.Replace(keys, clause, "", 1), w)
-		if !footerNamesAll(bare, row) {
-			return bare // the key cost the row another key
-		}
+		keys = m.footerClauseTraded(keys, clause, w, m.footerWith)
 	}
-	return row
+	return m.footerWith(keys, w)
 }
 
 // footerNamesAll says whether the finished row `now` names every key
@@ -4096,29 +4082,34 @@ func (m *Model) footerGuarded(keys string, w int) string {
 // the gap the keymap never contains (#134's reserve), and the attach
 // aside is not a key either (#55).
 func footerNamesAll(was, now string) bool {
-	read := func(s string) []string {
-		s = strings.ReplaceAll(ansi.Strip(s), attachHint, "")
-		if i := strings.Index(s, "  "); i >= 0 {
-			s = s[:i]
-		}
-		var out []string
-		for _, frag := range strings.Split(s, " · ") {
-			if f := strings.TrimSpace(frag); f != "" {
-				out = append(out, f)
-			}
-		}
-		return out
-	}
 	has := map[string]bool{}
-	for _, k := range read(now) {
+	for _, k := range footerKeysNamed(now) {
 		has[k] = true
 	}
-	for _, k := range read(was) {
+	for _, k := range footerKeysNamed(was) {
 		if !has[k] {
 			return false
 		}
 	}
 	return true
+}
+
+// footerKeysNamed is the keys a finished row names, read the way
+// footerNamesAll reads them: past the note, which stands after the gap
+// the keymap never contains (#134's reserve), and past the attach aside,
+// which is not a key (#55).
+func footerKeysNamed(row string) []string {
+	s := strings.ReplaceAll(ansi.Strip(row), attachHint, "")
+	if i := strings.Index(s, "  "); i >= 0 {
+		s = s[:i]
+	}
+	var out []string
+	for _, frag := range strings.Split(s, " · ") {
+		if f := strings.TrimSpace(frag); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // keymap is the whole keymap for where the keys are now, before any of it
@@ -5101,6 +5092,10 @@ func (m *Model) chapterYield(whole string, drops []string, fits func(string) boo
 // aside is not a key (#55), and a key the row still draws in its other
 // form — the head forms `enter attach · ` and `space unfold · ` name the
 // same key as their separator-led fragments — has not been shed at all.
+//
+// The gate is #193's own and is untouched by #331: what a clause that
+// acts is refused for is settled one layer out, in `footerClauseTraded`,
+// before a key is shed at all.
 func rowAlreadyShed(whole, was string, order []string, stuck map[string]bool) bool {
 	for _, d := range order {
 		if d == attachHint || d == " · enter · no pane" || stuck[d] {
@@ -5111,6 +5106,84 @@ func rowAlreadyShed(whole, was string, order []string, stuck map[string]bool) bo
 		}
 	}
 	return false
+}
+
+// footerClauseTraded is one clause's own trade, and answers with the
+// keymap the row is drawn from. Every clause new to a row since #281 —
+// the hide key, the search key, the grab key, the reader's mirror key
+// and its cursor key — is taken only where the finished row still names
+// every key it named without it (#281, #284, #289, #293, #300).
+//
+// A key that cannot move is not the key that refuses it (#331). That
+// count was taken key for key, and a key the next press refuses counted
+// with the rest: at 152 `fleet-hygiene`'s reader held six cells of `n/N`
+// with no search entered — both halves answer `no search — / starts one`
+// at every width (#210, #216) — and the mirror key waited for a width
+// the row already had; one level out, `few-ongoing`'s `[ ] chapters` on
+// a trail of one prompt cost the row `/ search`. #216 refuses a stuck
+// key as the gain that buys a trade; it is no more the cost that refuses
+// one. So where what the clause costs is nothing but keys that cannot
+// move, those keys give up their cells to it and the trade is measured
+// again: the clause is taken only where the row that has paid them over
+// still names every key it named, and where it does not, both the clause
+// and the refusing key stand exactly as they did. The cells are given up
+// to a key that acts, never for nothing (#193, #210's own measure).
+//
+// Under a stuck key's own note the key is not stuck at all (#24, #57):
+// the row refusing `n/N` names `n/N`, and the clause waits.
+func (m *Model) footerClauseTraded(keys, clause string, w int, draw func(string, int) string) string {
+	if !strings.Contains(keys, clause) {
+		return keys
+	}
+	bare := strings.Replace(keys, clause, "", 1)
+	with, without := draw(keys, w), draw(bare, w)
+	if footerNamesAll(without, with) {
+		return keys // the clause cost the row no key
+	}
+	if cost := m.footerStuckCost(without, with); len(cost) > 0 {
+		paid := clausesGone(keys, cost)
+		row, over := draw(paid, w), draw(clausesGone(bare, cost), w)
+		if footerNamesMore(over, row) && len(footerKeysNamed(row)) >= len(footerKeysNamed(without)) {
+			return paid // the keys that cannot move pay for it
+		}
+	}
+	return bare
+}
+
+// footerStuckCost is the clauses for the keys `was` names and `now` does
+// not, where every one of them is a key that cannot move from where the
+// row stands — and nil where a key that acts is among them, or where the
+// two rows name the same keys. It is what a clause is being refused for,
+// read as #216 reads a gain.
+func (m *Model) footerStuckCost(was, now string) []string {
+	stuck := map[string]string{}
+	for _, k := range m.stuckKeys(m.keymap()) {
+		stuck[keyWord(k)] = k
+	}
+	has := map[string]bool{}
+	for _, k := range footerKeysNamed(now) {
+		has[k] = true
+	}
+	var cost []string
+	for _, k := range footerKeysNamed(was) {
+		if has[k] {
+			continue
+		}
+		clause, ok := stuck[k]
+		if !ok {
+			return nil // a key that acts: the clause is refused for it
+		}
+		cost = append(cost, clause)
+	}
+	return cost
+}
+
+// clausesGone is a keymap with these clauses taken out of it.
+func clausesGone(keys string, clauses []string) string {
+	for _, c := range clauses {
+		keys = strings.Replace(keys, c, "", 1)
+	}
+	return keys
 }
 
 // keyWord is the fragment's key without the separator it is joined by or
