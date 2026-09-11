@@ -3894,7 +3894,10 @@ func (m *Model) replyRefusalSaid(whole string) string {
 // not, because a clause is given up for a key and never for a swap
 // (#281's own measure). Where the door's rank still decides anything it
 // is against `ctrl+d/u half page` alone, the one key #328 ranked it above
-// (#42, #51), which is read past on both sides of this trade.
+// (#42, #51), which is read past on both sides of this trade — and, where
+// the row standing the door has already shed it at that rank, held off
+// the row that gives the door up as well, so the twelve cells go to the
+// keys that act and not to the key the door outranks (#330).
 //
 // Where the door keeps the rank #56 and #62 gave it — a fleet of one, and
 // the deck below the board's width — there is no trade: the clause is the
@@ -3902,7 +3905,25 @@ func (m *Model) replyRefusalSaid(whole string) string {
 func (m *Model) footerTraded(keys string, w int) string {
 	if clause := " · A archive"; m.doorYields() && strings.Contains(keys, clause) {
 		bare := strings.Replace(keys, clause, "", 1)
-		with, without := m.footerCursorTraded(keys, w), m.footerCursorTraded(bare, w)
+		with := m.footerCursorTraded(keys, w)
+		// The page key does not profit from the door's cells (#330).
+		// `ctrl+d/u half page` is the one key the door outranks (#42,
+		// #51, #328), and where the row standing the door has already
+		// shed it at that rank, the counterfactual row must not hand it
+		// the twelve cells the door would vacate: drawn with the page
+		// key free to walk back in, it took them, evicted a key that
+		// acts, and the trade read as a swap — so the door stood on a
+		// row an acting key was off. The door's cells are the acting
+		// keys' to take, so the page key is held off that side of the
+		// trade too, and the comparison sees what the door really costs
+		// (#281's measure, #329's chain). Where the row with the door
+		// still names the page key, both sides carry it and nothing
+		// changes. The key stays read past in the naming on both sides:
+		// it is the one key the door may cost.
+		if pageKeyGone(with) == with {
+			bare = pageKeyGone(bare)
+		}
+		without := m.footerCursorTraded(bare, w)
 		if footerNamesMore(doorGone(pageKeyGone(with)), pageKeyGone(without)) {
 			return without
 		}
@@ -3922,9 +3943,11 @@ func (m *Model) doorYields() bool {
 	return m.sessionView() && m.liveCount() > 1
 }
 
-// pageKeyGone is a drawn row with `ctrl+d/u half page` taken out, in
-// whichever form the row drew it, so two rows can be read against each
-// other past the one key the door outranks (#42, #51, #328).
+// pageKeyGone is a drawn row — or a keymap, which spells the clause the
+// same way — with `ctrl+d/u half page` taken out, in whichever form it
+// stood, so two rows can be read against each other past the one key the
+// door outranks (#42, #51, #328), and so that key can be held off the
+// side of the trade the door's cells belong to (#330).
 func pageKeyGone(row string) string {
 	for _, f := range []string{" · ctrl+d/u half page", "ctrl+d/u half page · ", "ctrl+d/u half page"} {
 		if strings.Contains(row, f) {

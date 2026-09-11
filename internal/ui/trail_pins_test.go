@@ -2478,10 +2478,22 @@ func r328Acting(k string) bool {
 
 // r329DoorBought is the keys off this row that the row would name if the
 // door were given up: what the door is costing, measured the way #329
-// measures it. A key the row cannot name either way is not the door's
-// doing — the width is.
+// measures it and #330 corrects it. A key the row cannot name either way
+// is not the door's doing — the width is.
+//
+// #330: the counterfactual is the row drawn without the door *and*
+// without `ctrl+d/u half page` wherever the drawn row has already shed
+// it. The door outranks the page key and nothing else (#42, #51, #328),
+// so the twelve cells it would vacate are the acting keys' to take;
+// drawn with the page key free to walk back into them it took them,
+// evicted a key that acts, and the trade read as a swap — which is the
+// one shape #281's measure refuses — so the door went on standing on
+// five rows at 152 that an acting key was off.
 func r329DoorBought(m *Model, foot string, w int, lost []string) []string {
 	bare := strings.Replace(m.keymap(), " · A archive", "", 1)
+	if drawn := ansi.Strip(foot); pageKeyGone(drawn) == drawn {
+		bare = pageKeyGone(bare) // the page key does not profit from the door's cells (#330)
+	}
 	without := ansi.Strip(m.footerTraded(bare, w-2*edgePad))
 	shut := strings.Replace(ansi.Strip(foot), " · A archive", "", 1)
 	if !footerNamesAll(shut, without) || footerNamesAll(without, shut) {
@@ -2500,6 +2512,31 @@ func r329DoorBought(m *Model, foot string, w int, lost []string) []string {
 		}
 	}
 	return bought
+}
+
+// r330PageHeld says whether this row gives the door up only under #330's
+// measure: the row that stands the door has already shed `ctrl+d/u half
+// page` at the one rank the door outranks, and the door goes when the
+// counterfactual is drawn with the page key held off — where the same
+// counterfactual drawn with the page key free would have kept the door,
+// because the page key walked into the door's twelve cells and put an
+// acting key off the row in its place. These are the rows the second-day
+// operator counted: "The page key still decides the door, one step in."
+func r330PageHeld(m *Model, w int) bool {
+	keys := m.keymap()
+	if !strings.Contains(keys, " · A archive") {
+		return false // this frame names the archive on a row, not the footer
+	}
+	inner := w - 2*edgePad
+	with := ansi.Strip(m.footerCursorTraded(keys, inner))
+	if pageKeyGone(with) != with {
+		return false // the row standing the door still names the page key
+	}
+	bare := strings.Replace(keys, " · A archive", "", 1)
+	free := ansi.Strip(m.footerCursorTraded(bare, inner))
+	held := ansi.Strip(m.footerCursorTraded(pageKeyGone(bare), inner))
+	shut := doorGone(pageKeyGone(with))
+	return footerNamesMore(shut, pageKeyGone(held)) && !footerNamesMore(shut, pageKeyGone(free))
 }
 
 // TestTheArchiveDoorYieldsToEveryKeyThatActs pins #328. #327 stopped
@@ -2529,6 +2566,15 @@ func r329DoorBought(m *Model, foot string, w int, lost []string) []string {
 // went — and the row that is full is measured with the door held on
 // (`r329DoorRoom`), since twelve blank cells no longer mean the door was
 // owed them.
+//
+// #330 fixed the counterfactual the trade is read against. "The page key
+// still decides the door, one step in. The counterfactual row is drawn
+// with `ctrl+d/u half page` re-entering the twelve cells the door
+// vacates, so it evicts an acting key and the trade reads as a swap."
+// The row without the door is drawn with the page key held off wherever
+// the drawn row has already shed it (`r329DoorBought`, `r330PageHeld`),
+// so the door's cells go to the keys that act and the comparison sees
+// what the door really costs.
 func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	forceASCII(t)
 	stand := func(sc scene, w, h int, route []string) *Model {
@@ -2549,6 +2595,7 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	// the operators quoted are one `ctrl+u` and one `]` in).
 	routes := [][]string{nil, {"ctrl+u"}, {"]"}, {"j"}, {"tab"}, {"tab", "]"}, {"tab", "j"}}
 	stood, went, roomOnly, deep152 := 0, 0, 0, 0 // #329: and the rows a shed door bought a key back for
+	pageHeld := 0                                // #330: the rows the door goes on only once the page key is held off
 	for _, sc := range allScenes() {
 		for _, route := range routes {
 			wide := stand(sc, 220, 48, route)
@@ -2588,7 +2635,7 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 					// row without the door names it, and the width's
 					// where it does not.
 					if bought := r329DoorBought(m, rows[len(rows)-1], w, lost); len(bought) > 0 {
-						t.Errorf("%s: the archive's door stands and the row shed %v, which the row without it names (#328, #329)\n  foot=%q",
+						t.Errorf("%s: the archive's door stands and the row shed %v, which the row without it names (#328, #329, #330)\n  foot=%q",
 							where, bought, strings.TrimSpace(rows[len(rows)-1]))
 					}
 					continue
@@ -2602,6 +2649,9 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 					if m.level == levelWaypoints && w == 152 {
 						deep152++
 					}
+				}
+				if w == 152 && r330PageHeld(m, w) {
+					pageHeld++
 				}
 				if len(lost) > 0 && r329DoorRoom(m, rows[len(rows)-1], w) {
 					t.Errorf("%s: the door is gone, %v are gone and the row had room for it (#203, #328, #329)\n  foot=%q",
@@ -2626,8 +2676,14 @@ func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
 	if deep152 < 3 {
 		t.Errorf("only %d Lv2 rows at 152 took a key back from the door; the width the operators quoted is unmeasured", deep152)
 	}
-	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d · rows that took a key back from it: %d (Lv2 at 152: %d)",
-		stood, went, roomOnly, deep152)
+	// #330's own side: the rows at 152 where the door goes only once the
+	// page key is held off the counterfactual — the five the second-day
+	// operator named.
+	if pageHeld < 5 {
+		t.Errorf("only %d rows at 152 gave the door up with the page key held off; #330 is unmeasured", pageHeld)
+	}
+	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d · rows that took a key back from it: %d (Lv2 at 152: %d) · rows at 152 the page key was deciding: %d",
+		stood, went, roomOnly, deep152, pageHeld)
 }
 
 // r328Keys is the footer's key clauses as the frame draws them: the row's

@@ -898,7 +898,13 @@ func TestTheReadersRowNamesTheMirrorKey(t *testing.T) {
 						// and so is one with the clause's own cells still
 						// blank beside the note's reserve. There the clause
 						// costs no key, and `m` acts, so the row names it.
-						free := w - lipgloss.Width(foot)
+						// The cells the clause could actually have are the
+						// footer's own, not the terminal's: the frame pads
+						// both edges (#330), and counting those two among
+						// them read fourteen free where thirteen were, on
+						// the one row that had just given the archive's
+						// door up for `n/N` and left the gap standing.
+						free := w - 2*edgePad - lipgloss.Width(strings.TrimSpace(foot))
 						whole := strings.Contains(foot, attachHint) || free >= lipgloss.Width(r103ttRowWide)
 						if acts && whole {
 							roomy++
@@ -1188,10 +1194,21 @@ func TestTheReadersMoveKeyIsNamedForWhatItMoves(t *testing.T) {
 					scrolls++
 					// The word costs no key: on the page the rename
 					// touches, the row drawn with the old, longer word
-					// names nothing this row lacks (#281, #284).
+					// names nothing this row lacks (#281, #284). The
+					// counterfactual goes through the whole chain
+					// (`footerTraded`), not the mirror's trade alone: the
+					// archive door's trade is the outermost of it (#329)
+					// and is decided by what the other side of it draws
+					// (#330), so a row drawn short of that trade stood the
+					// door where the row beside it had given the door up
+					// for a key, and the word was blamed for the
+					// difference. The long word's row does not take the
+					// cursor trade's own branch — it no longer leads with
+					// `j/k rows · ` — so what this adds is the door's
+					// trade and nothing else.
 					whole := m.keymap()
 					if longer := strings.Replace(whole, "j/k rows · ", "j/k scroll · ", 1); longer != whole {
-						was := strings.Replace(m.footerMirrorTraded(longer, inner), "j/k scroll · ", "j/k rows · ", 1)
+						was := strings.Replace(m.footerTraded(longer, inner), "j/k scroll · ", "j/k rows · ", 1)
 						if !footerNamesAll(was, foot) {
 							t.Errorf("%s: the shorter word cost the row a key\n  now=%q\n  was=%q", where, r108ttWordKeys(foot), r108ttWordKeys(was))
 						}
