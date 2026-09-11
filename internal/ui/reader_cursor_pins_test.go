@@ -256,11 +256,24 @@ func TestTheReadersFittingPageNamesTheCursorKeys(t *testing.T) {
 					// Whatever the row took, it paid no key for it:
 					// the same stand drawn without the clause names
 					// nothing this row does not (#281, #284, #295).
+					//
+					// A swap is not a cost (#329). The archive door's
+					// trade is the outermost of the chain now, so the row
+					// drawn without this clause can spend the cells it
+					// frees on the door's twelve as well: at 152 the
+					// reader's fitting page names `j/k rows` and the door
+					// where the row without the clause gives the door up
+					// for `m live pane` — two keys against one, and the
+					// clause is what the row kept them with. The cost is
+					// the measure the door's own trade uses: the row
+					// without the clause must name every key this one
+					// names and one more.
 					whole := m.keymap()
 					bare := strings.Replace(whole, r107ttCurRows+" · ", "", 1)
 					if bare != whole {
-						if !footerNamesAll(m.footerTraded(bare, inner), foot) {
-							t.Errorf("%s: the cursor clause cost the row a key\n  with=%q\n  without=%q", where, keys, r107ttCurKeys(m.footerTraded(bare, inner)))
+						without := m.footerTraded(bare, inner)
+						if footerNamesAll(foot, without) && !footerNamesAll(without, foot) {
+							t.Errorf("%s: the cursor clause cost the row a key\n  with=%q\n  without=%q", where, keys, r107ttCurKeys(without))
 						}
 					}
 					for _, r := range rows {

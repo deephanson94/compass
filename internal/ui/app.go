@@ -1098,7 +1098,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			if m.note == fmt.Sprintf("no session %d", i+1) && m.level == levelWaypoints &&
+			if m.note == fmt.Sprintf("no session %d", i+1) && m.level >= levelWaypoints &&
 				m.sessionView() && m.liveCount() > 1 {
 				// The digit past the live fleet is the band's, and since
 				// #327 the band is the level above's: the session view
@@ -1120,9 +1120,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// read from this side. The level above is the board and
 				// not the list: the session view is drawn only where the
 				// board fits (`sessionView`).
+				//
+				// The reader is the same frame one press deeper (#329):
+				// #327 took the band off 72 Lv3 frames as well as the 66
+				// at Lv2, `openRecent` finds no drawn row there either,
+				// and the digit answered `no session 5` on a deck whose
+				// board wears `5 ○ api`. The note names the way that
+				// works from where it is said: `esc` is one level out at
+				// both (`zoomOut`), so from the reader the board is two
+				// of them — there is no key that reaches it in one.
+				way := "esc, then"
+				if m.level >= levelReader {
+					way = "esc, esc, then"
+				}
 				for _, r := range m.bandAbove() {
 					if r.num == i+1 {
-						m.note = fmt.Sprintf("%d %s is on the board · esc, then %d", i+1, sessionName(m.sessions[r.sess].Info), i+1)
+						m.note = fmt.Sprintf("%d %s is on the board · %s %d", i+1, sessionName(m.sessions[r.sess].Info), way, i+1)
 						break
 					}
 				}
@@ -2888,8 +2901,13 @@ func frameNamesTheArchive(frame string) bool {
 // no row wears the digit and there is nowhere to send them. The frame is
 // composed on a copy of the deck and thrown away; the copy's own `drawnBand`
 // is the answer, and the deck's is untouched.
+//
+// The reader asks it too (#329): the level above a session view is the
+// board from Lv2 and from Lv3 alike — the trail between them draws no band
+// either — and the refusal there names the same row, two `esc` away
+// instead of one.
 func (m *Model) bandAbove() []recentRow {
-	if m.level != levelWaypoints || m.archiveView || !m.boardShown() {
+	if m.level < levelWaypoints || m.archiveView || !m.boardShown() {
 		return nil
 	}
 	w, h := m.width, m.height
@@ -3851,9 +3869,96 @@ func (m *Model) replyRefusalSaid(whole string) string {
 	return ""
 }
 
-// footerTraded draws the row for this keymap with the trades the cursor,
-// mirror, grab and search clauses each pay for their place on it.
+// footerTraded draws the row for this keymap with every trade measured on
+// it, the archive door's own first of all (#329).
+//
+// The door goes after the keys that take only spare room. #328 gave it a
+// rank — second, behind `ctrl+d/u half page` and before every key that
+// acts — and a rank is spent against the keys that shed by rank. The
+// clauses a row takes only where they cost it no key (#281, #284, #289,
+// #293, #300) do not shed by rank: they withdraw by their own trade, and
+// that trade was measured with the door standing, so the door was the key
+// they were withdrawing for. At 152 on `fleet-hygiene`'s Lv3 reader
+// `space unfold · / search · n/N · [ ] turns · h/l session · r reply ·
+// a ask · enter attach · esc back · A archive · ? help · q quit` stood
+// where the same level and the same width on `many-idle` read `… a ask ·
+// x hide · enter attach · esc back · ? help · q quit`: the same key lost
+// the door in one scene and beat it in another, because in one the page
+// key was on the row to be shed for the door first and in the other it
+// was not. So the door is measured last of all the room-only clauses, its
+// trade at the head of the chain and theirs taken inside it: the door
+// goes wherever the row without it names every key the row with it named
+// and one more besides — `x hide`, `/ search`, `n/N`, `g grab`, the
+// mirror key, the reader's cursor key, or a key the chapter key's own
+// yield can then buy (#193, #210) — and the door stands wherever it does
+// not, because a clause is given up for a key and never for a swap
+// (#281's own measure). Where the door's rank still decides anything it
+// is against `ctrl+d/u half page` alone, the one key #328 ranked it above
+// (#42, #51), which is read past on both sides of this trade.
+//
+// Where the door keeps the rank #56 and #62 gave it — a fleet of one, and
+// the deck below the board's width — there is no trade: the clause is the
+// frame's only naming of the archive, not a second one (#328).
 func (m *Model) footerTraded(keys string, w int) string {
+	if clause := " · A archive"; m.doorYields() && strings.Contains(keys, clause) {
+		bare := strings.Replace(keys, clause, "", 1)
+		with, without := m.footerCursorTraded(keys, w), m.footerCursorTraded(bare, w)
+		if footerNamesMore(doorGone(pageKeyGone(with)), pageKeyGone(without)) {
+			return without
+		}
+		return with
+	}
+	return m.footerCursorTraded(keys, w)
+}
+
+// doorYields says whether this frame's archive door is the second naming
+// of a place the level above already names — the session view with a fleet
+// behind it, where the board one `esc` up draws the archive's own row and
+// the door is one `A` away there besides (#328, #329). A fleet of one has
+// no level above, and below the board's width the deck is a list and the
+// reader takes the whole screen: in both the footer's clause is the only
+// naming of the archive on the frame, and it keeps #62's rank.
+func (m *Model) doorYields() bool {
+	return m.sessionView() && m.liveCount() > 1
+}
+
+// pageKeyGone is a drawn row with `ctrl+d/u half page` taken out, in
+// whichever form the row drew it, so two rows can be read against each
+// other past the one key the door outranks (#42, #51, #328).
+func pageKeyGone(row string) string {
+	for _, f := range []string{" · ctrl+d/u half page", "ctrl+d/u half page · ", "ctrl+d/u half page"} {
+		if strings.Contains(row, f) {
+			return strings.Replace(row, f, "", 1)
+		}
+	}
+	return row
+}
+
+// doorGone is a drawn row with the archive's door taken out, so the row
+// that stands it can be read against the row that does not, key for key.
+func doorGone(row string) string {
+	for _, f := range []string{" · A archive", "A archive · "} {
+		if strings.Contains(row, f) {
+			return strings.Replace(row, f, "", 1)
+		}
+	}
+	return row
+}
+
+// footerNamesMore says whether the finished row `now` names every key
+// `was` named and one more besides — `keysGained`'s measure, read off two
+// drawn rows past the note and the attach aside as `footerNamesAll` reads
+// them (#55, #134). A clause is given up for a key, never for nothing and
+// never for a swap: the row that gives the door up must be the same row
+// with a key on it (#281, #329).
+func footerNamesMore(was, now string) bool {
+	return footerNamesAll(was, now) && !footerNamesAll(now, was)
+}
+
+// footerCursorTraded draws the row for this keymap with the trades the
+// cursor, mirror, grab and search clauses each pay for their place on it —
+// the chain under the archive door's own trade (#329).
+func (m *Model) footerCursorTraded(keys string, w int) string {
 	// The reader's fitting page names the key that walks its cursor
 	// (#300) on the same terms as every clause new to a row since #281:
 	// only where the finished row still names every key it named without
@@ -5348,7 +5453,12 @@ func (m *Model) shedOrder(chapter bool) []string {
 	order := []string{attachHint, " · ctrl+d/u half page", "ctrl+d/u half page · "}
 	// The archive door yields to every key that acts (#328): with a fleet
 	// it sheds second, right behind the page key and before anything else
-	// on the row. It is drawn on the session view only because no row of
+	// on the row — and it goes after the keys that take only spare room
+	// besides (#329): the rank below is spent against the keys that shed
+	// by rank, and the clauses that withdraw by their own trade take
+	// their cells first, in `footerTraded`.
+	//
+	// It is drawn on the session view only because no row of
 	// that frame names the archive (#203, #327), and one `esc` up the
 	// level that does draw it is one `A` away besides — while every other
 	// clause on the row is a key that does something here and now. At 120
@@ -5367,7 +5477,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// frame, not a second one. The board and the list never wear the
 	// clause at all — the door is a fleet row's there — so this rank is
 	// the session view's, and only its.
-	doorYields := m.sessionView() && m.liveCount() > 1
+	doorYields := m.doorYields()
 	if doorYields {
 		order = append(order, " · A archive")
 	}
