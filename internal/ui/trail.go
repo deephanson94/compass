@@ -1917,14 +1917,22 @@ func (m *Model) trailColumn(w, h int) []string {
 			}
 		}
 	}
-	band := m.recentRows(h - len(rows) - 2)
-	if m.sessionView() && m.fleetQuery != "" && m.archivedCount() > 0 && h-len(rows) >= 2 && len(band) == 0 {
+	// The past under the trail is the fleet of one's (#327): where the
+	// level the deck draws above this one carries the band itself — the
+	// board's stranded rows (#147), the narrow list's own group (#47) —
+	// the session view leaves it there and the footer names the archive's
+	// door in its place (#203).
+	var band []recentRow
+	if m.sessionKeepsThePast() {
+		band = m.recentRows(h - len(rows) - 2)
+	}
+	if m.sessionKeepsThePast() && m.fleetQuery != "" && m.archivedCount() > 0 && h-len(rows) >= 2 && len(band) == 0 {
 		// Under a search the band holds what matched (#98); where nothing
 		// did, the archive's door stays: the fleet of one has no list to
 		// say it on (#56).
 		rows = append(rows, "", dimStyle.Render(clip(fmt.Sprintf("%s archived%s", m.archiveDoorCount(m.archivedCount()), m.archiveDoorKey()), w)))
 	}
-	if m.sessionView() && len(band) > 0 {
+	if len(band) > 0 {
 		// The rows a short trail leaves are the recent band's (#47): a
 		// rule where the trail ends, then the sessions that ended last.
 		// The band is drawn into what is left over, never over a leg.
@@ -1955,7 +1963,7 @@ func (m *Model) sessionCard(w int) []string {
 			// is the live one's, and the card says so as the list's note
 			// does (#102).
 			miss := "no session matches /"
-			if len(m.recentRows(9)) > 0 {
+			if m.sessionKeepsThePast() && len(m.recentRows(9)) > 0 {
 				miss = "no live session matches /"
 			}
 			return []string{m.trailTitle(w), dimStyle.Render(clip(miss+m.fleetQuery+" · esc clears it", w))}

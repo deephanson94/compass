@@ -91,7 +91,13 @@ func TestAnOpencodeSessionIsARow(t *testing.T) {
 // The page key sheds after the attach aside (#51, #52): pinned, since the
 // fold went missing once between two decisions with nothing holding it.
 func TestThePageKeyOutlastsTheAttachAside(t *testing.T) {
-	m := boardModel(152, 40)
+	// The drawn side stands at 220. At 152 the Lv2 row is full to its last
+	// cell, and since #327 the band is not drawn there and the footer names
+	// the archive's door in its place — a clause that outlasts every key
+	// but the way out (#203) — so the row sheds the page key at its rank
+	// and the width, not the rank under test, decides. The shed order is
+	// the same order at either width.
+	m := boardModel(220, 48)
 	openTrail(m)
 	m.level = levelWaypoints // the legs: the reader's own footer is the held case (#53)
 	order := m.shedOrder(false)
@@ -109,13 +115,13 @@ func TestThePageKeyOutlastsTheAttachAside(t *testing.T) {
 	}
 	m.inTmux = false
 	m.View() // the footer is composed against the rows the frame drew (#199)
-	foot := ansi.Strip(m.footerLine(150))
+	foot := ansi.Strip(m.footerLine(218))
 	// The page key stands where what it moves has somewhere to go. At Lv2
 	// that is the cursor, not the viewport — `ctrl+d/u` walk the `▸` half
 	// a screenful of rows — so a trail the panel draws whole still moves
 	// under them; only a trail of one row leaves both keys nothing (#220,
 	// corrected: the viewport test shed a key that moves a drawn cell).
 	if moves := len(TrailRows(m.trail, m.level)) > 1; moves != strings.Contains(foot, "ctrl+d/u half page") {
-		t.Errorf("the 152 legs footer names the page key %v while the cursor moves %v: %q", !moves, moves, foot)
+		t.Errorf("the 220 legs footer names the page key %v while the cursor moves %v: %q", !moves, moves, foot)
 	}
 }

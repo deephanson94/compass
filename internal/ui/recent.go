@@ -25,6 +25,21 @@ type recentRow struct {
 	num  int
 }
 
+// sessionKeepsThePast says whether the session view draws the band under
+// its trail. Only a fleet of one does: there the deck opens straight into
+// the session, there is no level above to hold the past, and the band is
+// the only place it shows — which is the whole of #47. With a fleet the
+// deck draws a level up, that level already carries the band (the board's
+// stranded rows, #147; the narrow list's group, #47) and the session view
+// leaves it there, the footer naming the archive's door instead (#203,
+// #327). The fleet is the deck's own and not the search's — `liveCount`,
+// the same count that tells the help a fleet of one has no board (#53):
+// a query that leaves one live row has not made a deck of one, and the
+// fleet of one under a search keeps the band that answers it (#98, #102).
+func (m *Model) sessionKeepsThePast() bool {
+	return m.sessionView() && m.liveCount() == 1
+}
+
 // recentRows is the band as the deck would draw it with room for at most
 // n rows: the archived sessions that ended most recently, newest first,
 // numbered on from the live fleet's last digit. Nothing on the board or in
