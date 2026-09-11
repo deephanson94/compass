@@ -954,7 +954,17 @@ func TestTheArchivesListKeepsTheWayDeeper(t *testing.T) {
 // archive at every depth. The question is what the frame drew, not how
 // wide it is; the frame that names the door on a row does not name it
 // twice.
+//
+// Amended by #328, which moved the stand at 100 and 120: "`a ask` and
+// `enter attach` both gone. `enter` is the three-keypress proof's own key
+// (§3). Trading it for a door to a place one `esc` reaches is the wrong
+// end of the shed order." The door now yields to every key that acts, so
+// the rule reads: named once where the row can afford it, and never at an
+// acting key's cost. Where the row cannot take the door's twelve cells it
+// goes unnamed on the frame — `? help` still lists `A` — and the pin
+// measures that the cells really were not there.
 func TestTheReadersFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
+	named, afforded := 0, 0
 	for _, c := range []struct {
 		name string
 		sc   scene
@@ -980,14 +990,24 @@ func TestTheReadersFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 					onRow = true
 				}
 			}
-			if inFoot := strings.Contains(foot, "A archive"); inFoot == onRow {
-				if onRow {
-					t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
-				} else {
-					t.Errorf("%s %dx%d: no row and no key names the archive: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+			switch inFoot := strings.Contains(foot, "A archive"); {
+			case inFoot && onRow:
+				t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+			case !inFoot && !onRow:
+				if room := r328DoorRoom(foot, size[0]); room {
+					t.Errorf("%s %dx%d: the row had room for the door and named the archive nowhere: %q",
+						c.name, size[0], size[1], strings.TrimSpace(foot))
 				}
+				afforded++
+			default:
+				named++
 			}
 		}
+	}
+	// Both sides measured: the widths that afford the door name it, the
+	// widths that do not are the ones #328 moved.
+	if named < 3 || afforded < 2 {
+		t.Errorf("%d stands named the door and %d could not afford it; the rule is unmeasured", named, afforded)
 	}
 }
 
@@ -1003,8 +1023,16 @@ func TestTheReadersFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 // neither the count nor the key, while the same keypresses at a hundred
 // columns — where the fleet list is still beside the trail — named both.
 // The door is named once on the frame: on a row, or on the footer.
+//
+// Amended by #328: once where the row can afford it, and never at an
+// acting key's cost. The 120 stand is the one that moved — "`a ask` and
+// `enter attach` both gone. `enter` is the three-keypress proof's own key
+// (§3). Trading it for a door to a place one `esc` reaches is the wrong
+// end of the shed order" — and where the door goes unnamed the pin
+// measures that the row really could not take its twelve cells.
 func TestTheSessionViewsFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 	forceASCII(t)
+	named, afforded := 0, 0
 	for _, c := range []struct {
 		name string
 		sc   scene
@@ -1044,9 +1072,20 @@ func TestTheSessionViewsFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 			case inFoot && onRow:
 				t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
 			case !inFoot && !onRow:
-				t.Errorf("%s %dx%d: no row and no key names the archive: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
+				if r328DoorRoom(foot, size[0]) {
+					t.Errorf("%s %dx%d: the row had room for the door and named the archive nowhere: %q",
+						c.name, size[0], size[1], strings.TrimSpace(foot))
+				}
+				afforded++
+			default:
+				named++
 			}
 		}
+	}
+	// Both sides measured: the widths that afford the door name it, the
+	// widths that do not are the ones #328 moved.
+	if named < 3 || afforded < 2 {
+		t.Errorf("%d stands named the door and %d could not afford it; the rule is unmeasured", named, afforded)
 	}
 }
 

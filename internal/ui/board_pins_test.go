@@ -1900,8 +1900,15 @@ func TestTheBoardsBandStandsARowOffTheColumns(t *testing.T) {
 			if head < 3 {
 				continue
 			}
-			stands++
 			blank := func(i int) bool { return strings.TrimSpace(lines[i]) == "" }
+			// Amended by #328: the air row is spent only where the band
+			// still stands clear of the footer's rule by a row. Where the
+			// rows are too tight for both the band keeps its one row of
+			// air, as before #326, and this stand does not count.
+			if !r328BandOffTheRule(lines) {
+				continue
+			}
+			stands++
 			if !blank(head-1) || !blank(head-2) || blank(head-3) {
 				t.Errorf("%s %dx%d: the band's header should stand under two rows of air and a column row\n%s",
 					sc.name, size[0], size[1], strings.Join(lines[head-3:head+1], "\n"))
@@ -1911,4 +1918,33 @@ func TestTheBoardsBandStandsARowOffTheColumns(t *testing.T) {
 	if stands < 3 {
 		t.Errorf("only %d boards drew the band; the rule is unmeasured", stands)
 	}
+	// The other side, on the board the row came out of (#328): at 152x30
+	// the band's last row is followed by a blank before the footer's rule.
+	m := boardModel(152, 30)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if !r328BandOffTheRule(lines) {
+		t.Errorf("152x30: the band's last row abuts the footer's rule\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// r328BandOffTheRule says whether the frame's band ends a blank row above
+// the footer's rule: the floor #326 said it was keeping the band off.
+func r328BandOffTheRule(lines []string) bool {
+	head, rule := -1, -1
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "recent ·") {
+			head = i
+		}
+		if s := strings.TrimSpace(l); s != "" && strings.Trim(s, "─-") == "" && i > head && head >= 0 && rule < 0 {
+			rule = i
+		}
+	}
+	if head < 0 || rule < 0 {
+		return false
+	}
+	last := rule - 1
+	for last > head && strings.TrimSpace(lines[last]) == "" {
+		last--
+	}
+	return last < rule-1
 }
