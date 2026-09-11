@@ -3927,6 +3927,39 @@ func (m *Model) footerTraded(keys string, w int) string {
 		if footerNamesMore(doorGone(pageKeyGone(with)), pageKeyGone(without)) {
 			return without
 		}
+		// And a key that cannot move is not what keeps the door standing
+		// (#332). #331 read what a clause that acts is refused for past
+		// the keys the next press refuses, and made every trade in the
+		// chain go through `footerClauseTraded` — every trade but this
+		// one, the outermost, which went on counting a stuck key among
+		// the keys the door's departure would cost. At 152
+		// `fleet-hygiene`'s reader stood `space unfold · / search · n/N ·
+		// [ ] turns · h/l session · r reply · a ask · enter attach · esc
+		// back · A archive · ? help · q quit` under `the deepest level`,
+		// where `x` hides porter and `j/k` walks the reader's mark: both
+		// keys were off the row and the door was on it, held there by
+		// six cells of an `n/N` with no search entered, which answers
+		// `no search — / starts one` to both halves at every width
+		// (#210, #216, #223). The row that gives the door up named one
+		// key fewer — that one — and `footerNamesMore` read a swap.
+		//
+		// So the keys that cannot move pay on both sides of the door's
+		// own comparison, exactly as they pay inside it: where what the
+		// door's departure costs is nothing but those keys, they give up
+		// their cells and the trade is measured again. The door goes
+		// only where the row that has paid them over still names every
+		// key the row standing the door named and one more besides, and
+		// names no fewer keys than the row that keeps it — so the twelve
+		// cells and the refusing key's six go to the keys that act, and
+		// never for nothing (#193, #210's own measure, #281's measure).
+		if cost := m.footerStuckCost(doorGone(pageKeyGone(with)), pageKeyGone(without)); len(cost) > 0 {
+			paid := m.footerCursorTraded(clausesGone(keys, cost), w)
+			over := m.footerCursorTraded(clausesGone(bare, cost), w)
+			if footerNamesMore(doorGone(pageKeyGone(paid)), pageKeyGone(over)) &&
+				len(footerKeysNamed(over)) >= len(footerKeysNamed(with)) {
+				return over // the keys that cannot move pay the door's way out
+			}
+		}
 		return with
 	}
 	return m.footerCursorTraded(keys, w)
