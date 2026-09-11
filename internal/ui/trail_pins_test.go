@@ -935,7 +935,12 @@ func TestThePageKeyThatWalksTheCursorStays(t *testing.T) {
 	}{
 		{"two-tools", sceneTwoTools, 152, 40},
 		{"two-tools", sceneTwoTools, 220, 48},
-		{"fleet-hygiene", sceneFleetHygiene, 152, 40},
+		// fleet-hygiene stands at 220. Since #327 the session view leaves
+		// the band to the level above, so at 152 the footer names the
+		// archive's door in its place (#203) on a row already full to its
+		// last cell, and the page key goes at its rank for width. At 220
+		// the row affords both, and the key under test is the one drawn.
+		{"fleet-hygiene", sceneFleetHygiene, 220, 48},
 	} {
 		m := legs(c.scene(), c.w, c.h)
 		if body(legs(c.scene(), c.w, c.h, "ctrl+u")) == body(m) {
@@ -1138,7 +1143,15 @@ func TestThePageKeyBuysAStuckKeysCells(t *testing.T) {
 		w, h, n int
 	}{
 		{"two-tools", sceneTwoTools, 152, 40, 9},
-		{"fleet-hygiene", sceneFleetHygiene, 152, 40, 9},
+		// alarm-storm holds the second stand. fleet-hygiene's row at 152
+		// stood here until #327: the session view leaves the band to the
+		// level above, the footer names the archive's door in its place
+		// (#203), and the door outlasts the page key on the shed order —
+		// so the cells the stuck chapter key frees go to the door and not
+		// back to `ctrl+d/u`. alarm-storm has nothing archived, no door to
+		// pay for, and the same stand: the chapter key refuses on both
+		// halves and the page key walks the cursor.
+		{"alarm-storm", sceneAlarmStorm, 152, 40, 9},
 	} {
 		sc := c.scene()
 		// The chapter key refuses on both halves, at this stand.
@@ -2135,4 +2148,107 @@ func r109ttLegKeys(foot string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// ---- round 327, every scene ----
+
+// r327PastSizes are the five terminals the walkthrough is drawn at.
+var r327PastSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}}
+
+// r327PastDoor matches the archive's door as a drawn row wears it — "41
+// archived · A browses", "0 of 300 archived · A", "41 archived · 1 hidden
+// · A" — the count and the key that browses it (#169, #176).
+var r327PastDoor = regexp.MustCompile(`archived(?: · [^·\n]+)? · A(?: browses)?`)
+
+// r327PastBand is the band's own first row on this frame, or "" where the
+// frame drew none: the header is the only row that says what the band is.
+func r327PastBand(rows []string) string {
+	for _, r := range rows {
+		if strings.Contains(r, "recent ·") {
+			return strings.TrimSpace(r)
+		}
+	}
+	return ""
+}
+
+// r327PastNamesTheDoor says whether anything on the frame — one of its rows
+// or the footer's own clause — names the archive and the key that opens it.
+func r327PastNamesTheDoor(frame string) bool {
+	return strings.Contains(frame, "· A archive") || r327PastDoor.MatchString(frame)
+}
+
+// TestTheSessionViewLeavesThePastToTheLevelAbove pins #327. The recent band
+// is the past where the past has nowhere else to show: a fleet of one opens
+// straight into the session, has no board behind it, and #47 put the band
+// there for exactly that. With a fleet the deck draws a level up — the
+// board with its stranded rows (#147), the narrow list with its group —
+// the past is already on that level, and the session view drew it a second
+// time one Tab in for no reason anyone asked for. It now leaves it there:
+// no `recent ·` row on the frame, no digit opening a row the frame does not
+// wear (#255), and the footer naming the archive's door where no row does
+// (#203). The fleet of one keeps every row it had.
+func TestTheSessionViewLeavesThePastToTheLevelAbove(t *testing.T) {
+	sweep(t)
+	forceASCII(t)
+	stands, dropped, kept := 0, 0, 0
+	for _, sc := range allScenes() {
+		for _, size := range r327PastSizes {
+			w, h := size[0], size[1]
+			m := sceneModel(sc, w, h)
+			if !m.sessionView() {
+				// A fleet of one is already one level in: the deck opened
+				// the session for it (#47). Everything else takes a Tab.
+				pressKey(m, "tab")
+				poll(m, sc)
+			}
+			if !m.sessionView() || m.level != levelWaypoints {
+				continue // the narrow deck keeps its list, and its own band with it
+			}
+			stands++
+			where := sc.name + " " + itoaPin(w) + "x" + itoaPin(h)
+			frame := ansi.Strip(m.View())
+			rows := strings.Split(frame, "\n")
+			band := r327PastBand(rows)
+			foot := strings.TrimSpace(rows[len(rows)-1])
+			if m.liveCount() > 1 {
+				if band != "" {
+					t.Errorf("%s: the session view drew the band the level above draws: %q", where, band)
+				}
+				if len(m.drawnBand) > 0 {
+					t.Errorf("%s: no band drawn and %d digits still open one (#255)", where, len(m.drawnBand))
+				}
+				if m.archivedCount() == 0 {
+					continue // nothing has ended: no door to name
+				}
+				dropped++
+				if !r327PastNamesTheDoor(frame) {
+					t.Errorf("%s: the band is gone and nothing names the archive's door (#203)\n  foot=%q", where, foot)
+				}
+				continue
+			}
+			// The fleet of one: the band is the only place its past shows,
+			// and it is drawn as it was before (#47, #98, #102).
+			if m.archivedCount() == 0 {
+				continue // the first five minutes: nothing has ended yet
+			}
+			kept++
+			if band == "" {
+				t.Errorf("%s: the fleet of one lost the band that is its only past (#47)\n%s", where, frame)
+			}
+			if len(m.drawnBand) == 0 {
+				t.Errorf("%s: the fleet of one drew a band no digit opens (#255)", where)
+			}
+		}
+	}
+	// Not vacuous: the stands, and both sides of the rule measured on them.
+	if stands < 20 {
+		t.Errorf("only %d session-view stands walked; the rule is unmeasured", stands)
+	}
+	if dropped < 6 {
+		t.Errorf("only %d stands where a fleet had a past to drop; the new rule is unmeasured", dropped)
+	}
+	if kept < 3 {
+		t.Errorf("only %d fleet-of-one stands with an archive; #47 is unmeasured", kept)
+	}
+	t.Logf("session-view stands: %d · fleets that left the past above: %d · fleets of one keeping it: %d", stands, dropped, kept)
 }
