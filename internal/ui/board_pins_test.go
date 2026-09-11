@@ -1873,3 +1873,42 @@ func TestTheBoardsMirrorKeySaysTheFlagBothWays(t *testing.T) {
 	}
 	t.Logf("board stands where `m` arms the mirror: %d · stands off the board: %d", boards, deeps)
 }
+
+// The board's recent band stands one row of air off the last band's
+// columns (#326). The strip sat one row under the columns, and the band
+// took the strip's row when it replaced it (#147), so on a tall screen the
+// band's header sat against the columns' last rows and read as one more of
+// them, over twenty rows of nothing. Where the board draws the band, the
+// two rows above its header are air and the row above those is a column's.
+func TestTheBoardsBandStandsARowOffTheColumns(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}, {220, 60}} {
+			m := sceneModel(sc, size[0], size[1])
+			poll(m, sc)
+			if m.level != levelBoard || !m.boardShown() {
+				continue
+			}
+			lines := strings.Split(ansi.Strip(m.View()), "\n")
+			head := -1
+			for i, l := range lines {
+				if strings.HasPrefix(strings.TrimSpace(l), "recent ·") {
+					head = i
+				}
+			}
+			if head < 3 {
+				continue
+			}
+			stands++
+			blank := func(i int) bool { return strings.TrimSpace(lines[i]) == "" }
+			if !blank(head-1) || !blank(head-2) || blank(head-3) {
+				t.Errorf("%s %dx%d: the band's header should stand under two rows of air and a column row\n%s",
+					sc.name, size[0], size[1], strings.Join(lines[head-3:head+1], "\n"))
+			}
+		}
+	}
+	if stands < 3 {
+		t.Errorf("only %d boards drew the band; the rule is unmeasured", stands)
+	}
+}

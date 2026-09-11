@@ -204,7 +204,11 @@ func TestABandIsAsTallAsItsTallestTrail(t *testing.T) {
 			strip = i
 		}
 	}
-	if strip < 0 || strip != used {
+	want := used
+	if strip >= 0 && strings.HasPrefix(strings.TrimSpace(ansi.Strip(lines[strip])), "recent ·") {
+		want = used + 1 // the band stands one row of air further off than the strip (#326)
+	}
+	if strip < 0 || strip != want {
 		t.Errorf("the strip should sit one row under the last band (bands %v, strip at %d)", heights, strip)
 	}
 }
