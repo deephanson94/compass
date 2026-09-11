@@ -33,6 +33,25 @@ func sweep(t *testing.T) {
 	forceASCII(t)
 }
 
+// sweepAlone marks the one sweep that cannot walk beside the others: it
+// flips lipgloss's colour profile itself, and that profile is the single
+// process-wide thing every frame in the package is drawn through. Under
+// #325's `t.Parallel()` the flip landed in the middle of another sweep's
+// walk, and a sweep that compares two frames byte for byte — the mirror
+// key's, once, on 2026-09-10 — or reads a row above the footer then saw
+// one frame styled and one bare, and failed on a difference neither pin
+// was about. So this one steps aside under -short like the rest and then
+// runs alone, in the sequential phase, where nothing else is drawing: a
+// top-level test that never calls `t.Parallel()` finishes before any
+// parallel test resumes. It sets both profiles itself and puts back the
+// one it found, so it wants no `forceASCII` either (#325, #331).
+func sweepAlone(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("a panel sweep: run without -short to hold the rule")
+	}
+}
+
 // sweepColour says whether a sweep walks its frames a second time with
 // colour on. Every panel report that measured both profiles found the two
 // walks byte-identical once styling is stripped (#215, #218), and
@@ -49,7 +68,7 @@ func sweepColour() bool {
 // says the same words once the styling is stripped. A width or a cut that
 // depended on a style would show here as a frame that differs.
 func TestTheCorpusSaysTheSameWordsWithColourOn(t *testing.T) {
-	sweep(t)
+	sweepAlone(t)
 	prev := lipgloss.ColorProfile()
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	walk := func(sc scene, w, h int, prof termenv.Profile) []string {
