@@ -1098,6 +1098,35 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			if m.note == fmt.Sprintf("no session %d", i+1) && m.level == levelWaypoints &&
+				m.sessionView() && m.liveCount() > 1 {
+				// The digit past the live fleet is the band's, and since
+				// #327 the band is the level above's: the session view
+				// leaves the past there and refuses the digit here. The
+				// refusal names the row and the way to it, the shape the
+				// hidden twin has (#57) — "5 api is on the board · esc,
+				// then 5" — because the board one `esc` up wears that
+				// very row under that very digit, and nothing on this
+				// frame said whether `5` still lands. At a hundred
+				// columns the same keypress opens it (the band is drawn
+				// beside the trail), so without this the digit's meaning
+				// turned on the terminal's width and said nothing. The
+				// row is the one the band would carry, numbered on from
+				// the live fleet as it numbers them (`recentRows`), and
+				// under a search it is what matched (#98). A digit the
+				// board's own frame does not wear — its columns fill the
+				// screen and it strands no band — has nowhere to send
+				// anyone and keeps `no session N`, which is #255's rule
+				// read from this side. The level above is the board and
+				// not the list: the session view is drawn only where the
+				// board fits (`sessionView`).
+				for _, r := range m.bandAbove() {
+					if r.num == i+1 {
+						m.note = fmt.Sprintf("%d %s is on the board · esc, then %d", i+1, sessionName(m.sessions[r.sess].Info), i+1)
+						break
+					}
+				}
+			}
 		}
 		return m, m.refresh()
 	}
@@ -2849,6 +2878,39 @@ func frameNamesTheArchive(frame string) bool {
 		}
 	}
 	return false
+}
+
+// bandAbove is the recent band the level the deck draws above the session
+// view would carry: the board's own stranded rows (#147). #255's rule is
+// that a digit opens the row the frame drew and no other, so the refusal
+// that sends a person one level up asks that frame rather than what a band
+// could hold — on a board whose columns fill the screen there is no band,
+// no row wears the digit and there is nowhere to send them. The frame is
+// composed on a copy of the deck and thrown away; the copy's own `drawnBand`
+// is the answer, and the deck's is untouched.
+func (m *Model) bandAbove() []recentRow {
+	if m.level != levelWaypoints || m.archiveView || !m.boardShown() {
+		return nil
+	}
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	inner := w - 2*edgePad
+	if inner < 10 {
+		inner = w
+	}
+	body := h - 5
+	if body < 1 {
+		body = 1
+	}
+	above := *m
+	above.level, above.drawnBand = levelBoard, []recentRow{}
+	above.boardLines(inner, body)
+	return above.drawnBand
 }
 
 func (m *Model) viewOnce() string {
@@ -5283,7 +5345,33 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// page key becomes the row's head and the separator-led fragment
 	// above matches nothing — the head form #56 gave the attach key and
 	// #200 gave `space unfold`.
-	order := []string{attachHint, " · ctrl+d/u half page", "ctrl+d/u half page · ", mirror, " · h/l session"}
+	order := []string{attachHint, " · ctrl+d/u half page", "ctrl+d/u half page · "}
+	// The archive door yields to every key that acts (#328): with a fleet
+	// it sheds second, right behind the page key and before anything else
+	// on the row. It is drawn on the session view only because no row of
+	// that frame names the archive (#203, #327), and one `esc` up the
+	// level that does draw it is one `A` away besides — while every other
+	// clause on the row is a key that does something here and now. At 120
+	// it was taking `a ask` and `enter attach`, the key §3's own
+	// three-keypress proof is written on, and parking eleven blank
+	// columns beside the note. Where the row affords the door without
+	// shedding a key that acts it stands; where it cannot it goes and the
+	// row reads as it did before #327. `? help` still lists `A`.
+	//
+	// Two places keep the rank #56 and #62 gave the door, last of the
+	// level's own keys (below). A fleet of one: there is no level above
+	// to hold the past, the band is the only place it shows (#47, #327).
+	// And below the board's width, where the deck is a list and the
+	// reader takes the whole screen with no band on it. In both the
+	// footer's clause is the only naming of the archive anywhere on the
+	// frame, not a second one. The board and the list never wear the
+	// clause at all — the door is a fleet row's there — so this rank is
+	// the session view's, and only its.
+	doorYields := m.sessionView() && m.liveCount() > 1
+	if doorYields {
+		order = append(order, " · A archive")
+	}
+	order = append(order, mirror, " · h/l session")
 	homeKey := m.level >= levelWaypoints && m.archiveView
 	// The way in and the way out are not shared in the same sense as
 	// `h/l session` or the attach hint — they are how you enter and leave
@@ -5292,9 +5380,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 	var own []string
 	switch {
 	case m.level >= levelReader:
-		// The archive door stands with the way out, as `A fleet` does
-		// below the archive's list (#56, #62): it outlasts the reader's
-		// own keys, which the help teaches, and goes before `esc`.
+		// The archive door is no longer among the level's own keys: it
+		// yields to every one of them (#328, at the head of the order).
+		// `A fleet` below the archive's list is the way home from a level
+		// that has no other, and keeps the rank #56 and #62 gave it.
 		own = []string{" · g grab", " · x hide", " · x unhide", " · tab deeper", " · tab reader", " · [ ] chapters", " · r reply",
 			// An attach that cannot work is a refusal, not a key, and a
 			// refusal goes before a key that acts — the rank the
@@ -5316,14 +5405,14 @@ func (m *Model) shedOrder(chapter bool) []string {
 			// `space unfold` leads the row and the separator-led form
 			// above matches nothing — the same head-form the attach key
 			// needs two lines up.
-			"space unfold · ", " · A archive"}
+			"space unfold · "}
 	case m.level >= levelWaypoints:
-		// The archive door stands with the way out here as it does in
-		// the reader (#56, #62): last of the level's own keys.
+		// The door is not here either: it yields to every key that acts
+		// on this level too (#328).
 		own = []string{" · g grab",
 			// The refusal goes before the key that acts here too (#52).
 			" · enter · no pane", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns",
-			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters", " · A archive"}
+			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
 	default:
 		// A row whose movement key has yielded (#213, #216, #259) leads
 		// with the attach key, and the separator-led fragment above then
@@ -5369,6 +5458,12 @@ func (m *Model) shedOrder(chapter bool) []string {
 				own = heads([]string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · enter · no pane", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · x unhide"})
 			}
 		}
+	}
+	if m.level >= levelWaypoints && !doorYields {
+		// The fleet of one's door, last of the level's own keys (#56,
+		// #62): the rank it has had since the reader's footer was given
+		// it, kept where nothing else on the frame names the archive.
+		own = append(own, " · A archive")
 	}
 	order = append(order, own...)
 	// The row's movement key gives way before the way out and before the

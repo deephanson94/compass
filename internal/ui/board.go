@@ -419,9 +419,18 @@ func (m *Model) boardLines(w, h int) []string {
 			bw = bx.left - 1
 		}
 		if bw >= fleetWidth {
-			if band := m.strandedBand(bw, free); len(band) > 1 {
+			// The air row is spent only where the band still stands clear
+			// of the footer's rule by a row afterwards (#328). On a thirty-
+			// row board the row came out of the blank below the band, not
+			// out of the nothing above it: `9 ○ api · "port the client to
+			// httpx" 1d` ended up against the rule, which is the floor
+			// #326 said it was keeping the band off. Where the rows are
+			// that tight the band keeps its one row of air, as before #326.
+			if band := m.strandedBand(bw, free); len(band) > 1 && free-len(band) >= 1 {
 				lines = append(lines[:len(lines)-1], "")
 				lines = append(lines, band...)
+			} else if band := m.strandedBand(bw, free+1); len(band) > 1 {
+				lines = append(lines[:len(lines)-1], band...)
 			}
 		}
 	}

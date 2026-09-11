@@ -2191,6 +2191,7 @@ func TestTheSessionViewLeavesThePastToTheLevelAbove(t *testing.T) {
 	sweep(t)
 	forceASCII(t)
 	stands, dropped, kept := 0, 0, 0
+	refused, named := 0, 0 // #328's digits: refused in words, and the ones that name the way
 	for _, sc := range allScenes() {
 		for _, size := range r327PastSizes {
 			w, h := size[0], size[1]
@@ -2217,12 +2218,62 @@ func TestTheSessionViewLeavesThePastToTheLevelAbove(t *testing.T) {
 				if len(m.drawnBand) > 0 {
 					t.Errorf("%s: no band drawn and %d digits still open one (#255)", where, len(m.drawnBand))
 				}
-				if m.archivedCount() == 0 {
-					continue // nothing has ended: no door to name
+				if m.archivedCount() > 0 {
+					dropped++
+					if !r327PastNamesTheDoor(frame) && r328DoorRoom(rows[len(rows)-1], w) {
+						// #328 amends #203: the door is named where the
+						// row can afford it and never at an acting key's
+						// cost, so a full row goes without it. It is a
+						// failure only where the cells were there.
+						t.Errorf("%s: the band is gone, the row had room and nothing names the archive's door (#203, #328)\n  foot=%q", where, foot)
+					}
 				}
-				dropped++
-				if !r327PastNamesTheDoor(frame) {
-					t.Errorf("%s: the band is gone and nothing names the archive's door (#203)\n  foot=%q", where, foot)
+				// The digit the band carried one keypress ago: pressed
+				// here it must refuse in words (#43), and where the
+				// board one `esc` up wears that very row it must say so
+				// and say the way (#328) — nothing else on the frame
+				// tells a person whether `5` still lands, and twenty
+				// columns narrower the same keypress opens it.
+				if digit := m.liveCount() + 1; digit <= 9 {
+					body, lvl := strings.Join(rows[:len(rows)-1], "\n"), m.level
+					pressKey(m, itoaPin(digit))
+					poll(m, sc)
+					after := strings.Split(ansi.Strip(m.View()), "\n")
+					refused++
+					switch {
+					case m.note == "":
+						t.Errorf("%s: `%d` past the live fleet answered nothing (#43)", where, digit)
+					case m.note == "no session "+itoaPin(digit):
+					case strings.HasSuffix(m.note, " is on the board · esc, then "+itoaPin(digit)):
+						named++
+						// The way the note names is a way: one `esc` up,
+						// the same digit opens that row in the archive.
+						want := strings.TrimSuffix(strings.TrimPrefix(m.note, itoaPin(digit)+" "),
+							" is on the board · esc, then "+itoaPin(digit))
+						pressKey(m, "esc")
+						poll(m, sc)
+						m.View() // the board records the band it draws (#255)
+						pressKey(m, itoaPin(digit))
+						poll(m, sc)
+						s, ok := m.selected()
+						if !m.archiveView || !ok || sessionName(s.Info) != want {
+							t.Errorf("%s: the refusal sent `esc, then %d` to %q and the board refused it: archive=%v note=%q",
+								where, digit, want, m.archiveView, m.note)
+						}
+						continue // this stand has left its frame behind
+					default:
+						t.Errorf("%s: `%d` answered %q, which is neither refusal (#43, #328)", where, digit, m.note)
+					}
+					if m.level != lvl {
+						t.Errorf("%s: the refused digit moved the deck to Lv%d (#255)", where, m.level)
+					}
+					if got := strings.Join(after[:len(after)-1], "\n"); got != body {
+						t.Errorf("%s: the refused digit moved the frame above the footer (#255)", where)
+					}
+					if !strings.Contains(strings.TrimSpace(after[len(after)-1]), m.note) {
+						t.Errorf("%s: the refusal is not on the footer: note=%q foot=%q",
+							where, m.note, strings.TrimSpace(after[len(after)-1]))
+					}
 				}
 				continue
 			}
@@ -2250,5 +2301,158 @@ func TestTheSessionViewLeavesThePastToTheLevelAbove(t *testing.T) {
 	if kept < 3 {
 		t.Errorf("only %d fleet-of-one stands with an archive; #47 is unmeasured", kept)
 	}
-	t.Logf("session-view stands: %d · fleets that left the past above: %d · fleets of one keeping it: %d", stands, dropped, kept)
+	// #328: the digit past the live fleet answers in words on every stand
+	// where the band is gone, and on the stands whose board strands the
+	// band it names the row and the way.
+	if refused < 12 {
+		t.Errorf("only %d digits pressed past the live fleet; the refusal is unmeasured", refused)
+	}
+	if named < 3 {
+		t.Errorf("only %d refusals named the row and the way; #328's note is unmeasured", named)
+	}
+	t.Logf("session-view stands: %d · fleets that left the past above: %d · fleets of one keeping it: %d · digits refused: %d (naming the way: %d)",
+		stands, dropped, kept, refused, named)
+}
+
+// ---- round 328, the second-day and two-tools operators ----
+
+// r328DoorCells is what the archive's door costs a footer: " · A archive".
+const r328DoorCells = 12
+
+// r328DoorRoom says whether a drawn footer had the twelve cells the door
+// wants and named the archive nowhere all the same. The row is measured as
+// drawn, its left pad included, against the field the footer is given: the
+// terminal less its right pad.
+func r328DoorRoom(foot string, w int) bool {
+	return lipgloss.Width(strings.TrimRight(foot, " "))+r328DoorCells <= w-1
+}
+
+// r328Acting is whether a clause on the widest row is a key that acts and
+// sheds by rank — what the door must never cost. Read past:
+//   - the door itself, and `ctrl+d/u half page`, the one key it outranks:
+//     a shortcut for a distance `j` covers, which the help teaches (#42,
+//     #51), and the key the panel calls the right payment at 152;
+//   - `enter · no pane`, a refusal and not a key (#52), in both halves the
+//     split leaves;
+//   - `? help` and `q quit`, which no row ever sheds;
+//   - the clauses a row takes only where they cost it no key — `/ search`
+//     and `g grab` on the session view, the hide key, the reader's mirror
+//     key, and `n/N`, which rides with the search it walks (#281, #284,
+//     #289, #293, #300). Those yield by their own trade rather than at
+//     their rank, and that trade is not the door's rank.
+func r328Acting(k string) bool {
+	switch k {
+	case "A archive", "ctrl+d/u half page", "enter", "no pane", "? help", "q quit",
+		"/ search", "n/N", "x hide", "x unhide", "g grab", "m live pane", "m conversation":
+		return false
+	}
+	return true
+}
+
+// TestTheArchiveDoorYieldsToEveryKeyThatActs pins #328. #327 stopped
+// drawing the recent band in the session view of a fleet the deck draws a
+// level up, and the footer names the archive's door in its place (#203) —
+// at the rank the door had had since #56 and #62, last of the level's own
+// keys. Two operators read the frames: "`a ask` and `enter attach` both
+// gone. `enter` is the three-keypress proof's own key (§3). Trading it for
+// a door to a place one `esc` reaches is the wrong end of the shed order."
+// And: "Both rows are 119 columns; the new one parks 11 blank columns
+// between `q quit` and the note. Shedding `enter attach` alone (15) pays
+// for `· A archive` (12) with 5 to spare."
+//
+// The door now sheds second, behind `ctrl+d/u half page` and before every
+// key that acts. Both sides, over every scene at four sizes, at Lv2 and at
+// Lv3: where the door stands, the row names every acting key the widest
+// row names — the door never stands where an acting key was shed — and
+// where the door is gone, the row was full to within its twelve cells, so
+// it was not shed for nothing.
+func TestTheArchiveDoorYieldsToEveryKeyThatActs(t *testing.T) {
+	forceASCII(t)
+	stand := func(sc scene, w, h, deeper int) *Model {
+		m := sceneModel(sc, w, h)
+		if !m.sessionView() {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		for i := 0; i < deeper; i++ {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		return m
+	}
+	stood, went := 0, 0
+	for _, sc := range allScenes() {
+		for _, deeper := range []int{0, 1} {
+			wide := stand(sc, 220, 48, deeper)
+			if !wide.sessionView() || wide.liveCount() <= 1 || wide.archivedCount() == 0 {
+				continue
+			}
+			var acting []string
+			for _, k := range r328Keys(ansi.Strip(wide.View())) {
+				if r328Acting(k) {
+					acting = append(acting, k)
+				}
+			}
+			for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+				w, h := size[0], size[1]
+				m := stand(sc, w, h, deeper)
+				if !m.sessionView() || m.level < levelWaypoints {
+					continue // the narrow deck keeps its list, and its own band
+				}
+				frame := ansi.Strip(m.View())
+				rows := strings.Split(frame, "\n")
+				where := sc.name + " " + itoaPin(w) + "x" + itoaPin(h) + " Lv" + itoaPin(m.level)
+				have := map[string]bool{}
+				for _, k := range r328Keys(frame) {
+					have[k] = true
+				}
+				var lost []string
+				for _, k := range acting {
+					if !have[k] {
+						lost = append(lost, k)
+					}
+				}
+				if have["A archive"] {
+					stood++
+					if len(lost) > 0 {
+						t.Errorf("%s: the archive's door stands and the row shed %v, which act (#328)\n  foot=%q",
+							where, lost, strings.TrimSpace(rows[len(rows)-1]))
+					}
+					continue
+				}
+				went++
+				if len(lost) > 0 && r328DoorRoom(rows[len(rows)-1], w) {
+					t.Errorf("%s: the door is gone, %v are gone and the row had room for it (#203, #328)\n  foot=%q",
+						where, lost, strings.TrimSpace(rows[len(rows)-1]))
+				}
+			}
+		}
+	}
+	// Both sides measured: rows that afford the door, and rows that do not.
+	if stood < 6 {
+		t.Errorf("only %d rows stood the door; the rule is unmeasured", stood)
+	}
+	if went < 4 {
+		t.Errorf("only %d rows gave it up; the other side is unmeasured", went)
+	}
+	t.Logf("session-view rows standing the door: %d · rows that could not afford it: %d", stood, went)
+}
+
+// r328Keys is the footer's key clauses as the frame draws them: the row's
+// left half, up to the two blank columns that hold the note off, with the
+// attach aside — which sheds before any key does (#56) — off the attach
+// key's own clause.
+func r328Keys(frame string) []string {
+	rows := strings.Split(frame, "\n")
+	foot := strings.TrimRight(rows[len(rows)-1], " ")
+	if i := strings.Index(foot, "  "); i > 0 {
+		foot = foot[:i]
+	}
+	var out []string
+	for _, k := range strings.Split(strings.TrimSpace(foot), " · ") {
+		if k != "" {
+			out = append(out, strings.TrimSuffix(k, " (prefix d returns)"))
+		}
+	}
+	return out
 }
