@@ -407,16 +407,21 @@ func (m *Model) boardLines(w, h int) []string {
 	strip := strings.TrimSpace(ansi.Strip(lines[len(lines)-1]))
 	if free := h - len(lines); free >= 2 && !m.archiveView && len(m.overlaps()) == 0 &&
 		!strings.HasPrefix(strip, "+") && strings.HasSuffix(strip, fmt.Sprintf("%d archived%s", m.archivedCount(), m.archiveDoorKey())) {
-		bw, top := w, len(lines)-1
+		// The band stands one row of air further off the last band than
+		// the strip did (#326): on a tall screen the header sat against
+		// the columns' last rows and read as one more of them, over
+		// twenty rows of nothing.
+		bw, top := w, len(lines)
 		// The band is a column too: where the reply box begins inside it,
 		// it is composed at the width the box leaves, as a board column
 		// is (#126).
-		if bx := m.replyBox; bx.on && top < bx.top+bx.h && top+free+1 > bx.top && bx.left < w {
+		if bx := m.replyBox; bx.on && top < bx.top+bx.h && top+free > bx.top && bx.left < w {
 			bw = bx.left - 1
 		}
 		if bw >= fleetWidth {
-			if band := m.strandedBand(bw, free+1); len(band) > 1 {
-				lines = append(lines[:len(lines)-1], band...)
+			if band := m.strandedBand(bw, free); len(band) > 1 {
+				lines = append(lines[:len(lines)-1], "")
+				lines = append(lines, band...)
 			}
 		}
 	}
