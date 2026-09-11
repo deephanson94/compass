@@ -994,7 +994,11 @@ func TestTheReadersFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 			case inFoot && onRow:
 				t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
 			case !inFoot && !onRow:
-				if room := r328DoorRoom(foot, size[0]); room {
+				// The room the door is owed is what is left after the
+				// keys that take only spare room have taken theirs
+				// (#329): twelve blank cells on the row no longer say
+				// the door was owed them.
+				if room := r329DoorRoom(m, foot, size[0]); room {
 					t.Errorf("%s %dx%d: the row had room for the door and named the archive nowhere: %q",
 						c.name, size[0], size[1], strings.TrimSpace(foot))
 				}
@@ -1072,7 +1076,8 @@ func TestTheSessionViewsFooterNamesTheArchiveWhereNoRowDoes(t *testing.T) {
 			case inFoot && onRow:
 				t.Errorf("%s %dx%d: the archive door is named twice: %q", c.name, size[0], size[1], strings.TrimSpace(foot))
 			case !inFoot && !onRow:
-				if r328DoorRoom(foot, size[0]) {
+				// The room is what the room-only keys leave (#329).
+				if r329DoorRoom(m, foot, size[0]) {
 					t.Errorf("%s %dx%d: the row had room for the door and named the archive nowhere: %q",
 						c.name, size[0], size[1], strings.TrimSpace(foot))
 				}
