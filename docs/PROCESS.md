@@ -121,3 +121,42 @@ said it is not re-spawned unless a later fold touches its scene.
 - The help owes a row to every mark a frame draws, at the width that draws it.
 - Every held item names the frame that would refute it. A hold with no reason
   is a defect the next round will raise again.
+
+## 6. Releasing
+
+A version is a tag, and only a tag:
+
+```sh
+git tag -a v0.1.0 -m "the deck, the trail and the reader"
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` runs the whole suite on the tag first — a tag
+that cannot pass `go test ./... -count=1 -timeout 40m` is never published — and
+then goreleaser (`.goreleaser.yaml`) builds four binaries (linux and darwin,
+amd64 and arm64), a `checksums.txt`, and the release itself. The notes are the
+commit subjects since the previous tag, oldest first, with `tests:` and `docs:`
+subjects left out: the log is the round-by-round record, the notes are what
+changed for someone running the deck.
+
+Versions start at **v0.1.0** and stay on 0.x while the SPEC still moves, and
+a 0.x release is an ordinary one — the major version says the ground is still
+moving, so no flag has to. `prerelease: auto` marks a release as a pre-release
+only when the tag says so itself (`v0.2.0-rc1`, `v1.0.0-beta.1`); `edge` is the
+only standing pre-release.
+
+Between tags nobody builds from source. Every push to main refreshes one
+pre-release named `edge`: the same four binaries, its tag and release deleted
+and recreated at the merge commit, wearing `edge-<short sha>` where a version
+would be. That job does not run the suite again — ci.yml ran it on the pull
+request — it only builds.
+
+`compass -version` prints whichever build you are on: `dev` from a working
+tree, `edge-<short sha>` from main, `vX.Y.Z` from a tag.
+
+To see what a release would contain without publishing one:
+
+```sh
+goreleaser check
+goreleaser release --snapshot --clean --skip=publish   # the artifacts land in dist/
+```

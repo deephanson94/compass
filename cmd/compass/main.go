@@ -20,6 +20,12 @@ import (
 // tmux pane still counts as live while it spoke this recently (M5 contract).
 const defaultLiveWithin = "5m"
 
+// version is the build's name. It is "dev" for a binary built from a working
+// tree; a release build stamps the tag over it with
+// -ldflags "-X main.version=v1.2.3", and the rolling build of main stamps
+// "edge-<short sha>".
+var version = "dev"
+
 func main() {
 	args := os.Args[1:]
 
@@ -53,9 +59,15 @@ func main() {
 	liveWithin := fs.String("live-within", liveDefault,
 		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only)`)
 	opencodeDB := fs.String("opencode-db", opencode.DefaultDB(), `OpenCode's store, whose sessions join the fleet when the file exists ("" = never)`)
+	showVersion := fs.Bool("version", false, "print the build's version and exit")
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
+	}
+	// -version answers and stops: it reads nothing and watches nothing.
+	if *showVersion {
+		fmt.Printf("compass %s\n", version)
+		os.Exit(0)
 	}
 	window, err := time.ParseDuration(*liveWithin)
 	if err != nil {

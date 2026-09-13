@@ -68,6 +68,24 @@ and to its right the conversation itself, anchored to whatever trail row the
 cursor is on — the trail is a minimap, the transcript is the code. `Tab` again
 hands the keys to the conversation.
 
+## Install
+
+Take a binary from the [releases page](https://github.com/deephanson94/compass/releases)
+— tagged versions (`vX.Y.Z`), plus `edge`, which is the latest main, rebuilt on
+every merge:
+
+```sh
+tar xzf compass_<version>_<os>_<arch>.tar.gz   # linux/darwin, amd64/arm64
+install compass ~/.local/bin/
+compass -version                               # says which build this is
+```
+
+Or build it from source, with Go 1.24 or newer:
+
+```sh
+go install github.com/deephanson94/compass/cmd/compass@latest   # the newest tag
+```
+
 ## Principles
 
 1. **The CLI is sacred, and so is your tmux.** Sessions are the real `claude` binary
