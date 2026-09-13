@@ -597,6 +597,9 @@ func (m *Model) readerTitleAs(w int, anchorClause, bare bool) string {
 	}
 	mark := m.titleMark(panelReader)
 	left := m.titleStyleFor(panelReader).Render(clip(title, body-lipgloss.Width(right)-1))
+	if right == "" {
+		return mark + left // no clause at the far edge, no gap to hold it there (#339)
+	}
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1

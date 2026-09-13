@@ -3010,7 +3010,13 @@ func (m *Model) viewOnce() string {
 	}
 
 	for i, line := range out {
-		if line == "" {
+		if ansi.Strip(line) == "" {
+			// A row of no cells is the empty row, whatever styling it
+			// wears: asked whether its bytes were empty instead, the
+			// margin went on a row that was bare under a plain terminal
+			// and on nothing under a coloured one, and the same deck
+			// spelled the row two ways (#215, #218, #339).
+			out[i] = ""
 			continue
 		}
 		out[i] = strings.Repeat(" ", edgePad) + line
@@ -6435,26 +6441,64 @@ func joinColumnsBelow(h int, cols []column, least int) []string {
 	}
 
 	sep := " " + ruleStyle.Render("│") + " "
+	// The hairline with nothing after it: the stroke keeps its cell and
+	// gives the cell behind it back.
+	bare := strings.TrimRight(sep, " ")
 	lines := make([]string, h)
 	for i := 0; i < h; i++ {
 		if i >= stop {
-			lines[i] = strings.TrimRight(rows[0][i], " ")
+			lines[i] = blankAway(rows[0][i])
 			continue
 		}
 		var b strings.Builder
 		for j := range cols {
+			drawn := rows[j][i]
+			if j == len(cols)-1 {
+				// The row's own end. A column that drew nothing here
+				// leaves the hairline the last thing on the row; a column
+				// that drew something keeps every cell it laid, the
+				// blanks included — a cursor bar spans its panel
+				// (`cursored`) and a title fills its width, and those
+				// cells are the drawer's, not the joiner's to take back.
+				//
+				// Read as bytes — `TrimRight(row, " ")` — the joiner took
+				// them off a bare frame and could not take them off a
+				// styled one, because a styled row ends on its reset and
+				// not on a space. The same deck then drew two different
+				// rows depending on the terminal's colours, and #339's
+				// pin, which reads the rows above the footer either side
+				// of a refused digit, saw the frame move whenever another
+				// test flipped the one process-wide profile between the
+				// two drawings. A frame's cells are its own, colour or no
+				// colour (#215, #218, #339).
+				if drawn = blankAway(drawn); drawn == "" && j > 0 {
+					b.WriteString(bare)
+					break
+				}
+				if j > 0 {
+					b.WriteString(sep)
+				}
+				b.WriteString(drawn)
+				break
+			}
 			if j > 0 {
 				b.WriteString(sep)
 			}
-			if j == len(cols)-1 {
-				b.WriteString(rows[j][i])
-			} else {
-				b.WriteString(pad(rows[j][i], cols[j].width))
-			}
+			b.WriteString(pad(drawn, cols[j].width))
 		}
-		lines[i] = strings.TrimRight(b.String(), " ")
+		lines[i] = b.String()
 	}
 	return lines
+}
+
+// blankAway is a row that says nothing, said as nothing: a row of blank
+// cells is the empty row whatever styling it happens to wear, so the frame
+// spells it the same way under a bare terminal and a coloured one.
+func blankAway(row string) string {
+	if strings.TrimSpace(ansi.Strip(row)) == "" {
+		return ""
+	}
+	return row
 }
 
 // root is the watched directory, safe to call without a Manager.
