@@ -4405,6 +4405,19 @@ func (m *Model) keymap() string {
 			keys = clauseGone(keys, " · r reply")
 		}
 	}
+	if m.level >= levelReader && m.query != "" {
+		// The way out says what the key does from here. With a search
+		// standing in the reader `esc` clears the query first and the
+		// second press is the one that leaves (`case "esc"`), while the
+		// row promised `esc back` — the deck's one key whose clause was
+		// not the answer the press gives (#210's device, at the way out).
+		// The sentence is the one the deck already writes where a query
+		// stands and a miss is drawn: the board's `no session matches
+		// /zzz · esc clears it`, the list's and the trail's own (#232).
+		// It is the same key at the same rank (`shedOrder`), wearing the
+		// word this frame earns.
+		keys = strings.Replace(keys, " · esc back", " · esc clears it", 1)
+	}
 	if m.readerLane != "" && m.level >= levelReader {
 		// The agent's own conversation: `r` and `a` are the lead's, and
 		// a footer offering them here read as steering the agent (#49).
@@ -5357,12 +5370,14 @@ func (m *Model) hideKeymap() string {
 // unfold key and the walk key at the one board key they did not reach
 // (#210, #211, #213, #219, #222, #223). Under its own note the key stays
 // (#24, #57): the row refusing `x` must name `x`.
+// The row is read wherever the key stands (`rowNames`, #333), as the
+// chapter reader and the walk's read theirs.
 func (m *Model) hideKeyStuck(whole string) string {
 	if m.hideNote() || m.hideKeyMoves() {
 		return ""
 	}
 	const hide = " · x hide"
-	if strings.Contains(whole, hide) {
+	if rowNames(whole, hide) {
 		return hide
 	}
 	return ""
@@ -5442,15 +5457,55 @@ func (m *Model) unfoldKeyMoves() bool {
 // #213, #219). `/ search` stands beside it and says how a walk begins, so
 // the row still teaches how to start one. Under its own note the key
 // stays (#24, #57).
+//
+// A query that matches nothing is a walk that cannot move either: the
+// gate read `m.query != ""` and called the pair acting the moment a
+// search stood, but `jumpMatch` answers `no matches` to both halves,
+// whichever is pressed and at every width, for as long as that query
+// stands. The key is asked the same question as every other stuck key —
+// whether the press moves anything from where the row stands (#210's
+// device) — and the answer is the run of matches, not the query
+// (`walkKeysMove`). The row is read wherever the pair stands (#333).
 func (m *Model) walkKeyStuck(whole string) string {
-	if m.level < levelReader || m.note == "no search — / starts one" || m.query != "" {
+	if m.level < levelReader || m.walkRefusalSaid() || m.walkKeysMove() {
 		return ""
 	}
 	const walk = " · n/N"
-	if strings.Contains(whole, walk) {
+	if rowNames(whole, walk) {
 		return walk
 	}
 	return ""
+}
+
+// walkRefusalSaid says whether the note is the walk key's own refusal:
+// the two sentences `n` and `N` answer when there is nothing to walk —
+// `no search — / starts one` with no query, `no matches` with one that
+// finds nothing. Under either the key stays (#24, #57): the row refusing
+// `n` must name `n`.
+func (m *Model) walkRefusalSaid() bool {
+	return m.note == "no search — / starts one" || m.note == "no matches"
+}
+
+// walkKeysMove reports whether `n` or `N` moves the reader from where it
+// stands: a row of the document the query appears in for the walk to land
+// on (`readerMatches`, `jumpMatch`'s own run). With no query, and with a
+// query the conversation does not carry, there is none.
+func (m *Model) walkKeysMove() bool {
+	if m.query == "" {
+		return false
+	}
+	return len(readerMatches(m.doc(m.readerWidth()), m.query)) > 0
+}
+
+// searchNote says whether the note is the search key's own: `no matches`,
+// the answer `/` gives to a query the conversation does not carry. Under
+// it the row keeps the key that made the search, as it keeps the chapter
+// keys under a chapter key's note and the pair under the walk's (#24,
+// #57, #223) — a row reporting a search while shedding the key that
+// started it reads as the key having gone, with the panel's own header
+// drawing the query beside it.
+func (m *Model) searchNote() bool {
+	return m.note == "no matches"
 }
 
 // moveKeyStuck is the movement key this row leads with that cannot move
@@ -5509,16 +5564,21 @@ func (m *Model) moveKeysMove() bool {
 // turn of a first prompt `[` answers `no earlier turn` and `]` answers
 // `no later turn`, whichever is pressed and at every width. Under a
 // chapter key's own note the key the note is about stays (#24, #57).
+//
+// The row is read wherever the key stands (`rowNames`, #333): the order
+// spells the chapter keys one way only, and since a key is now shed at
+// the head of a row as well as mid-row, the row this reader is handed can
+// lead with the very key it is asked about.
 func (m *Model) chapterKeyStuck(whole string) string {
 	if m.chapterNote() {
 		return ""
 	}
 	const chapters = " · [ ] chapters"
-	if strings.Contains(whole, chapters) && !m.chapterKeysMove() {
+	if rowNames(whole, chapters) && !m.chapterKeysMove() {
 		return chapters
 	}
 	const turns = " · [ ] turns"
-	if m.level >= levelReader && strings.Contains(whole, turns) && !m.turnKeysMove() {
+	if m.level >= levelReader && rowNames(whole, turns) && !m.turnKeysMove() {
 		return turns
 	}
 	return ""
@@ -5688,7 +5748,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 			// (#24: the way out is the last key to go). The attach key
 			// sheds at its own rank wherever it leads the row.
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
-			" · esc back", " · esc board", " · [ ] turns", " · space unfold",
+			// `esc clears it` is the same key under a standing query,
+			// which it clears before it goes back (#334): it sheds at the
+			// way out's own rank, whichever word the row wears.
+			" · esc back", " · esc clears it", " · esc board", " · [ ] turns", " · space unfold",
 			// A page that is all on screen offers no scroll key, so
 			// `space unfold` leads the row and the separator-led form
 			// above matches nothing — the same head-form the attach key
@@ -5758,12 +5821,34 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// keys a note is about: the arrows move too, and a footer that kept
 	// `j/k rows` and shed `esc back` left `q quit` as the only named exit.
 	order = append(order, "j/k move · ", "j/k rows · ", "j/k legs · ", "j/k scroll · ")
+	if m.searchNote() {
+		// The same rule at the search key (#24, #57, #223): under the
+		// note `/` put there the row keeps the key that made the search,
+		// as it keeps the chapter keys under a chapter key's note and the
+		// pair under the walk's. At eighty the reader answered `no
+		// matches` on ` a ask · enter attach · esc back · A archive ·
+		// ? help · q quit` with `/zzz` drawn in the panel's own header:
+		// the row reported a search and named no key that makes one, the
+		// harm #24 named and #223 pinned from the other side. It goes
+		// last of the level's own keys and still gives way to the way out
+		// (#24) — the exception the chapter note takes is the chapter
+		// note's alone.
+		var keep []string
+		for i := 0; i < len(order); i++ {
+			if order[i] == " · / search" {
+				keep = append(keep, order[i])
+				order = append(order[:i], order[i+1:]...)
+				i--
+			}
+		}
+		order = append(order, keep...)
+	}
 	// The way out is the last key to go before the help — but a chapter
 	// note's own keys go after it (#24): the row refusing `]` must carry
 	// `[ ] chapters`, and every other row must carry the way out.
 	var out []string
 	for i := 0; i < len(order); i++ {
-		if order[i] == " · esc back" || order[i] == " · esc board" {
+		if order[i] == " · esc back" || order[i] == " · esc clears it" || order[i] == " · esc board" {
 			out = append(out, order[i])
 			order = append(order[:i], order[i+1:]...)
 			i--
