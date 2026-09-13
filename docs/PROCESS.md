@@ -152,7 +152,10 @@ Then goreleaser (`.goreleaser.yaml`) builds four binaries (linux and darwin,
 amd64 and arm64), a `checksums.txt`, and the release itself. The notes are the
 commit subjects since the previous tag, oldest first, with `tests:` and `docs:`
 subjects left out: the log is the round-by-round record, the notes are what
-changed for someone running the deck.
+changed for someone running the deck. The `edge` tag is ignored when the notes
+look for that previous version (`git.ignore_tags` in `.goreleaser.yaml`): it
+names the latest build of main, not a version, so it is no boundary for a
+release's notes.
 
 Versions start at **v0.1.0** and stay on 0.x while the SPEC still moves, and
 a 0.x release is an ordinary one — the major version says the ground is still

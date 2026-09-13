@@ -44,9 +44,19 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
+# Which tags count when the previous version is looked for. `edge` is the
+# rolling pre-release that every push to main deletes and writes again: it names
+# the latest build of main, not a version, so it must never be the boundary the
+# notes are measured from. Left in, it is the tag one merge back, and a release
+# gets the commits since the last merge instead of the commits since the last
+# version — which is what the first cut, v0.1.0, got.
+git:
+  ignore_tags:
+    - edge
+
 changelog:
-  # The notes are the commit subjects since the last tag, oldest first. Test
-  # and documentation commits are housekeeping, not news.
+  # The notes are the commit subjects since the previous version, oldest first.
+  # Test and documentation commits are housekeeping, not news.
   use: git
   sort: asc
   filters:
