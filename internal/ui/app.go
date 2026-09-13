@@ -187,11 +187,12 @@ type Model struct {
 	mgr        *fleet.Manager
 	feeds      *feedStore
 	runner     tmuxop.Runner
-	replyBox   box      // where the reply panel will land, set in View before the body (#108)
-	panelSteps bool     // the box steps a column right: its first placement covered the strip whole
-	replyRows  []string // what that panel says, so a covered row can leave its sentence to it (#133)
-	bodyRows   []string // the body as drawn, settled before the footer
-	trailRows  []string // the trail column's drawn rows, settled before the fleet column
+	replyBox   box         // where the reply panel will land, set in View before the body (#108)
+	panelSteps bool        // the box steps a column right: its first placement covered the strip whole
+	replyRows  []string    // what that panel says, so a covered row can leave its sentence to it (#133)
+	bodyRows   []string    // the body as drawn, settled before the footer
+	trailRows  []string    // the trail column's drawn rows, settled before the fleet column
+	footer     *footerMemo // what this drawing of the footer has already worked out (#336)
 	proc       tmuxop.Proc
 	narrator   Narrator
 
@@ -3770,6 +3771,74 @@ func (m *Model) statusChips() string {
 	return strings.Join(parts, "  ")
 }
 
+// footerMemo is what one drawing of the footer has already worked out.
+//
+// The row is priced by drawing it. Every clause new to it since #281 is
+// taken only where the row without it still names every key it named
+// with it, so each trade draws the whole chain beneath it twice: the
+// archive door's at the head (#329), the reader's cursor key, the mirror
+// key, the grab key, the search key and the hide key inside it, each of
+// those twice again where the keys that cannot move pay a clause's way
+// (#331), and a note that yields (#304, #307) drawing the finished row
+// twice over all of it. One frame asks `footerRow` for the same keymap,
+// width and note hundreds of times, and `stuckKeys` and `keymap`
+// thousands.
+//
+// It is the same question every time. Inside one drawing of the footer
+// nothing the row is drawn from moves: the fleet, the level, the query,
+// the selection, the reader's page, the stuck set and the body rows the
+// note is read against are the frame's, settled before `footerLine` is
+// entered (`m.bodyRows`, `viewOnce`). The one thing that does move is
+// the note, which the trades in `footerLine` and `footerWith` put back
+// exactly as they found it — so the note is part of what a row is
+// remembered under, with the keymap it is drawn from and the width it is
+// drawn in, and two asks that agree on those three cannot want different
+// rows. Nothing here decides anything: a remembered row is the row the
+// draw would have drawn, and the decisions are the draws' own.
+//
+// The memo is made when the footer is entered and dropped when the row is
+// done, so no frame is answered out of another's, and a keypress, a poll
+// or a pin that asks a draw for a row outside a frame is answered by the
+// draw itself.
+type footerMemo struct {
+	keys  string // the whole keymap, which no trade moves
+	drawn map[footerAsk]footerAnswer
+	stuck map[footerAsk][]string
+}
+
+// footerAsk is one question put to the footer: which draw is asking, the
+// keymap it is drawn from, the width it has, and the note beside it.
+type footerAsk struct {
+	draw string
+	keys string
+	w    int
+	note string
+}
+
+// footerAnswer is the drawn row, and the keys it named where the draw
+// says so (`footerRow`).
+type footerAnswer struct {
+	row   string
+	named string
+}
+
+// footerDrawn is one draw of the chain, answered from this frame's memo
+// where the same question has been put before and drawn and remembered
+// where it has not. Outside a frame there is no memo and it is the draw
+// itself.
+func (m *Model) footerDrawn(draw, keys string, w int, once func(string, int) string) string {
+	if m.footer == nil {
+		return once(keys, w)
+	}
+	ask := footerAsk{draw: draw, keys: keys, w: w, note: m.note}
+	if got, ok := m.footer.drawn[ask]; ok {
+		return got.row
+	}
+	row := once(keys, w)
+	m.footer.drawn[ask] = footerAnswer{row: row}
+	return row
+}
+
 // footerLine carries the keymap, and — briefly, on the right — whatever the
 // last keypress did.
 //
@@ -3780,6 +3849,13 @@ func (m *Model) statusChips() string {
 // (#39's ranks, measured as #281 measures them — on the finished row,
 // because the note's own reserve is what the keys are shed against).
 func (m *Model) footerLine(w int) string {
+	// The footer's own frame begins here: the body is drawn and settled
+	// above (`m.bodyRows`), and every row the trades below work out is
+	// remembered until this row is done and no longer (#336).
+	if m.footer == nil {
+		m.footer = &footerMemo{drawn: map[footerAsk]footerAnswer{}, stuck: map[footerAsk][]string{}}
+		defer func() { m.footer = nil }()
+	}
 	keys := m.keymap()
 	// A note the mark's own move outranks yields to it (#304): `g` on a
 	// page that fits walked the cursor and kept `scrollBy`'s word for the
@@ -3898,6 +3974,12 @@ func (m *Model) replyRefusalSaid(whole string) string {
 // the deck below the board's width — there is no trade: the clause is the
 // frame's only naming of the archive, not a second one (#328).
 func (m *Model) footerTraded(keys string, w int) string {
+	return m.footerDrawn("traded", keys, w, m.footerTradedOnce)
+}
+
+// footerTradedOnce is the draw itself: the memo above is what keeps
+// the frame from working the same row out again (#336).
+func (m *Model) footerTradedOnce(keys string, w int) string {
 	if clause := " · A archive"; m.doorYields() && rowNames(keys, clause) {
 		bare := clauseGone(keys, clause)
 		with := m.footerCursorTraded(keys, w)
@@ -4000,6 +4082,12 @@ func footerNamesMore(was, now string) bool {
 // cursor, mirror, grab and search clauses each pay for their place on it —
 // the chain under the archive door's own trade (#329).
 func (m *Model) footerCursorTraded(keys string, w int) string {
+	return m.footerDrawn("cursor", keys, w, m.footerCursorTradedOnce)
+}
+
+// footerCursorTradedOnce is the draw itself: the memo above is what keeps
+// the frame from working the same row out again (#336).
+func (m *Model) footerCursorTradedOnce(keys string, w int) string {
 	// The reader's fitting page names the key that walks its cursor
 	// (#300) on the same terms as every clause new to a row since #281:
 	// only where the finished row still names every key it named without
@@ -4030,6 +4118,12 @@ func (m *Model) footerCursorTraded(keys string, w int) string {
 // footerMirrorTraded draws the row with the mirror, grab and search
 // clauses' own trades measured on it.
 func (m *Model) footerMirrorTraded(keys string, w int) string {
+	return m.footerDrawn("mirror", keys, w, m.footerMirrorTradedOnce)
+}
+
+// footerMirrorTradedOnce is the draw itself: the memo above is what keeps
+// the frame from working the same row out again (#336).
+func (m *Model) footerMirrorTradedOnce(keys string, w int) string {
 	// The reader's mirror key is new to its row for the same reason as
 	// the hide key and the search key one level out, and pays the same
 	// price: it is taken only where the finished row still names every
@@ -4065,6 +4159,12 @@ func (m *Model) footerMirrorTraded(keys string, w int) string {
 // footerSearchTraded draws the row for this keymap with the search
 // clause's own trade measured on it (#289).
 func (m *Model) footerSearchTraded(keys string, w int) string {
+	return m.footerDrawn("search", keys, w, m.footerSearchTradedOnce)
+}
+
+// footerSearchTradedOnce is the draw itself: the memo above is what keeps
+// the frame from working the same row out again (#336).
+func (m *Model) footerSearchTradedOnce(keys string, w int) string {
 	// The search key is new to the session view's row for the same reason
 	// as the hide key and pays the same price: it is taken only where the
 	// finished row still names every key it named without it (#281, #284).
@@ -4078,6 +4178,12 @@ func (m *Model) footerSearchTraded(keys string, w int) string {
 // footerGuarded draws the row for this keymap with the hide clause's own
 // trade measured on it (#284).
 func (m *Model) footerGuarded(keys string, w int) string {
+	return m.footerDrawn("guarded", keys, w, m.footerGuardedOnce)
+}
+
+// footerGuardedOnce is the draw itself: the memo above is what keeps
+// the frame from working the same row out again (#336).
+func (m *Model) footerGuardedOnce(keys string, w int) string {
 	guarded := []string{" · x hide", " · x unhide"}
 	if m.level < levelWaypoints {
 		// Below the session view the two views' own rows have named
@@ -4134,6 +4240,22 @@ func footerKeysNamed(row string) []string {
 // is shed for width: the row's promise, and what the help asks when it has
 // to choose which key rows a short body keeps.
 func (m *Model) keymap() string {
+	// The whole keymap is the frame's too, and no trade moves it: it is
+	// read from where the keys are — the level, the view, the selection,
+	// the rows the body drew — and never from the note, which is the one
+	// thing a trade changes. So one drawing of the footer asks for it
+	// once (#336).
+	if m.footer == nil {
+		return m.keymapOnce()
+	}
+	if m.footer.keys == "" {
+		m.footer.keys = m.keymapOnce()
+	}
+	return m.footer.keys
+}
+
+// keymapOnce reads it off the deck (#336).
+func (m *Model) keymapOnce() string {
 	keys := "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x hide · g grab · ? help · q quit"
 	if m.archiveView {
 		// In the archive `A` is the way home, so the keymap says that
@@ -4464,6 +4586,12 @@ func (m *Model) keymapAt(w int) string {
 // deck's own chapter yield spends them (#24, #165, #175, #187, #194, #198,
 // #201, #264).
 func (m *Model) footerWith(keys string, w int) string {
+	return m.footerDrawn("with", keys, w, m.footerWithOnce)
+}
+
+// footerWithOnce is the draw itself: the memo above is what keeps
+// the frame from working the same row out again (#336).
+func (m *Model) footerWithOnce(keys string, w int) string {
 	row, named := m.footerRow(keys, w)
 	if unit := " columns"; strings.HasSuffix(m.note, unit) {
 		was := m.note
@@ -4512,6 +4640,20 @@ func keysGained(was, now string) bool {
 
 // footerRow draws one such row and says which keys it named.
 func (m *Model) footerRow(keys string, w int) (string, string) {
+	if m.footer == nil {
+		return m.footerRowOnce(keys, w)
+	}
+	ask := footerAsk{draw: "row", keys: keys, w: w, note: m.note}
+	if got, ok := m.footer.drawn[ask]; ok {
+		return got.row, got.named
+	}
+	row, named := m.footerRowOnce(keys, w)
+	m.footer.drawn[ask] = footerAnswer{row: row, named: named}
+	return row, named
+}
+
+// footerRowOnce draws the row and says which keys it named (#336).
+func (m *Model) footerRowOnce(keys string, w int) (string, string) {
 	if m.note == "" {
 		fits := func(k string) bool { return lipgloss.Width(k) <= w }
 		keys = shedKeys(keys, m.chapterYield(keys, m.footerDrops(false), fits), fits)
@@ -5316,6 +5458,25 @@ func keyWord(frag string) string {
 // is not on the row — and each is taken only where a key that acts comes
 // back for it, so where nothing is shed both keys stand (#193).
 func (m *Model) stuckKeys(whole string) []string {
+	if m.footer == nil {
+		return m.stuckKeysOnce(whole)
+	}
+	// Which keys cannot move is the frame's fact, not the trade's: it is
+	// read off this row and this note, and every draw under a trade asks
+	// it again of the same two. The answer is read and never written
+	// (`chapterYield`, `footerStuckCost`, `yieldKeepsTheRow`), so the one
+	// slice is handed to all of them (#336).
+	ask := footerAsk{draw: "stuck", keys: whole, note: m.note}
+	if got, ok := m.footer.stuck[ask]; ok {
+		return got
+	}
+	stuck := m.stuckKeysOnce(whole)
+	m.footer.stuck[ask] = stuck
+	return stuck
+}
+
+// stuckKeysOnce reads them off the row (#336).
+func (m *Model) stuckKeysOnce(whole string) []string {
 	var stuck []string
 	if k := m.chapterKeyStuck(whole); k != "" {
 		stuck = append(stuck, k)
