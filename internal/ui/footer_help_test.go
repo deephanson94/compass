@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -239,4 +240,206 @@ func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
 	if f := foot(m); strings.Contains(f, "j/k move") || !strings.Contains(f, "g grab") {
 		t.Errorf("80x24: the movement key did not yield to a key that acts: %q", f)
 	}
+}
+
+// ---- round 118, the second-day operator ----
+// TestTheShedDropsAKeyWhereverItStands pins #333. The shed gives up a key
+// by taking its fragment out of the row, and every fragment is written
+// separator-led (` · / search`); the head forms the order carries were
+// added one key at a time, for the attach key (#56), the unfold key
+// (#200), the page key (#213) and the movement keys, and no other key
+// ever got one. So a key that had come to lead the row — its own head
+// form gone above it — matched nothing: the shed marked it given up and
+// the row kept it anyway, beside keys that outrank it and are off.
+//
+// The second-day operator quoted `second-day-80x24` line 522, the frame
+// after the second `tab`: `/ search · esc back · A archive · ? help ·
+// q quit` under `the deepest level`, 49 of 59 cells, where `[ ] turns`
+// outranks `/ search` (#39's ranks) and stands in 50. `/ search` was not
+// alone — `r reply`, `[ ] chapters`, `m live pane` and `x hide` head rows
+// with no head form too.
+//
+// The rule: a key is shed wherever it stands — at the head (`key · `),
+// mid-row (` · key`) or alone (`key`) — through one helper every removal
+// goes through (`clauseGone`). The ranks are untouched; only the matching
+// changes.
+//
+// Both halves are pinned. The drop itself, on a row that leads with the
+// key the shed is asked for and on a row that is one key; and the rule
+// over every scene at five widths, on every frame of the canonical walk:
+// no key stands on a row while a key that outranks it in that level's
+// shed order is off the row and would fit in the row's free cells and its
+// own. Read past the keys whose place is not the rank's to settle — the
+// attach aside, which is not a key (#55); a key that cannot move, whose
+// cells the fold spends out of rank (#210, #216, #331); and a clause
+// withdrawn at this stand by its own trade (#281's chain) or its own
+// yield to a key naming a level (#297).
+func TestTheShedDropsAKeyWhereverItStands(t *testing.T) {
+	forceASCII(t)
+	// The drop itself. A row that leads with the key the shed is asked
+	// for gives it up and closes over the separator it led; a row of one
+	// key loses it whole.
+	narrow := func(n int) func(string) bool {
+		return func(k string) bool { return lipgloss.Width(k) <= n }
+	}
+	if got := shedKeys("x hide · enter attach · esc back", []string{" · x hide"}, narrow(25)); got != "enter attach · esc back" {
+		t.Errorf("the head of the row keeps its key: %q", got)
+	}
+	if got := shedKeys("q quit", []string{" · q quit"}, narrow(0)); got != "" {
+		t.Errorf("a row of one key keeps it: %q", got)
+	}
+
+	stands, checked, headless := 0, 0, 0
+	for _, sc := range allScenes() {
+		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+			w, h := size[0], size[1]
+			m := sceneModel(sc, w, h)
+			for i, k := range append([]string{""}, canonicalKeys...) {
+				if i > 0 {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				rows := strings.Split(ansi.Strip(m.View()), "\n")
+				foot := rows[len(rows)-1]
+				keys, note := r333Split(foot)
+				named := footerKeysNamed(keys)
+				whole := m.keymap()
+				offered := map[string]bool{}
+				for _, o := range footerKeysNamed(whole) {
+					offered[o] = true
+				}
+				subset := len(named) > 0
+				for _, n := range named {
+					if !offered[n] {
+						subset = false // the search line, the reply panel, the help
+					}
+				}
+				if !subset {
+					continue
+				}
+				stands++
+				if r333Headless(m.footerDrops(m.chapterNote()), named[0]) {
+					headless++ // the rows the fold is about: no head form was ever written for the key that leads them
+				}
+				on := map[string]bool{}
+				for _, n := range named {
+					on[n] = true
+				}
+				stuck := map[string]bool{}
+				for _, s := range m.stuckKeys(whole) {
+					stuck[keyWord(s)] = true
+				}
+				rank := r333Rank(m.footerDrops(m.chapterNote()))
+				// The cells the keymap is drawn in: the row past its
+				// edges, less the note and the two columns that hold it
+				// off (`fitsWith`, #134's reserve).
+				room := w - 2*edgePad
+				if note != "" {
+					room -= lipgloss.Width(note) + 2
+				}
+				free := room - lipgloss.Width(keys)
+				for _, lo := range named {
+					lr, ok := rank[lo]
+					if !ok || stuck[lo] {
+						continue
+					}
+					for hi, hr := range rank {
+						if hr <= lr || on[hi] || !offered[hi] || stuck[hi] || m.r333Traded(hi) {
+							continue
+						}
+						checked++
+						if lipgloss.Width(" · "+hi) <= free+lipgloss.Width(" · "+lo) {
+							t.Errorf("%s %dx%d Lv%d after %q: %q stands while %q, which outranks it, is off a row with %d free cells (#39, #333)\n  foot=%q",
+								sc.name, w, h, m.level, k, lo, hi, free, strings.TrimSpace(foot))
+						}
+					}
+				}
+			}
+		}
+	}
+	if stands < 1500 {
+		t.Errorf("only %d footers were read; the rule is unmeasured", stands)
+	}
+	// The stand the fold is about: a row led by a key the order spells one
+	// way only. Before #333 the shed could not take that key off the row
+	// at all, whatever its rank.
+	if headless < 200 {
+		t.Errorf("only %d rows were led by a key with no head form; #333 is unmeasured", headless)
+	}
+	t.Logf("footers read: %d · rows led by a key with no head form: %d · pairs of keys weighed by rank: %d", stands, headless, checked)
+}
+
+// r333Split is a drawn footer's keymap and its note, parted at the two
+// columns that hold the one off the other (#134's reserve).
+func r333Split(foot string) (string, string) {
+	s := strings.TrimRight(strings.TrimPrefix(foot, " "), " ")
+	if i := strings.Index(s, "  "); i >= 0 {
+		return s[:i], strings.TrimSpace(s[i:])
+	}
+	return s, ""
+}
+
+// r333Rank is where a level's shed order stands each key: first to go
+// first, so a later place outranks an earlier one. A key's rank is its
+// own fragment's, the head forms beside it naming the same key (#333).
+func r333Rank(order []string) map[string]int {
+	rank := map[string]int{}
+	for i, d := range order {
+		if d == attachHint {
+			continue
+		}
+		if k := keyWord(d); k != "" {
+			if _, seen := rank[k]; !seen {
+				rank[k] = i
+			}
+		}
+	}
+	return rank
+}
+
+// r333Headless says whether the order spells this key one way only — the
+// stand #333 is about, where the key leads the row and the separator-led
+// fragment is all the shed has to match it by.
+func r333Headless(order []string, key string) bool {
+	for _, d := range order {
+		if keyWord(d) == key && strings.HasSuffix(d, " · ") {
+			return false
+		}
+	}
+	return true
+}
+
+// r333Traded says whether this key's place on the row is settled by its
+// own trade at this stand rather than by its rank — the archive's door,
+// the reader's cursor and mirror keys, and the hide, search and grab
+// clauses at the levels they are new to (#281, #284, #289, #293, #295,
+// #300, #328). An attach that cannot work is a refusal the note may
+// already say, and goes the same way (#165, #299).
+func (m *Model) r333Traded(k string) bool {
+	switch k {
+	case "A archive":
+		return m.doorYields()
+	case "j/k rows":
+		return m.level >= levelReader && m.readerPageFits()
+	case "m live pane", "m conversation":
+		return m.level >= levelReader
+	case "g grab":
+		return m.level < levelReader && (m.level >= levelWaypoints || m.archiveView)
+	case "/ search":
+		return m.level >= levelWaypoints && m.level < levelReader
+	case "x hide":
+		return m.level >= levelWaypoints || m.archiveView
+	case "x unhide":
+		return m.level >= levelWaypoints
+	case "enter · no pane":
+		return true
+	case "[ ] chapters":
+		// The chapter key yields to a key naming a level, and only where
+		// the key comes back: its rank on the row is the way in's to
+		// settle, not the order's (#175, #187, #297, and
+		// `chapterKeyAboveTheWayIn`).
+		_, moved := chapterKeyAboveTheWayIn(m.footerDrops(m.chapterNote()))
+		return moved && !m.chapterNote()
+	}
+	return false
 }
