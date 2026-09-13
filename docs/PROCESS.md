@@ -178,3 +178,11 @@ To see what a release would contain without publishing one:
 goreleaser check
 goreleaser release --snapshot --clean --skip=publish   # the artifacts land in dist/
 ```
+
+## 7. dokime
+
+This repo is governed by dokime: `intent.md` is the agreement, `units/` is the
+ledger, `python3 tools/dokime.py check` is the boundary check. Open a unit before
+work (`python3 tools/dokime.py open <name> --condition "run: ..."`) and end each
+session with `handoffs/YYYY-MM-DD-<topic>.md` containing a `unit: <name>` line.
+Never edit `intent.md` or a unit's done_condition without asking.
