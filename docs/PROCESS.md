@@ -124,16 +124,31 @@ said it is not re-spawned unless a later fold touches its scene.
 
 ## 6. Releasing
 
-A version is a tag, and only a tag:
+A version is a tag, and only a tag. There are two ways to write that tag.
+
+From the **Actions tab**, which needs nothing installed and no push rights on
+tags: Actions → **release** → **Run workflow** → keep the branch on `main`, type
+the version (`v0.1.0`) into the one input, run it. The `cut` job checks the
+input is a version (`v` then `MAJOR.MINOR.PATCH`, an optional suffix) and that
+the tag is not already on origin, runs the whole suite on the commit the branch
+is at, and only then writes the annotated tag and publishes the release. It
+publishes the release itself rather than waiting for the tag to do it: a tag
+pushed with the workflow's own token starts no workflow run, so the `release`
+job never sees that tag.
+
+Or from **a shell**, where the tag can be pushed:
 
 ```sh
 git tag -a v0.1.0 -m "the deck, the trail and the reader"
 git push origin v0.1.0
 ```
 
-`.github/workflows/release.yml` runs the whole suite on the tag first — a tag
-that cannot pass `go test ./... -count=1 -timeout 40m` is never published — and
-then goreleaser (`.goreleaser.yaml`) builds four binaries (linux and darwin,
+Either way the suite runs on the commit before the version is published — the
+`cut` job runs it before it writes the tag, and the `release` job runs it on the
+tag before it builds. A tag that cannot pass
+`go test ./... -count=1 -timeout 40m` is never published.
+
+Then goreleaser (`.goreleaser.yaml`) builds four binaries (linux and darwin,
 amd64 and arm64), a `checksums.txt`, and the release itself. The notes are the
 commit subjects since the previous tag, oldest first, with `tests:` and `docs:`
 subjects left out: the log is the round-by-round record, the notes are what
