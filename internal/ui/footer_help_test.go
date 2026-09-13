@@ -243,7 +243,7 @@ func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
 }
 
 // ---- round 118, the second-day operator ----
-// TestTheShedDropsAKeyWhereverItStands pins #333. The shed gives up a key
+// The two tests below pin #333. The shed gives up a key
 // by taking its fragment out of the row, and every fragment is written
 // separator-led (` · / search`); the head forms the order carries were
 // added one key at a time, for the attach key (#56), the unfold key
@@ -264,21 +264,21 @@ func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
 // goes through (`clauseGone`). The ranks are untouched; only the matching
 // changes.
 //
-// Both halves are pinned. The drop itself, on a row that leads with the
-// key the shed is asked for and on a row that is one key; and the rule
-// over every scene at five widths, on every frame of the canonical walk:
-// no key stands on a row while a key that outranks it in that level's
-// shed order is off the row and would fit in the row's free cells and its
-// own. Read past the keys whose place is not the rank's to settle — the
-// attach aside, which is not a key (#55); a key that cannot move, whose
-// cells the fold spends out of rank (#210, #216, #331); and a clause
-// withdrawn at this stand by its own trade (#281's chain) or its own
-// yield to a key naming a level (#297).
-func TestTheShedDropsAKeyWhereverItStands(t *testing.T) {
+// Both halves are pinned, in two tests. TestTheShedDropsAKeyAtTheHeadOfTheRow
+// takes the drop itself, on a row that leads with the key the shed is
+// asked for and on a row that is one key. TestNoKeyStandsWhileOneThatOutranksItFits
+// takes the rule over every scene at five widths, on every frame of the
+// canonical walk: no key stands on a row while a key that outranks it in
+// that level's shed order is off the row and would fit in the row's free
+// cells and its own. Read past the keys whose place is not the rank's to
+// settle — the attach aside, which is not a key (#55); a key that cannot
+// move, whose cells the fold spends out of rank (#210, #216, #331); and a
+// clause withdrawn at this stand by its own trade (#281's chain) or its
+// own yield to a key naming a level (#297).
+func TestTheShedDropsAKeyAtTheHeadOfTheRow(t *testing.T) {
 	forceASCII(t)
-	// The drop itself. A row that leads with the key the shed is asked
-	// for gives it up and closes over the separator it led; a row of one
-	// key loses it whole.
+	// A row that leads with the key the shed is asked for gives it up and
+	// closes over the separator it led; a row of one key loses it whole.
 	narrow := func(n int) func(string) bool {
 		return func(k string) bool { return lipgloss.Width(k) <= n }
 	}
@@ -288,7 +288,14 @@ func TestTheShedDropsAKeyWhereverItStands(t *testing.T) {
 	if got := shedKeys("q quit", []string{" · q quit"}, narrow(0)); got != "" {
 		t.Errorf("a row of one key keeps it: %q", got)
 	}
+}
 
+// TestNoKeyStandsWhileOneThatOutranksItFits is #333's own walk: the rule
+// on every footer the canonical walk draws, at five widths, on every
+// scene. A panel sweep, so it steps aside under -short (`sweep`).
+func TestNoKeyStandsWhileOneThatOutranksItFits(t *testing.T) {
+	sweep(t)
+	forceASCII(t)
 	stands, checked, headless := 0, 0, 0
 	for _, sc := range allScenes() {
 		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
