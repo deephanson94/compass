@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -288,6 +289,152 @@ func TestTheShedDropsAKeyAtTheHeadOfTheRow(t *testing.T) {
 	if got := shedKeys("q quit", []string{" · q quit"}, narrow(0)); got != "" {
 		t.Errorf("a row of one key keeps it: %q", got)
 	}
+	// ---- round 119, the two-tools operator ----
+	// The readers that answer whether a key can move read the row the same
+	// way (#334). Each was written with one separator-led form and nothing
+	// else — `" · [ ] turns"`, `" · n/N"`, `" · x hide"` — so the very key
+	// #333 now puts at the head of a row was invisible to them, which is
+	// the case the fold beside this one reads. They ask `rowNames` now, as
+	// every removal of a clause does.
+	sc := sceneSecondDay()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range canonicalKeys[:13] {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if m.level < levelReader {
+		t.Fatalf("the walk is not in the reader: Lv%d", m.level)
+	}
+	if m.turnKeysMove() {
+		t.Fatalf("the turn keys move from this stand: the reader is not standing on its one turn")
+	}
+	for _, row := range []string{"[ ] turns · esc back", "j/k rows · [ ] turns · esc back"} {
+		if got := m.chapterKeyStuck(row); got != " · [ ] turns" {
+			t.Errorf("the chapter reader misses the turn key on %q: %q", row, got)
+		}
+	}
+	if m.query != "" {
+		t.Fatalf("a search stands: the walk keys are not the ones that cannot move")
+	}
+	for _, row := range []string{"n/N · esc back", "j/k rows · n/N · esc back"} {
+		if got := m.walkKeyStuck(row); got != " · n/N" {
+			t.Errorf("the walk reader misses the pair on %q: %q", row, got)
+		}
+	}
+}
+
+// ---- round 119, the second-day operator ----
+// TestTheSearchNoteNamesTheKeyThatMadeIt pins #334: off the canonical walk,
+// a search the conversation does not carry.
+//
+// Three facts of one frame, all of them the row's. The note reports a
+// search and the panel's header draws the query beside it, and at eighty
+// the footer named no key that makes one — the harm #24 named and #223
+// pinned at the walk key, at the key that starts the walk. `esc` there
+// clears the query before it goes anywhere (`case "esc"`), and the row
+// promised `esc back`: the deck's one clause that was not the answer the
+// press gives (#210's device, at the way out). And `n/N` cannot move for
+// as long as that query stands — `jumpMatch` answers `no matches` to both
+// halves at every width — while the gate called the pair acting the moment
+// a search stood (#210, #216, #219, #223, #331).
+func TestTheSearchNoteNamesTheKeyThatMadeIt(t *testing.T) {
+	forceASCII(t)
+	foot := func(m *Model) string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimRight(rows[len(rows)-1], " ")
+	}
+	for _, mk := range []func() scene{sceneSecondDay, sceneFirstSession} {
+		for _, size := range [][2]int{{80, 24}, {100, 30}} {
+			sc, w, h := mk(), size[0], size[1]
+			m := sceneModel(sc, w, h)
+			for _, k := range []string{"tab", "tab"} {
+				pressKey(m, k)
+				poll(m, sc)
+			}
+			if m.level < levelReader {
+				t.Fatalf("%s %dx%d: two tabs do not reach the reader (Lv%d)", sc.name, w, h, m.level)
+			}
+			for _, k := range []string{"/", "z", "z", "z", "enter"} {
+				pressKey(m, k)
+				poll(m, sc)
+			}
+			where := fmt.Sprintf("%s %dx%d", sc.name, w, h)
+			if m.query != "zzz" || m.note != "no matches" {
+				t.Fatalf("%s: the search did not miss: query %q, note %q", where, m.query, m.note)
+			}
+			f := foot(m)
+			if !strings.Contains(f, "/ search") {
+				t.Errorf("%s: the row reports a search and names no key that makes one: %q", where, f)
+			}
+			if !strings.Contains(f, "esc clears it") || strings.Contains(f, "esc back") {
+				t.Errorf("%s: the way out promises a level and clears a query: %q", where, f)
+			}
+			// The walk cannot move from here, and says so, whichever half
+			// is pressed — so its cells are the fold's to spend once the
+			// note it is under has been answered (#24, #57, #210).
+			for _, half := range []string{"n", "N"} {
+				step := sceneModel(sc, w, h)
+				for _, k := range []string{"tab", "tab", "/", "z", "z", "z", "enter", half} {
+					pressKey(step, k)
+					poll(step, sc)
+				}
+				if step.note != "no matches" {
+					t.Errorf("%s: `%s` moves from this stand: %q", where, half, step.note)
+				}
+			}
+			// One press on, the note answered and the query still standing:
+			// the pair is off the row and the key that starts a search is
+			// on it.
+			pressKey(m, "j")
+			poll(m, sc)
+			if next := foot(m); strings.Contains(next, "n/N") || !strings.Contains(next, "esc clears it") {
+				t.Errorf("%s: a walk that cannot move keeps its cells: %q", where, next)
+			}
+			// And `esc` does what the row now says: the query goes, the
+			// level stays.
+			pressKey(m, "esc")
+			if m.query != "" || m.level < levelReader {
+				t.Errorf("%s: esc left the query %q standing, at Lv%d", where, m.query, m.level)
+			}
+			// With a query the conversation does carry, the walk acts and
+			// the note is the walk's own count (#223).
+			hit := sceneModel(sc, w, h)
+			for _, k := range []string{"tab", "tab"} {
+				pressKey(hit, k)
+				poll(hit, sc)
+			}
+			word := "" // a word the conversation on this page carries
+			for _, l := range hit.doc(hit.readerWidth()) {
+				for _, f := range strings.Fields(l.text) {
+					if len(f) >= 4 && strings.Trim(f, "abcdefghijklmnopqrstuvwxyz") == "" {
+						word = f
+						break
+					}
+				}
+				if word != "" {
+					break
+				}
+			}
+			if word == "" {
+				t.Fatalf("%s: the reader's page carries no word to search for", where)
+			}
+			for _, k := range []string{"/", word, "enter"} {
+				pressKey(hit, k)
+				poll(hit, sc)
+			}
+			if hit.query != word {
+				t.Fatalf("%s: the search was not entered: %q", where, hit.query)
+			}
+			pressKey(hit, "n")
+			poll(hit, sc)
+			if !strings.HasPrefix(hit.note, "match ") {
+				t.Errorf("%s: `%s` is on the page and `n` does not walk to it: %q", where, word, hit.note)
+			}
+			if f := foot(hit); !strings.Contains(f, "n/N") {
+				t.Errorf("%s: the walk acts here and the row does not name it: %q", where, f)
+			}
+		}
+	}
 }
 
 // TestNoKeyStandsWhileOneThatOutranksItFits is #333's own walk: the rule
@@ -297,6 +444,7 @@ func TestNoKeyStandsWhileOneThatOutranksItFits(t *testing.T) {
 	sweep(t)
 	forceASCII(t)
 	stands, checked, headless := 0, 0, 0
+	stoodStuck, yieldedStuck := 0, 0
 	for _, sc := range allScenes() {
 		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			w, h := size[0], size[1]
@@ -345,10 +493,25 @@ func TestNoKeyStandsWhileOneThatOutranksItFits(t *testing.T) {
 					room -= lipgloss.Width(note) + 2
 				}
 				free := room - lipgloss.Width(keys)
+				for _, s := range m.stuckKeys(whole) {
+					if on[keyWord(s)] {
+						stoodStuck++
+					} else {
+						yieldedStuck++
+					}
+				}
 				for _, lo := range named {
 					lr, ok := rank[lo]
-					if !ok || stuck[lo] {
+					if !ok {
 						continue
+					}
+					// A key that cannot move is outranked by every key
+					// that acts (#210, #216, #331, #332): its cells are
+					// the fold's to spend whatever place the order gives
+					// it, so it is weighed against every acting key that
+					// is off the row and not only the ones above it.
+					if stuck[lo] {
+						lr = -1
 					}
 					for hi, hr := range rank {
 						if hr <= lr || on[hi] || !offered[hi] || stuck[hi] || m.r333Traded(hi) {
@@ -356,8 +519,12 @@ func TestNoKeyStandsWhileOneThatOutranksItFits(t *testing.T) {
 						}
 						checked++
 						if lipgloss.Width(" · "+hi) <= free+lipgloss.Width(" · "+lo) {
-							t.Errorf("%s %dx%d Lv%d after %q: %q stands while %q, which outranks it, is off a row with %d free cells (#39, #333)\n  foot=%q",
-								sc.name, w, h, m.level, k, lo, hi, free, strings.TrimSpace(foot))
+							why := "which outranks it"
+							if stuck[lo] {
+								why = "which acts where it cannot move"
+							}
+							t.Errorf("%s %dx%d Lv%d after %q: %q stands while %q, %s, is off a row with %d free cells (#39, #333, #334)\n  foot=%q",
+								sc.name, w, h, m.level, k, lo, hi, why, free, strings.TrimSpace(foot))
 						}
 					}
 				}
@@ -373,7 +540,14 @@ func TestNoKeyStandsWhileOneThatOutranksItFits(t *testing.T) {
 	if headless < 200 {
 		t.Errorf("only %d rows were led by a key with no head form; #333 is unmeasured", headless)
 	}
-	t.Logf("footers read: %d · rows led by a key with no head form: %d · pairs of keys weighed by rank: %d", stands, headless, checked)
+	// The floor #334 leaves: the keys that cannot move, counted where they
+	// stand and where the fold has already spent their cells. Without both
+	// the half of the rule they carry is unmeasured.
+	if stoodStuck < 100 || yieldedStuck < 100 {
+		t.Errorf("keys that cannot move: %d standing, %d yielded — the rule is unmeasured", stoodStuck, yieldedStuck)
+	}
+	t.Logf("footers read: %d · rows led by a key with no head form: %d · pairs of keys weighed by rank: %d · keys that cannot move: %d standing, %d yielded",
+		stands, headless, checked, stoodStuck, yieldedStuck)
 }
 
 // r333Split is a drawn footer's keymap and its note, parted at the two
