@@ -321,6 +321,30 @@ func TestTheShedDropsAKeyAtTheHeadOfTheRow(t *testing.T) {
 			t.Errorf("the walk reader misses the pair on %q: %q", row, got)
 		}
 	}
+	// ---- round 120, the two-tools operator ----
+	// The chapter key's yield asked the same question of the same row and
+	// read one form of it (#335). The reader that says the key cannot
+	// move and the gate that spends its cells stand on either side of one
+	// call — `stuckKeys` inside `chapterYield` — so a row the chapter key
+	// heads had the one seeing it and the other not.
+	trail := sceneModel(sc, 80, 24)
+	if trail.chapterNote() {
+		t.Fatalf("the opening frame stands under a chapter note: %q", trail.note)
+	}
+	for _, row := range []string{"[ ] chapters · esc back", "j/k move · [ ] chapters · esc back", "[ ] chapters"} {
+		if !trail.chapterKeyYields(row) {
+			t.Errorf("the yield's own gate misses the chapter key on %q", row)
+		}
+	}
+	if trail.chapterKeyYields("j/k move · esc back · q quit") {
+		t.Errorf("the yield's gate reaches for a chapter key no row names")
+	}
+	// And under a chapter key's own note the key stays where it is
+	// (#24, #57): the gate is shut whichever form the row draws it in.
+	trail.note = "no later prompt"
+	if trail.chapterKeyYields("[ ] chapters · esc back") {
+		t.Errorf("the yield's gate spends the chapter key's cells under its own note")
+	}
 }
 
 // ---- round 119, the second-day operator ----
@@ -337,6 +361,12 @@ func TestTheShedDropsAKeyAtTheHeadOfTheRow(t *testing.T) {
 // as long as that query stands — `jumpMatch` answers `no matches` to both
 // halves at every width — while the gate called the pair acting the moment
 // a search stood (#210, #216, #219, #223, #331).
+//
+// ---- round 120, the second-day operator ----
+// And #335: the same row under the other note the search writes. A query
+// the conversation does carry lands on `match 1/1`, and at eighty the row
+// named `n/N` and no key that makes a search — #334's own finding one
+// keypress over, on the count `/` puts there when the query lands.
 func TestTheSearchNoteNamesTheKeyThatMadeIt(t *testing.T) {
 	forceASCII(t)
 	foot := func(m *Model) string {
@@ -425,13 +455,33 @@ func TestTheSearchNoteNamesTheKeyThatMadeIt(t *testing.T) {
 			if hit.query != word {
 				t.Fatalf("%s: the search was not entered: %q", where, hit.query)
 			}
+			// ---- round 120, the second-day operator ----
+			// The count is a note the search writes too, and the row
+			// under it named no key that makes one: at eighty `n/N ·
+			// enter attach · esc clears it · A archive · ? help · q quit`
+			// stood under `match 1/1` with `/flag` in the panel's own
+			// header — #334's finding one press over, on the note the
+			// same key puts there when the query lands (#335).
+			if matches := readerMatches(hit.doc(hit.readerWidth()), hit.query); len(matches) == 0 {
+				t.Fatalf("%s: %q is not on the page after all", where, word)
+			}
+			if !strings.HasPrefix(hit.note, "match ") {
+				t.Fatalf("%s: the search that lands does not count its match: %q", where, hit.note)
+			}
+			if f := foot(hit); !strings.Contains(f, "/ search") {
+				t.Errorf("%s: the row counts a match and names no key that makes one: %q", where, f)
+			}
 			pressKey(hit, "n")
 			poll(hit, sc)
 			if !strings.HasPrefix(hit.note, "match ") {
 				t.Errorf("%s: `%s` is on the page and `n` does not walk to it: %q", where, word, hit.note)
 			}
-			if f := foot(hit); !strings.Contains(f, "n/N") {
+			f = foot(hit)
+			if !strings.Contains(f, "n/N") {
 				t.Errorf("%s: the walk acts here and the row does not name it: %q", where, f)
+			}
+			if !strings.Contains(f, "/ search") {
+				t.Errorf("%s: the walk's own count is the search's note too: %q", where, f)
 			}
 		}
 	}

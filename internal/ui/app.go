@@ -4730,7 +4730,7 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 		// news on it (#175), as that yield measures it.
 		short := "no pane"
 		cand := drops
-		if order, moved := chapterKeyAboveTheWayIn(drops); moved && !m.chapterNote() && strings.Contains(whole, " · [ ] chapters") {
+		if order, moved := chapterKeyAboveTheWayIn(drops); moved && m.chapterKeyYields(whole) {
 			cand = order
 		}
 		for i, d := range cand {
@@ -4769,7 +4769,7 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 		// same row (#297).
 		short := strings.TrimSuffix(minimal, goesBack)
 		cand := drops
-		if order, moved := chapterKeyAboveTheWayIn(drops); moved && !m.chapterNote() && strings.Contains(whole, " · [ ] chapters") {
+		if order, moved := chapterKeyAboveTheWayIn(drops); moved && m.chapterKeyYields(whole) {
 			cand = order
 		}
 		for i, d := range cand {
@@ -4787,7 +4787,7 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 			forms = noteForms(note)
 		}
 	}
-	if chapters := " · [ ] chapters"; !m.chapterNote() && strings.Contains(whole, chapters) {
+	if m.chapterKeyYields(whole) {
 		// The way in outlasts a key that moves inside a panel already
 		// open (#39). At eighty the trail's own keys are 65 cells
 		// against the 64 the twelve-cell note floor leaves, so every
@@ -4798,7 +4798,8 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 		// fifteen cells and the widest optional key on the row, stood.
 		// The chapter key yields to a key naming a level, and only
 		// where the key comes back. Under a chapter key's own note the
-		// key the note is about stays where it is (#24, #57).
+		// key the note is about stays where it is (#24, #57), and the row
+		// is read wherever the key stands (`rowNames`, #333, #335).
 		order, moved := chapterKeyAboveTheWayIn(drops)
 		if moved {
 			up := order
@@ -5098,6 +5099,23 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 	return build()
 }
 
+// chapterKeyYields is the question the three gates that reach for the
+// chapter key's yield ask of the row they are handed: does the row name
+// `[ ] chapters`, and is the note something other than a chapter key's
+// own (#24, #57)?
+//
+// One question, one helper, and the row is read wherever the key stands
+// (`rowNames`, #333). The gates each matched the one separator-led form
+// while `chapterKeyStuck` — reached through `stuckKeys` from inside
+// `chapterYield` itself — was given `rowNames` by #334: on a row the
+// chapter key heads, the stuck reader saw the key and the yield's own
+// gate did not, so the cells of a key that cannot move were never
+// offered to the key naming the way deeper. Latent today, as #334's own
+// blindness was, and answered on the same terms (#335).
+func (m *Model) chapterKeyYields(whole string) bool {
+	return !m.chapterNote() && rowNames(whole, " · [ ] chapters")
+}
+
 // chapterYield is the drop order with `[ ] chapters` first to go, on a
 // trail whose one chapter the trail already stands on: `[` answers `no
 // earlier prompt` and `]` answers `no later prompt`, whichever is pressed
@@ -5110,6 +5128,9 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 // so where nothing is shed the key stands and a wide footer still names
 // what `[` and `]` are (#193). Under a chapter key's own note the key the
 // note is about stays where it is (#24, #57).
+//
+// The row this yield is handed is read wherever the key stands
+// (`chapterKeyYields`, #333, #335).
 func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
 	order := drops
 	var head []string
@@ -5497,15 +5518,43 @@ func (m *Model) walkKeysMove() bool {
 	return len(readerMatches(m.doc(m.readerWidth()), m.query)) > 0
 }
 
-// searchNote says whether the note is the search key's own: `no matches`,
-// the answer `/` gives to a query the conversation does not carry. Under
-// it the row keeps the key that made the search, as it keeps the chapter
-// keys under a chapter key's note and the pair under the walk's (#24,
-// #57, #223) — a row reporting a search while shedding the key that
-// started it reads as the key having gone, with the panel's own header
-// drawing the query beside it.
+// searchNote says whether the note is the search key's own. Under it the
+// row keeps the key that made the search, as it keeps the chapter keys
+// under a chapter key's note and the pair under the walk's (#24, #57,
+// #223) — a row reporting a search while shedding the key that started it
+// reads as the key having gone, with the panel's own header drawing the
+// query beside it.
+//
+// Every note the search writes, not one of them. #334 asked only for `no
+// matches`, the answer `/` gives to a query the conversation does not
+// carry, while the reader's own search writes two notes (`jumpMatch`,
+// `landFirstMatch`): at eighty on a query that matches, the row read
+// `n/N · enter attach · esc clears it · A archive · ? help · q quit`
+// under `match 1/1`, the note reporting a search with `/ search` off the
+// row — the same harm on the same key one press over (#335). The count is
+// the walk's place in the run, and `/` itself puts it there the moment the
+// query lands, so the search key stays last of the level's own keys under
+// either form.
 func (m *Model) searchNote() bool {
-	return m.note == "no matches"
+	if m.note == "no matches" {
+		return true
+	}
+	// `match 3/9` — the form `jumpMatch` and `landFirstMatch` write, the
+	// turn note's shape without a quote (#20, #236). Read as the two
+	// counts it is, so no other note can wear the word.
+	rest, ok := strings.CutPrefix(m.note, "match ")
+	if !ok {
+		return false
+	}
+	at, of, ok := strings.Cut(rest, "/")
+	if !ok {
+		return false
+	}
+	if _, err := strconv.Atoi(at); err != nil {
+		return false
+	}
+	_, err := strconv.Atoi(of)
+	return err == nil
 }
 
 // moveKeyStuck is the movement key this row leads with that cannot move
