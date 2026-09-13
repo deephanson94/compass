@@ -192,6 +192,14 @@ func TestTheReaderTitleSaysWhatThePageDoesNot(t *testing.T) {
 // key the note is about stays (#24, #57), and where a turn key moves it
 // stays — many-idle's reader lands on `❯ 1/1` and very-long's on
 // `❯ 12/12`.
+//
+// #333 moved two of the narrow stands onto that first side. Once the shed
+// gives a key up wherever it stands, `first-session` at a hundred columns
+// and `second-day` at 120 name every key that acts on the row with the
+// turn key still on it — the keys the fold used to buy with its cells are
+// there already, and nothing else can come back — so the yield buys
+// nothing and the key stands (#193's own rule, which #210 and #219 are
+// written on). `stands` names them; the gains are still asked for.
 func TestTheTurnKeysYieldWhereTheyCannotMove(t *testing.T) {
 	forceASCII(t)
 	footer := func(m *Model) string {
@@ -209,16 +217,17 @@ func TestTheTurnKeysYieldWhereTheyCannotMove(t *testing.T) {
 		return m
 	}
 	for _, c := range []struct {
-		name  string
-		scene func() scene
-		w, h  int
-		gains []string
+		name   string
+		scene  func() scene
+		w, h   int
+		gains  []string
+		stands bool // the row affords the turn key besides: the yield buys nothing (#193, #333)
 	}{
-		{"second-day", sceneSecondDay, 80, 24, []string{"a ask", "enter attach"}},
-		{"first-session", sceneFirstSession, 80, 24, []string{"a ask", "enter attach"}},
-		{"second-day", sceneSecondDay, 100, 30, []string{"/ search"}},
-		{"first-session", sceneFirstSession, 100, 30, []string{"r reply"}},
-		{"second-day", sceneSecondDay, 120, 34, []string{"r reply"}},
+		{"second-day", sceneSecondDay, 80, 24, []string{"a ask", "enter attach"}, false},
+		{"first-session", sceneFirstSession, 80, 24, []string{"a ask", "enter attach"}, false},
+		{"second-day", sceneSecondDay, 100, 30, []string{"/ search"}, false},
+		{"first-session", sceneFirstSession, 100, 30, []string{"r reply"}, true},
+		{"second-day", sceneSecondDay, 120, 34, []string{"r reply"}, true},
 	} {
 		// The key cannot move: both turn keys refuse from this stand.
 		for _, r := range []struct{ key, want string }{
@@ -237,11 +246,13 @@ func TestTheTurnKeysYieldWhereTheyCannotMove(t *testing.T) {
 					c.name, c.w, c.h, foot)
 			}
 		}
-		// And the footer whose cells are short spends none on it.
+		// And the footer whose cells are short spends none on it — while
+		// the footer that affords it keeps it, there being no key left
+		// for the cells to buy (#193).
 		foot := footer(reader(c.scene(), c.w, c.h))
-		if strings.Contains(foot, "[ ] turns") {
-			t.Errorf("%s %dx%d: the reader offers a turn key that refuses on both sides: %q",
-				c.name, c.w, c.h, foot)
+		if strings.Contains(foot, "[ ] turns") != c.stands {
+			t.Errorf("%s %dx%d: the turn key that refuses on both sides stands=%v: %q",
+				c.name, c.w, c.h, !c.stands, foot)
 		}
 		for _, gain := range c.gains {
 			if !strings.Contains(foot, gain) {
@@ -1051,7 +1062,12 @@ func TestTheReaderMoveSaysWhatItDid(t *testing.T) {
 		t.Errorf("second-day 80x24: one row for a press that moved the mark and a press that could not: %q", r107sdFoot(one))
 	}
 	// The cells the note gave up come back as keys, and none is lost.
-	for _, key := range []string{"/ search", "esc back", "A archive", "? help", "q quit"} {
+	// `/ search` was the key they bought until #333: the shed could not
+	// take it off the head of the row, so it stood where `[ ] turns`,
+	// `a ask` and `enter attach`, all three of which outrank it (#39),
+	// were shed for. The cells buy those now, and the row is longer for
+	// it, not shorter.
+	for _, key := range []string{"[ ] turns", "a ask", "enter attach", "esc back", "A archive", "? help", "q quit"} {
 		if !strings.Contains(r107sdFoot(one), key) {
 			t.Errorf("second-day 80x24 [tab tab j]: the row lost %q: %q", key, r107sdFoot(one))
 		}

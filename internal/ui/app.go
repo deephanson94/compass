@@ -3829,7 +3829,7 @@ func (m *Model) footerLine(w int) string {
 	// clause this row trades, it goes only where the row without it still
 	// names every key the row with it named (#281, #284, #289).
 	if clause := m.replyRefusalSaid(keys); clause != "" {
-		bare := strings.Replace(keys, clause, "", 1)
+		bare := clauseGone(keys, clause)
 		with, without := m.footerTraded(keys, w), m.footerTraded(bare, w)
 		if footerNamesAll(noPaneClauseGone(ansi.Strip(with)), without) {
 			return without
@@ -3843,12 +3843,7 @@ func (m *Model) footerLine(w int) string {
 // taken out, in whichever form the row drew it, so the row under the
 // refusal can be read against the row beside it key for key.
 func noPaneClauseGone(row string) string {
-	for _, f := range []string{" · enter · no pane", "enter · no pane · ", "enter · no pane"} {
-		if strings.Contains(row, f) {
-			return strings.Replace(row, f, "", 1)
-		}
-	}
-	return row
+	return clauseGone(row, " · enter · no pane")
 }
 
 // replyRefusalSaid is the keymap's own `enter · no pane` under the reply
@@ -3903,8 +3898,8 @@ func (m *Model) replyRefusalSaid(whole string) string {
 // the deck below the board's width — there is no trade: the clause is the
 // frame's only naming of the archive, not a second one (#328).
 func (m *Model) footerTraded(keys string, w int) string {
-	if clause := " · A archive"; m.doorYields() && strings.Contains(keys, clause) {
-		bare := strings.Replace(keys, clause, "", 1)
+	if clause := " · A archive"; m.doorYields() && rowNames(keys, clause) {
+		bare := clauseGone(keys, clause)
 		with := m.footerCursorTraded(keys, w)
 		// The page key does not profit from the door's cells (#330).
 		// `ctrl+d/u half page` is the one key the door outranks (#42,
@@ -3982,23 +3977,13 @@ func (m *Model) doorYields() bool {
 // door outranks (#42, #51, #328), and so that key can be held off the
 // side of the trade the door's cells belong to (#330).
 func pageKeyGone(row string) string {
-	for _, f := range []string{" · ctrl+d/u half page", "ctrl+d/u half page · ", "ctrl+d/u half page"} {
-		if strings.Contains(row, f) {
-			return strings.Replace(row, f, "", 1)
-		}
-	}
-	return row
+	return clauseGone(row, " · ctrl+d/u half page")
 }
 
 // doorGone is a drawn row with the archive's door taken out, so the row
 // that stands it can be read against the row that does not, key for key.
 func doorGone(row string) string {
-	for _, f := range []string{" · A archive", "A archive · "} {
-		if strings.Contains(row, f) {
-			return strings.Replace(row, f, "", 1)
-		}
-	}
-	return row
+	return clauseGone(row, " · A archive")
 }
 
 // footerNamesMore says whether the finished row `now` names every key
@@ -4292,7 +4277,7 @@ func (m *Model) keymap() string {
 		// frame whose trail fits, they do nothing, and a footer naming
 		// them beside "j/k move" read as though they paged the list (#83).
 		if total, h, _ := m.trailView(); total <= h {
-			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
+			keys = pageKeyGone(keys)
 		}
 	}
 	if m.level == levelWaypoints && !m.showHelp && !m.searching && !m.replying {
@@ -4308,8 +4293,7 @@ func (m *Model) keymap() string {
 		// (#213, #219); anywhere else the key acts and stays (#215, #218:
 		// the frame is what a person sees).
 		if len(TrailRows(m.trail, m.level)) <= 1 {
-			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
-			keys = strings.Replace(keys, " · ctrl+d/u half page", "", 1)
+			keys = pageKeyGone(keys)
 		}
 	}
 	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying {
@@ -4339,7 +4323,7 @@ func (m *Model) keymap() string {
 		// named `j/k scroll` already the new word is two cells shorter
 		// and costs nothing.
 		if m.readerPageFits() {
-			keys = strings.Replace(keys, "ctrl+d/u half page · ", "", 1)
+			keys = pageKeyGone(keys)
 		}
 	}
 	if m.level >= levelWaypoints && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
@@ -4381,7 +4365,7 @@ func (m *Model) keymap() string {
 		s, ok := m.selected()
 		switch {
 		case !ok || !s.Live:
-			keys = strings.Replace(keys, " · x unhide", "", 1)
+			keys = clauseGone(keys, " · x unhide")
 		case m.onBoard(s):
 			keys = strings.Replace(keys, " · x unhide", " · x hide", 1)
 		}
@@ -4394,18 +4378,18 @@ func (m *Model) keymap() string {
 		// One session: the keys that move between sessions answer no
 		// question, and "esc board" beside "nothing to zoom out to" was
 		// two answers.
-		for _, drop := range []string{"h/l columns · ", " · h/l session", " · esc board", " · g grab", " · x hide"} {
-			keys = strings.Replace(keys, drop, "", 1)
+		for _, drop := range []string{" · h/l columns", " · h/l session", " · esc board", " · g grab", " · x hide"} {
+			keys = clauseGone(keys, drop)
 		}
 	}
 	if m.liveCount() == 1 && m.archiveView {
-		keys = strings.Replace(keys, " · ⇧tab board", "", 1) // no board to go back to: A is the way (#53)
+		keys = clauseGone(keys, " · ⇧tab board") // no board to go back to: A is the way (#53)
 	}
 	if !m.anyNeedsYou() {
 		// Nothing amber: the grab answers no question, and its refusal
 		// ("nothing is waiting on you") was the only thing it could say.
 		// The help still teaches it (#78).
-		keys = strings.Replace(keys, " · g grab", "", 1)
+		keys = clauseGone(keys, " · g grab")
 	}
 	if m.archiveView && m.level >= levelWaypoints && !strings.Contains(keys, "A fleet") {
 		// Below the list the archive's footer still names the way home (#55).
@@ -4418,18 +4402,18 @@ func (m *Model) keymap() string {
 		if pane, has := m.panes[s.Info.Key()]; !has || pane.Target == "" {
 			// `r` types into a pane, like `enter` attaches to one: a row
 			// that says "no pane" does not offer the other write either.
-			keys = strings.Replace(keys, " · r reply", "", 1)
+			keys = clauseGone(keys, " · r reply")
 		}
 	}
 	if m.readerLane != "" && m.level >= levelReader {
 		// The agent's own conversation: `r` and `a` are the lead's, and
 		// a footer offering them here read as steering the agent (#49).
-		keys = strings.Replace(strings.Replace(keys, " · r reply", "", 1), " · a ask", "", 1)
+		keys = clauseGone(clauseGone(keys, " · r reply"), " · a ask")
 		if len(m.readerEvents()) == 0 {
 			// Nothing to scroll, unfold, search or step: a page with no
 			// turns offers only the way out (#56).
-			for _, drop := range []string{"j/k scroll · ", "j/k rows · ", "ctrl+d/u half page · ", "space unfold · ", "/ search · ", "n/N · ", "[ ] turns · ", " · h/l session", "h/l session · "} {
-				keys = strings.Replace(keys, drop, "", 1)
+			for _, drop := range []string{" · j/k scroll", " · j/k rows", " · ctrl+d/u half page", " · space unfold", " · / search", " · n/N", " · [ ] turns", " · h/l session"} {
+				keys = clauseGone(keys, drop)
 			}
 		}
 	}
@@ -4532,7 +4516,7 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 	// back on the rows that had shed them for it (#264's rule: a note
 	// costs no key that acts on the row it refuses).
 	if k := m.attachRefusalSaid(keys); k != "" {
-		keys = strings.Replace(keys, k, "", 1)
+		keys = clauseGone(keys, k)
 	}
 	// The note is the news, but the keymap is the only place the reader's
 	// keys are named: shed the keymap's fragments for the note first, and
@@ -4829,7 +4813,7 @@ func (m *Model) footerRow(keys string, w int) (string, string) {
 		// comes back whenever the keys leave it room, whether or not the
 		// hint is still there to give up: a refusal three cells longer
 		// than the hide note lost the pane the hide note kept (#63).
-		bare := strings.Replace(keys, attachHint, "", 1)
+		bare := clauseGone(keys, attachHint)
 		switch {
 		case fitsWith(keys, note+pane):
 			note += pane
@@ -4912,7 +4896,7 @@ func (m *Model) noteDrawnIn(note string, room int) int {
 func keysHeld(whole string, order []string, keys string, held func(string) int) string {
 	gone := map[string]bool{}
 	for _, frag := range order {
-		if strings.Contains(whole, frag) && !strings.Contains(keys, frag) {
+		if rowNames(whole, frag) && !rowNames(keys, frag) {
 			gone[frag] = true
 		}
 	}
@@ -4920,7 +4904,7 @@ func keysHeld(whole string, order []string, keys string, held func(string) int) 
 		k := whole
 		for _, frag := range order {
 			if gone[frag] {
-				k = strings.Replace(k, frag, "", 1)
+				k = clauseGone(k, frag)
 			}
 		}
 		return k
@@ -4986,18 +4970,82 @@ func chapterKeyAboveTheWayIn(drops []string) ([]string, bool) {
 	return order, moved
 }
 
+// clauseForms are the three shapes one key stands in on a row: mid-row
+// (` · key`), at the head of it (`key · `), and alone (`key`), the
+// separator going with the key it joins. Mid-row is tried first, so a key
+// in the middle takes the separator before it and never the one after,
+// which belongs to the key that follows.
+// The attach aside is not a key (#55) — it finishes a sentence a key
+// already began, carries no separator of its own and stands inside the
+// clause it belongs to — so it is only ever itself: read as a key, its
+// `key · ` form ate the separator after `enter attach (prefix d returns)`
+// and joined the row's next key to it.
+func clauseForms(frag string) [3]string {
+	if frag == attachHint {
+		return [3]string{frag, frag, frag}
+	}
+	k := strings.TrimSuffix(strings.TrimPrefix(frag, " · "), " · ")
+	return [3]string{" · " + k, k + " · ", k}
+}
+
+// clauseGone is a row — a keymap, or a drawn footer, which spells its
+// clauses the same way — with one key taken off it wherever it stands.
+//
+// The shed's fragments are written separator-led (` · / search`), and a
+// key that had come to lead the row, its own head form shed above it,
+// matched none of them: the shed marked it given up and the row kept it
+// anyway, beside keys that outrank it and are off. At eighty the reader
+// stood `/ search · esc back · A archive · ? help · q quit` under `the
+// deepest level`, 49 of 59 cells, where `[ ] turns` outranks `/ search`
+// and fits in the free cells and its own (#332 recorded the shape of it
+// and left it for a round that could weigh the head forms on their own;
+// #39 owns the ranks). Five keys did this — `/ search`, `r reply`,
+// `[ ] chapters`, `m live pane` and `x hide` — on rows where no head form
+// was ever written for them.
+//
+// So one helper answers for every form, and every place a clause is
+// removed goes through it: a key is given up at the rank `shedOrder`
+// gives it, whichever shape the row draws it in (#333). The head forms
+// the order still carries (`enter attach · `, `space unfold · `,
+// `j/k rows · `) keep their places: they are what the stuck keys and the
+// chapter yield name a key by, and they shed at the same rank either way.
+func clauseGone(row, frag string) string {
+	for _, f := range clauseForms(frag) {
+		if strings.Contains(row, f) {
+			return strings.Replace(row, f, "", 1)
+		}
+	}
+	return row
+}
+
+// rowNames says whether the row names this key in any of its forms —
+// `clauseGone`'s own question, asked before a key is given up.
+func rowNames(row, frag string) bool {
+	for _, f := range clauseForms(frag) {
+		if strings.Contains(row, f) {
+			return true
+		}
+	}
+	return false
+}
+
 // shedKeys gives up the keymap's optional fragments in order until fits
 // holds, then puts back, most recently shed first, each one that fits
 // after all: a greedy shed left a list with 14 free cells and none of
 // `/ search`, `x hide`, `g grab` on it because `[ ] chapters` went last
 // for one cell.
+//
+// A key is given up wherever it stands (`clauseGone`, #333): the order's
+// fragments are written separator-led, and a key that had come to lead
+// the row matched none of them, so the shed marked it given up and the
+// row kept it beside keys that outrank it and are off.
 func shedKeys(whole string, order []string, fits func(string) bool) string {
 	gone := map[string]bool{}
 	build := func() string {
 		k := whole
 		for _, frag := range order {
 			if gone[frag] {
-				k = strings.Replace(k, frag, "", 1)
+				k = clauseGone(k, frag)
 			}
 		}
 		return k
@@ -5007,7 +5055,7 @@ func shedKeys(whole string, order []string, fits func(string) bool) string {
 		if fits(build()) {
 			break
 		}
-		if strings.Contains(whole, frag) {
+		if rowNames(whole, frag) {
 			gone[frag] = true
 			shed = append(shed, frag)
 		}
@@ -5134,7 +5182,7 @@ func rowAlreadyShed(whole, was string, order []string, stuck map[string]bool) bo
 		if d == attachHint || d == " · enter · no pane" || stuck[d] {
 			continue
 		}
-		if strings.Contains(whole, d) && !strings.Contains(was, keyWord(d)) {
+		if rowNames(whole, d) && !strings.Contains(was, keyWord(d)) {
 			return true
 		}
 	}
@@ -5165,10 +5213,10 @@ func rowAlreadyShed(whole, was string, order []string, stuck map[string]bool) bo
 // Under a stuck key's own note the key is not stuck at all (#24, #57):
 // the row refusing `n/N` names `n/N`, and the clause waits.
 func (m *Model) footerClauseTraded(keys, clause string, w int, draw func(string, int) string) string {
-	if !strings.Contains(keys, clause) {
+	if !rowNames(keys, clause) {
 		return keys
 	}
-	bare := strings.Replace(keys, clause, "", 1)
+	bare := clauseGone(keys, clause)
 	with, without := draw(keys, w), draw(bare, w)
 	if footerNamesAll(without, with) {
 		return keys // the clause cost the row no key
@@ -5211,10 +5259,11 @@ func (m *Model) footerStuckCost(was, now string) []string {
 	return cost
 }
 
-// clausesGone is a keymap with these clauses taken out of it.
+// clausesGone is a keymap with these clauses taken out of it, each
+// wherever it stands (#333).
 func clausesGone(keys string, clauses []string) string {
 	for _, c := range clauses {
-		keys = strings.Replace(keys, c, "", 1)
+		keys = clauseGone(keys, c)
 	}
 	return keys
 }

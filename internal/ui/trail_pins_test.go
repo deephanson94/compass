@@ -1045,8 +1045,13 @@ func TestAStuckKeyIsTriedAgainOnceAnotherHasYielded(t *testing.T) {
 		if !strings.Contains(got, "enter attach") {
 			t.Errorf("first-session 80x24 after %d keys: the cells the turn key spends buy no `enter attach`: %q", n, got)
 		}
-		// No key the row drew is lost for the trade (#216).
-		for _, keep := range []string{"/ search", "esc back", "? help", "q quit"} {
+		// No key the row drew is lost for the trade (#216). `/ search`
+		// stood here until #333: the shed could not take it off the head
+		// of the row, so it held cells `a ask`, which outranks it (#39),
+		// was shed for. It is the rank that gives it up now, one layer
+		// above the trade, and the row the trade is measured against no
+		// longer draws it.
+		for _, keep := range []string{"a ask", "esc back", "? help", "q quit"} {
 			if !strings.Contains(got, keep) {
 				t.Errorf("first-session 80x24 after %d keys: the trade lost `%s`: %q", n, keep, got)
 			}
