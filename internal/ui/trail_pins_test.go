@@ -2482,7 +2482,8 @@ func TestTheSessionViewLeavesThePastToTheLevelAbove(t *testing.T) {
 						t.Errorf("%s: the refused digit moved the deck to Lv%d (#255)", where, m.level)
 					}
 					if got := strings.Join(after[:len(after)-1], "\n"); got != body {
-						t.Errorf("%s: the refused digit moved the frame above the footer (#255)", where)
+						t.Errorf("%s: the refused digit moved the frame above the footer (#255)%s",
+							where, frameMoved(rows[:len(rows)-1], after[:len(after)-1]))
 					}
 					if !strings.Contains(strings.TrimSpace(after[len(after)-1]), m.note) {
 						t.Errorf("%s: the refusal is not on the footer: note=%q foot=%q",
@@ -2575,7 +2576,8 @@ func TestTheSessionViewLeavesThePastToTheLevelAbove(t *testing.T) {
 				t.Errorf("%s: the refused digit moved the deck to Lv%d (#255)", where, m.level)
 			}
 			if got := strings.Join(after[:len(after)-1], "\n"); got != body {
-				t.Errorf("%s: the refused digit moved the frame above the footer (#255)", where)
+				t.Errorf("%s: the refused digit moved the frame above the footer (#255)%s",
+					where, frameMoved(rows[:len(rows)-1], after[:len(after)-1]))
 			}
 			if !strings.Contains(strings.TrimSpace(after[len(after)-1]), m.note) {
 				t.Errorf("%s: the refusal is not on the footer: note=%q foot=%q",

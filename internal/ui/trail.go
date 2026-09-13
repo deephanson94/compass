@@ -2423,6 +2423,15 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 		}
 	}
 	left := m.titleStyleFor(panelTrail).Render(clip(title, room))
+	if right == "" {
+		// Nothing to push to the far edge: the row ends where the title
+		// does. The gap was laid anyway and the frame's joiner took the
+		// blanks back off the row's bytes — which it could do on a bare
+		// terminal and not on a coloured one, where the row ends on a
+		// reset (#339). Blanks nobody is holding a place for are not
+		// drawn at all.
+		return mark + left
+	}
 	gap := body - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
