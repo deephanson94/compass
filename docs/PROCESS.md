@@ -182,7 +182,9 @@ goreleaser release --snapshot --clean --skip=publish   # the artifacts land in d
 ## 7. dokime
 
 This repo is governed by dokime: `intent.md` is the agreement, `units/` is the
-ledger, `python3 tools/dokime.py check` is the boundary check. Open a unit before
-work (`python3 tools/dokime.py open <name> --condition "run: ..."`) and end each
-session with `handoffs/YYYY-MM-DD-<topic>.md` containing a `unit: <name>` line.
-Never edit `intent.md` or a unit's done_condition without asking.
+ledger, `python3 tools/dokime.py check` is the boundary check, and its `next:`
+line names the command that applies. Open a unit before work
+(`python3 tools/dokime.py open <name> --condition "run: ..."`) and end every
+commit message with the trailer `Unit: <name>` in the final trailer block.
+Handoffs are optional and in whatever form this repo already keeps. Never edit
+`intent.md` or a unit's done_condition without asking.
