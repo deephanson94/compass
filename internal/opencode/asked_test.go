@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/transcript"
 )
 
 // The ask door, for this store (#344, round 59). The panel's two-tools
@@ -198,5 +201,76 @@ func TestATurnsWordsAreReadInTheOrderItWroteThem(t *testing.T) {
 	}
 	if asked, _ := askedInfo(t, askStore(t, two("I looked at both designs.", "Which should I build?"))); !asked {
 		t.Errorf("Asked = false on a turn that ends on its question")
+	}
+}
+
+// The walk's budget is rows, and a turn can be two hundred parts long, so
+// the rows it takes must be the newest ones. Taking them oldest-first
+// spent the whole budget on the front of the last turn and never reached
+// its question — the door that keeps an opencode question alive past five
+// minutes, closed by a long turn (round 61).
+func TestALongTurnStillEndsOnItsQuestion(t *testing.T) {
+	for _, parts := range []int{3, 81, 120, 200} {
+		t.Run(fmt.Sprintf("%d parts", parts), func(t *testing.T) {
+			path := askStore(t, func(must func(string, ...any), sessionID string) {
+				must(`insert into message values ('msg_z', ?, 1788688887339, 1788688892636,
+					'{"role":"assistant","modelID":"mock-1","providerID":"mock","time":{"created":1788688887339,"completed":1788688892634},"finish":"stop"}')`, sessionID)
+				for i := 0; i < parts-1; i++ {
+					must(fmt.Sprintf(`insert into part values ('prt_%04d', 'msg_z', ?, 1788688892768, 1788688892773, ?)`, i),
+						sessionID, fmt.Sprintf(`{"type":"text","text":"step %d"}`, i))
+				}
+				must(fmt.Sprintf(`insert into part values ('prt_%04d', 'msg_z', ?, 1788688892790, 1788688892791, ?)`, parts),
+					sessionID, `{"type":"text","text":"Two designs fit. Which should I build?"}`)
+			})
+			if asked, _ := askedInfo(t, path); !asked {
+				t.Errorf("a turn of %d parts ending on its question: Asked = false", parts)
+			}
+		})
+	}
+}
+
+// The question tool's options may be bare strings where Claude Code's tool
+// takes objects, and the reader decodes the whole input or nothing — so a
+// shape it cannot read loses the question text too, not just the options.
+// Round 60 folded the normalisation and pinned nothing (round 61).
+func TestBareStringOptionsKeepTheQuestion(t *testing.T) {
+	out := string(toolInput([]byte(`{"question":"Per-key buckets or per-IP?","options":["per key","per IP"]}`)))
+	for _, want := range []string{`"questions"`, "Per-key buckets or per-IP?", `"label"`, "per key"} {
+		if !contains(out, want) {
+			t.Errorf("toolInput = %s, want it to carry %s", out, want)
+		}
+	}
+	// And what the row draws from it: the question, never the tool's name.
+	if got := state.ActivityFor(transcript.ToolUse{Name: toolName("question"), Input: toolInput([]byte(`{"question":"Per-key buckets or per-IP?","options":["per key","per IP"]}`))}); !contains(got, "Per-key buckets") {
+		t.Errorf("the row reads %q, want the question being decided", got)
+	}
+}
+
+// A turn the gateway refused reaches the reader too, not only the door.
+// The reader's own join was the inner one the door's fix left behind, so
+// `events` never emitted the refusal and the machine went on reading the
+// question above it: a 429 a minute old drew `needs you · turn ended with
+// a question`, on a session no keypress can answer (round 61).
+func TestARefusedTurnWithNoPartsReachesTheReader(t *testing.T) {
+	path := askStore(t, func(must func(string, ...any), sessionID string) {
+		saidMsg("msg_z", "Two designs fit. Which should I build?")(must, sessionID)
+		must(`insert into message values ('msg_err', ?, 1788688893000, 1788688893000,
+			'{"role":"assistant","modelID":"mock-1","providerID":"mock","time":{"created":1788688893000,"completed":1788688893100},"error":{"name":"APIError","data":{"message":"429 rate limited"}}}')`, sessionID)
+	})
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	evs, err := st.NewSource(sess).Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := evs[len(evs)-1]
+	if !last.APIError {
+		t.Fatalf("the newest event is %+v, want the refusal — the reader never saw the turn", last)
+	}
+	if !contains(last.Text, "429") {
+		t.Errorf("the refusal reads %q, want the gateway's own words", last.Text)
 	}
 }

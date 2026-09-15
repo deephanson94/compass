@@ -80,14 +80,20 @@ func (s *Store) keepAsks(live map[string]bool) {
 func (s *Store) walkAsk(sessionID string) (bool, time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Left join, and the parts of a message in the order it wrote them: an
-	// inner join hid a turn that carries no part at all — the refusal
-	// opencode records on the message alone — and `p.id desc` handed the
-	// text blocks back reversed, so "ends with a question" read the wrong
-	// end of the turn (round 60).
+	// Left join, because an inner one hid a turn that carries no part at
+	// all — the refusal opencode records on the message alone (round 60).
+	//
+	// Everything here descends, the parts included: the budget below is
+	// rows, so a turn of two hundred parts must spend it on its newest
+	// ones. Reading them ascending spent it on the *front* of the last
+	// turn instead, and a turn that ended on its question came back
+	// unasked — the one door that keeps an opencode question alive past
+	// five minutes, broken by the fix for the order it reads them in
+	// (round 61). The order it reads them in is restored below, where the
+	// parts of a message are turned back the way it wrote them.
 	rows, err := s.db.Query(`select m.id, m.data, coalesce(p.data, ''), m.time_created
 		from message m left join part p on m.id = p.message_id
-		where m.session_id = ? order by m.time_created desc, m.id desc, p.id asc limit ?`,
+		where m.session_id = ? order by m.time_created desc, m.id desc, p.id desc limit ?`,
 		sessionID, askRows)
 	if err != nil {
 		return false, time.Time{}
@@ -102,8 +108,11 @@ func (s *Store) walkAsk(sessionID string) (bool, time.Time) {
 	var created int64
 	settled, asked, at := false, false, time.Time{}
 	settle := func() {
-		if settled {
-			return
+		// The rows came back newest-first so the budget would be spent on
+		// the newest parts; a turn's own words are read in the order it
+		// wrote them.
+		for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+			parts[i], parts[j] = parts[j], parts[i]
 		}
 		asked, at, settled = askedIn(cur, parts, created)
 	}

@@ -2110,12 +2110,21 @@ func (m *Model) sweepWaiting() {
 		// further than the key. A sweep that skipped the refusals hid rows
 		// `x` had just refused to hide, and `onBoard` then kept them off
 		// for good (round 60).
-		if s.Waiting && !m.hidden[s.Info.Key()] && m.hideRefusal(s) == "" {
+		//
+		// All but one of them. `x` refuses the last row on the board by a
+		// rule about the board, not about the row, and a sweep that read
+		// that refusal as "this is not a question" answered a board whose
+		// only row was a question you left behind with `nothing is
+		// unanswered` — the one sentence on this panel that denies an
+		// alarm it is drawing. The count rule comes through and is
+		// answered below, in the same words `x` gives it (round 61).
+		if refusal := m.hideRefusal(s); s.Waiting && !m.hidden[s.Info.Key()] &&
+			(refusal == "" || refusal == lastLiveRefusal) {
 			keys = append(keys, s.Info.Key())
 		}
 	}
 	if len(keys) == 0 {
-		m.note = "nothing is waiting on an old question"
+		m.note = "nothing is unanswered"
 		return
 	}
 	stayed := ""
@@ -2132,7 +2141,7 @@ func (m *Model) sweepWaiting() {
 		keys = keys[1:]
 	}
 	if len(keys) == 0 {
-		m.note = "the live one stays" // the sentence `x` gives for the same rule
+		m.note = lastLiveRefusal // the sentence `x` gives for the same rule
 		return
 	}
 	for _, key := range keys {
@@ -2145,9 +2154,12 @@ func (m *Model) sweepWaiting() {
 	// down one at a time with `x` included (round 59); it says `A, then x`
 	// now, which is the grammar the hide note beside it already uses and a
 	// promise the archive keeps (round 60).
-	m.note = fmt.Sprintf("%d waiting hidden · A, then x", len(keys))
+	// The glyph says which rows: `▲3 hidden` is seven cells cheaper than
+	// the word and buys back the clause that names the way home at eighty,
+	// where the longer form shed it (round 61).
+	m.note = fmt.Sprintf("%s%d hidden · A, then x", fleet.GlyphNeedsYou, len(keys))
 	if stayed != "" {
-		m.note = fmt.Sprintf("%d waiting hidden · %s stays", len(keys), stayed)
+		m.note = fmt.Sprintf("%s%d hidden · %s stays", fleet.GlyphNeedsYou, len(keys), stayed)
 	}
 	if order := m.viewOrder(); len(order) > 0 {
 		if m.hidden[m.selectedKey] {
@@ -2297,6 +2309,11 @@ func (m *Model) numberDrawn(num int) bool {
 	return false
 }
 
+// lastLiveRefusal is what `x` and `X` both say about the last row on the
+// board: the rule is the board's, not the row's, and the two keys give it
+// in the same words (round 61).
+const lastLiveRefusal = "the live one stays"
+
 // hideRefusal is what `x` answers about this session instead of taking it
 // off the board, or "" when the key acts. What owes you an alarm stays,
 // and says so: a note that reported a hide while the column stood was the
@@ -2341,7 +2358,7 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		// does not draw, leaving `nothing live` and `○ all quiet` beside
 		// a trail still drawing `● scout thinking… for 40s`. The same
 		// key on the same session one `A` away already says this.
-		return "the live one stays"
+		return lastLiveRefusal
 	case s.Snap.APIError:
 		return name + " stays · dead on the API"
 	case s.Snap.State == state.NeedsYou && !s.Waiting:
@@ -5641,6 +5658,24 @@ func (m *Model) footerStuckCost(was, now string) []string {
 	stuck := map[string]string{}
 	for _, k := range m.stuckKeys(m.keymap()) {
 		stuck[keyWord(k)] = k
+	}
+	// The archive's attach refusal is not a key that acts: `enter` on an
+	// archived session with no pane answers `no pane` at every width and
+	// however often it is pressed — the rule #210 and #216 read off the
+	// chapter key, the movement key and the walk pair, at the one clause
+	// they never reached. `footerKeysNamed` splits a row on " · ", so this
+	// clause is read as the two words `enter` and `no pane`, while the
+	// stuck map keys it by `keyWord(" · enter · no pane")` — a string that
+	// can never match either. The one clause spelled with a separator
+	// inside it is the one the gate could never see, so the refusal has
+	// never been able to pay for anything, and the grab's trade was read
+	// as a swap (#281) on a row with nine cells free (round 61).
+	if m.archiveView && m.enterKeymap() == "enter · no pane" {
+		for _, w := range []string{"enter", "no pane"} {
+			if _, seen := stuck[w]; !seen {
+				stuck[w] = " · enter · no pane"
+			}
+		}
 	}
 	has := map[string]bool{}
 	for _, k := range footerKeysNamed(now) {

@@ -273,6 +273,11 @@ type tailState struct {
 	askedAt  time.Time
 	settled  bool
 	answered map[string]bool
+	// busy is a subagent writing under whatever the walk finds next: the
+	// session is doing something, so its words are not a question you owe
+	// — but a question the harness is holding open outranks that, as the
+	// machine's own rules do (round 61).
+	busy bool
 }
 
 func peekHead(f *os.File, info *SessionInfo) {
@@ -433,8 +438,15 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 		// this session being busy, which is how the machine reads it too,
 		// and a walk that read past it would call a session with an agent
 		// in flight a question you owe (round 59).
+		//
+		// It marks rather than settles. The machine's rule 2 — a question
+		// the harness is holding open — precedes its rule about a turn in
+		// flight, so a session that asked you in as many words and
+		// dispatched an agent in the same breath is needs-you while the
+		// agent runs; a walk that stopped at the agent's first line
+		// archived it (round 61).
 		if ev.Type == transcript.EventUser && strings.TrimSpace(ev.Text) != "" {
-			t.settleAsk(false, time.Time{})
+			t.busy = true
 		}
 		return
 	}
@@ -467,7 +479,7 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			}
 			out++
 		}
-		if out > 0 {
+		if out > 0 || t.busy {
 			t.settleAsk(false, time.Time{}) // a call still out: work in flight
 			return
 		}
@@ -485,7 +497,7 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 		}
 		// A refused call is not the model asking: nothing you type into the
 		// pane clears a 403, and `g` skips those for the same reason.
-		t.settleAsk(!ev.APIError && state.EndsWithQuestion(ev.Text), ev.Timestamp)
+		t.settleAsk(!t.busy && !ev.APIError && state.EndsWithQuestion(ev.Text), ev.Timestamp)
 	}
 }
 

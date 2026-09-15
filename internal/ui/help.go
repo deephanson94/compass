@@ -459,7 +459,7 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 				// sheds for the sentence — `x there brings it back` — is
 				// said by the archive's own group header, two rows above
 				// the rows it applies to.
-				key, what = "x X A", "hide a session · A browses the archive · X, every one unanswered"
+				key, what = "x X A", "hide a session · A browses the archive · X, every unanswered one"
 			case "A":
 				what = ""
 			case "m":
@@ -567,6 +567,19 @@ func dropToolGloss(lines []string) []string {
 // (#281's rule, in the legend).
 func helpCursorGloss(l string, w int) string {
 	const clause = " \u00b7 \u25b8 its row"
+	// The fleet's glyph line is a glyph-to-word list, and the word this
+	// feature added belongs in it: `▲ unanswered` is the same shape as its
+	// six neighbours, and it fits at a hundred columns and up. It is a
+	// clause, not a row, because a row of its own sheds `(3h+ = away)` at
+	// 152 — round 57's pin, which is why this went two rounds as a hold
+	// (round 61).
+	if strings.HasPrefix(l, "fleet:") {
+		const waiting = "  \u25b2\u00a0unanswered"
+		if ansi.StringWidth(strings.ReplaceAll(l+waiting, "\u00a0", " ")) <= w {
+			return l + waiting
+		}
+		return l
+	}
 	if !strings.HasPrefix(l, focusMark+" marks") || ansi.StringWidth(strings.ReplaceAll(l, "\u00a0", " ")+clause) > w {
 		return l
 	}

@@ -718,16 +718,22 @@ func (m *Model) archiveGroups() []fleetGroup {
 			return m.sessions[e[a]].Info.LastEventAt.After(m.sessions[e[b]].Info.LastEventAt)
 		})
 	}
-	// Held in round 59: the hidden group sorts by its newest row like any
-	// other, so a swept pile of old questions sits under the recent
-	// archive rather than at the top its name claims. Pinning it first is
-	// right and it is one keypress of `j` away — but it lands the archive's
-	// cursor on a hidden row, whose `x unhide` costs the row eleven cells,
-	// and the footer's shedder then takes `g grab` as well as the chapter
-	// keys where thirteen cells would have done: a frame with nine cells
-	// free and a key that acts unnamed. That shedder is another round's,
-	// and it is what this ordering waits for.
+	// Newest first among the projects, and the hidden group over all of
+	// them — what `x` and `X` took off the board is what the person came
+	// here for, and it sorted by its newest row like any other, so a swept
+	// pile of old questions sank under the recent archive and the note
+	// that said `A, then x` sent them looking for it.
+	//
+	// It waited two rounds on the footer: landing the cursor on a hidden
+	// row costs the row `x unhide`, and the grab was withdrawn for it —
+	// not by the shedder, as round 60 recorded, but by its own trade,
+	// because the attach refusal beside it could never be counted
+	// (footerStuckCost). With that counted, this ordering costs no key
+	// that acts (round 61).
 	sort.SliceStable(names, func(a, b int) bool { return newest(members[names[a]]) > newest(members[names[b]]) })
+	sort.SliceStable(names, func(a, b int) bool {
+		return names[a] == hiddenGroup && names[b] != hiddenGroup
+	})
 
 	groups := make([]fleetGroup, 0, len(names))
 	for _, name := range names {

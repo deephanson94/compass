@@ -593,3 +593,37 @@ func TestAFileThatFallsQuietIsReadAgain(t *testing.T) {
 	}
 	assertWaiting(t, quiet, askedAt)
 }
+
+// A question the harness is holding open outranks an agent in flight, as
+// the machine's own rules do: rule 2 precedes rule 3. A walk that stopped
+// at the subagent's first line archived a session that had asked you in as
+// many words and dispatched an agent in the same breath — the batch the
+// either-order test exists for (round 61).
+func TestAHeldQuestionOutranksAnAgentInFlight(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idAskedTool, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module")
+	b.calls(at, [2]string{"toolu_ask7", state.AskUserQuestion}, [2]string{"toolu_task7", "Task"})
+	b.sidechainPrompt(ago(25*time.Hour), "scout the payments module").
+		sidechainText(ago(24*time.Hour), "The manifest is unsigned.").
+		write(root, slugAlpha)
+
+	assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idAskedTool), at)
+}
+
+// And the other side of the same mark: an agent writing under the model's
+// own words is a session that is working, whatever those words end on.
+func TestAnAgentInFlightStillClosesTheDoorOnPlainWords(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module").
+		text(ago(26*time.Hour), "Two designs fit. Which should I build?").
+		sidechainPrompt(ago(25*time.Hour), "scout the payments module").
+		write(root, slugAlpha)
+
+	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingWeek)
+	if s.Info.Asked || s.Waiting {
+		t.Errorf("Asked/Waiting = %v/%v with an agent still writing", s.Info.Asked, s.Waiting)
+	}
+}

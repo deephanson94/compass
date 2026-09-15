@@ -129,8 +129,11 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 	if m.hidden[sessionKey("s-api")] || m.hidden[sessionKey("s-etl")] {
 		t.Errorf("X took a session that is not waiting on an old question")
 	}
-	if !strings.Contains(m.note, "2 waiting hidden · A, then x") {
-		t.Errorf("note = %q, want the count and the route back in the grammar its neighbours use", m.note)
+	if !strings.Contains(m.note, "▲2 hidden · A, then x") {
+		t.Errorf("note = %q, want the count in the glyph the rows wear and the route back", m.note)
+	}
+	if strings.Contains(m.note, "waiting") {
+		t.Errorf("note = %q: the deck says `unanswered` of these rows, and the trail owns `waiting`", m.note)
 	}
 	if strings.Contains(m.note, "then X") {
 		t.Errorf("note = %q promises an undo X does not keep: it brings back every hidden row", m.note)
@@ -141,7 +144,7 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 
 	// A second press has nothing to take, and says so rather than acting.
 	pressKey(m, "X")
-	if !strings.Contains(m.note, "nothing is waiting") {
+	if !strings.Contains(m.note, "nothing is unanswered") {
 		t.Errorf("note = %q, want the refusal", m.note)
 	}
 
@@ -179,6 +182,9 @@ func TestTheSweepLeavesOneQuestionStanding(t *testing.T) {
 	}
 	if !strings.Contains(m.note, "infra stays") {
 		t.Errorf("note = %q, want the name of the row that stayed", m.note)
+	}
+	if !strings.Contains(m.note, "▲1 hidden") {
+		t.Errorf("note = %q, want the count in the glyph the rows wear", m.note)
 	}
 }
 
@@ -427,5 +433,66 @@ func TestTheArchiveNamesTheKeyThatBringsThemAllBack(t *testing.T) {
 		if strings.Contains(row, "…") {
 			t.Errorf("%d columns: the header is cut mid-sentence: %q", w, strings.TrimSpace(row))
 		}
+	}
+}
+
+// The board's last row is the board's rule, not the row's, and both keys
+// give it in the same words. `X` on a board whose one row is a question
+// you left behind answered `nothing is unanswered` — the one sentence on
+// this panel that denies an alarm it is drawing — because the sweep read
+// `x`'s count refusal as "this is not a question" and filtered the row
+// out. Nothing in the package caught it (round 61).
+func TestTheSweepAnswersTheLastRowAsTheHideDoes(t *testing.T) {
+	forceASCII(t)
+	m := New(nil)
+	m.Update(tea.WindowSizeMsg{Width: 152, Height: 40})
+	one := []fleet.Session{waiting("s-docs", "docs", "rewrite the install guide", fixtureBase.Add(-26*time.Hour))}
+	m.Update(fleetMsg{sessions: one, at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
+
+	pressKey(m, "X")
+	if len(m.hidden) != 0 {
+		t.Fatalf("the sweep emptied the board: %d hidden", len(m.hidden))
+	}
+	if m.note != lastLiveRefusal {
+		t.Errorf("X answers %q, want %q — the words `x` gives the same row", m.note, lastLiveRefusal)
+	}
+	// And `x` on that row says the same thing, which is the point.
+	m.point(sessionKey("s-docs"))
+	pressKey(m, "x")
+	if m.note != lastLiveRefusal {
+		t.Errorf("x answers %q, want %q", m.note, lastLiveRefusal)
+	}
+}
+
+// What the sweep may never take: a row `x` refuses for a reason about the
+// row itself. `X` had no refusal check at all, so it hid a hang and a
+// quota death that `x` had just refused, and `onBoard` kept them off for
+// good (round 60, pinned in 61 — the fold shipped with no test).
+func TestTheSweepTakesOnlyWhatTheHideWouldTake(t *testing.T) {
+	forceASCII(t)
+	m := New(nil)
+	m.Update(tea.WindowSizeMsg{Width: 152, Height: 40})
+	hung := waiting("s-hung", "hung", "backfill the shards", fixtureBase.Add(-26*time.Hour))
+	hung.Snap.State = state.Stuck
+	dead := waiting("s-dead", "dead", "regenerate the reference", fixtureBase.Add(-30*time.Hour))
+	dead.Snap.APIError = true
+	ss := []fleet.Session{
+		hung, dead,
+		waiting("s-docs", "docs", "rewrite the install guide", fixtureBase.Add(-26*time.Hour)),
+		sess("s-etl", "etl", "/home/user/etl", "main", "dedupe the nightly load",
+			state.Working, fixtureBase.Add(-20*time.Minute), journey.Build, "", "tool call in flight", "thinking…"),
+	}
+	fleet.SortFleet(ss)
+	m.Update(fleetMsg{sessions: ss, at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
+	pressKey(m, "X")
+
+	for _, id := range []string{"s-hung", "s-dead"} {
+		if m.hidden[sessionKey(id)] {
+			s, _ := m.session(sessionKey(id))
+			t.Errorf("X hid %s, which x refuses: %q", id, m.hideRefusal(s))
+		}
+	}
+	if !m.hidden[sessionKey("s-docs")] {
+		t.Errorf("X left the question it is for: note %q", m.note)
 	}
 }

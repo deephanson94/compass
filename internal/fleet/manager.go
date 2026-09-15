@@ -309,6 +309,11 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		if live {
 			snap := e.machine.Evaluate(now)
 			waiting := m.isWaiting(e.info, now)
+			// The mark is recorded whichever way the guard goes: a denied
+			// session that is read again next run must not replay its
+			// whole transcript to reach the same answer, and `compass
+			// status` is a fresh process every few seconds (round 61).
+			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
 			if waiting && (snap.State != state.NeedsYou || snap.APIError) {
 				// The door is the file's word and the fold is the
 				// machine's, and where they differ the machine wins: it
@@ -322,7 +327,6 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 				archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
 				continue
 			}
-			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
 			out = append(out, Session{
 				Info: e.info, Snap: snap, Live: true,
 				Waiting: waiting,
@@ -428,13 +432,18 @@ func (e *entry) merge(info SessionInfo) {
 	if e.info.StartedAt.IsZero() {
 		e.info.StartedAt = info.StartedAt
 	}
-	if !e.sawEvent && info.LastEventAt.After(e.info.LastEventAt) {
+	grew := info.LastEventAt.After(e.info.LastEventAt)
+	if !e.sawEvent && grew {
 		e.info.LastEventAt = info.LastEventAt // file mtime, until events say otherwise
 	}
 	// The question is the scan's to answer, every time: it is read off the
 	// end of the file, and the end of the file is what moves when somebody
 	// finally replies (#344).
-	moved := !e.info.Asked && info.Asked || !e.info.AskedAt.Equal(info.AskedAt) || info.LastEventAt.After(e.info.LastEventAt)
+	// `grew` is measured above, before the clock is overwritten: comparing
+	// after the assignment could never be true, so a door the fold refused
+	// stayed shut for the life of the process however the file changed
+	// (round 61).
+	moved := grew || !e.info.Asked && info.Asked || !e.info.AskedAt.Equal(info.AskedAt)
 	e.info.Asked, e.info.AskedAt = info.Asked, info.AskedAt
 	if moved {
 		e.askDenied = false // the file grew: the door is worth another knock

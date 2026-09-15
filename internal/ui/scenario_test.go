@@ -965,7 +965,12 @@ func sceneLeftBehind() scene {
 
 	fleet.SortFleet(ss)
 	panes, order := paneMap([]string{"gateway", "loader"}, []string{"work:0.0", "work:1.0"})
-	return scene{name: "left-behind", extra: []string{"g", "esc", "3", "x", "X", "A", "X"},
+	// The sweep twice: the second press has nothing left to take and says
+	// so, and the pair puts the notes this feature's keys give — the
+	// refusal, the row that stays, the way home — on a frame for the first
+	// time. Three of them had never been rendered by any route on any
+	// scene (round 61).
+	return scene{name: "left-behind", extra: []string{"g", "esc", "3", "x", "X", "X", "A", "x"},
 		story: "Two sessions in this morning's tmux — one asking, one working — and three that stopped days ago on a question nobody answered. Which of them is the deck's first row, and how does the pile go away when it is not today's problem?",
 		sessions: ss, trails: tr, panes: panes, order: order}
 }

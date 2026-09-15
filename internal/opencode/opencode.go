@@ -267,16 +267,25 @@ func (src *Source) Poll() ([]transcript.Event, error) {
 	src.store.mu.Lock()
 	defer src.store.mu.Unlock()
 	db := src.store.db
+	// Both clocks: a turn the gateway refused can be a message with no part
+	// under it at all, and such a turn moved neither the part clock nor the
+	// row count — so the poll that would have reported it never ran, and a
+	// 429 a minute old drew as the question above it (round 61).
 	var newest sql.NullInt64
-	if err := db.QueryRow(`select max(time_updated) from part where session_id = ?`, src.sessionID).Scan(&newest); err != nil {
+	if err := db.QueryRow(`select max(t) from (
+			select max(time_updated) as t from part where session_id = ?
+			union all select max(time_updated) as t from message where session_id = ?)`,
+		src.sessionID, src.sessionID).Scan(&newest); err != nil {
 		return nil, err
 	}
 	if newest.Valid && newest.Int64 <= src.last && src.last > 0 {
 		return nil, nil
 	}
-	rows, err := db.Query(`select m.id, p.id, m.data, p.data, m.time_created, p.time_updated
-		from part p join message m on m.id = p.message_id
-		where p.session_id = ? order by m.time_created, m.id, p.id`, src.sessionID)
+	// Left join for the same reason: a message with no parts is a turn, and
+	// the only kind that ever is one is the kind nothing else reports.
+	rows, err := db.Query(`select m.id, coalesce(p.id, ''), m.data, coalesce(p.data, ''), m.time_created, coalesce(p.time_updated, m.time_updated)
+		from message m left join part p on m.id = p.message_id
+		where m.session_id = ? order by m.time_created, m.id, p.id`, src.sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +297,11 @@ func (src *Source) Poll() ([]transcript.Event, error) {
 			rows.Close()
 			return nil, err
 		}
-		if json.Unmarshal([]byte(mdata), &r.msg) != nil || json.Unmarshal([]byte(pdata), &r.part) != nil {
+		if json.Unmarshal([]byte(mdata), &r.msg) != nil {
 			continue
+		}
+		if pdata != "" && json.Unmarshal([]byte(pdata), &r.part) != nil {
+			continue // a part whose shape has moved on, skipped as before
 		}
 		all = append(all, r)
 		if r.updated > src.last {

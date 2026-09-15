@@ -509,6 +509,12 @@ func StripCD(cmd, cwd string) (string, bool) {
 	return cmd, false
 }
 
+// ActivityFor is the one-line hint a row draws for a tool call, for the
+// readers that build a call rather than fold a transcript — the other
+// store's adapter, whose question tool has to reach the row as a question
+// and not as the tool's own name (round 61).
+func ActivityFor(use transcript.ToolUse) string { return activityFor(use) }
+
 func activityFor(use transcript.ToolUse) string {
 	switch use.Name {
 	case "Bash":
