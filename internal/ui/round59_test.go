@@ -2084,3 +2084,51 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 		t.Errorf("220x48 has the room for every row; the title says `↓ G`: %q", title)
 	}
 }
+
+// The panel's ninth pass, two-tools, folded (#358).
+
+func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
+	forceASCII(t)
+	gloss := "the summary waits for the next trail that counts · s here ends the hold"
+	for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m, _ := twoToolsWaiting(t, size[0], size[1])
+		press(m, "s")
+		if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+			t.Fatalf("%dx%d: the summary did not open", size[0], size[1])
+		}
+		// The neighbour of one of each suspends it; on a narrow deck
+		// `h` is not a key, so the digit of the other Claude session.
+		if size[0] >= deckWideCols {
+			press(m, "h")
+		} else {
+			press(m, "1")
+		}
+		if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary waits]") {
+			t.Fatalf("%dx%d: the summary is not suspended:\n%s", size[0], size[1], v)
+		}
+		press(m, "?")
+		v := ansi.Strip(m.View())
+		if !strings.Contains(v, gloss) {
+			t.Errorf("%dx%d: the frame draws `[summary waits]` and the help has no row for it (#358):\n%s", size[0], size[1], v)
+		}
+		press(m, "?")
+		press(m, "s") // ends the hold
+		if v := ansi.Strip(m.View()); strings.Contains(v, "summary waits") {
+			t.Fatalf("%dx%d: `s` did not end the hold:\n%s", size[0], size[1], v)
+		}
+		press(m, "?")
+		if v := ansi.Strip(m.View()); strings.Contains(v, "ends the hold") || strings.Contains(v, "summary: the legs by class") {
+			t.Errorf("%dx%d: the hold is over and the help still draws a row for `s`, which refuses here (#344):\n%s", size[0], size[1], v)
+		}
+	}
+	// The gloss keeps the keys column: no wider than the page keys' row.
+	widest := 0
+	for _, k := range helpKeys {
+		if k[0] == "ctrl+d/u" {
+			widest = len([]rune(k[1]))
+		}
+	}
+	if len([]rune(gloss)) > widest {
+		t.Errorf("the held gloss is %d cells, wider than the page keys' row (%d)", len([]rune(gloss)), widest)
+	}
+}
