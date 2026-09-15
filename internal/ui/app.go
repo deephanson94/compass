@@ -280,6 +280,7 @@ type Model struct {
 	archiveView bool
 	restSelKey  string // the other view's selection, also a Key()
 	restLevel   int    // the level the archive was opened from, for the way back (#53)
+	restSummary bool   // and whether the summary was up there, for the same way back (#348)
 	fleetScroll int
 	onBoardBand bool
 	// drawnBand is the stranded band the board's last frame drew under
@@ -959,7 +960,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.archiveView:
 			// The archive is a list; it opens as one, whatever the depth,
 			// and remembers the depth for the way back.
-			m.restLevel = from
+			m.restLevel, m.restSummary = from, m.summary // the summary comes back with the level (#348)
 			if m.level != levelTrail {
 				m.level = levelTrail
 				m.cursor, m.anchor = -1, -1
@@ -1841,6 +1842,7 @@ func (m *Model) leaveArchive(rest int) {
 		m.level = levelWaypoints
 		m.cursor, m.anchor = -1, -1
 		m.cursorMove(0)
+		m.summary = m.restSummary
 		if rest >= levelReader {
 			m.enterReader()
 		}
@@ -3064,8 +3066,8 @@ func (m *Model) viewOnce() string {
 	if inner < 10 {
 		inner = w
 	}
-	if m.summary && m.level == levelWaypoints && !m.archiveView {
-		m.summarySync() // afresh on another session, closed on one with nothing to count — on this frame (#347)
+	if m.summary && m.level == levelWaypoints {
+		m.summarySync() // afresh on another session, closed on one with nothing to count — on this frame, the archive's too (#347, #348)
 	}
 
 	bodyHeight := h - 5 // header, hairline, blank, hairline, footer
@@ -4497,7 +4499,7 @@ func (m *Model) keymapOnce() string {
 	case m.level >= levelReader:
 		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.summaryShown() && m.sessionView():
-		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · h/l session · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · h/l session · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
 	case m.summaryShown():
 		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · r reply · a ask · / search · " + m.hideKeymap() + " · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
@@ -6064,7 +6066,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// the door first, the page key, the session keys, then what acts
 		// here, and the way out last of all, after the fold key the row
 		// exists for and the key that goes back into the trail (#345).
-		return []string{attachHint, " · ctrl+d/u half page", " · A archive", " · m live pane", " · m conversation", " · h/l session", " · / search", " · x hide", " · x unhide", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
+		return []string{attachHint, " · ctrl+d/u half page", " · A archive", " · g grab", " · m live pane", " · m conversation", " · h/l session", " · / search", " · x hide", " · x unhide", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
 			" · tab legs", " · tab lanes", " · tab trail there", " · space open", " · space close", " · s/esc trail", "j/k rows · "}
 	}

@@ -898,7 +898,7 @@ func sceneFleetHygiene() scene {
 		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap([]string{"harness-a", "harness-b", "relay", "nopane"}, []string{"harness:1.0", "harness:0.0", "tinker:0.0", ""})
-	return scene{name: "fleet-hygiene", extra: []string{"4", "r", "esc"}, story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "fleet-hygiene", extra: []string{"4", "r", "esc", "tab", "s", "esc"}, story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // ---------------------------------------------------------------- driver

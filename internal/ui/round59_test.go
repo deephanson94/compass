@@ -104,8 +104,8 @@ func TestTheSummaryCountsTheLegsByClass(t *testing.T) {
 				red++
 			}
 		}
-		if red > 0 && !strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red") {
-			t.Errorf("%dx%d: the test row does not count its %d red runs:\n%s", w, h, red, view)
+		if said := strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red"); red > 0 && said == m.sessionView() {
+			t.Errorf("%dx%d: the test row should count its %d red runs where no card does, and not where one does (#348): said %v\n%s", w, h, red, said, view)
 		}
 		// The footer names the fold key and the way back; the trail's
 		// scroll clauses are not the summary's.
@@ -852,8 +852,8 @@ func TestATrailOfOneOfEachIsRefused(t *testing.T) {
 	before := ansi.Strip(m.View())
 	press(m, "s")
 	view := ansi.Strip(m.View())
-	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one leg a class") {
-		t.Errorf("s on a trail of one of each should refuse with `one leg a class` (#347):\n%s", view)
+	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one of each") {
+		t.Errorf("s on a trail of one of each should refuse with `one of each` (#348):\n%s", view)
 	}
 	if !strings.Contains(before, "◉") || !strings.Contains(view, "◉") {
 		t.Errorf("the refusal took the ask off the frame")
@@ -916,8 +916,8 @@ func TestGOnTheSummaryIsThePresent(t *testing.T) {
 	if at.kind != "class" || at.class != journey.Build {
 		t.Errorf("G should stand on the class holding HEAD (build), not %+v", at)
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "▸build  2 legs · for ") {
-		t.Errorf("the running class's row does not say how long its leg has run:\n%s", v)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "▸build  2 legs · ◈3 out 20m") {
+		t.Errorf("the running class's row does not carry HEAD's own figure — parked on its agents, `◈3 out 20m · 2 silent 18m` (#348):\n%s", v)
 	}
 }
 
@@ -1063,7 +1063,7 @@ func TestTheSummaryHangsTheQuestionUnderHead(t *testing.T) {
 	}
 }
 
-func TestTheRedWordFollowsTheCard(t *testing.T) {
+func TestTheRedCountIsSaidOncePerFrame(t *testing.T) {
 	forceASCII(t)
 	sc := sceneManyIdle()
 	find := func(w, h int) *Model {
@@ -1083,14 +1083,32 @@ func TestTheRedWordFollowsTheCard(t *testing.T) {
 		t.Fatal("no session with two test legs")
 		return nil
 	}
-	narrow := find(120, 34)
-	view := ansi.Strip(narrow.View())
-	if !strings.Contains(view, "test   2 legs · 1✗") {
-		t.Errorf("120x34: the class row should follow the card's `1✗`:\n%s", view)
+	// Where the card above carries the day's red count, the class row
+	// does not; where there is no card, the title stands down and the
+	// class row says it (#348).
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		m := find(size[0], size[1])
+		rows := summaryFrameRows(m)
+		title, row := "", ""
+		for _, r := range rows {
+			cell := summaryTrailCell(m, r)
+			switch {
+			case strings.Contains(cell, "TRAIL · "):
+				title = cell
+			case strings.Contains(cell, "test   2 legs"):
+				row = cell
+			}
+		}
+		if !strings.Contains(row, "2 legs · 1 red") || strings.Contains(title, " red") || strings.Contains(title, "✗") {
+			t.Errorf("%dx%d: the red count should be on the class row alone: title %q, row %q", size[0], size[1], title, row)
+		}
 	}
-	wide := find(152, 40)
-	if v := ansi.Strip(wide.View()); !strings.Contains(v, "test   2 legs · 1 red") {
-		t.Errorf("152x40: the class row should say `1 red` as the card does:\n%s", v)
+	for _, size := range [][2]int{{120, 34}, {152, 40}} {
+		m := find(size[0], size[1])
+		v := ansi.Strip(m.View())
+		if strings.Contains(v, "2 legs · 1 red") || strings.Contains(v, "2 legs · 1✗") {
+			t.Errorf("%dx%d: the class row repeats the red count the card carries:\n%s", size[0], size[1], v)
+		}
 	}
 }
 
@@ -1161,7 +1179,7 @@ func TestADigitOntoAnotherSessionStartsTheSummaryAfresh(t *testing.T) {
 	}
 	pressKey(m, cli)
 	view = ansi.Strip(m.View())
-	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one leg a class") {
+	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one of each") {
 		t.Errorf("a digit onto a trail of one of each should draw the trail with the reason on this frame (#347):\n%s", view)
 	}
 	was := m.cursor
@@ -1363,5 +1381,171 @@ func TestTheHiddenLiveRowKeepsItsShapeOverTheSummaryAtEveryWidth(t *testing.T) {
 		if after := row(); after != before {
 			t.Errorf("%dx%d: the archive's row changed across s:\n%q\n%q", size[0], size[1], before, after)
 		}
+	}
+}
+
+// The panel's fourth pass, folded (#348).
+
+func TestTheSummaryIsSettledInTheArchiveToo(t *testing.T) {
+	forceASCII(t)
+	sc := sceneManyIdle()
+	m := sceneModel(sc, 152, 40)
+	found := false
+	for _, d := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if !summaryCountsNothing(m.trails[m.selectedKey]) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no live session that counts")
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	for i := 0; i < 8 && !m.summaryRowsHere()[m.summaryCursor].group(); i++ {
+		press(m, "j") // onto a class row
+	}
+	pressKey(m, "space")
+	if len(m.summaryOpen) == 0 {
+		t.Fatalf("no class opened on etl's summary")
+	}
+	opened := m.summaryOpen
+	pressKey(m, "A")
+	poll(m, sc)
+	pressKey(m, "tab") // an archived session's legs: one of each
+	poll(m, sc)
+	if m.level != levelWaypoints || !m.archiveView {
+		t.Fatalf("tab in the archive did not open the legs: level %d, archive %v", m.level, m.archiveView)
+	}
+	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || !strings.Contains(v, "one of each") {
+		t.Errorf("the archive's legs draw the summary over a trail of one of each, or say nothing (#348):\n%s", v)
+	}
+	pressKey(m, "esc")
+	poll(m, sc)
+	pressKey(m, "A")
+	poll(m, sc)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || len(m.summaryOpen) != len(opened) {
+		t.Errorf("A back should return to the summary it left, with its class open (#348): open %v (was %v)\n%s", m.summaryOpen, opened, v)
+	}
+}
+
+// twoToolsWaiting is the two-tools scene with its claude api session given
+// four prompts four minutes apart: one of each leg, and a 12m wait on you
+// that no single prompt row wears — the summary's only count there.
+func twoToolsWaiting(t *testing.T, w, h int) (*Model, scene) {
+	t.Helper()
+	sc := sceneTwoTools()
+	m := sceneModel(sc, w, h)
+	var key string
+	for _, d := range []string{"1", "2", "3", "4"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if s, ok := m.selected(); ok && sessionName(s.Info) == "api" && summaryCountsNothing(m.trails[m.selectedKey]) && key == "" {
+			key = m.selectedKey
+		}
+	}
+	if key == "" {
+		t.Fatal("no api session of one of each")
+	}
+	tr := sc.trails[key]
+	at := tr.Legs[len(tr.Legs)-1].End
+	if at.IsZero() {
+		at = tr.Legs[len(tr.Legs)-1].Start
+	}
+	for i, text := range []string{"and the refresh path", "and the tests", "and the audit log"} {
+		tr = withPrompt(tr, at.Add(time.Duration(i+1)*4*time.Minute), text)
+	}
+	sc.trails[key] = tr
+	if promptWaits(tr) < waitNotable {
+		t.Fatalf("the built trail's wait is %s, under the threshold", promptWaits(tr))
+	}
+	m = sceneModel(sc, w, h)
+	for _, d := range []string{"1", "2", "3", "4"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if m.selectedKey == key {
+			break
+		}
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	return m, sc
+}
+
+func TestTheSummaryRowNamesTheGrab(t *testing.T) {
+	forceASCII(t)
+	m, _ := twoToolsWaiting(t, 220, 48) // a fleet with a session waiting on you: g acts
+	press(m, "s")
+	if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Fatalf("the summary did not open:\n%s", ansi.Strip(m.View()))
+	}
+	foot := summaryFrameRows(m)
+	if row := foot[len(foot)-1]; !strings.Contains(row, "g grab") {
+		t.Errorf("the summary's row does not name g grab where it acts (#348): %q", strings.TrimSpace(row))
+	}
+}
+
+func TestTheHungQuestionIsCutAtTheRail(t *testing.T) {
+	forceASCII(t)
+	sc := sceneAlarmStorm()
+	m := sceneModel(sc, 80, 24)
+	pressKey(m, "1")
+	poll(m, sc)
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "keep the bastion?") || strings.Contains(view, "keep the bast…") {
+		t.Errorf("the question's line is cut short of the row it hangs on (#348):\n%s", view)
+	}
+}
+
+func TestTheWaitIsARowOfTheDocument(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 100, 30)
+	press(m, "s")
+	pressKey(m, "space") // scout open: the wait's row is below the fold
+	rows := m.summaryRowsHere()
+	if rows[len(rows)-1].kind != "wait" {
+		t.Fatalf("the wait is not the document's last row: %+v", rows[len(rows)-1])
+	}
+	view := ansi.Strip(m.View())
+	for _, r := range strings.Split(view, "\n") {
+		if cell := summaryTrailCell(m, r); strings.Contains(cell, "TRAIL · ") && strings.Contains(cell, "on you") {
+			t.Errorf("the title carries the wait while the summary's row does: %q", cell)
+		}
+	}
+	press(m, "G")
+	for i := 0; i < 40; i++ {
+		press(m, "j")
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "◉ waited on you · 12 prompts") {
+		t.Errorf("the wait's row cannot be reached at the end of the document:\n%s", v)
+	}
+	// And a trail of one of each with a wait worth a row is not refused.
+	tm, _ := twoToolsWaiting(t, 120, 34)
+	press(tm, "s")
+	if v := ansi.Strip(tm.View()); !strings.Contains(v, "[summary]") || !strings.Contains(v, "◉ waited on you") {
+		t.Errorf("a trail whose only count is the wait on you should open the summary on it (#348):\n%s", v)
+	}
+}
+
+func TestASilentLaneHangsItsOwnLine(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 152, 40)
+	toLanes(t, m)
+	pressKey(m, "space")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "nothing written") {
+		t.Errorf("a lane gone quiet hangs nothing under it in the summary (#348):\n%s", view)
 	}
 }

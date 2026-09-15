@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -2081,6 +2082,12 @@ func (m *Model) cardSecond(w int) string {
 	best := ""
 	for _, compact := range []bool{false, true} {
 		day := dayParts(m.trail, m.now, compact)
+		if m.summaryShown() {
+			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · ")), " · "), " · ")
+			if len(day) == 1 && day[0] == "" {
+				day = nil
+			}
+		}
 		parts := append([]string{}, verdict...)
 		if len(day) > 0 {
 			// The day's total carries the wait; the verdict's clause is
@@ -2147,8 +2154,10 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 	if s, ok := m.selected(); ok && s.Live {
 		dead, activity = s.Snap.APIError, s.Snap.Activity
 	}
+	agents := m.agentsFor(m.selectedKey)
 	return TrailOpts{
-		HeadWaits:    headWaits(m.trail), // a parked HEAD keeps its own name, in the summary too (#347)
+		HeadWaits:    headWaits(m.trail),                                        // a parked HEAD keeps its own name, in the summary too (#347)
+		HeadTail:     headTail(m.trail, m.now, headState != state.Idle, agents), // and its own figure, `◈3 out 20m · 2 silent 18m` (#348)
 		HeadClass:    headClass,
 		HeadDead:     dead,
 		HeadActivity: activity,
@@ -2203,10 +2212,10 @@ func legsHiddenAbove(tr journey.Trail, level int, sel []int, top int) int {
 func (m *Model) trailDayHere(compact bool) string {
 	d := trailDay(m.trail, m.now, compact)
 	if m.summaryShown() {
-		// The summary's own rows carry the wait on you to the minute,
-		// and its `◉` row the span where no reader stands beside (#347).
-		d = withoutClause(d, " · waited on you ")
-		d = withoutClause(d, " · on you ")
+		// The summary's own rows carry the wait on you to the minute
+		// and the red runs on the class that ran them, and its `◉` row
+		// the span where no reader stands beside (#347, #348).
+		d = summaryDay(d)
 		if !m.sessionView() && len(m.trail.Prompts) > 0 {
 			d = withoutSpan(d, m.now, m.trail)
 		}
@@ -2293,6 +2302,19 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 	}
 	return out
 }
+
+// summaryDay is the day's clauses as the summary's title and card carry
+// them: without the wait on you and the red count, which the summary's own
+// rows say to the minute and on the class that ran them (#347, #348).
+func summaryDay(d string) string {
+	d = withoutClause(d, " · waited on you ")
+	d = withoutClause(d, " · on you ")
+	d = redClause.ReplaceAllString(d, "")
+	d = strings.TrimSuffix(d, " ·")
+	return d
+}
+
+var redClause = regexp.MustCompile(` · \d+ red| \d+✗`)
 
 // withoutClause is the day's clauses without the one that begins with
 // prefix, whole.
