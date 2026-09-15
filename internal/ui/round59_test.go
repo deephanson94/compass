@@ -2090,14 +2090,46 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 	if title := titleOf(m); strings.Contains(title, "↓ G") {
 		t.Errorf("220x48 has the room for every row; the title says `↓ G`: %q", title)
 	}
+	// A trail with nothing running: the present is the row `G` goes to,
+	// the last one, and the mark says when the window hides it (#361).
+	sc := sceneVeryLong()
+	m = sceneModel(sc, 80, 24)
+	pressKey(m, "3")
+	poll(m, sc)
+	pressKey(m, "tab")
+	poll(m, sc)
+	for _, l := range m.trail.Legs {
+		if l.Current {
+			t.Fatalf("etl should have no running leg")
+		}
+	}
+	press(m, "s")
+	if title := titleOf(m); strings.Contains(title, "↓ G") {
+		t.Errorf("the idle summary opens with its last row on the frame; the title says `↓ G`: %q", title)
+	}
+	press(m, "space") // scout opens, the last row leaves the window
+	if title := titleOf(m); !strings.Contains(title, "↓ G  [summary]") {
+		t.Errorf("the idle summary's last row is off the window and the title does not say `↓ G` (#361): %q\n%s", title, ansi.Strip(m.View()))
+	}
+	press(m, "G")
+	rows := m.summaryRowsHere()
+	last := len(rows) - 1
+	for last > 0 && !rows[last].stands() {
+		last--
+	}
+	if title := titleOf(m); strings.Contains(title, "↓ G") || m.summaryCursor != last {
+		t.Errorf("`G` on the idle summary is its last standing row (%d, cursor %d); the title still says `↓ G`: %q", last, m.summaryCursor, title)
+	}
 }
 
 // The panel's ninth pass, two-tools, folded (#358).
 
 func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 	forceASCII(t)
-	gloss := "the summary waits for the next trail that counts · s here ends the hold"
-	for _, size := range [][2]int{{100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+	gloss := "the summary waits for the next trail that counts · s ends the hold"
+	// At 80 too: the row keeps its place on the short body, where a
+	// refused key's row is otherwise the first cut (#360).
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 		m, _ := twoToolsWaiting(t, size[0], size[1])
 		press(m, "s")
 		if !strings.Contains(ansi.Strip(m.View()), "[summary]") {

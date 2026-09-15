@@ -881,6 +881,16 @@ func (m *Model) summaryOffPresent(h int) bool {
 		}
 		off = true
 	}
+	if !off {
+		// Nothing is running: the newest work is the row `G` goes to, the
+		// last row, as it is on the trail — which wears `↓ G` on an idle
+		// session too (#361).
+		at := len(rows) - 1
+		for at > 0 && !rows[at].stands() {
+			at--
+		}
+		return at < first || at >= last
+	}
 	return off
 }
 

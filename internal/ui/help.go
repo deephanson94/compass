@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -188,6 +189,13 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
 		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "s", "[ ]", "space")
+		if o.held {
+			// `s` is refused on the trail that suspended the summary,
+			// and it is also the key the deck just gave a job there:
+			// the row that names the mark the frame draws keeps its
+			// place at 80, where the cut would take it first (#360).
+			order = slices.DeleteFunc(order, func(k string) bool { return k == "s" })
+		}
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -433,7 +441,7 @@ func helpKeyLinesIn(w int, board, reader, held bool, refused ...string) []string
 				// one key that ends the hold: the help owes the mark a
 				// row, and the key the sentence it acts on here (#40,
 				// #358).
-				what = "the summary waits for the next trail that counts · s here ends the hold"
+				what = "the summary waits for the next trail that counts · s ends the hold" // 77 cells with its key at 80, the counting row's own width (#360)
 			}
 		}
 		if !board {
