@@ -21,7 +21,7 @@ var helpKeys = [][2]string{
 	{"ctrl+d/u", "half a page (PgDn / PgUp too): the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
-	{"s", "summary: the legs counted by class · space opens one · tab the trail there"},
+	{"s", "summary: the legs by class · space opens one · tab the trail there"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back"},

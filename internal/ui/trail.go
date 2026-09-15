@@ -1865,7 +1865,16 @@ func (m *Model) trailColumn(w, h int) []string {
 	droppedTag := false
 	draw := func(h int) []string {
 		if m.summaryShown() {
-			return m.summaryLines(w, h) // the summary where the trail was (#344)
+			// The summary where the trail was (#344). The title above
+			// may already carry the wait on you; the summary's own line
+			// for it is drawn only where it does not (#346).
+			said := false
+			for _, r := range rows {
+				if strings.Contains(ansi.Strip(r), "on you") {
+					said = true
+				}
+			}
+			return m.summaryLines(w, h, said)
 		}
 		return trailRows(m.trail, m.trailOpts(w, h))
 	}

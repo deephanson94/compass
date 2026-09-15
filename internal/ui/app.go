@@ -4494,9 +4494,9 @@ func (m *Model) keymapOnce() string {
 	case m.level >= levelReader:
 		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.summaryShown() && m.sessionView():
-		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · h/l session · r reply · a ask · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · h/l session · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
 	case m.summaryShown():
-		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · r reply · a ask · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
 		// `/` opens the fleet search here as it does on the board, on a
 		// list and in the reader: pressed at this level it takes the
@@ -4632,7 +4632,9 @@ func (m *Model) keymapOnce() string {
 		// drawn — eleven more frames per width naming neither. The door
 		// goes before the way out, whichever word this level's way out
 		// wears (#56, #62).
-		if strings.Contains(keys, " · esc back") {
+		if strings.Contains(keys, " · s/esc trail") {
+			keys = strings.Replace(keys, " · s/esc trail", " · s/esc trail · A archive", 1) // the summary's row keeps the door (#346)
+		} else if strings.Contains(keys, " · esc back") {
 			keys = strings.Replace(keys, " · esc back", " · esc back · A archive", 1)
 		} else {
 			keys = strings.Replace(keys, " · esc board", " · esc board · A archive", 1)
@@ -6059,9 +6061,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// the door first, the page key, the session keys, then what acts
 		// here, and the way out last of all, after the fold key the row
 		// exists for and the key that goes back into the trail (#345).
-		return []string{attachHint, " · ctrl+d/u half page", " · h/l session", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
+		return []string{attachHint, " · ctrl+d/u half page", " · A archive", " · h/l session", " · x hide", " · x unhide", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
-			" · tab legs", " · tab lanes", " · s/esc trail", " · tab trail there", " · space open", " · space close", "j/k rows · "}
+			" · tab legs", " · tab lanes", " · tab trail there", " · space open", " · space close", " · s/esc trail", "j/k rows · "}
 	}
 	// First to go first. What every level shares — the attach hint, `a
 	// ask`, the between-sessions keys — goes before anything a level owns,
@@ -6211,7 +6213,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 		own = append(own, " · A archive")
 	}
 	order = append(order, own...)
-	if m.note == "the summary is the legs'" {
+	if m.note == "the summary is the legs'" && m.level < levelReader {
 		// The note's way in is `tab`: the row keeps `tab deeper` over the
 		// attach, or the note sends the person to a key it evicted (#345).
 		order = keyAfterTheAttach(order, " · tab deeper")
