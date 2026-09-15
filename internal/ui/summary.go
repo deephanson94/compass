@@ -199,9 +199,10 @@ func (m *Model) summarySync() {
 		// there is to show, on this frame, not the next (#347).
 		m.summary = false
 		if m.note == "" {
+			// The key's own note stands where it has one — the hide's
+			// says what the hide did, and the reason would cost the row
+			// its way back (#350); the trail drawn says the rest.
 			m.note = m.summaryRefusal()
-		} else if !strings.Contains(m.note, m.summaryRefusal()) {
-			m.note += " · " + m.summaryRefusal() // after the hide's own note, where the row has the room (#348)
 		}
 		return
 	}

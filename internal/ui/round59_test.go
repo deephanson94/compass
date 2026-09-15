@@ -1650,3 +1650,55 @@ func TestTheCardStandsDownForTheSummarysRows(t *testing.T) {
 		t.Errorf("the red count should be said exactly once: card %v, row %v\n%s", onCard, onRow, view)
 	}
 }
+
+// The panel's fifth pass, fleet-hygiene's late report, folded (#350).
+
+func TestTheHidesNoteStandsAloneWhenTheSummaryCloses(t *testing.T) {
+	forceASCII(t)
+	sc := sceneManyIdle()
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}} {
+		m := sceneModel(sc, size[0], size[1])
+		found := false
+		for _, d := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
+			pressKey(m, d)
+			poll(m, sc)
+			if !summaryCountsNothing(m.trails[m.selectedKey]) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("no live session that counts")
+		}
+		for m.level < levelWaypoints {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		press(m, "s")
+		if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+			t.Fatalf("%dx%d: the summary did not open", size[0], size[1])
+		}
+		for i := 0; i < 4; i++ {
+			pressKey(m, "x") // onto the next, until one of the scene's one-of-each trails
+			poll(m, sc)
+			if summaryCountsNothing(m.trail) {
+				break
+			}
+		}
+		if !summaryCountsNothing(m.trail) {
+			t.Fatalf("%dx%d: x never landed on a trail of one of each", size[0], size[1])
+		}
+		rows := summaryFrameRows(m)
+		foot := rows[len(rows)-1]
+		if strings.Contains(ansi.Strip(m.View()), "[summary]") {
+			t.Fatalf("%dx%d: the summary stayed up over a trail of one of each", size[0], size[1])
+		}
+		if !strings.Contains(foot, "is hidden") || strings.Contains(foot, "one of each") {
+			t.Errorf("%dx%d: the hide's note should stand alone (#350): %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+		way := strings.Contains(foot, "esc back") || strings.Contains(foot, "esc board") || strings.Contains(foot, "tab deeper") || strings.Contains(foot, "tab reader")
+		if !way {
+			t.Errorf("%dx%d: the row after the hide names no way on: %q", size[0], size[1], strings.TrimSpace(foot))
+		}
+	}
+}
