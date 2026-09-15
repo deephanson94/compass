@@ -204,8 +204,12 @@ func (m *Model) summarySync() {
 		if m.note == "" {
 			// The key's own note stands where it has one — the hide's
 			// says what the hide did, and the reason would cost the row
-			// its way back (#350); the trail drawn says the rest.
+			// its way back (#350); the trail drawn says the rest. Held,
+			// the note says the summary is coming back (#353).
 			m.note = m.summaryRefusal()
+			if m.summaryHeld {
+				m.note += " · summary waits"
+			}
 		}
 		return
 	}

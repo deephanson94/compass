@@ -1436,43 +1436,29 @@ func TestTheSummaryIsSettledInTheArchiveToo(t *testing.T) {
 	}
 }
 
-// twoToolsWaiting is the two-tools scene with its claude api session given
-// four prompts four minutes apart: one of each leg, and a 12m wait on you
-// that no single prompt row wears — the summary's only count there.
+// twoToolsWaiting is the two-tools scene on its claude api session: one
+// of each leg, and four prompts four minutes apart — a 12m wait on you
+// that no single prompt row wears, the summary's only count there, and
+// the session whose card wears the verdict (#353).
 func twoToolsWaiting(t *testing.T, w, h int) (*Model, scene) {
 	t.Helper()
 	sc := sceneTwoTools()
 	m := sceneModel(sc, w, h)
-	var key string
-	for _, d := range []string{"1", "2", "3", "4"} {
-		pressKey(m, d)
-		poll(m, sc)
-		if s, ok := m.selected(); ok && sessionName(s.Info) == "api" && summaryCountsNothing(m.trails[m.selectedKey]) && key == "" {
-			key = m.selectedKey
-		}
+	key := sessionKey("api-claude")
+	if promptWaits(sc.trails[key]) < waitNotable {
+		t.Fatalf("the scene's claude api session waits %s, under the threshold", promptWaits(sc.trails[key]))
 	}
-	if key == "" {
-		t.Fatal("no api session of one of each")
-	}
-	tr := sc.trails[key]
-	at := tr.Legs[len(tr.Legs)-1].End
-	if at.IsZero() {
-		at = tr.Legs[len(tr.Legs)-1].Start
-	}
-	for i, text := range []string{"and the refresh path", "and the tests", "and the audit log"} {
-		tr = withPrompt(tr, at.Add(time.Duration(i+1)*4*time.Minute), text)
-	}
-	sc.trails[key] = tr
-	if promptWaits(tr) < waitNotable {
-		t.Fatalf("the built trail's wait is %s, under the threshold", promptWaits(tr))
-	}
-	m = sceneModel(sc, w, h)
+	found := false
 	for _, d := range []string{"1", "2", "3", "4"} {
 		pressKey(m, d)
 		poll(m, sc)
 		if m.selectedKey == key {
+			found = true
 			break
 		}
+	}
+	if !found {
+		t.Fatal("no digit reaches the claude api session")
 	}
 	for m.level < levelWaypoints {
 		pressKey(m, "tab")
@@ -1722,8 +1708,8 @@ func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	}
 	was := m.selectedKey
 	press(m, "h") // the neighbour: one of each
-	if strings.Contains(ansi.Strip(m.View()), "[summary]") || m.selectedKey == was {
-		t.Fatalf("h did not land on a trail of one of each with the summary suspended")
+	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || m.selectedKey == was || !strings.Contains(v, "summary waits") {
+		t.Fatalf("h did not land on a trail of one of each with the summary suspended and said so (#353):\n%s", v)
 	}
 	press(m, "l") // back onto the trail that counts
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || m.selectedKey != was {

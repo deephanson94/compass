@@ -750,6 +750,16 @@ func sceneTwoTools() scene {
 		legSpec{journey.Scout, "middleware.py", 5 * time.Minute, []string{"middleware.py"}, "", nil},
 		legSpec{journey.Test, "pytest", 3 * time.Minute, nil, "18✓ 2✗", nil},
 		legSpec{journey.Fix, "tokens.py", 2 * time.Minute, []string{"tokens.py"}, "", nil})
+	// Three follow-up prompts four minutes apart: one of each leg, and a
+	// wait on you worth a row — the summary's only count here (#353).
+	if k := sessionKey("api-claude"); true {
+		t := tr[k]
+		at := t.Legs[len(t.Legs)-1].End
+		for i, text := range []string{"and the refresh path", "and the tests", "and the audit log"} {
+			t = withPrompt(t, at.Add(time.Duration(i+1)*4*time.Minute), text)
+		}
+		tr[k] = t
+	}
 	add("api-oc", "api", "/home/user/api", "add rate limiting to the token endpoint", state.Working, 40*time.Second, journey.Build, "tool call in flight", "Bash: go test ./...", "opencode", "anthropic/claude-sonnet-4-5",
 		legSpec{journey.Scout, "limiter.go", 4 * time.Minute, []string{"limiter.go"}, "", nil},
 		legSpec{journey.Build, "limiter.go", 12 * time.Minute, []string{"limiter.go"}, "", nil},
@@ -760,7 +770,7 @@ func sceneTwoTools() scene {
 		legSpec{journey.Scout, "main.tf", 18 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "AskUserQuestion", 4 * time.Minute, nil, "", nil})
 	panes, order := paneMap([]string{"api-claude", "api-oc", "docs-oc", "infra"}, []string{"dev:1.0", "dev:2.0", "dev:3.0", "ops:0.0"})
-	return scene{name: "two-tools", extra: []string{"2", "tab", "3", "s", "h", "l", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "two-tools", extra: []string{"2", "tab", "3", "s", "1", "3", "esc", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The second day: one session live, and yesterday's dozen behind it. The
