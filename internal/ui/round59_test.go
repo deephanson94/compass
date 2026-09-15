@@ -1,0 +1,330 @@
+package ui
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/deephanson94/compass/internal/journey"
+)
+
+// Round fifty-nine: the summary (#344). `s` on the legs counts them by
+// class, `space` opens a class into its legs oldest first, `tab` on a leg
+// is the trail with the cursor on it, and `s` or `esc` is the trail again.
+
+// summaryModel is the very-long scene's day-long session on its legs.
+func summaryModel(t *testing.T, w, h int) *Model {
+	t.Helper()
+	sc := sceneVeryLong()
+	m := sceneModel(sc, w, h)
+	pressKey(m, "1")
+	poll(m, sc)
+	pressKey(m, "tab")
+	poll(m, sc)
+	if m.level != levelWaypoints {
+		t.Fatalf("tab from the board should land on the legs, not level %d", m.level)
+	}
+	if len(m.trail.Legs) < 100 {
+		t.Fatalf("the scene's long session has %d legs; the summary is for a long one", len(m.trail.Legs))
+	}
+	return m
+}
+
+func classCounts(tr journey.Trail) map[journey.Class]int {
+	n := map[journey.Class]int{}
+	for _, l := range tr.Legs {
+		n[l.Class]++
+	}
+	return n
+}
+
+func TestTheSummaryCountsTheLegsByClass(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		m := summaryModel(t, w, h)
+		before := ansi.Strip(m.View())
+		if strings.Contains(before, "[summary]") {
+			t.Fatalf("%dx%d: the legs' frame says summary before s:\n%s", w, h, before)
+		}
+		press(m, "s")
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "[summary]") {
+			t.Fatalf("%dx%d: s on the legs does not open the summary:\n%s", w, h, view)
+		}
+		if strings.Contains(view, "[session]") || strings.Contains(view, "[legs]") {
+			t.Errorf("%dx%d: the summary's frame still wears the legs' word:\n%s", w, h, view)
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if n := ansi.StringWidth(line); n > w {
+				t.Errorf("%dx%d: a summary line runs past the terminal (%d): %q", w, h, n, line)
+			}
+		}
+		counts := classCounts(m.trail)
+		if len(counts) < 5 {
+			t.Fatalf("the scene's long session has %d classes; the summary is for every class", len(counts))
+		}
+		for c, n := range counts {
+			want := pad(c.String(), trailVerbWidth) + " " + plural(n, "leg")
+			if !strings.Contains(view, want) {
+				t.Errorf("%dx%d: the summary does not count %q:\n%s", w, h, want, view)
+			}
+		}
+		// The classes come in the order work happens: scout before build,
+		// build before ship.
+		rows := strings.Split(view, "\n")
+		at := func(class string) int {
+			for i, r := range rows {
+				if strings.Contains(r, pad(class, trailVerbWidth)+" ") && strings.Contains(r, " leg") {
+					return i
+				}
+			}
+			return -1
+		}
+		if s, b, sh := at("scout"), at("build"), at("ship"); !(s >= 0 && s < b && b < sh) {
+			t.Errorf("%dx%d: the classes are out of order (scout %d, build %d, ship %d):\n%s", w, h, s, b, sh, view)
+		}
+		// Red runs are counted on the test row.
+		red := 0
+		for _, l := range m.trail.Legs {
+			if l.Class == journey.Test && strings.Contains(legBadge(l), "✗") {
+				red++
+			}
+		}
+		if red > 0 && !strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+"✗") {
+			t.Errorf("%dx%d: the test row does not count its %d red runs:\n%s", w, h, red, view)
+		}
+		// The footer names the fold key and the way back; the trail's
+		// scroll clauses are not the summary's.
+		foot := rows[len(rows)-1]
+		for _, want := range []string{"space open", "s trail"} {
+			if !strings.Contains(foot, want) {
+				t.Errorf("%dx%d: the summary's footer does not name %q: %q", w, h, want, foot)
+			}
+		}
+		if strings.Contains(view, "↑ ") && strings.Contains(view, " legs  [summary]") {
+			t.Errorf("%dx%d: the summary's title counts legs above a fold it has not got:\n%s", w, h, view)
+		}
+	}
+}
+
+func TestTheSummaryOpensAClassIntoItsLegsOldestFirst(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 120, 34)
+	press(m, "s")
+	// The cursor opens on the first class row; space opens it.
+	rows := summaryRows(m.trail, m.summaryOpen)
+	first := rows[0].class
+	pressKey(m, "space")
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	var legs []journey.Leg
+	for _, l := range m.trail.Legs {
+		if l.Class == first {
+			legs = append(legs, l)
+		}
+	}
+	if len(legs) < 3 {
+		t.Fatalf("the first class has %d legs; the order needs three", len(legs))
+	}
+	// Each open leg's row is the trail's own row for it — the class verb
+	// and the label — hung on the waypoint rail, in the trail's order.
+	w, h := m.trailBox()
+	o := m.trailOpts(w-trailWayWidth, h)
+	seen := -1
+	for i, l := range legs {
+		label, _ := legLabel(l, o)
+		want := pad(first.String(), trailVerbWidth) + " " + label
+		found := -1
+		for j := seen + 1; j < len(lines); j++ {
+			if strings.Contains(lines[j], "├ ") || strings.Contains(lines[j], "└ ") {
+				if strings.Contains(lines[j], want) {
+					found = j
+					break
+				}
+			}
+		}
+		if found < 0 {
+			if i < 3 {
+				t.Fatalf("the %s class's leg %d (%q) is not drawn beneath it in order:\n%s", first, i, want, view)
+			}
+			break // the rest are below the fold
+		}
+		seen = found
+	}
+	if !strings.Contains(lines[len(lines)-1], "space close") {
+		t.Errorf("an open class's footer does not offer to close it: %q", lines[len(lines)-1])
+	}
+	// Space on a leg row folds its class and lands on the class row.
+	press(m, "j")
+	pressKey(m, "space")
+	if rows := summaryRows(m.trail, m.summaryOpen); rows[m.summaryCursor].kind != "class" || m.summaryOpen[first.String()] {
+		t.Errorf("space on a leg should fold its class and stand on it: cursor %d, open %v", m.summaryCursor, m.summaryOpen)
+	}
+}
+
+func TestTabOnASummaryLegIsTheTrailThere(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 120, 34)
+	press(m, "s")
+	pressKey(m, "space")
+	press(m, "j")
+	press(m, "j") // the second leg of the first class
+	rows := summaryRows(m.trail, m.summaryOpen)
+	if rows[m.summaryCursor].kind != "leg" {
+		t.Fatalf("the cursor is not on a leg: %+v", rows[m.summaryCursor])
+	}
+	leg := rows[m.summaryCursor].leg
+	pressKey(m, "tab")
+	if m.summary || m.level != levelWaypoints {
+		t.Fatalf("tab on a leg should leave the summary on the legs: summary %v, level %d", m.summary, m.level)
+	}
+	trail := TrailRows(m.trail, m.level)
+	if m.cursor < 0 || m.cursor >= len(trail) || trail[m.cursor].Kind != "leg" || trail[m.cursor].Leg != leg {
+		t.Fatalf("the trail's cursor is not on leg %d: cursor %d", leg, m.cursor)
+	}
+	view := ansi.Strip(m.View())
+	w, h := m.trailBox()
+	label, _ := legLabel(m.trail.Legs[leg], m.trailOpts(w, h))
+	cursored := ""
+	for _, line := range strings.Split(view, "\n") {
+		if isCursorRow(line) || strings.Contains(line, "▸") {
+			if strings.Contains(line, label) {
+				cursored = line
+			}
+		}
+	}
+	if cursored == "" {
+		t.Errorf("the trail's cursor row does not carry leg %d (%q):\n%s", leg, label, view)
+	}
+	if strings.Contains(view, "[summary]") {
+		t.Errorf("the frame after tab still says summary:\n%s", view)
+	}
+	// And s is the summary again, esc the trail again.
+	press(m, "s")
+	if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Errorf("s after tab does not reopen the summary")
+	}
+	pressKey(m, "esc")
+	if m.summary || m.level != levelWaypoints || strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Errorf("esc on the summary should be the legs again: summary %v, level %d", m.summary, m.level)
+	}
+}
+
+func TestTheSummaryIsRefusedOffTheLegs(t *testing.T) {
+	forceASCII(t)
+	sc := sceneVeryLong()
+	m := sceneModel(sc, 152, 40)
+	if m.level != levelBoard {
+		t.Fatalf("the scene does not open on the board: level %d", m.level)
+	}
+	press(m, "s")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "the summary is one trail's · tab into it") || strings.Contains(view, "[summary]") {
+		t.Errorf("s on the board should say the way in:\n%s", view)
+	}
+	narrow := sceneModel(sc, 80, 24)
+	pressKey(narrow, "1")
+	poll(narrow, sc)
+	if narrow.level != levelTrail {
+		t.Fatalf("a digit on the narrow deck should land on the trail: level %d", narrow.level)
+	}
+	press(narrow, "s")
+	if view := ansi.Strip(narrow.View()); !strings.Contains(view, "the summary is the legs' · tab, then s") || strings.Contains(view, "[summary]") {
+		t.Errorf("s on the trail should say the way in:\n%s", view)
+	}
+	pressKey(narrow, "tab")
+	press(narrow, "s")
+	if view := ansi.Strip(narrow.View()); !strings.Contains(view, "[summary]") {
+		t.Errorf("s on the narrow deck's legs should open the summary:\n%s", view)
+	}
+	// Tab on a class row is its legs, tab on a leg the trail there, and
+	// the next tab the reader, which keeps its keys.
+	pressKey(narrow, "tab")
+	if rows := summaryRows(narrow.trail, narrow.summaryOpen); !narrow.summary || rows[narrow.summaryCursor].kind != "leg" {
+		t.Fatalf("tab on a class row should open it and stand on its first leg: summary %v, cursor %d", narrow.summary, narrow.summaryCursor)
+	}
+	pressKey(narrow, "tab")
+	if narrow.summary || narrow.level != levelWaypoints {
+		t.Fatalf("tab on a leg row should be the trail there: summary %v, level %d", narrow.summary, narrow.level)
+	}
+	pressKey(narrow, "tab")
+	if narrow.level != levelReader {
+		t.Fatalf("tab on the legs should open the reader: level %d", narrow.level)
+	}
+	if strings.Contains(ansi.Strip(narrow.View()), "[summary]") {
+		t.Errorf("the reader's frame says summary")
+	}
+}
+
+func TestTheSummaryCountsTheLanes(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	m := sceneModel(sc, 120, 34)
+	found := false
+	for _, d := range []string{"1", "2", "3", "4", "5"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if len(m.trails[m.selectedKey].Branches) >= 3 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("the subagents scene has no session with three lanes")
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	view := ansi.Strip(m.View())
+	want := pad(summaryLanes, trailVerbWidth) + " " + plural(len(m.trail.Branches), "lane")
+	if !strings.Contains(view, want) {
+		t.Fatalf("the summary does not count the lanes (%q):\n%s", want, view)
+	}
+	press(m, "G")
+	pressKey(m, "space")
+	view = ansi.Strip(m.View())
+	seen := -1
+	lines := strings.Split(view, "\n")
+	for i, br := range m.trail.Branches {
+		name := string([]rune(branchName(br.Label))[:12])
+		found := -1
+		for j := seen + 1; j < len(lines); j++ {
+			if strings.Contains(lines[j], glyphBranch+" "+name) {
+				found = j
+				break
+			}
+		}
+		if found < 0 {
+			t.Fatalf("lane %d (%q) is not drawn beneath the lanes' row in order:\n%s", i, name, view)
+		}
+		seen = found
+	}
+}
+
+func TestTheHelpNamesTheSummaryOnTheLegs(t *testing.T) {
+	forceASCII(t)
+	// The footer names the key where the legs' row has the room — it is
+	// the first key that row gives up, so the page key and the door keep
+	// their cells at 152 — and the help names it on the legs at every
+	// width, and nowhere else.
+	wide := summaryModel(t, 220, 48)
+	if foot := ansi.Strip(wide.View()); !strings.Contains(foot, "s summary") {
+		t.Errorf("the legs' footer at 220 does not name s:\n%s", foot)
+	}
+	for _, size := range [][2]int{{80, 24}, {152, 40}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "?")
+		if view := ansi.Strip(m.View()); !strings.Contains(view, "summary: the legs counted by class") {
+			t.Errorf("%dx%d: the help on the legs does not explain s:\n%s", size[0], size[1], view)
+		}
+	}
+	board := sceneModel(sceneVeryLong(), 152, 40)
+	press(board, "?")
+	if view := ansi.Strip(board.View()); strings.Contains(view, "summary: the legs counted by class") {
+		t.Errorf("the board's help explains a key that is refused there:\n%s", view)
+	}
+}

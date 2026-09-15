@@ -21,6 +21,7 @@ var helpKeys = [][2]string{
 	{"ctrl+d/u", "half a page (PgDn / PgUp too): the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
+	{"s", "summary: the legs counted by class · space opens one, tab goes to the trail at a leg"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back"},
@@ -76,7 +77,8 @@ func helpOffered(key, keymap string) bool {
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
 		"G": {"G is the present"}, "? / q": {"? help"}, "x / A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
-		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
+		"a": {"a ask"}, "space": {"space unfold", "space open", "space close"}, "/ n N": {"/ search", "n/N"},
+		"s": {"s summary", "s trail"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
 	}[key] {
 		if strings.Contains(keymap, f) {
@@ -184,7 +186,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space")
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "s", "[ ]", "space")
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -421,6 +423,9 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 				// there is room for it.
 				what = "the start of the conversation, the other end of G; the grab is a level out"
 			}
+		}
+		if key == "s" && refuses(refused, "s") {
+			what = "" // the summary is the legs' view: its row is drawn where the key works (#344)
 		}
 		if !board {
 			switch key {

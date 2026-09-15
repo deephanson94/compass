@@ -709,7 +709,7 @@ func sceneVeryLong() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"auth", "etl", "cli"}, []string{"work:0.0", "work:1.0", "tools:0.0"})
-	return scene{name: "very-long", story: "Two sessions a day long each — 160 and 120 legs, every class, prompts every dozen legs, a plan with pending steps — beside a short one.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "very-long", extra: []string{"1", "tab", "s", "space", "j", "tab", "s", "G", "space", "esc"}, story: "Two sessions a day long each — 160 and 120 legs, every class, prompts every dozen legs, a plan with pending steps — beside a short one.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 func allScenes() []scene {

@@ -249,6 +249,13 @@ type Model struct {
 	trailScroll int
 	trailPinned bool
 
+	// The summary (#344): the trail's legs counted by class, where the
+	// trail was, while summary is on and the keys are on the legs.
+	summary       bool
+	summaryCursor int             // index into summaryRows
+	summaryScroll int             // the first summary row drawn
+	summaryOpen   map[string]bool // the classes opened into their legs, by name; the lanes under summaryLanes
+
 	// anchor is the reader's own cursor: the document line marked, and the
 	// row Space acts on. It opens on the Lv2 cursor's row — so the two
 	// panels say they are showing the same moment — and from there `j`/`k`
@@ -887,9 +894,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	m.note, m.noteYields = "", false // a keypress answers the last note
 
+	if m.level != levelWaypoints {
+		m.summary = false // the summary is the legs' view: a level away from them it is closed
+	}
+	if m.summaryShown() && m.summaryKey(key) {
+		return m, nil
+	}
+
 	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+	case "s":
+		if m.level >= levelReader {
+			break // the reader's keys are its own
+		}
+		m.toggleSummary()
+		return m, nil
 	case "?":
 		m.showHelp = true
 		return m, nil
@@ -4423,6 +4443,18 @@ func (m *Model) keymapOnce() string {
 		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · h/l session · m live pane · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.level >= levelReader:
 		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
+	case m.summaryShown() && m.sessionView():
+		keys = "j/k rows · space " + m.summaryFoldWord() + " · tab " + m.summaryTabWord() + " · h/l session · r reply · a ask · " + m.enterKeymap() + " · s trail · esc trail · ? help · q quit"
+	case m.summaryShown():
+		keys = "j/k rows · space " + m.summaryFoldWord() + " · tab " + m.summaryTabWord() + " · r reply · a ask · " + m.enterKeymap() + " · s trail · esc trail · ? help · q quit"
+	case m.level >= levelWaypoints && m.summaryRefusal() != "":
+		// A trail with nothing to count names no summary key (#344):
+		// the rows below, without their `s summary` clause.
+		if m.sessionView() {
+			keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		} else {
+			keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
+		}
 	case m.level >= levelWaypoints && m.sessionView():
 		// `/` opens the fleet search here as it does on the board, on a
 		// list and in the reader: pressed at this level it takes the
@@ -4459,9 +4491,9 @@ func (m *Model) keymapOnce() string {
 		// very level has said `rows` all along, so one key, one act, one
 		// level now wears one name (#220, #307). The two words are the
 		// same width: no row's keys move.
-		keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · s summary · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · s summary · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
 	if m.archiveView && m.level < levelReader && !m.showHelp && !m.searching && !m.replying && !strings.Contains(keys, " · g grab") {
 		// `g` is the fleet's key and it acts in the archive too: pressed
@@ -5190,6 +5222,9 @@ func (m *Model) refusedKeys() []string {
 	if m.liveCount() == 1 && !m.archiveView {
 		refused = append(refused, "g", "x") // nothing to grab, and hiding the only session is refused
 	}
+	if m.level != levelWaypoints {
+		refused = append(refused, "s") // the summary is the legs' (#344): elsewhere the key says the way in
+	}
 	return refused
 }
 
@@ -5367,6 +5402,11 @@ func (m *Model) chapterKeyYields(whole string) bool {
 // The row this yield is handed is read wherever the key stands
 // (`chapterKeyYields`, #333, #335).
 func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
+	if m.summaryShown() {
+		// The summary's row has no chapter key and no stuck key to yield
+		// for: its order stands as ranked (#344).
+		return drops
+	}
 	order := drops
 	var head []string
 	stuck := m.stuckKeys(whole)
@@ -5914,8 +5954,8 @@ func keysActGained(was, now string, drops []string, yield string, stuck map[stri
 		if had && !in && d != yield {
 			return "" // something the row drew is gone
 		}
-		if in && !had && d != " · enter · no pane" && d != attachHint && !stuck[d] {
-			return d
+		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · s summary" && !stuck[d] {
+			return d // the summary's key takes only spare room: no yield is spent on it (#344)
 		}
 	}
 	return ""
@@ -5972,6 +6012,14 @@ func (m *Model) readerPageFits() bool {
 // pressed it, and the chapter keys outlast it. A chapter note keeps the
 // chapter keys over everything; `? help` goes last of all.
 func (m *Model) shedOrder(chapter bool) []string {
+	if m.summaryShown() {
+		// The summary's row sheds like the legs' row it stands in for:
+		// the door first, the session keys, then what acts here, and the
+		// way out last of all, after the fold key the row exists for.
+		return []string{attachHint, " · h/l session", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
+			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
+			" · tab legs", " · tab lanes", " · tab trail there", " · s trail", " · esc trail", " · space open", " · space close", "j/k rows · "}
+	}
 	// First to go first. What every level shares — the attach hint, `a
 	// ask`, the between-sessions keys — goes before anything a level owns,
 	// and every level keeps its own keys longest: the chapter keys are the
@@ -5992,6 +6040,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// above matches nothing — the head form #56 gave the attach key and
 	// #200 gave `space unfold`.
 	order := []string{attachHint, " · ctrl+d/u half page", "ctrl+d/u half page · "}
+	if m.level == levelWaypoints {
+		// The summary's key takes only spare room: it goes before the
+		// page key and the door, which a row of the legs owes (#344).
+		order = append([]string{" · s summary"}, order...)
+	}
 	// The archive door yields to every key that acts (#328): with a fleet
 	// it sheds second, right behind the page key and before anything else
 	// on the row — and it goes after the keys that take only spare room

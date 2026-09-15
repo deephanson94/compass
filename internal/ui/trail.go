@@ -1863,8 +1863,14 @@ func (m *Model) trailColumn(w, h int) []string {
 		rows = m.sessionCard(w)
 	}
 	droppedTag := false
+	draw := func(h int) []string {
+		if m.summaryShown() {
+			return m.summaryLines(w, h) // the summary where the trail was (#344)
+		}
+		return trailRows(m.trail, m.trailOpts(w, h))
+	}
 	if h > len(rows) {
-		body := trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+		body := draw(h - len(rows))
 		if m.sessionView() && len(rows) > 2 {
 			// The count and the look are the trail's own read-line's, a
 			// few rows below in this same column: they go whether or not
@@ -1874,7 +1880,7 @@ func (m *Model) trailColumn(w, h int) []string {
 			if left, over := countLessBeside(rows[2], body); over {
 				if strings.TrimSpace(left) == "" {
 					rows = rows[:2]
-					body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+					body = draw(h - len(rows))
 				} else if left != strings.TrimSpace(ansi.Strip(rows[2])) {
 					rows[2] = "    " + dimStyle.Render(left)
 				}
@@ -1889,7 +1895,7 @@ func (m *Model) trailColumn(w, h int) []string {
 			cardKeepsOnlyItsTag(probe)
 			if left, said := m.tagTheHeaderSays(probe[1]); said && left == "" {
 				rows = append(rows[:1:1], rows[2:]...)
-				body = trailRows(m.trail, m.trailOpts(w, h-len(rows)))
+				body = draw(h - len(rows))
 				droppedTag = true
 			} else if said {
 				// The row keeps its trace and sheds the tag beside it: the
@@ -1979,10 +1985,13 @@ func (m *Model) sessionCard(w int) []string {
 	if m.level >= levelReader {
 		right = ""
 	}
-	if n := m.legsAbove(); n > 0 {
+	if m.summaryShown() {
+		right = "[summary]" // the legs counted, not walked (#344)
+	}
+	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
-	if !m.trailPinned {
+	if !m.trailPinned && !m.summaryShown() {
 		right = strings.TrimSpace("↓ G  " + right)
 	}
 	body := w - 1
@@ -2378,6 +2387,9 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 		// the row is the session, and read wrong on a panel titled
 		// TRAIL (#20, #64).
 		level = "[legs]"
+		if m.summaryShown() {
+			level = "[summary]" // the legs counted, not walked (#344)
+		}
 	}
 	// Scrolled off the present, the title says so: the trail is no longer
 	// showing the newest work, and `G` is the way back to it.
@@ -2385,10 +2397,10 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 	// day above the fold, "↓ G" when scrolled off the present — both,
 	// because the hunt for an hour is exactly when the count matters.
 	right := level
-	if n := m.legsAbove(); n > 0 {
+	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
-	if !m.trailPinned {
+	if !m.trailPinned && !m.summaryShown() {
 		right = strings.TrimSpace("↓ G  " + right)
 	}
 	mark := m.titleMark(panelTrail)

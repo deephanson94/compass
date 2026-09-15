@@ -208,6 +208,7 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
+| `s` | on a session's legs, the summary: the legs counted by class (`build 32 legs`, `test 32 legs · 10✗`, the lanes last). `space` opens a class into its legs, oldest first, one line each; `tab` on a leg is the trail with the cursor there; `s` or `esc` is the trail again |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `/` | on the board, the list or the archive: search the fleet — name, opening prompt, branch, any prompt, a leg, a file a leg touched. The header says `/query · 3 of 40`; `esc` clears it |
