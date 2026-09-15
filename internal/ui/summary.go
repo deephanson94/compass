@@ -532,6 +532,36 @@ func (m *Model) summaryLines(w, h int) []string {
 	}
 	top, head, more := summaryWindow(len(lines), h, m.summaryCursor, m.summaryScroll)
 	m.summaryScroll = top
+	// An open class row yields its `for Nm` to HEAD's own row beneath
+	// (#351) — but only where the window draws that row: a clause stands
+	// down where the frame says it, as the red count does (#349, #352).
+	first, last := top, min(top+h, len(lines))
+	if head {
+		first++
+	}
+	if more {
+		last--
+	}
+	for i := first; i < last && i < len(rows); i++ {
+		r := rows[i]
+		if r.kind != "class" || !m.summaryOpen[r.key] {
+			continue
+		}
+		drawn := false
+		for j := i + 1; j < len(rows) && rows[j].key == r.key && rows[j].kind != "class"; j++ {
+			if rows[j].kind == "leg" && m.trail.Legs[rows[j].leg].Current && j >= first && j < last {
+				drawn = true
+			}
+		}
+		if drawn {
+			continue
+		}
+		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), false, w)
+		if i == m.summaryCursor {
+			text = summaryCursored(text, w)
+		}
+		lines[i] = text
+	}
 	body := make([]string, 0, h)
 	if head {
 		body = append(body, dimStyle.Render(shedClauses(summaryAbove(rows, top+1), w)))
@@ -584,12 +614,12 @@ func summaryBelow(rows []summaryRow, from int) string {
 		return ""
 	}
 	if rest[0].kind == "wait" {
-		return "▾ the wait on you"
+		return "▾ the wait"
 	}
 	if rest[0].group() || rest[0].solo {
 		out := "▾ " + summaryGroups(len(summaryGroupsIn(rest))) + " below"
 		if rest[len(rest)-1].kind == "wait" {
-			out += " · the wait on you"
+			out += " · the wait" // the row beneath says whose (#352)
 		}
 		return out
 	}
@@ -607,7 +637,7 @@ func summaryBelow(rows []summaryRow, from int) string {
 		out += " · " + summaryGroups(groups)
 	}
 	if rest[len(rest)-1].kind == "wait" {
-		out += " · the wait on you"
+		out += " · the wait"
 	}
 	return out
 }

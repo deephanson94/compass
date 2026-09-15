@@ -1754,7 +1754,7 @@ func TestTheEdgeRowShedsWholeClauses(t *testing.T) {
 	pressKey(wide, "space")
 	found := false
 	for _, r := range summaryFrameRows(wide) {
-		if cell := summaryTrailCell(wide, r); strings.Contains(cell, "▾ ") && strings.Contains(cell, "the wait on you") {
+		if cell := summaryTrailCell(wide, r); strings.Contains(cell, "▾ ") && strings.Contains(cell, "· the wait") {
 			found = true
 		}
 	}
@@ -1816,5 +1816,40 @@ func TestAFindingIsHungWhole(t *testing.T) {
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "should cache") || !strings.Contains(view, "└ it") || strings.Contains(view, "re-ran the same setup; t…") {
 		t.Errorf("a finding is cut where the trail spells it whole (#351):\n%s", view)
+	}
+}
+
+// The panel's seventh pass, folded (#352).
+
+func TestTheOpenClassKeepsItsClockWhereHeadsRowIsBelowTheFold(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 80, 24)
+	press(m, "s")
+	press(m, "j") // design, the running class
+	pressKey(m, "space")
+	rows := summaryFrameRows(m)
+	class, present := "", false
+	for _, r := range rows {
+		cell := summaryTrailCell(m, r)
+		switch {
+		case strings.Contains(cell, "design 16 legs"):
+			class = strings.TrimSpace(cell)
+		case strings.Contains(cell, "● design ") && strings.Contains(cell, "for "):
+			present = true
+		}
+	}
+	if class == "" {
+		t.Fatalf("no design class row on the frame:\n%s", strings.Join(rows, "\n"))
+	}
+	if present == strings.Contains(class, "· for ") {
+		t.Errorf("the present should be on the frame exactly once — the class row's clause where HEAD's own row is below the fold (#352): row %q, HEAD's row drawn %v\n%s", class, present, strings.Join(rows, "\n"))
+	}
+	// At 80 the edge's word for the wait fits whole.
+	pressKey(m, "space")
+	pressKey(m, "space")
+	for _, r := range summaryFrameRows(m) {
+		if cell := summaryTrailCell(m, r); strings.Contains(cell, "▾ ") && strings.Contains(cell, "…") {
+			t.Errorf("the edge row is cut inside a clause: %q", strings.TrimSpace(cell))
+		}
 	}
 }
