@@ -110,8 +110,11 @@ func TestHidingAWaitingSessionSticks(t *testing.T) {
 	if m.hidden[sessionKey("s-api")] {
 		t.Errorf("x hid the session that is asking you now")
 	}
-	if !strings.Contains(m.note, "it is asking") {
-		t.Errorf("note = %q, want the refusal for a live alarm", m.note)
+	if !strings.Contains(m.note, "stays · asked ") {
+		t.Errorf("note = %q, want a refusal that says what makes this row different: when it asked", m.note)
+	}
+	if strings.Contains(m.note, "it is asking") {
+		t.Errorf("note = %q names the property both kinds of row share", m.note)
 	}
 }
 
@@ -129,8 +132,8 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 	if m.hidden[sessionKey("s-api")] || m.hidden[sessionKey("s-etl")] {
 		t.Errorf("X took a session that is not waiting on an old question")
 	}
-	if !strings.Contains(m.note, "▲2 hidden · A, then x") {
-		t.Errorf("note = %q, want the count in the glyph the rows wear and the route back", m.note)
+	if !strings.Contains(m.note, "hid 2 unanswered · A, then x") {
+		t.Errorf("note = %q, want the count in the word the rows wear and the route back", m.note)
 	}
 	if strings.Contains(m.note, "waiting") {
 		t.Errorf("note = %q: the deck says `unanswered` of these rows, and the trail owns `waiting`", m.note)
@@ -183,8 +186,8 @@ func TestTheSweepLeavesOneQuestionStanding(t *testing.T) {
 	if !strings.Contains(m.note, "infra stays") {
 		t.Errorf("note = %q, want the name of the row that stayed", m.note)
 	}
-	if !strings.Contains(m.note, "▲1 hidden") {
-		t.Errorf("note = %q, want the count in the glyph the rows wear", m.note)
+	if !strings.Contains(m.note, "hid 1 unanswered") {
+		t.Errorf("note = %q, want the count in the word the rows wear", m.note)
 	}
 }
 

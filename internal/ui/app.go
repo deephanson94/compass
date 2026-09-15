@@ -2154,12 +2154,14 @@ func (m *Model) sweepWaiting() {
 	// down one at a time with `x` included (round 59); it says `A, then x`
 	// now, which is the grammar the hide note beside it already uses and a
 	// promise the archive keeps (round 60).
-	// The glyph says which rows: `▲3 hidden` is seven cells cheaper than
-	// the word and buys back the clause that names the way home at eighty,
-	// where the longer form shed it (round 61).
-	m.note = fmt.Sprintf("%s%d hidden · A, then x", fleet.GlyphNeedsYou, len(keys))
+	// The word the rows wear, in the cells the old one spent: `2 unanswered
+	// hidden` is three cells longer and sheds `/ search` at 120, and the
+	// verb-first form is not — it is what the deck says about these rows
+	// everywhere else, and a note that answered `X` in a word the board no
+	// longer uses left the person to bridge the two (round 61).
+	m.note = fmt.Sprintf("hid %d unanswered · A, then x", len(keys))
 	if stayed != "" {
-		m.note = fmt.Sprintf("%s%d hidden · %s stays", fleet.GlyphNeedsYou, len(keys), stayed)
+		m.note = fmt.Sprintf("hid %d unanswered · %s stays", len(keys), stayed)
 	}
 	if order := m.viewOrder(); len(order) > 0 {
 		if m.hidden[m.selectedKey] {
@@ -2365,7 +2367,12 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		// The refusal is about an alarm you are in the middle of. A
 		// question nothing has moved on since you walked away is the one
 		// `x` is for: it is the pile this key exists to keep down (#344).
-		return name + " stays · it is asking"
+		//
+		// It says when, not what: `it is asking` is true of the rows this
+		// key does take as well, so the sentence named the property both
+		// sides share and explained nothing. The clock is the difference
+		// (round 61), and it costs the same cells.
+		return name + " stays · asked " + m.age(headSince(s)) + " ago"
 	case s.Snap.State == state.Stuck:
 		return name + " stays · it hangs"
 	case m.isCircling(s):

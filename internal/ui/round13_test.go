@@ -212,7 +212,10 @@ func TestHidingIsHonest(t *testing.T) {
 	infra := sessionKey("s-infra")
 	m.point(infra)
 	press(m, "x")
-	if m.hidden[infra] || !strings.Contains(m.note, "stays · it is asking") || m.selectedKey != infra {
+	// Round 61 gave the refusal the clock instead of the property both
+	// kinds of amber row share; it is the same refusal, and it still
+	// refuses.
+	if m.hidden[infra] || !strings.Contains(m.note, "stays · asked ") || m.selectedKey != infra {
 		t.Errorf("x on a question: hidden %v, note %q, selected %q", m.hidden[infra], m.note, m.selectedKey)
 	}
 	if strings.Contains(ansi.Strip(m.View()), "x unhide") {

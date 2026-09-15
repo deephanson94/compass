@@ -1160,13 +1160,16 @@ func TestTheHideKeyYieldsWhereItCannotHide(t *testing.T) {
 		refusal string
 		gained  string
 	}{
-		{"two-tools", sceneTwoTools, 80, 24, 0, "infra stays · it is asking", "g grab"},
-		{"two-tools", sceneTwoTools, 100, 30, 0, "infra stays · it is asking", "a ask"},
-		{"two-tools", sceneTwoTools, 120, 34, 2, "infra stays · it is asking", "/ search"},
-		{"alarm-storm", sceneAlarmStorm, 120, 34, 2, "infra stays · it is asking", "/ search"},
+		{"two-tools", sceneTwoTools, 80, 24, 0, "infra stays · asked ", "g grab"},
+		{"two-tools", sceneTwoTools, 100, 30, 0, "infra stays · asked ", "a ask"},
+		{"two-tools", sceneTwoTools, 120, 34, 2, "infra stays · asked ", "/ search"},
+		{"alarm-storm", sceneAlarmStorm, 120, 34, 2, "infra stays · asked ", "/ search"},
 	} {
-		if note := at(c.scene(), c.w, c.h, c.n, "x").note; note != c.refusal {
-			t.Fatalf("%s %dx%d: `x` was expected to refuse with %q, it said %q", c.name, c.w, c.h, c.refusal, note)
+		// The refusal's tail is the clock (round 61), so the stand is
+		// pinned on the sentence it opens with rather than on a minute
+		// that moves with the fixture.
+		if note := at(c.scene(), c.w, c.h, c.n, "x").note; !strings.HasPrefix(note, c.refusal) {
+			t.Fatalf("%s %dx%d: `x` was expected to refuse with %q…, it said %q", c.name, c.w, c.h, c.refusal, note)
 		}
 		f := foot(at(c.scene(), c.w, c.h, c.n))
 		if strings.Contains(f, "x hide") {
