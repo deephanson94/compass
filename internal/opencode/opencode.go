@@ -79,6 +79,10 @@ type Store struct {
 	path string
 	db   *sql.DB
 	mu   sync.Mutex
+
+	// asks is the ask door's answer per session, against the clock the
+	// store stamps the session with (asked.go).
+	asks map[string]askCache
 }
 
 // Open opens the store read-only. A missing file is an error: the caller
@@ -140,14 +144,19 @@ func (s *Store) Infos() ([]fleet.SessionInfo, error) {
 		return nil, err
 	}
 	out := make([]fleet.SessionInfo, 0, len(sessions))
+	live := make(map[string]bool, len(sessions))
 	for _, in := range sessions {
+		live[in.ID] = true
+		asked, at := s.asked(in)
 		out = append(out, fleet.SessionInfo{
 			ID: in.ID, TranscriptPath: in.Key(), ProjectSlug: Scheme,
 			CWD: in.Directory, OriginCWD: in.Directory, Title: titleOf(in.Title),
 			StartedAt: in.Created, LastEventAt: in.Updated,
 			Tool: Tool, Model: in.Model,
+			Asked: asked, AskedAt: at,
 		})
 	}
+	s.keepAsks(live)
 	return out, nil
 }
 
@@ -455,6 +464,21 @@ func toolInput(raw json.RawMessage) json.RawMessage {
 	if fp, ok := m["filePath"]; ok {
 		if _, has := m["file_path"]; !has {
 			m["file_path"] = fp
+		}
+	}
+	// The question tool asks one question where Claude Code's takes a list,
+	// and the row prints the question, not the tool's name: without this the
+	// one call this store's ask door turns on draws "AskUserQuestion" where
+	// the words go.
+	if q, ok := m["question"]; ok {
+		if _, has := m["questions"]; !has {
+			one := map[string]json.RawMessage{"question": q}
+			if opts, ok := m["options"]; ok {
+				one["options"] = opts
+			}
+			if raw, err := json.Marshal([]any{one}); err == nil {
+				m["questions"] = raw
+			}
 		}
 	}
 	out, err := json.Marshal(m)

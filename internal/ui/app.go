@@ -2114,12 +2114,18 @@ func (m *Model) sweepWaiting() {
 		m.note = "nothing is waiting on an old question"
 		return
 	}
-	stayed := false
+	stayed := ""
 	if m.liveCount()-len(keys) < 1 {
 		// The last row on the board is not a pile. What stays is the row
 		// the board draws first — the question that has waited longest,
-		// which is the one it puts first for the same reason.
-		keys, stayed = keys[1:], true
+		// which is the one it puts first for the same reason — and the
+		// note names it, as every other refusal on this key does.
+		if s, ok := m.session(keys[0]); ok {
+			stayed = sessionName(s.Info)
+		} else {
+			stayed = "one"
+		}
+		keys = keys[1:]
 	}
 	if len(keys) == 0 {
 		m.note = "the live one stays" // the sentence `x` gives for the same rule
@@ -2129,9 +2135,13 @@ func (m *Model) sweepWaiting() {
 		m.hidden[key] = true
 	}
 	m.saveHidden()
-	m.note = fmt.Sprintf("%d waiting hidden · A, then X", len(keys))
-	if stayed {
-		m.note = fmt.Sprintf("%d waiting hidden · one stays", len(keys))
+	// The route back is `A`, and the archive's own group header names the
+	// keys there: the note promised `A, then X` as this key's undo, and `X`
+	// there brings back everything hidden, the rows put down one at a time
+	// with `x` included (round 59).
+	m.note = fmt.Sprintf("%d waiting hidden · A lists them", len(keys))
+	if stayed != "" {
+		m.note = fmt.Sprintf("%d waiting hidden · %s stays", len(keys), stayed)
 	}
 	if order := m.viewOrder(); len(order) > 0 {
 		if m.hidden[m.selectedKey] {
@@ -2947,7 +2957,10 @@ func (m *Model) grabNeedsYou(waiting bool) bool {
 func (m *Model) needsYouCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if m.onBoard(s) && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+		// A tab bar badge is read from across the room and acted on: the
+		// questions you walked away from are not what it is for, and they
+		// have the header's own chip (round 59).
+		if m.onBoard(s) && !s.Waiting && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
 			n++
 		}
 	}
@@ -3831,11 +3844,23 @@ func (m *Model) statusChips() string {
 	counts := map[state.State]int{}
 	oldest := map[state.State]time.Time{}
 	loops, dead, loopSince, deadSince, deadWord := 0, 0, time.Time{}, time.Time{}, ""
+	waits, waitSince := 0, time.Time{}
 	for _, s := range m.sessions {
 		if !m.onBoard(s) {
 			continue
 		}
 		switch {
+		case s.Waiting:
+			// A question you walked away from is not an alarm of the
+			// moment, and a chip that counted it as one made four alarms
+			// out of one: the panel walked `▲4 9d` down to `▲1 6m` with
+			// four keypresses that answered nothing (round 59). It keeps
+			// its own chip, in the form the quota deaths wear.
+			waits++
+			if waitSince.IsZero() || headSince(s).Before(waitSince) {
+				waitSince = headSince(s)
+			}
+			continue
 		case s.Snap.APIError:
 			dead++
 			if deadSince.IsZero() || headSince(s).Before(deadSince) {
@@ -3879,6 +3904,12 @@ func (m *Model) statusChips() string {
 	}
 	if dead > 0 {
 		parts = append(parts, needsYouStyle.Render(fmt.Sprintf("%s%d %s %s", glyphAPIError, dead, deadWord, m.age(deadSince))))
+	}
+	if waits > 0 {
+		// Dim, where the alarms are warm: the glyph says what it is, the
+		// word says it is not today's, and the age is the oldest question
+		// on the board — the number `X` clears in one key.
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("%s%d waiting %s", fleet.GlyphNeedsYou, waits, m.age(waitSince))))
 	}
 	for _, st := range []state.State{state.Working, state.Idle} {
 		if n := counts[st]; n > 0 {
@@ -3966,7 +3997,7 @@ func (m *Model) statusChips() string {
 	if unread > 0 {
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("%d unread", unread)))
 	}
-	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && dead == 0 && out == 0 && owed == 0 && unread == 0 && !m.archiveView {
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && dead == 0 && waits == 0 && out == 0 && owed == 0 && unread == 0 && !m.archiveView {
 		// Calm, said aloud: the absence of a warm glyph is the design, and
 		// in monochrome an absence is also what a clipped header looks like.
 		parts = append(parts, dimStyle.Render("all calm"))

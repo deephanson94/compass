@@ -48,13 +48,30 @@ Rules:
    harness's own turns settle nothing, and a refused call is not a question.
    The door clears itself — reply, and the last word is yours.
 
+   The walk reads a file that has gone quiet whole, and gives one window to
+   a file still being written — that one is live on the recency door whatever
+   the walk decides (#345). A message decides as a whole, not by its first
+   block: an unanswered `AskUserQuestion` anywhere in it opens the door, any
+   other call still out is work in flight, and a turn whose calls all came
+   back is one the model is still in the middle of. A subagent's lines never
+   open the door and any of them closes it, which is how the machine reads
+   them too. The invariant that falls out, and is pinned: **`Waiting` implies
+   needs-you.**
+
    Such a session is flagged `Waiting` when nothing else would have kept it:
    no pane, outside the window. `Waiting` is the fleet's word for "you walked
-   away from this one", and it sorts under the live alarms (needs-you, stuck)
-   and over the work in flight. `StatusLine` leaves it out: the bar answers
-   "is anything happening", and a question from last week is not. The board
-   ranks it the same way, lets `x` put it down for good, and sweeps the pile
-   with `X` (docs/SPEC.md #344).
+   away from this one", and it sorts under everything happening today — the
+   live alarms and the work in flight — and over what is merely idle (#345:
+   an archive where one session in four ends on a question would otherwise
+   take every column the board has). `StatusLine` leaves it out: the bar
+   answers "is anything happening", and a question from last week is not. The
+   board ranks it the same way, says `waiting 9d` on its row, counts it in a
+   chip of its own rather than among the alarms, lets `x` put it down for
+   good, and sweeps the pile with `X` (docs/SPEC.md #344, #345).
+
+   The other store answers the same question of its own rows
+   (`internal/opencode/asked.go`): one fleet, one rule, or "waiting" means
+   two things in one list.
 2. Only live sessions are tailed and state-machined per Refresh. An archived
    session's Snap is always `{Idle, Since: LastEventAt, Reason: "archived",
    Activity: "idle"}` — the archive can never be amber, so `g` and the

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -64,13 +65,14 @@ func orderedNames(m *Model) []string {
 	return out
 }
 
-// The board keeps the question and ranks it honestly: under the session
-// asking you now, over the one that is working. Two sessions waiting sort
+// The board keeps the question and ranks it honestly: under everything
+// happening today — the session asking you now and the one that is working
+// — and over what is merely done. Two sessions waiting sort
 // oldest-question-first, as every other alarm does.
 func TestAWaitingSessionKeepsItsColumnUnderTodaysAlarms(t *testing.T) {
 	m := r59Model(t)
-	if got, want := strings.Join(orderedNames(m), ","), "api,infra,docs,etl"; got != want {
-		t.Fatalf("board order = %s, want %s — the waiting go under the live alarm and over the work", got, want)
+	if got, want := strings.Join(orderedNames(m), ","), "api,etl,infra,docs"; got != want {
+		t.Fatalf("board order = %s, want %s — the waiting go under today's alarm and today's work", got, want)
 	}
 	view := ansi.Strip(m.View())
 	for _, name := range []string{"docs", "infra"} {
@@ -126,8 +128,11 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 	if m.hidden[sessionKey("s-api")] || m.hidden[sessionKey("s-etl")] {
 		t.Errorf("X took a session that is not waiting on an old question")
 	}
-	if !strings.Contains(m.note, "2 waiting hidden") {
-		t.Errorf("note = %q, want the count it hid", m.note)
+	if !strings.Contains(m.note, "2 waiting hidden · A lists them") {
+		t.Errorf("note = %q, want the count and the route back", m.note)
+	}
+	if strings.Contains(m.note, "then X") {
+		t.Errorf("note = %q promises an undo X does not keep: it brings back every hidden row", m.note)
 	}
 	if got, want := strings.Join(orderedNames(m), ","), "api,etl"; got != want {
 		t.Fatalf("board order = %s, want %s", got, want)
@@ -171,8 +176,8 @@ func TestTheSweepLeavesOneQuestionStanding(t *testing.T) {
 	if !m.hidden[sessionKey("s-docs")] {
 		t.Errorf("the sweep took nothing: note %q", m.note)
 	}
-	if !strings.Contains(m.note, "one stays") {
-		t.Errorf("note = %q, want the sentence that says one stayed", m.note)
+	if !strings.Contains(m.note, "infra stays") {
+		t.Errorf("note = %q, want the name of the row that stayed", m.note)
 	}
 }
 
@@ -205,5 +210,176 @@ func TestTheGrabTakesTodaysQuestionBeforeTheOldOnes(t *testing.T) {
 	}
 	if got := sessionName(m.sessions[m.selectedIndex()].Info); got != "docs" {
 		t.Errorf("g grabbed %q, want the question still on the board", got)
+	}
+}
+
+// ---- the panel's round-59 folds ----
+
+// THE ONE THING, named by two reviewers independently: the header counted
+// the pile as alarms. `▲4 9d` stood on every frame where one session was
+// asking, six minutes in, and three were a dismissible pile — and four
+// keypresses that answered nothing walked it down to `▲1 6m`. The pile
+// keeps its own chip, in the form the quota deaths wear.
+func TestTheHeaderCountsTodaysAlarmsApartFromThePile(t *testing.T) {
+	m := r59Model(t)
+	chips := ansi.Strip(m.statusChips())
+	if !strings.Contains(chips, "▲1 4m") {
+		t.Errorf("chips = %q, want one alarm of the moment with its own wait", chips)
+	}
+	if !strings.Contains(chips, "▲2 waiting 3d") {
+		t.Errorf("chips = %q, want the pile counted apart, in its own words, at the oldest question's age", chips)
+	}
+	if strings.Contains(chips, "▲3") || strings.Contains(chips, "▲4") {
+		t.Errorf("chips = %q: the pile is still being counted as alarms", chips)
+	}
+	// And the tab title, which is read from across the room, says the same.
+	if got := m.needsYouCount(); got != 1 {
+		t.Errorf("needsYouCount = %d, want 1 — the badge is today's alarms", got)
+	}
+}
+
+// A board of nothing but questions from other days is not "all calm", and
+// it is not an alarm either: the chip says what it is, and the word that
+// would contradict it is gone.
+func TestABoardOfOnlyWaitingIsNeitherCalmNorAnAlarm(t *testing.T) {
+	forceASCII(t)
+	m := New(nil)
+	m.Update(tea.WindowSizeMsg{Width: 152, Height: 40})
+	only := []fleet.Session{
+		waiting("s-docs", "docs", "rewrite the install guide", fixtureBase.Add(-26*time.Hour)),
+		waiting("s-infra", "infra", "split the vpc module", fixtureBase.Add(-3*24*time.Hour)),
+	}
+	fleet.SortFleet(only)
+	m.Update(fleetMsg{sessions: only, at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
+	chips := ansi.Strip(m.statusChips())
+	if !strings.Contains(chips, "▲2 waiting 3d") {
+		t.Errorf("chips = %q, want the pile's own chip", chips)
+	}
+	if strings.Contains(chips, "all calm") {
+		t.Errorf("chips = %q: `all calm` beside two unanswered questions is the header contradicting itself", chips)
+	}
+}
+
+// The wall the fleet-hygiene reviewer measured: an archive where one
+// session in four ended on a question comes back as ten amber rows on a
+// 24-row terminal, with the one session that is working scrolled off. The
+// pile never takes the columns of what is happening today.
+func TestThePileNeverTakesTheColumnsOfTodaysWork(t *testing.T) {
+	forceASCII(t)
+	m := New(nil)
+	m.Update(tea.WindowSizeMsg{Width: 152, Height: 40})
+	ss := []fleet.Session{sess("s-etl", "etl", "/home/user/etl", "main", "dedupe the nightly load",
+		state.Working, fixtureBase.Add(-20*time.Minute), journey.Build, "", "tool call in flight", "thinking…")}
+	for i := 0; i < 12; i++ {
+		ss = append(ss, waiting(fmt.Sprintf("s-old%02d", i), fmt.Sprintf("old%02d", i),
+			"a question from another day", fixtureBase.Add(-time.Duration(i+2)*24*time.Hour)))
+	}
+	fleet.SortFleet(ss)
+	m.Update(fleetMsg{sessions: ss, at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
+
+	order := orderedNames(m)
+	if len(order) == 0 || order[0] != "etl" {
+		t.Fatalf("board order = %v, want the working session first: twelve old questions took the board", order)
+	}
+	n, _ := boardColumns(m.width-2*edgePad, len(order))
+	keys := m.boardKeys(n)
+	if len(keys) == 0 || keys[0] != sessionKey("s-etl") {
+		t.Errorf("the first column is %v, want the session that is working", keys)
+	}
+}
+
+// A row held by an old question says so. Four rows reading `▲ needs you`
+// where one was asked six minutes ago and three days ago told the person
+// nothing about which was which.
+func TestAWaitingRowSaysItIsWaiting(t *testing.T) {
+	m := r59Model(t)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "waiting") {
+		t.Fatalf("no row says it is waiting:\n%s", view)
+	}
+	for _, s := range m.sessions {
+		got := headline(s)
+		want := "needs you"
+		if s.Waiting {
+			want = "waiting"
+		}
+		if s.Snap.State == state.Working {
+			want = ""
+		}
+		if got != want {
+			t.Errorf("%s: headline = %q, want %q", sessionName(s.Info), got, want)
+		}
+	}
+}
+
+// The group that holds the whole pile wears its alarm, like every other
+// group — and with the echo comes the clock's silence: the header over a
+// three-day-old question was reporting the group's newest row.
+func TestTheGroupHoldingThePileWearsItsMark(t *testing.T) {
+	forceASCII(t)
+	m := New(nil)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.Update(fleetMsg{sessions: r59Fleet(), at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
+	var pile fleetGroup
+	for _, g := range m.liveGroups() {
+		if g.name == "elsewhere" {
+			pile = g
+		}
+	}
+	if len(pile.entries) == 0 {
+		t.Fatalf("no elsewhere group: the paneless questions are grouped somewhere else")
+	}
+	if got := m.groupEcho(pile); got != fleet.GlyphNeedsYou {
+		t.Errorf("the group holding every unanswered question echoes %q, want %q", got, fleet.GlyphNeedsYou)
+	}
+}
+
+// The key this round added is named at every width. The narrow help — the
+// width the dogfood happened at — carried `x / A` and nothing else, so `X`
+// was learnable only by pressing it.
+func TestTheNarrowHelpNamesTheSweep(t *testing.T) {
+	forceASCII(t)
+	for _, w := range []int{80, 100, 120, 152, 220} {
+		lines := helpLinesWith(w, 40, helpOpts{board: w >= 120})
+		found := false
+		for _, l := range lines {
+			if strings.Contains(ansi.Strip(l), "X") && strings.Contains(ansi.Strip(l), "hide a session") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%d columns: the help never names X:\n%s", w, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// And the row that teaches `g` says what `g` now does: it steps over a
+// nine-day-old question to take the one asked six minutes ago.
+func TestTheHelpRowForTheGrabSaysWhichQuestionItTakes(t *testing.T) {
+	forceASCII(t)
+	lines := helpLinesWith(152, 40, helpOpts{board: true})
+	row := ""
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(ansi.Strip(l)), "g ") {
+			row = ansi.Strip(l)
+		}
+	}
+	if row == "" {
+		t.Fatalf("no help row for g:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(row, "the oldest") {
+		t.Errorf("row = %q: `g` takes today's question first, not the oldest", row)
+	}
+	if !strings.Contains(row, "today's question first") {
+		t.Errorf("row = %q, want the row to say which question g takes", row)
+	}
+}
+
+// The archive's own header names both keys, because `X` there brings back
+// everything hidden — the rows put down one at a time with `x` included.
+// The board's note no longer promises that undo.
+func TestTheArchiveNamesTheKeyThatBringsThemAllBack(t *testing.T) {
+	if !strings.Contains(hiddenGroup, "x brings one back") || !strings.Contains(hiddenGroup, "X all") {
+		t.Errorf("the hidden group's header = %q, want both keys named where they are pressed", hiddenGroup)
 	}
 }

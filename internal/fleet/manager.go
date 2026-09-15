@@ -220,9 +220,9 @@ func normalizeDir(path string) string {
 
 // Refresh re-discovers sessions, polls each live tailer, feeds the machines and
 // returns the fleet in display order: the live block first — needs-you (longest
-// waiting first), stuck (longest first), the questions walked away from
-// (longest first), working (most recent activity first), idle (most recent
-// first) — then the archive, newest last event first.
+// waiting first), stuck (longest first), working (most recent activity first),
+// the questions walked away from (longest first), idle (most recent first) —
+// then the archive, newest last event first.
 //
 // Only live sessions are tailed and state-machined. The archive is real and
 // readable but it can never be amber, which is what keeps `g` and the attention
@@ -237,7 +237,10 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	if m.cache == nil {
 		m.cache = m.resume.seed()
 	}
-	infos, cache, err := scanProjects(m.root, m.cache)
+	// The scan reads the whole tail of a file that has gone quiet, looking
+	// for the question that would keep it live; a file still moving gets one
+	// window, since the recency door already has it (#344, round 59).
+	infos, cache, err := scanProjects(m.root, m.cache, now.Add(-m.liveWindow))
 	if err != nil {
 		return nil, err
 	}
@@ -477,13 +480,13 @@ func rank(s state.State) int {
 	}
 }
 
-// rankWaiting is where a session held open by an old question of yours sorts:
-// under the alarms of the moment, over the work in flight. It is still amber
-// and `g` still reaches it, but a session asking you now is asked first
-// (#344).
+// rankWaiting is where a session held open by an old question of yours
+// sorts: under everything happening today, over what is merely idle. It is
+// still amber and `g` still reaches it, but neither an alarm of the moment
+// nor the work in flight gives up its place to it (#344, round 59).
 const (
-	rankWaiting     = 2
-	rankLiveWorking = 3
+	rankLiveWorking = 2
+	rankWaiting     = 3
 	rankLiveIdle    = 4
 )
 
@@ -497,9 +500,9 @@ func fleetRank(s Session) int {
 }
 
 // SortFleet orders sessions the way the fleet shows them — needs-you longest
-// wait first, then stuck, then the questions left behind (longest wait first
-// too), then working and idle newest first — for a harness that builds a
-// fleet by hand and wants it in the order Refresh would return.
+// wait first, then stuck, then working newest first, then the questions left
+// behind (longest wait first), then idle — for a harness that builds a fleet
+// by hand and wants it in the order Refresh would return.
 func SortFleet(ss []Session) { sortFleet(ss) }
 
 func sortFleet(ss []Session) {
@@ -509,7 +512,7 @@ func sortFleet(ss []Session) {
 		if ra != rb {
 			return ra < rb
 		}
-		if ra <= rankWaiting {
+		if ra <= 1 || ra == rankWaiting {
 			// Waiting states: the longest wait rises to the top.
 			if !a.Snap.Since.Equal(b.Snap.Since) {
 				return a.Snap.Since.Before(b.Snap.Since)

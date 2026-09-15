@@ -69,6 +69,54 @@ func (b *transcriptBuilder) sidechainPrompt(ts time.Time, text string) *transcri
 	return b.add(o)
 }
 
+// sidechainText is a subagent's own words — its answer, or its own
+// question, which is the lead's to answer and never yours.
+func (b *transcriptBuilder) sidechainText(ts time.Time, text string) *transcriptBuilder {
+	o := b.common(ts)
+	o["type"] = "assistant"
+	o["isSidechain"] = true
+	o["message"] = map[string]any{
+		"role": "assistant", "model": "claude-fable-5", "type": "message",
+		"content":     []any{map[string]any{"type": "text", "text": text}},
+		"stop_reason": "end_turn",
+	}
+	return b.add(o)
+}
+
+// calls is one assistant message carrying several tool_use blocks, the way
+// the harness batches them: each pair is {id, name}, in the order written.
+func (b *transcriptBuilder) calls(ts time.Time, uses ...[2]string) *transcriptBuilder {
+	blocks := make([]any, 0, len(uses))
+	for _, u := range uses {
+		blocks = append(blocks, map[string]any{
+			"type": "tool_use", "id": u[0], "name": u[1], "input": map[string]any{},
+		})
+	}
+	o := b.common(ts)
+	o["type"] = "assistant"
+	o["message"] = map[string]any{
+		"role": "assistant", "model": "claude-fable-5", "type": "message",
+		"content": blocks, "stop_reason": "tool_use",
+	}
+	return b.add(o)
+}
+
+// textCalling is one assistant message that says something and calls a tool
+// in the same turn — the narration a model writes before it goes to work.
+func (b *transcriptBuilder) textCalling(ts time.Time, text, toolID, name string, input map[string]any) *transcriptBuilder {
+	o := b.common(ts)
+	o["type"] = "assistant"
+	o["message"] = map[string]any{
+		"role": "assistant", "model": "claude-fable-5", "type": "message",
+		"content": []any{
+			map[string]any{"type": "text", "text": text},
+			map[string]any{"type": "tool_use", "id": toolID, "name": name, "input": input},
+		},
+		"stop_reason": "tool_use",
+	}
+	return b.add(o)
+}
+
 // assertWaiting pins what the door is for: the session is live, it is marked
 // as waiting on you, and the verdict is the real one — read off the file, not
 // the archive's stand-in.
@@ -219,8 +267,12 @@ func TestAPaneOrTheWindowIsNotWaiting(t *testing.T) {
 	}
 }
 
-// Rule 2, the order: a question you left behind sorts under the alarms of the
-// moment and over the work in flight. `g` and the board both read this order.
+// Rule 2, the order: a question you left behind sorts under everything
+// happening today — the alarms of the moment and the work in flight — and
+// over what is merely idle. `g` and the board both read this order, and the
+// panel measured what happens when it sits higher: an archive where one
+// session in four ends on a question takes every column the board has
+// (round 59).
 func TestTheWaitingSortUnderTheLiveAlarms(t *testing.T) {
 	root := t.TempDir()
 	needsYouAt(t, root, slugAlpha, idFreshUnmapped, time.Minute)
@@ -230,7 +282,7 @@ func TestTheWaitingSortUnderTheLiveAlarms(t *testing.T) {
 	idleAt(t, root, slugBeta, idLiveIdler, 30*time.Second)
 
 	sessions := mustRefresh(t, fleet.NewManager(root), fleetNow)
-	assertOrder(t, sessions, idFreshUnmapped, idStalePane, idWaitingDay, idLiveWorker, idLiveIdler)
+	assertOrder(t, sessions, idFreshUnmapped, idStalePane, idLiveWorker, idWaitingDay, idLiveIdler)
 }
 
 // Rule 4: the off switch. "tmux panes only" is an answer to the whole
@@ -289,27 +341,132 @@ func TestASubagentInFlightIsNotAQuestion(t *testing.T) {
 	assertArchivedSnap(t, s)
 }
 
-// The walk gets the last window of the file and no more. A question buried
-// behind more than that much of a subagent's output is not one this door
-// opens for — and the bound is what keeps a session mid-Task from re-reading
-// a megabyte on every scan, which is a second-by-second cost where the door
-// is a once-a-day gain.
-func TestTheAskWalkReadsOneWindowOfTheTail(t *testing.T) {
-	root := t.TempDir()
-	askedAt := ago(30 * time.Hour)
-	b := newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
-		prompt(ago(31*time.Hour), "map the payments module").
-		text(askedAt, "Two designs fit. Which should I build?")
-	// A subagent's own conversation, wider than the window the walk reads.
-	bulk := strings.Repeat("payments ", 4096) // ~40KB a line
-	for i := 0; i < 4; i++ {
-		b = b.sidechainPrompt(ago(29*time.Hour), bulk)
+// A message decides as a whole. Claude Code batches calls, so the model
+// asking you something is written beside whatever else it dispatched, in
+// whichever order it wrote them — and the machine reads the turn, not the
+// block. A walk that settled on the first call disagreed with the machine
+// whenever the question came second (round 59).
+func TestAQuestionBesideAnotherCallOpensTheDoorInEitherOrder(t *testing.T) {
+	ask := func(t *testing.T, id string, first, second [2]string) fleet.Session {
+		t.Helper()
+		root := t.TempDir()
+		at := ago(26 * time.Hour)
+		b := newTranscript(t, id, "/home/user/alpha", "main").
+			prompt(ago(27*time.Hour), "map the payments module")
+		b.calls(at, first, second)
+		b.write(root, slugAlpha)
+		return pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), id)
 	}
-	b.write(root, slugAlpha)
+	task := [2]string{"toolu_task9", "Task"}
+	question := [2]string{"toolu_ask9", state.AskUserQuestion}
+
+	assertWaiting(t, ask(t, idAskedTool, question, task), time.Time{})
+	assertWaiting(t, ask(t, idAskedTool, task, question), time.Time{})
+}
+
+// The model's words are the last word only when nothing it dispatched came
+// back after them. A turn that said something and then called a tool whose
+// result is in the file is a turn the model is still in the middle of —
+// the machine calls that working, or hung, and the door must not call it a
+// question you owe (round 59).
+func TestAMessageWhoseCallsCameBackIsNotTheLastWord(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	newTranscript(t, idResumed, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "find the gate").
+		textCalling(at, "Which of the two files defines the gate?", "toolu_grep1", "Grep", map[string]any{"pattern": "gate"}).
+		result(at.Add(time.Second), "toolu_grep1", "gate.go:12").
+		write(root, slugAlpha)
+
+	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idResumed)
+	if s.Info.Asked {
+		t.Errorf("Info.Asked = true on narration the turn moved past: the result came after it")
+	}
+	assertArchivedSnap(t, s)
+}
+
+// A subagent writing after the question is this session being busy — the
+// machine counts those lines, and a door that read past them would call a
+// session with an agent in flight a question you owe. The subagent's own
+// question never opens the door either: that one is the lead's to answer.
+func TestASubagentWritingAfterTheQuestionClosesTheDoor(t *testing.T) {
+	root := t.TempDir()
+	newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module").
+		text(ago(26*time.Hour), "Two designs fit. Which should I build?").
+		sidechainPrompt(ago(25*time.Hour), "scout the payments module").
+		sidechainText(ago(24*time.Hour), "Should an unsigned manifest be fatal, or a warning?").
+		write(root, slugAlpha)
 
 	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingWeek)
 	if s.Info.Asked {
-		t.Errorf("Info.Asked = true: the walk read past its window")
+		t.Errorf("Info.Asked = true with a subagent still writing under the question")
 	}
-	assertArchivedSnap(t, s)
+	if s.Waiting {
+		t.Errorf("Waiting = true on a session whose agent is in flight")
+	}
+}
+
+// How far back the walk reads is decided by the clock, not by a fixed
+// window: a file that has gone quiet is one whose question is the only
+// thing that can keep it live, and the scan will not open it again until
+// it moves, so it is read whole. A file still being written gets one
+// window — the recency door already has it, so nothing is lost (round 59).
+func TestTheWalkWidensForAFileThatHasGoneQuiet(t *testing.T) {
+	// The bulk is the harness's own: a line nobody typed, which settles
+	// nothing and pushes the question out of the last window.
+	bulk := strings.Repeat("resumed. ", 12000) // ~108KB, past peekTail
+
+	t.Run("quiet: the question is found however far back it is", func(t *testing.T) {
+		root := t.TempDir()
+		askedAt := ago(26 * time.Hour)
+		newTranscript(t, idWaitingDay, "/home/user/alpha", "main").
+			prompt(ago(27*time.Hour), "review the migration plan").
+			text(askedAt, "The plan is drafted. Shall I proceed?").
+			meta(ago(25*time.Hour), bulk).
+			write(root, slugAlpha)
+
+		assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingDay), askedAt)
+	})
+
+	t.Run("still moving: one window, and the recency door has it anyway", func(t *testing.T) {
+		root := t.TempDir()
+		newTranscript(t, idWaitingDay, "/home/user/alpha", "main").
+			prompt(ago(4*time.Minute), "review the migration plan").
+			text(ago(3*time.Minute), "The plan is drafted. Shall I proceed?").
+			meta(ago(time.Minute), bulk).
+			write(root, slugAlpha)
+
+		s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingDay)
+		if s.Info.Asked {
+			t.Errorf("Info.Asked = true: a file still being written read past its window")
+		}
+		if !s.Live || s.Waiting {
+			t.Errorf("Live/Waiting = %v/%v, want live on the recency door and not waiting", s.Live, s.Waiting)
+		}
+	})
+}
+
+// The invariant the board, the ranks and the SPEC row all rest on: a
+// session the ask door keeps live is a session the machine calls needs-you.
+// Where the two could disagree, the door yields — it is the machine that
+// draws the row (round 59).
+func TestWaitingIsAlwaysNeedsYou(t *testing.T) {
+	root := t.TempDir()
+	askedQuestionAt(t, root, slugAlpha, idWaitingDay, 26*time.Hour)
+	stalledCallAt(t, root, slugAlpha, idArchQuestion, 26*time.Hour)
+	needsYouAt(t, root, slugAlpha, idFreshUnmapped, time.Minute)
+	workingAt(t, root, slugBeta, idLiveWorker, 10*time.Second)
+	newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module").
+		text(ago(26*time.Hour), "Two designs fit. Which should I build?").
+		sidechainPrompt(ago(25*time.Hour), "scout the payments module").
+		write(root, slugAlpha)
+
+	for _, s := range mustRefresh(t, fleet.NewManager(root), fleetNow) {
+		if s.Waiting && s.Snap.State != state.NeedsYou {
+			t.Errorf("%s: Waiting with state %s — the door opened on a verdict the machine does not share",
+				s.Info.ID, s.Snap.State)
+		}
+	}
 }

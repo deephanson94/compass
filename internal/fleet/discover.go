@@ -119,7 +119,7 @@ const titleMax = 80
 // Discover is uncached: its callers are one-shot. The Manager, which scans
 // every second, uses the same walk with a cache (see scanProjects).
 func Discover(root string) ([]SessionInfo, error) {
-	out, _, err := scanProjects(root, nil)
+	out, _, err := scanProjects(root, nil, time.Now().Add(-DefaultLiveWindow))
 	return out, err
 }
 
@@ -141,7 +141,7 @@ type cachedInfo struct {
 // Only discovery is cached. A live session's fresh lines still arrive through
 // its tailer, which reads the file itself — so a stale peek can never make a
 // running session look quiet.
-func scanProjects(root string, prev map[string]cachedInfo) ([]SessionInfo, map[string]cachedInfo, error) {
+func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]SessionInfo, map[string]cachedInfo, error) {
 	if root == "" {
 		return nil, nil, nil
 	}
@@ -185,7 +185,11 @@ func scanProjects(root string, prev map[string]cachedInfo) ([]SessionInfo, map[s
 				ProjectSlug:    slug.Name(),
 				LastEventAt:    fi.ModTime(), // refined to the last event time by the Manager
 			}
-			peek(&info, fi.Size())
+			// A file that has not moved since the quiet mark is one whose
+			// question is load-bearing — nothing else can keep it live,
+			// and the cache will not open it again until it moves — so its
+			// ask walk gets the whole widening (round 59).
+			peek(&info, fi.Size(), fi.ModTime().Before(quiet))
 			out = append(out, info)
 			next[path] = cachedInfo{size: fi.Size(), modTime: fi.ModTime(), info: info}
 		}
@@ -212,7 +216,7 @@ const (
 
 // peek fills a session's identity fields from its transcript. Anything it
 // cannot find stays as it was — a fleet entry is never an error.
-func peek(info *SessionInfo, size int64) {
+func peek(info *SessionInfo, size int64, wide bool) {
 	f, err := os.Open(info.TranscriptPath)
 	if err != nil {
 		return
@@ -226,7 +230,7 @@ func peek(info *SessionInfo, size int64) {
 	// writing its current cwd and branch on every event, so the tail is the
 	// only honest answer to "where is this session now". It overrides the
 	// head's, which stays as the fallback for a tail that carries neither.
-	tail := peekTailState(f, size)
+	tail := peekTailState(f, size, wide)
 	if !tail.at.IsZero() {
 		info.LastEventAt = tail.at // the mtime was only a stand-in
 	}
@@ -252,8 +256,8 @@ type tailState struct {
 	name    string
 
 	// asked is the verdict of the ask walk (seeAsk), settled is whether it
-	// has its answer — a line that settled it, or the end of the one window
-	// it is given — and answered are the tool calls
+	// has its answer — a line that settled it, or the end of what it was
+	// given to read — and answered are the tool calls
 	// whose results are already in the file — collected on the way back, so
 	// a call still out is one no result has answered.
 	asked    bool
@@ -311,7 +315,7 @@ func peekHead(f *os.File, info *SessionInfo) {
 // Sidechain lines are a subagent's own conversation, not this session
 // speaking, and while a Task is running they are the newest lines in the file.
 // Everything else that reads transcripts skips them; so does this.
-func peekTailState(f *os.File, size int64) tailState {
+func peekTailState(f *os.File, size int64, wide bool) tailState {
 	var out tailState
 	if size <= 0 {
 		return out
@@ -328,13 +332,14 @@ func peekTailState(f *os.File, size int64) tailState {
 			start = 0
 		}
 		scanTail(f, size, start, &out)
-		// The ask walk gets the last window and no more, whatever it found:
-		// a question is the last thing in a file or it is not the question
-		// this door is for, and widening for it would re-read a megabyte of
-		// a subagent's output every second on a session mid-Task — the very
-		// case the widening below exists to survive cheaply.
-		out.settled = true
-		if out.located || start == 0 {
+		if !wide {
+			// A file that is still being written is live on the recency
+			// door whatever this walk decides, so its ask gets one window
+			// and the widening is left to the location, which is what it
+			// was written for.
+			out.settled = true
+		}
+		if (out.located && out.settled) || start == 0 {
 			break
 		}
 	}
@@ -410,8 +415,19 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 // treats them. A line with neither words nor a call is skipped for the same
 // reason, and the walk keeps going back.
 func (t *tailState) seeAsk(ev transcript.Event) {
-	if t.settled || ev.IsSidechain {
-		return // a subagent's conversation is not this session speaking
+	if t.settled {
+		return
+	}
+	if ev.IsSidechain {
+		// A subagent's conversation is not this session speaking, so its
+		// words never open the door — but a subagent writing at all is
+		// this session being busy, which is how the machine reads it too,
+		// and a walk that read past it would call a session with an agent
+		// in flight a question you owe (round 59).
+		if ev.Type == transcript.EventUser && strings.TrimSpace(ev.Text) != "" {
+			t.settleAsk(false, time.Time{})
+		}
+		return
 	}
 	switch ev.Type {
 	case transcript.EventUser:
@@ -425,11 +441,34 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			t.settleAsk(false, time.Time{})
 		}
 	case transcript.EventAssistant:
+		// The whole message decides, not its first block. Claude Code
+		// batches calls, so an AskUserQuestion is written beside the Task
+		// it was dispatched with, in whatever order the model wrote them —
+		// and the machine reads the turn, not the block, so a walk that
+		// settled on the first call disagreed with it whenever the
+		// question was written second (#344, round 59).
+		out := 0
 		for _, u := range ev.ToolUses {
 			if t.answered[u.ID] {
 				continue
 			}
-			t.settleAsk(u.Name == state.AskUserQuestion, ev.Timestamp)
+			if u.Name == state.AskUserQuestion {
+				t.settleAsk(true, ev.Timestamp)
+				return
+			}
+			out++
+		}
+		if out > 0 {
+			t.settleAsk(false, time.Time{}) // a call still out: work in flight
+			return
+		}
+		if len(ev.ToolUses) > 0 {
+			// Every call in it came back, so the model's words here are not
+			// the last word in the file — the results are, and the turn is
+			// the model's to continue. The machine calls that working or
+			// hung; a door that read the text would call it a question
+			// nobody was ever asked.
+			t.settleAsk(false, time.Time{})
 			return
 		}
 		if strings.TrimSpace(ev.Text) == "" {

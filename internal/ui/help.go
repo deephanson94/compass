@@ -14,7 +14,7 @@ var helpKeys = [][2]string{
 	{"1 – 9", "select a session · a digit under recent opens that finished one"},
 	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
-	{"g", "grab the oldest ▲ needs-you and attach — a ⊘ is skipped"},
+	{"g", "grab a ▲ and attach — today's question first; a ⊘ is skipped"},
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: board → session → reader"},
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
@@ -74,7 +74,7 @@ func helpOffered(key, keymap string) bool {
 	for _, f := range map[string][]string{
 		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"},
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
-		"G": {"G is the present"}, "? / q": {"? help"}, "x / A": {"x hide", "x unhide", "A fleet", "A browses"},
+		"G": {"G is the present"}, "? / q": {"? help"}, "x X A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
 		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
@@ -184,7 +184,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space")
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "[ ]", "space")
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -452,7 +452,14 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 			case "G":
 				what = "" // the newest row: named on the j / k row below
 			case "x":
-				key, what = "x / A", "hide a session · A browses the archive, x there brings it back"
+				// `X` rides in the key column, where it costs nothing: the
+				// narrow help is where the M5 dogfood happened, and the
+				// key this round added was named on no frame of it until
+				// after it had been pressed (round 59). The clause it
+				// sheds for the sentence — `x there brings it back` — is
+				// said by the archive's own group header, two rows above
+				// the rows it applies to.
+				key, what = "x X A", "hide a session · A browses the archive · X, every one waiting"
 			case "A":
 				what = ""
 			case "m":
