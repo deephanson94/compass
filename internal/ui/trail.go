@@ -2109,7 +2109,7 @@ func (m *Model) cardSecond(w int) string {
 			// The card gives up the wait, the ships and the red count,
 			// which the summary's rows carry — the reds class by class,
 			// which one total on the card could not (#349, #367).
-			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · "), true), " · "), " · ")
+			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · ")), " · "), " · ")
 			if len(day) == 1 && day[0] == "" {
 				day = nil
 			}
@@ -2245,7 +2245,7 @@ func (m *Model) trailDayHere(compact bool) string {
 		// the ships on the ship row, the red runs on the class that ran
 		// them where no card carries them, and its `◉` row the span
 		// where no reader stands beside (#347, #348, #349).
-		d = summaryDay(d, true)
+		d = summaryDay(d)
 		if !m.sessionView() && len(m.trail.Prompts) > 0 {
 			d = withoutSpan(d, m.now, m.trail)
 		}
@@ -2336,13 +2336,11 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 // summaryDay is the day's clauses as the summary's title and card carry
 // them: without the wait on you and the red count, which the summary's own
 // rows say to the minute and on the class that ran them (#347, #348).
-func summaryDay(d string, reds bool) string {
+func summaryDay(d string) string {
 	d = withoutClause(d, " · waited on you ")
 	d = withoutClause(d, " · on you ")
 	d = shipClause.ReplaceAllString(d, "")
-	if reds {
-		d = redClause.ReplaceAllString(d, "")
-	}
+	d = redClause.ReplaceAllString(d, "")
 	d = strings.TrimSuffix(d, " ·")
 	return d
 }
