@@ -625,7 +625,7 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"porter", "harness", "redteam", "cli"}, []string{"tinker:0.0", "harness:0.0", "harness:1.0", "tools:0.0"})
-	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "j", "tab"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "j", "tab", "esc", "s", "j", "j", "j", "space", "j", "tab", "s", "3", "j", "j", "j", "space", "esc"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
 }
 
 // Two very long sessions — a day of work each, every class, dozens of prompts
@@ -709,7 +709,7 @@ func sceneVeryLong() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"auth", "etl", "cli"}, []string{"work:0.0", "work:1.0", "tools:0.0"})
-	return scene{name: "very-long", story: "Two sessions a day long each — 160 and 120 legs, every class, prompts every dozen legs, a plan with pending steps — beside a short one.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "very-long", extra: []string{"1", "tab", "s", "space", "j", "tab", "s", "G", "space", "esc", "?", "?", "3", "s", "space"}, story: "Two sessions a day long each — 160 and 120 legs, every class, prompts every dozen legs, a plan with pending steps — beside a short one.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 func allScenes() []scene {
@@ -730,7 +730,7 @@ func sceneFirstSession() scene {
 	ss[0].Info.StartedAt = n.Add(-50 * time.Second)
 	tr[sessionKey("hello")] = journey.Trail{Prompts: []journey.Prompt{{Text: "add a --version flag", At: n.Add(-50 * time.Second)}}}
 	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
-	return scene{name: "first-session", story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "first-session", extra: []string{"tab", "s"}, story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Two tools: a fleet where opencode sessions sit beside claude ones, each
@@ -750,6 +750,16 @@ func sceneTwoTools() scene {
 		legSpec{journey.Scout, "middleware.py", 5 * time.Minute, []string{"middleware.py"}, "", nil},
 		legSpec{journey.Test, "pytest", 3 * time.Minute, nil, "18✓ 2✗", nil},
 		legSpec{journey.Fix, "tokens.py", 2 * time.Minute, []string{"tokens.py"}, "", nil})
+	// Three follow-up prompts four minutes apart: one of each leg, and a
+	// wait on you worth a row — the summary's only count here (#357).
+	if k := sessionKey("api-claude"); true {
+		t := tr[k]
+		at := t.Legs[len(t.Legs)-1].End
+		for i, text := range []string{"and the refresh path", "and the tests", "and the audit log"} {
+			t = withPrompt(t, at.Add(time.Duration(i+1)*4*time.Minute), text)
+		}
+		tr[k] = t
+	}
 	add("api-oc", "api", "/home/user/api", "add rate limiting to the token endpoint", state.Working, 40*time.Second, journey.Build, "tool call in flight", "Bash: go test ./...", "opencode", "anthropic/claude-sonnet-4-5",
 		legSpec{journey.Scout, "limiter.go", 4 * time.Minute, []string{"limiter.go"}, "", nil},
 		legSpec{journey.Build, "limiter.go", 12 * time.Minute, []string{"limiter.go"}, "", nil},
@@ -760,7 +770,7 @@ func sceneTwoTools() scene {
 		legSpec{journey.Scout, "main.tf", 18 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "AskUserQuestion", 4 * time.Minute, nil, "", nil})
 	panes, order := paneMap([]string{"api-claude", "api-oc", "docs-oc", "infra"}, []string{"dev:1.0", "dev:2.0", "dev:3.0", "ops:0.0"})
-	return scene{name: "two-tools", extra: []string{"2", "tab", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "two-tools", extra: []string{"2", "tab", "3", "s", "1", "?", "?", "3", "esc", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The second day: one session live, and yesterday's dozen behind it. The
@@ -833,7 +843,8 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Build, "the generator", 30 * time.Minute, []string{"gen.py"}, "", nil})
 	ss = append(ss, sess("infra", "infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", state.NeedsYou, n.Add(-7*time.Minute), journey.Design, "", "question", "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]"))
 	tr[sessionKey("infra")] = trailOf(n.Add(-30*time.Minute), "tighten the vpc security groups without breaking the bastion", true,
-		legSpec{journey.Scout, "main.tf and the bastion rules", 14 * time.Minute, []string{"main.tf"}, "", nil},
+		legSpec{journey.Scout, "the vpc", 4 * time.Minute, []string{"vpc.tf"}, "", nil}, // a second scout, so the summary counts here and its question is on a frame (#351)
+		legSpec{journey.Scout, "main.tf and the bastion rules", 10 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "Open port 22 to the office CIDR only, or keep the bastion?", 7 * time.Minute, nil, "", nil})
 	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/backfill", "backfill last week's shards", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 6m mid-turn", "Bash: python backfill.py --all"))
 	ss[len(ss)-1].Info.LastEventAt = n.Add(-6 * time.Minute)
@@ -857,7 +868,7 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Scout, "the command table", 5 * time.Minute, []string{"main.go"}, "", nil},
 		legSpec{journey.Build, "the flag", 15 * time.Minute, []string{"main.go"}, "", nil})
 	panes, order := paneMap([]string{"billing", "mobile", "docs-site", "infra", "etl", "api", "cli"}, []string{"work:0.0", "work:1.0", "work:2.0", "ops:0.0", "work:3.0", "work:4.0", "tools:0.0"})
-	return scene{name: "alarm-storm", extra: []string{"4", "r", "1", "3", "x", "3", "tab", "esc", "g", "7", "tab"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "alarm-storm", extra: []string{"4", "r", "1", "3", "x", "3", "tab", "esc", "g", "7", "tab", "esc", "1", "tab", "s", "esc"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Fleet hygiene: two live sessions with one name in one tmux session, a
@@ -897,7 +908,7 @@ func sceneFleetHygiene() scene {
 		tr[g.Info.Key()] = pastTrail(g)
 	}
 	panes, order := paneMap([]string{"harness-a", "harness-b", "relay", "nopane"}, []string{"harness:1.0", "harness:0.0", "tinker:0.0", ""})
-	return scene{name: "fleet-hygiene", extra: []string{"4", "r", "esc"}, story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "fleet-hygiene", extra: []string{"4", "r", "esc", "tab", "s", "esc"}, story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Left behind: the questions nobody answered. One session is asking right
@@ -1133,12 +1144,19 @@ func TestScenarioWalkthrough(t *testing.T) {
 		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			w, h := size[0], size[1]
 			m := sceneModel(sc, w, h)
-			for _, k := range append([]string{}, keys...) {
+			walked := append([]string{}, keys...)
+			if len(sc.extra) > 0 {
+				walked = append(append(walked, "esc"), sc.extra...) // the scene's own keys are walked and measured too (#353)
+			}
+			for _, k := range append(walked, "") {
 				frame := m.View()
 				for _, line := range strings.Split(frame, "\n") {
 					if x := lipgloss.Width(line); x > w {
 						t.Errorf("%s %dx%d before %q: line runs past the terminal (%d): %q", sc.name, w, h, k, x, line)
 					}
+				}
+				if k == "" {
+					break // the frame after the last key is measured too (#355)
 				}
 				pressKey(m, k)
 				poll(m, sc)

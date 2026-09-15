@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -21,6 +22,7 @@ var helpKeys = [][2]string{
 	{"ctrl+d/u", "half a page (PgDn / PgUp too): the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
+	{"s", "summary: the legs by class · space opens one · tab the trail there"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
@@ -58,6 +60,7 @@ type helpOpts struct {
 	board   bool
 	reader  bool // the keys are in the reader: the page keys page it, not the trail (#83, #87)
 	refused []string
+	held    bool // the summary is held for the next trail that counts (#358, #362)
 	keymap  string
 	tools   bool // the fleet runs two CLIs, so its rows wear the word (#85)
 }
@@ -76,7 +79,8 @@ func helpOffered(key, keymap string) bool {
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
 		"G": {"G is the present"}, "? / q": {"? help"}, "x X A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
-		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
+		"a": {"a ask"}, "space": {"space unfold", "space open", "space close"}, "/ n N": {"/ search", "n/N"},
+		"s": {"s summary", "s/esc trail"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
 	}[key] {
 		if strings.Contains(keymap, f) {
@@ -88,7 +92,7 @@ func helpOffered(key, keymap string) bool {
 
 func helpLinesWith(w, h int, o helpOpts) []string {
 	board, refused := o.board, o.refused
-	keys := helpKeyLinesIn(w, board, o.reader, refused...)
+	keys := helpKeyLinesIn(w, board, o.reader, o.held, refused...)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
 	// Two columns at a width that holds them whole, or at any width past
@@ -116,11 +120,11 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			legend = kept
 		}
 		return joinColumns(h, []column{
-			{left, withoutRecent(helpKeyLinesIn(left, board, o.reader, refused...), o.recent)},
+			{left, withoutRecent(helpKeyLinesIn(left, board, o.reader, o.held, refused...), o.recent)},
 			{right, legend},
 		})
 	}
-	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, refused...), o.recent)
+	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, o.held, refused...), o.recent)
 	legend := helpLegendLines(w, false, o.tools, board)
 	if !o.tools {
 		legend = dropToolGloss(legend)
@@ -184,7 +188,14 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "[ ]", "space")
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "s", "[ ]", "space")
+		if o.held {
+			// `s` is refused on the trail that suspended the summary,
+			// and it is also the key the deck just gave a job there:
+			// the row that names the mark the frame draws keeps its
+			// place at 80, where the cut would take it first (#364).
+			order = slices.DeleteFunc(order, func(k string) bool { return k == "s" })
+		}
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -387,10 +398,10 @@ func refuses(refused []string, key string) bool {
 // on one too narrow for it, "zoom in: board → trail" describes a level the
 // person cannot reach.
 func helpKeyLinesFor(w int, board bool, refused ...string) []string {
-	return helpKeyLinesIn(w, board, false, refused...)
+	return helpKeyLinesIn(w, board, false, false, refused...)
 }
 
-func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
+func helpKeyLinesIn(w int, board, reader, held bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
 		key, what := k[0], k[1]
@@ -420,6 +431,17 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 				// The grab is a level out, which the aside says where
 				// there is room for it.
 				what = "the start of the conversation, the other end of G; the grab is a level out"
+			}
+		}
+		if key == "s" && refuses(refused, "s") {
+			what = "" // the summary is the legs' view: its row is drawn where the key works (#348)
+			if held {
+				// A held summary is a mark the frame draws, `[summary
+				// waits]`, and `s` on the trail that suspended it is the
+				// one key that ends the hold: the help owes the mark a
+				// row, and the key the sentence it acts on here (#40,
+				// #362).
+				what = "the summary waits for the next trail that counts · s ends the hold" // 77 cells with its key at 80, the counting row's own width (#364)
 			}
 		}
 		if !board {
