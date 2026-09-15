@@ -42,6 +42,12 @@ type PeekedInfo struct {
 	Size    int64       `json:"size"`
 	ModTime time.Time   `json:"mtime"`
 	Info    SessionInfo `json:"info"`
+	// Wide says that peek read the whole tail for a question rather than
+	// one window. Without it every restored entry looked narrow, so the
+	// scan re-read every quiet transcript on every run — 135MB a run on a
+	// real home directory, for a process tmux starts every few seconds
+	// (round 61).
+	Wide bool `json:"wide,omitempty"`
 }
 
 // cacheFile is what actually goes to disk. The two halves travel together
@@ -68,7 +74,7 @@ func OpenResumeCache(path string) *ResumeCache {
 		c.points = f.Points
 	}
 	for path, p := range f.Peeked {
-		c.peeked[path] = cachedInfo{size: p.Size, modTime: p.ModTime, info: p.Info}
+		c.peeked[path] = cachedInfo{size: p.Size, modTime: p.ModTime, info: p.Info, wide: p.Wide}
 	}
 	return c
 }
@@ -82,7 +88,7 @@ func (c *ResumeCache) Save() {
 	}
 	f := cacheFile{Points: c.points, Peeked: make(map[string]PeekedInfo, len(c.peeked))}
 	for path, p := range c.peeked {
-		f.Peeked[path] = PeekedInfo{Size: p.size, ModTime: p.modTime, Info: p.info}
+		f.Peeked[path] = PeekedInfo{Size: p.size, ModTime: p.modTime, Info: p.info, Wide: p.wide}
 	}
 	raw, err := json.Marshal(f)
 	if err != nil {

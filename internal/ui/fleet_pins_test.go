@@ -604,7 +604,7 @@ func TestTheHelpInTheReaderSaysWhatTheGrabKeyDoes(t *testing.T) {
 			if row == "" {
 				t.Fatalf("%s: the reader's help draws no row for `g`", where("reader"))
 			}
-			says := strings.Contains(row, "grab the oldest")
+			says := strings.Contains(row, "grab a ▲") // round 59 reworded the row
 			if says && !grabs {
 				t.Errorf("%s: the help promises a grab `g` does not make here: %q", where("reader"), row)
 			}
@@ -668,7 +668,10 @@ func TestNoHelpRowPromisesAGrabTheReaderWillNotMake(t *testing.T) {
 				grabAt[st.lv] = r88ttPinIsGrab(probe, sc)
 			}
 			for _, st := range stands {
-				says := strings.Contains(st.row, "grab the oldest")
+				// The row's own words changed in round 59 — `g` no longer
+				// takes the oldest but today's question first — so the
+				// probe is the promise, not the sentence it used to be.
+				says := strings.Contains(st.row, "grab a ▲")
 				if says == grabAt[st.lv] {
 					continue
 				}

@@ -27,18 +27,66 @@ func (m *Manager) MarkPaneMapped(ids map[string]bool)
 
 // SetLiveWindow sets the recency door: a session with no pane still counts as
 // live while now−LastEventAt ≤ d. Default 5 minutes; 0 closes the door (panes
-// only). The door exists because pane matching is a heuristic — a session that
-// is WRITING ITS TRANSCRIPT RIGHT NOW must never be hidden by a matching miss.
+// only) — and with it the ask door below. The door exists because pane matching
+// is a heuristic — a session that is WRITING ITS TRANSCRIPT RIGHT NOW must never
+// be hidden by a matching miss.
 func (m *Manager) SetLiveWindow(d time.Duration)
 ```
 
 Rules:
-1. **live** = pane-mapped ∪ (LastEventAt within the live window). Everything
-   else is **archived**.
+1. **live** = pane-mapped ∪ (LastEventAt within the live window) ∪ **asked**.
+   Everything else is **archived**.
+
+   **The ask door (#344, 2026-09-15).** A session whose transcript's last word
+   is the model's, asking you something nobody has answered, is live however
+   long ago it asked. `SessionInfo.Asked` is read off the file in the same tail
+   peek that dates it, so it survives the pane closing and compass restarting —
+   which is the point, since a question you forgot is one you were not
+   watching. It reads the file the way the machine reads the fold: a person's
+   words settle it (nothing waits), a call still out is work in flight unless
+   it is `AskUserQuestion`, and otherwise rule 4's own test decides. The
+   harness's own turns settle nothing, and a refused call is not a question.
+   The door clears itself — reply, and the last word is yours.
+
+   The walk reads a file that has gone quiet whole, and gives one window to
+   a file still being written — that one is live on the recency door whatever
+   the walk decides (#345). A message decides as a whole, not by its first
+   block: an unanswered `AskUserQuestion` anywhere in it opens the door, any
+   other call still out is work in flight, and a turn whose calls all came
+   back is one the model is still in the middle of. A subagent's lines never
+   open the door and any of them closes it, which is how the machine reads
+   them too.
+
+   **`Waiting` implies needs-you, and it is enforced rather than hoped for**
+   (#346): the walk reads the end of a file where the machine folds all of
+   it, so where the two differ the machine wins — the session goes back to
+   the archive and the door does not knock again until the transcript grows.
+   A door the fold refused is remembered on the entry, not re-litigated
+   every second.
+
+   Such a session is flagged `Waiting` when nothing else would have kept it:
+   no pane, outside the window. `Waiting` is the fleet's word for "you walked
+   away from this one", and it sorts under everything happening today — the
+   live alarms and the work in flight — and over what is merely idle (#345:
+   an archive where one session in four ends on a question would otherwise
+   take every column the board has). `StatusLine` leaves it out: the bar
+   answers "is anything happening", and a question from last week is not. The
+   board ranks it the same way, says `waiting 9d` on its row, counts it in a
+   chip of its own rather than among the alarms, lets `x` put it down for
+   good, and sweeps the pile with `X` (docs/SPEC.md #344, #345).
+
+   The other store answers the same question of its own rows
+   (`internal/opencode/asked.go`): one fleet, one rule, or the word means
+   two things in one list. It reads what that store's own reader reads — a
+   part left `pending` is a call the reader skips, so the door skips it too
+   (#346).
 2. Only live sessions are tailed and state-machined per Refresh. An archived
    session's Snap is always `{Idle, Since: LastEventAt, Reason: "archived",
    Activity: "idle"}` — the archive can never be amber, so `g` and the
-   attention chips stay truthful by construction.
+   attention chips stay truthful by construction. A session holding a question
+   open is amber because it is *live*, not because the archive grew a state:
+   it is tailed and state-machined like any other live session, and the amber
+   is its machine's own verdict.
 3. A session crossing archive→live (its pane appears, or its file grows) gets
    a tailer from scratch (full replay, as any first sight); live→archive drops
    its tailer and machine.

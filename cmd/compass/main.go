@@ -57,7 +57,7 @@ func main() {
 	mirror := fs.Bool("mirror", cfg.Mirror, "open the live mirror of the selected pane at Lv1 (m toggles it)")
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
-		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only)`)
+		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only, questions included)`)
 	opencodeDB := fs.String("opencode-db", opencode.DefaultDB(), `OpenCode's store, whose sessions join the fleet when the file exists ("" = never)`)
 	showVersion := fs.Bool("version", false, "print the build's version and exit")
 	fs.Usage = usage(fs)

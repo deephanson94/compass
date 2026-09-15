@@ -434,9 +434,15 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 	}
 	for pos := 0; pos < len(all); pos += n {
 		band := all[pos:min(pos+n, len(all))]
+		// Measured at the width the band will actually be drawn at: a
+		// short band's columns are widened (bandWidth), and measuring
+		// them at the full board's column width counted a wrap the frame
+		// does not draw — one row of air too many under a last band whose
+		// question wrapped (round 59).
+		bw := bandWidth(m.width-2*edgePad, len(band), cw)
 		tallest := 0
 		for _, key := range band {
-			tallest = max(tallest, m.boardColumnRows(key, cw))
+			tallest = max(tallest, m.boardColumnRows(key, bw))
 		}
 		// A band is measured against its own trails, not against the
 		// tallest band on the board: a band of short trails was named in
@@ -1294,6 +1300,13 @@ func redNow(tr journey.Trail) bool {
 // owes you, not merely nothing is amber.
 func (m *Model) obligation(s fleet.Session) int {
 	tr := m.trails[s.Info.Key()]
+	if s.Waiting {
+		// A question you walked away from: nothing is happening in it, and
+		// nothing will until you answer, so it keeps its column however
+		// long that takes — under what is happening today, which is what
+		// the board is for (#344, round 59).
+		return rankWaiting
+	}
 	switch s.Snap.State {
 	case state.NeedsYou:
 		if s.Snap.APIError {
@@ -1328,7 +1341,7 @@ func (m *Model) obligation(s fleet.Session) int {
 
 // The obligation ranks, in board order: what a keypress ends first, then
 // what only time or a person elsewhere can clear, then work in flight, then
-// what stopped short of done.
+// the questions you left behind, then what stopped short of done.
 const (
 	rankNeedsYou = iota
 	rankStuck
@@ -1336,6 +1349,14 @@ const (
 	rankAPIError
 	rankParked
 	rankWorking
+	// rankWaiting is under everything happening today. The panel measured
+	// why it cannot sit higher: an archive where one session in four ends
+	// on a question comes back as ten amber rows on a 24-row terminal,
+	// with the one session that is working scrolled off the screen. The
+	// pile keeps its place in the order and its column where there is
+	// room, and never takes the column of something that is running
+	// (round 59).
+	rankWaiting
 	rankOwed
 	rankUnread
 	rankRest

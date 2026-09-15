@@ -1599,7 +1599,7 @@ func TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped(t *testing.T) 
 						continue // the group is not on this frame
 					}
 					shed++
-					if strings.Contains(label, "brings one back") {
+					if strings.Contains(label, "one back") {
 						t.Errorf("%s %s %dx%d %v: the archive's hidden header names a key the typed line has taken: %q over %q",
 							prof.name, sc.name, w, h, route, label, r103fhLastRow(view))
 					} else if label != "hidden" {
@@ -1620,7 +1620,7 @@ func TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped(t *testing.T) 
 					if !m.archiveView || m.searching || m.replying {
 						continue
 					}
-					if label, ok := r103fhGroupHeader(m.View()); ok && strings.Contains(label, "brings one back") {
+					if label, ok := r103fhGroupHeader(m.View()); ok && strings.Contains(label, "one back") {
 						kept++
 					}
 				}
@@ -1825,6 +1825,11 @@ var r105ttArchiveSizes = [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {22
 var r105ttArchiveRoutes = [][]string{
 	{"A"}, {"A", "tab"}, {"x", "A"},
 	{"2", "x", "A"}, {"2", "x", "A", "esc"}, {"2", "x", "A", "tab"},
+	// The route that presses the sweep. Round 60 measured the archive's
+	// hidden-group ordering against this test and found it green either
+	// way, because no route here walked `X` — the one press that fills the
+	// hidden group and lands the cursor on it (round 61).
+	{"X", "A"}, {"X", "j", "A"},
 }
 
 // r105ttArchiveClause is the clause the archive's row was missing.

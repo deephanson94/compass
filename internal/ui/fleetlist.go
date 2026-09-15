@@ -650,10 +650,17 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 }
 
 // hiddenGroup is the archive's first group: live sessions `x` took off the
-// board, so the way back is where the strip said it was. hiddenGroupWord
+// board, so the way back is where the strip said it was. It names both keys
+// because `X` brings back everything here, the rows put down one at a time
+// included — the blast radius belongs where the key is pressed, and the
+// board's own note promised an undo it could not keep (round 59). It pays
+// for the second key out of the first's own words: at eighty the label
+// column is thirty cells, and `x brings one back, X all` clipped to a bare
+// `X…` welded against the group's own `▲` (round 60).
+// hiddenGroupWord
 // is the group without that way — the word the header keeps when the key
 // is not the deck's to give (groupLabel).
-const hiddenGroup = "hidden · x brings one back"
+const hiddenGroup = "hidden · x one back, X all"
 const hiddenGroupWord = "hidden"
 
 // groupLabel is the name a group header draws. Only the hidden group's
@@ -711,7 +718,22 @@ func (m *Model) archiveGroups() []fleetGroup {
 			return m.sessions[e[a]].Info.LastEventAt.After(m.sessions[e[b]].Info.LastEventAt)
 		})
 	}
+	// Newest first among the projects, and the hidden group over all of
+	// them — what `x` and `X` took off the board is what the person came
+	// here for, and it sorted by its newest row like any other, so a swept
+	// pile of old questions sank under the recent archive and the note
+	// that said `A, then x` sent them looking for it.
+	//
+	// It waited two rounds on the footer: landing the cursor on a hidden
+	// row costs the row `x unhide`, and the grab was withdrawn for it —
+	// not by the shedder, as round 60 recorded, but by its own trade,
+	// because the attach refusal beside it could never be counted
+	// (footerStuckCost). With that counted, this ordering costs no key
+	// that acts (round 61).
 	sort.SliceStable(names, func(a, b int) bool { return newest(members[names[a]]) > newest(members[names[b]]) })
+	sort.SliceStable(names, func(a, b int) bool {
+		return names[a] == hiddenGroup && names[b] != hiddenGroup
+	})
 
 	groups := make([]fleetGroup, 0, len(names))
 	for _, name := range names {
@@ -736,10 +758,20 @@ func (m *Model) archivedCount() int {
 func (m *Model) groupEcho(g fleetGroup) string {
 	// The group's worst row, as the board ranks it — a ▲ over a group of
 	// ◍ ↻ ⊘ pointed at the wrong group — and nothing when that row is the
-	// one right beneath the header.
+	// one right beneath the header. The cutoff reaches the waiting rank:
+	// a group made only of questions you walked away from said nothing
+	// wanted you, and kept its clock — the group's *newest* event — so the
+	// header over a nine-day-old question read `1d` (round 59).
 	worst, rank := -1, rankAPIError+1
 	for _, i := range g.entries {
-		if r := m.obligation(m.sessions[i]); r < rank {
+		r := m.obligation(m.sessions[i])
+		if r == rankWaiting {
+			// Waiting sits under the work in flight in the board's order,
+			// and the echo is about what wants you, not what is running:
+			// it takes the alarms' side of the cutoff, and only it.
+			r = rankAPIError
+		}
+		if r < rank {
 			worst, rank = i, r
 		}
 	}
@@ -1699,6 +1731,17 @@ func wantsAttention(s state.State) bool {
 func headline(s fleet.Session) string {
 	if s.Snap.APIError {
 		return apiWord(s)
+	}
+	if s.Waiting {
+		// Four rows reading `▲ needs you` where one of them was asked six
+		// minutes ago and three were asked days ago told the person
+		// nothing about which was which (round 59). One word says which:
+		// `unanswered 9d` is a question nobody has come back to,
+		// `needs you 6m` is one being asked now. It is not the trail's
+		// `waiting 6m` — that marker sits on the open leg of a session
+		// that is asking you *now*, and spending the same word on both
+		// put two meanings on one frame (round 60).
+		return "unanswered"
 	}
 	switch s.Snap.State {
 	case state.NeedsYou, state.Stuck:

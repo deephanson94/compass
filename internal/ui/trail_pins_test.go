@@ -1341,7 +1341,7 @@ func TestAStuckKeyGoesFromARowAlreadyShed(t *testing.T) {
 	// with `a ask` and `/ search` already shed: the hide key goes.
 	if got := foot(t, 100, 30, walk[:6]); strings.Contains(got, "x hide") {
 		t.Errorf("100x30 list: the row keeps a hide key that answers %q: %q",
-			"infra stays · it is asking", strings.TrimSpace(got))
+			"infra stays · asked …", strings.TrimSpace(got))
 	} else if !strings.HasSuffix(got, "search cleared") || !strings.Contains(got, "g grab") {
 		t.Errorf("100x30 list: not the stand this pins: %q", strings.TrimSpace(got))
 	}

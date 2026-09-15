@@ -713,7 +713,7 @@ func sceneVeryLong() scene {
 }
 
 func allScenes() []scene {
-	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools()}
+	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools(), sceneLeftBehind()}
 }
 
 // quota is the refusal a session dead on its daily limit carries, in the
@@ -909,6 +909,81 @@ func sceneFleetHygiene() scene {
 	}
 	panes, order := paneMap([]string{"harness-a", "harness-b", "relay", "nopane"}, []string{"harness:1.0", "harness:0.0", "tinker:0.0", ""})
 	return scene{name: "fleet-hygiene", extra: []string{"4", "r", "esc", "tab", "s", "esc"}, story: "Two live sessions called harness in tmux session harness, a lead messaging another session, a session with no pane, a session whose pane closed half an hour ago, and forty archived sessions wearing the same four names.", sessions: ss, trails: tr, panes: panes, order: order}
+}
+
+// Left behind: the questions nobody answered. One session is asking right
+// now, one is working, and three stopped days ago on something only the
+// person can decide — the pile that used to vanish from the board five
+// minutes after its pane closed (#344). The question this scene asks: does
+// the pile stay findable without burying the morning?
+func sceneLeftBehind() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+
+	ss = append(ss, sess("gateway", "gateway", "/home/user/gateway", "claude/rate-limit", "rate-limit the public api", state.NeedsYou, n.Add(-6*time.Minute), journey.Design, "", "question", "Per-key buckets or per-IP? [per key / per IP / both]"))
+	tr[sessionKey("gateway")] = trailOf(n.Add(-40*time.Minute), "rate-limit the public api", true,
+		legSpec{journey.Scout, "the edge handlers", 12 * time.Minute, []string{"edge.go"}, "", nil},
+		legSpec{journey.Design, "Per-key buckets or per-IP?", 6 * time.Minute, nil, "", nil})
+
+	ss = append(ss, sess("loader", "loader", "/home/user/loader", "feat/dedupe", "dedupe the nightly load", state.Working, n.Add(-50*time.Second), journey.Build, "", "tool call in flight", "Edit: loader.py"))
+	tr[sessionKey("loader")] = trailOf(n.Add(-2*time.Hour), "dedupe the nightly load", true,
+		legSpec{journey.Scout, "loader.py", 10 * time.Minute, []string{"loader.py"}, "", nil},
+		legSpec{journey.Build, "bloom.py", 35 * time.Minute, []string{"bloom.py"}, "", nil},
+		legSpec{journey.Test, "pytest", 5 * time.Minute, nil, "212✓", nil})
+
+	// The pile. Each stopped on a question, none of them has a pane, and
+	// the newest of them is a day old — so nothing but the question is
+	// keeping any of them on the board.
+	left := []struct {
+		id, name, branch, title, ask string
+		ago                          time.Duration
+		legs                         []legSpec
+	}{
+		{"shards", "shards", "feat/backfill", "backfill last week's shards", "Wipe the staging rows first, or upsert over them?", 26 * time.Hour, []legSpec{
+			{journey.Scout, "the shard layout", 9 * time.Minute, []string{"shards.py"}, "", nil},
+			{journey.Build, "backfill.py", 24 * time.Minute, []string{"backfill.py"}, "", nil},
+			{journey.Test, "pytest", 4 * time.Minute, nil, "88✓ 2✗", []string{"test_upsert_window"}},
+		}},
+		{"checkout", "webapp", "fix/checkout", "the checkout suite flakes on CI", "Two fixes fit — pin the clock, or drop the fixture? Which?", 3 * 24 * time.Hour, []legSpec{
+			{journey.Scout, "the CI logs", 6 * time.Minute, []string{"ci.log"}, "", nil},
+			{journey.Fix, "a timezone in the fixture", 11 * time.Minute, []string{"conftest.py"}, "", nil},
+		}},
+		{"runbook", "ops", "main", "update the on-call runbook", "Should the escalation page the SRE on call, or the team channel?", 9 * 24 * time.Hour, []legSpec{
+			{journey.Docs, "runbook.md", 18 * time.Minute, []string{"runbook.md"}, "", nil},
+		}},
+	}
+	for _, l := range left {
+		s := sess(l.id, l.name, "/home/user/"+l.name, l.branch, l.title, state.NeedsYou, n.Add(-l.ago),
+			journey.Design, "", "turn ended with a question", l.ask)
+		s.Waiting = true
+		s.Info.Asked, s.Info.AskedAt = true, n.Add(-l.ago)
+		ss = append(ss, s)
+		// HEAD is the question itself, still open: the turn ended on it and
+		// nothing has happened since, which is what the trail of a session
+		// waiting on you looks like.
+		tr[sessionKey(l.id)] = trailOf(n.Add(-l.ago-time.Hour), l.title, true,
+			append(l.legs, legSpec{journey.Design, l.ask, 3 * time.Minute, nil, "", nil})...)
+	}
+
+	// And the ordinary archive behind it all, so the pile is told apart
+	// from what is simply over.
+	for i := 0; i < 14; i++ {
+		g := gone(fmt.Sprintf("lb-%03d", i), []string{"gateway", "loader", "webapp", "ops"}[i%4], pastTitles[i%len(pastTitles)], n.Add(-time.Duration(i+2)*7*time.Hour))
+		ss = append(ss, g)
+		tr[g.Info.Key()] = pastTrail(g)
+	}
+
+	fleet.SortFleet(ss)
+	panes, order := paneMap([]string{"gateway", "loader"}, []string{"work:0.0", "work:1.0"})
+	// The sweep twice: the second press has nothing left to take and says
+	// so, and the pair puts the notes this feature's keys give — the
+	// refusal, the row that stays, the way home — on a frame for the first
+	// time. Three of them had never been rendered by any route on any
+	// scene (round 61).
+	return scene{name: "left-behind", extra: []string{"g", "esc", "3", "x", "X", "X", "A", "x"},
+		story:    "Two sessions in this morning's tmux — one asking, one working — and three that stopped days ago on a question nobody answered. Which of them is the deck's first row, and how does the pile go away when it is not today's problem?",
+		sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // ---------------------------------------------------------------- driver

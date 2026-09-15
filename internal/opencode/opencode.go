@@ -79,6 +79,10 @@ type Store struct {
 	path string
 	db   *sql.DB
 	mu   sync.Mutex
+
+	// asks is the ask door's answer per session, against the clock the
+	// store stamps the session with (asked.go).
+	asks map[string]askCache
 }
 
 // Open opens the store read-only. A missing file is an error: the caller
@@ -140,14 +144,19 @@ func (s *Store) Infos() ([]fleet.SessionInfo, error) {
 		return nil, err
 	}
 	out := make([]fleet.SessionInfo, 0, len(sessions))
+	live := make(map[string]bool, len(sessions))
 	for _, in := range sessions {
+		live[in.ID] = true
+		asked, at := s.asked(in)
 		out = append(out, fleet.SessionInfo{
 			ID: in.ID, TranscriptPath: in.Key(), ProjectSlug: Scheme,
 			CWD: in.Directory, OriginCWD: in.Directory, Title: titleOf(in.Title),
 			StartedAt: in.Created, LastEventAt: in.Updated,
 			Tool: Tool, Model: in.Model,
+			Asked: asked, AskedAt: at,
 		})
 	}
+	s.keepAsks(live)
 	return out, nil
 }
 
@@ -258,16 +267,25 @@ func (src *Source) Poll() ([]transcript.Event, error) {
 	src.store.mu.Lock()
 	defer src.store.mu.Unlock()
 	db := src.store.db
+	// Both clocks: a turn the gateway refused can be a message with no part
+	// under it at all, and such a turn moved neither the part clock nor the
+	// row count — so the poll that would have reported it never ran, and a
+	// 429 a minute old drew as the question above it (round 61).
 	var newest sql.NullInt64
-	if err := db.QueryRow(`select max(time_updated) from part where session_id = ?`, src.sessionID).Scan(&newest); err != nil {
+	if err := db.QueryRow(`select max(t) from (
+			select max(time_updated) as t from part where session_id = ?
+			union all select max(time_updated) as t from message where session_id = ?)`,
+		src.sessionID, src.sessionID).Scan(&newest); err != nil {
 		return nil, err
 	}
 	if newest.Valid && newest.Int64 <= src.last && src.last > 0 {
 		return nil, nil
 	}
-	rows, err := db.Query(`select m.id, p.id, m.data, p.data, m.time_created, p.time_updated
-		from part p join message m on m.id = p.message_id
-		where p.session_id = ? order by m.time_created, m.id, p.id`, src.sessionID)
+	// Left join for the same reason: a message with no parts is a turn, and
+	// the only kind that ever is one is the kind nothing else reports.
+	rows, err := db.Query(`select m.id, coalesce(p.id, ''), m.data, coalesce(p.data, ''), m.time_created, coalesce(p.time_updated, m.time_updated)
+		from message m left join part p on m.id = p.message_id
+		where m.session_id = ? order by m.time_created, m.id, p.id`, src.sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,8 +297,11 @@ func (src *Source) Poll() ([]transcript.Event, error) {
 			rows.Close()
 			return nil, err
 		}
-		if json.Unmarshal([]byte(mdata), &r.msg) != nil || json.Unmarshal([]byte(pdata), &r.part) != nil {
+		if json.Unmarshal([]byte(mdata), &r.msg) != nil {
 			continue
+		}
+		if pdata != "" && json.Unmarshal([]byte(pdata), &r.part) != nil {
+			continue // a part whose shape has moved on, skipped as before
 		}
 		all = append(all, r)
 		if r.updated > src.last {
@@ -455,6 +476,34 @@ func toolInput(raw json.RawMessage) json.RawMessage {
 	if fp, ok := m["filePath"]; ok {
 		if _, has := m["file_path"]; !has {
 			m["file_path"] = fp
+		}
+	}
+	// The question tool asks one question where Claude Code's takes a list,
+	// and the row prints the question, not the tool's name: without this the
+	// one call this store's ask door turns on draws "AskUserQuestion" where
+	// the words go.
+	if q, ok := m["question"]; ok {
+		if _, has := m["questions"]; !has {
+			one := map[string]any{"question": q}
+			if opts, ok := m["options"]; ok {
+				// The labels may be bare strings where Claude Code's tool
+				// takes objects, and the reader decodes the whole input or
+				// nothing — so a shape it cannot read loses the question
+				// text as well as the options (round 60).
+				var plain []string
+				if json.Unmarshal(opts, &plain) == nil {
+					labels := make([]any, 0, len(plain))
+					for _, l := range plain {
+						labels = append(labels, map[string]any{"label": l})
+					}
+					one["options"] = labels
+				} else {
+					one["options"] = opts
+				}
+			}
+			if raw, err := json.Marshal([]any{one}); err == nil {
+				m["questions"] = raw
+			}
 		}
 	}
 	out, err := json.Marshal(m)
