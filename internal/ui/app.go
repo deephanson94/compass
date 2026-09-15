@@ -927,6 +927,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		m.toggleHidden()
 		return m, nil
+	case "X":
+		m.sweepWaiting()
+		return m, nil
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
 		// stays selected, per view, so coming back lands where you left. It is
@@ -2051,6 +2054,12 @@ func (m *Model) onBoard(s fleet.Session) bool {
 	if !m.hidden[s.Info.Key()] {
 		return true
 	}
+	if s.Waiting {
+		// The alarm an old question raises is the one you *can* put down:
+		// `x` on it is a decision — "not that one" — and a decision that
+		// came back on the next poll would not be one (#344).
+		return false
+	}
 	if _, _, loop := circling(m.trails[s.Info.Key()]); loop {
 		return true
 	}
@@ -2066,6 +2075,100 @@ func (m *Model) hiddenCount() int {
 		}
 	}
 	return n
+}
+
+// sweepWaiting is `X`: the set where `x` is one row. On the live fleet it
+// takes every session that is on the board only because it is holding an old
+// question of yours — the pile that builds up while you are not looking — off
+// it in one key; in the archive it brings every hidden session back, so the
+// key that made the pile disappear is the key that gets it back (#344).
+//
+// It never empties the board: where the pile is the whole of it, the row the
+// board draws first stays, as `x` leaves the last live session standing.
+func (m *Model) sweepWaiting() {
+	if m.hidden == nil {
+		m.hidden = map[string]bool{}
+	}
+	if m.archiveView {
+		n := len(m.hidden)
+		if n == 0 {
+			m.note = "nothing is hidden"
+			return
+		}
+		m.hidden = map[string]bool{}
+		m.saveHidden()
+		m.note = plural(n, "session") + " back on the board"
+		return
+	}
+
+	// The board's own order, so the row that stays below is the one the
+	// frame draws first.
+	var keys []string
+	for _, i := range m.viewOrder() {
+		s := m.sessions[i]
+		// Only what `x` would take: the plural of a key cannot reach
+		// further than the key. A sweep that skipped the refusals hid rows
+		// `x` had just refused to hide, and `onBoard` then kept them off
+		// for good (round 60).
+		//
+		// All but one of them. `x` refuses the last row on the board by a
+		// rule about the board, not about the row, and a sweep that read
+		// that refusal as "this is not a question" answered a board whose
+		// only row was a question you left behind with `nothing is
+		// unanswered` — the one sentence on this panel that denies an
+		// alarm it is drawing. The count rule comes through and is
+		// answered below, in the same words `x` gives it (round 61).
+		if refusal := m.hideRefusal(s); s.Waiting && !m.hidden[s.Info.Key()] &&
+			(refusal == "" || refusal == lastLiveRefusal) {
+			keys = append(keys, s.Info.Key())
+		}
+	}
+	if len(keys) == 0 {
+		m.note = "nothing is unanswered"
+		return
+	}
+	stayed := ""
+	if m.liveCount()-len(keys) < 1 {
+		// The last row on the board is not a pile. What stays is the row
+		// the board draws first — the question that has waited longest,
+		// which is the one it puts first for the same reason — and the
+		// note names it, as every other refusal on this key does.
+		if s, ok := m.session(keys[0]); ok {
+			stayed = sessionName(s.Info)
+		} else {
+			stayed = "one"
+		}
+		keys = keys[1:]
+	}
+	if len(keys) == 0 {
+		m.note = lastLiveRefusal // the sentence `x` gives for the same rule
+		return
+	}
+	for _, key := range keys {
+		m.hidden[key] = true
+	}
+	m.saveHidden()
+	// The route back is `A`, and the key there is `x` — the one that brings
+	// back the row you pick. The note promised `A, then X` as this key's
+	// own undo, and `X` there brings back everything hidden, the rows put
+	// down one at a time with `x` included (round 59); it says `A, then x`
+	// now, which is the grammar the hide note beside it already uses and a
+	// promise the archive keeps (round 60).
+	// The word the rows wear, in the cells the old one spent: `2 unanswered
+	// hidden` is three cells longer and sheds `/ search` at 120, and the
+	// verb-first form is not — it is what the deck says about these rows
+	// everywhere else, and a note that answered `X` in a word the board no
+	// longer uses left the person to bridge the two (round 61).
+	m.note = fmt.Sprintf("hid %d unanswered · A, then x", len(keys))
+	if stayed != "" {
+		m.note = fmt.Sprintf("hid %d unanswered · %s stays", len(keys), stayed)
+	}
+	if order := m.viewOrder(); len(order) > 0 {
+		if m.hidden[m.selectedKey] {
+			m.pointQuiet(m.sessions[order[0]].Info.Key())
+		}
+	}
+	m.clampSelection()
 }
 
 // toggleHidden is `x`: the selected session leaves the board — a test
@@ -2208,6 +2311,11 @@ func (m *Model) numberDrawn(num int) bool {
 	return false
 }
 
+// lastLiveRefusal is what `x` and `X` both say about the last row on the
+// board: the rule is the board's, not the row's, and the two keys give it
+// in the same words (round 61).
+const lastLiveRefusal = "the live one stays"
+
 // hideRefusal is what `x` answers about this session instead of taking it
 // off the board, or "" when the key acts. What owes you an alarm stays,
 // and says so: a note that reported a hide while the column stood was the
@@ -2235,7 +2343,7 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		// So the sentence yields the last of what the frame supplies and
 		// answers the key's own question instead. In the archive `x`
 		// brings a hidden row back (§3), and the archive's own header
-		// says `hidden · x brings one back` of the rows it does bring
+		// says `hidden · x one back, X all` of the rows it does bring
 		// back (#291): this row is not one of them. Where the row is is
 		// what the frame says three ways already — `▌FLEET · archive`,
 		// the header's `archive 12` chip and the row's own `○` (#175,
@@ -2252,11 +2360,19 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		// does not draw, leaving `nothing live` and `○ all quiet` beside
 		// a trail still drawing `● scout thinking… for 40s`. The same
 		// key on the same session one `A` away already says this.
-		return "the live one stays"
+		return lastLiveRefusal
 	case s.Snap.APIError:
 		return name + " stays · dead on the API"
-	case s.Snap.State == state.NeedsYou:
-		return name + " stays · it is asking"
+	case s.Snap.State == state.NeedsYou && !s.Waiting:
+		// The refusal is about an alarm you are in the middle of. A
+		// question nothing has moved on since you walked away is the one
+		// `x` is for: it is the pile this key exists to keep down (#344).
+		//
+		// It says when, not what: `it is asking` is true of the rows this
+		// key does take as well, so the sentence named the property both
+		// sides share and explained nothing. The clock is the difference
+		// (round 61), and it costs the same cells.
+		return name + " stays · asked " + m.age(headSince(s)) + " ago"
 	case s.Snap.State == state.Stuck:
 		return name + " stays · it hangs"
 	case m.isCircling(s):
@@ -2831,9 +2947,28 @@ func (m *Model) move(delta int) {
 // fleet is already sorted that way. Only a live session can be waiting on you
 // (an archived one is idle by construction), so the archive is never searched;
 // pressing `g` while browsing it comes back to the live fleet first.
+//
+// It goes in two passes: the sessions asking you in today's fleet, then the
+// questions you walked away from (#344). Both are needs-you and both are
+// reachable, but a question from Tuesday is not what `g` means while
+// something is asking now.
 func (m *Model) selectOldestNeedsYou() bool {
+	if m.grabNeedsYou(false) {
+		return true
+	}
+	// Nothing is asking in today's fleet: the questions left behind are
+	// what `g` has, oldest first, and answering one is what clears it.
+	return m.grabNeedsYou(true)
+}
+
+// grabNeedsYou is one pass of `g` over the fleet: the sessions held open by
+// an old question of yours, or the ones that are not (#344).
+func (m *Model) grabNeedsYou(waiting bool) bool {
 	for _, s := range m.sessions {
-		if s.Live && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+		if s.Waiting != waiting {
+			continue
+		}
+		if s.Live && m.onBoard(s) && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
 			// A session dead on the API is not one a keypress helps.
 			if m.archiveView {
 				// Out of the archive as `A` goes: at the level it was
@@ -2852,7 +2987,10 @@ func (m *Model) selectOldestNeedsYou() bool {
 func (m *Model) needsYouCount() int {
 	n := 0
 	for _, s := range m.sessions {
-		if m.onBoard(s) && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+		// A tab bar badge is read from across the room and acted on: the
+		// questions you walked away from are not what it is for, and they
+		// have the header's own chip (round 59).
+		if m.onBoard(s) && !s.Waiting && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
 			n++
 		}
 	}
@@ -3736,11 +3874,23 @@ func (m *Model) statusChips() string {
 	counts := map[state.State]int{}
 	oldest := map[state.State]time.Time{}
 	loops, dead, loopSince, deadSince, deadWord := 0, 0, time.Time{}, time.Time{}, ""
+	waits, waitSince := 0, time.Time{}
 	for _, s := range m.sessions {
 		if !m.onBoard(s) {
 			continue
 		}
 		switch {
+		case s.Waiting:
+			// A question you walked away from is not an alarm of the
+			// moment, and a chip that counted it as one made four alarms
+			// out of one: the panel walked `▲4 9d` down to `▲1 6m` with
+			// four keypresses that answered nothing (round 59). It keeps
+			// its own chip, in the form the quota deaths wear.
+			waits++
+			if waitSince.IsZero() || headSince(s).Before(waitSince) {
+				waitSince = headSince(s)
+			}
+			continue
 		case s.Snap.APIError:
 			dead++
 			if deadSince.IsZero() || headSince(s).Before(deadSince) {
@@ -3784,6 +3934,12 @@ func (m *Model) statusChips() string {
 	}
 	if dead > 0 {
 		parts = append(parts, needsYouStyle.Render(fmt.Sprintf("%s%d %s %s", glyphAPIError, dead, deadWord, m.age(deadSince))))
+	}
+	if waits > 0 {
+		// Dim, where the alarms are warm: the glyph says what it is, the
+		// word says it is not today's, and the age is the oldest question
+		// on the board — the number `X` clears in one key.
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("%s%d unanswered %s", fleet.GlyphNeedsYou, waits, m.age(waitSince))))
 	}
 	for _, st := range []state.State{state.Working, state.Idle} {
 		if n := counts[st]; n > 0 {
@@ -3871,7 +4027,7 @@ func (m *Model) statusChips() string {
 	if unread > 0 {
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("%d unread", unread)))
 	}
-	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && dead == 0 && out == 0 && owed == 0 && unread == 0 && !m.archiveView {
+	if counts[state.NeedsYou] == 0 && counts[state.Stuck] == 0 && loops == 0 && dead == 0 && waits == 0 && out == 0 && owed == 0 && unread == 0 && !m.archiveView {
 		// Calm, said aloud: the absence of a warm glyph is the design, and
 		// in monochrome an absence is also what a clipped header looks like.
 		parts = append(parts, dimStyle.Render("all calm"))
@@ -4375,7 +4531,7 @@ func (m *Model) keymapOnce() string {
 		// keys act here as they do on the live list, and answered
 		// `no earlier prompt` on a row that did not name them (#193).
 		// `r reply` stands here too: the archive draws and selects live
-		// rows — the hidden one under `hidden · x brings one back` (#29),
+		// rows — the hidden one under `hidden · x one back, X all` (#29),
 		// and the live session an archive with nothing in it keeps (#244,
 		// #248) — and for those the pane is real. Which of the two writes
 		// a row is offered is the pane's question, not the view's (#53):
@@ -5509,6 +5665,24 @@ func (m *Model) footerStuckCost(was, now string) []string {
 	stuck := map[string]string{}
 	for _, k := range m.stuckKeys(m.keymap()) {
 		stuck[keyWord(k)] = k
+	}
+	// The archive's attach refusal is not a key that acts: `enter` on an
+	// archived session with no pane answers `no pane` at every width and
+	// however often it is pressed — the rule #210 and #216 read off the
+	// chapter key, the movement key and the walk pair, at the one clause
+	// they never reached. `footerKeysNamed` splits a row on " · ", so this
+	// clause is read as the two words `enter` and `no pane`, while the
+	// stuck map keys it by `keyWord(" · enter · no pane")` — a string that
+	// can never match either. The one clause spelled with a separator
+	// inside it is the one the gate could never see, so the refusal has
+	// never been able to pay for anything, and the grab's trade was read
+	// as a swap (#281) on a row with nine cells free (round 61).
+	if m.archiveView && m.enterKeymap() == "enter · no pane" {
+		for _, w := range []string{"enter", "no pane"} {
+			if _, seen := stuck[w]; !seen {
+				stuck[w] = " · enter · no pane"
+			}
+		}
 	}
 	has := map[string]bool{}
 	for _, k := range footerKeysNamed(now) {

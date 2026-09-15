@@ -14,7 +14,7 @@ var helpKeys = [][2]string{
 	{"1 – 9", "select a session · a digit under recent opens that finished one"},
 	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
 	{"enter", "attach to its pane, at any level (prefix d returns)"},
-	{"g", "grab the oldest ▲ needs-you and attach — a ⊘ is skipped"},
+	{"g", "grab a ▲ and attach — today's question first; a ⊘ is skipped"},
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: board → session → reader"},
 	{"⇧ tab", "zoom out, back to the board (esc too)"},
@@ -23,7 +23,7 @@ var helpKeys = [][2]string{
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
-	{"x", "hide a session — A lists it, x there brings it back"},
+	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
@@ -74,7 +74,7 @@ func helpOffered(key, keymap string) bool {
 	for _, f := range map[string][]string{
 		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"},
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
-		"G": {"G is the present"}, "? / q": {"? help"}, "x / A": {"x hide", "x unhide", "A fleet", "A browses"},
+		"G": {"G is the present"}, "? / q": {"? help"}, "x X A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
 		"a": {"a ask"}, "space": {"space unfold"}, "/ n N": {"/ search", "n/N"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
@@ -184,7 +184,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x / A", "r", "a", "[ ]", "space")
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "[ ]", "space")
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -452,7 +452,14 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 			case "G":
 				what = "" // the newest row: named on the j / k row below
 			case "x":
-				key, what = "x / A", "hide a session · A browses the archive, x there brings it back"
+				// `X` rides in the key column, where it costs nothing: the
+				// narrow help is where the M5 dogfood happened, and the
+				// key this round added was named on no frame of it until
+				// after it had been pressed (round 59). The clause it
+				// sheds for the sentence — `x there brings it back` — is
+				// said by the archive's own group header, two rows above
+				// the rows it applies to.
+				key, what = "x X A", "hide a session · A browses the archive · X, every unanswered one"
 			case "A":
 				what = ""
 			case "m":
@@ -560,6 +567,19 @@ func dropToolGloss(lines []string) []string {
 // (#281's rule, in the legend).
 func helpCursorGloss(l string, w int) string {
 	const clause = " \u00b7 \u25b8 its row"
+	// The fleet's glyph line is a glyph-to-word list, and the word this
+	// feature added belongs in it: `▲ unanswered` is the same shape as its
+	// six neighbours, and it fits at a hundred columns and up. It is a
+	// clause, not a row, because a row of its own sheds `(3h+ = away)` at
+	// 152 — round 57's pin, which is why this went two rounds as a hold
+	// (round 61).
+	if strings.HasPrefix(l, "fleet:") {
+		const waiting = "  \u25b2\u00a0unanswered"
+		if ansi.StringWidth(strings.ReplaceAll(l+waiting, "\u00a0", " ")) <= w {
+			return l + waiting
+		}
+		return l
+	}
 	if !strings.HasPrefix(l, focusMark+" marks") || ansi.StringWidth(strings.ReplaceAll(l, "\u00a0", " ")+clause) > w {
 		return l
 	}
