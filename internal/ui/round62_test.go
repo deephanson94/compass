@@ -15,7 +15,7 @@ import (
 	"github.com/deephanson94/compass/internal/state"
 )
 
-// Round fifty-nine: the summary (#344). `s` on the legs counts them by
+// Round sixty-two: the summary (#348). `s` on the legs counts them by
 // class, `space` opens a class into its legs oldest first, `tab` on a leg
 // is the trail with the cursor on it, and `s` or `esc` is the trail again.
 
@@ -107,7 +107,7 @@ func TestTheSummaryCountsTheLegsByClass(t *testing.T) {
 		tw, th := m.trailBox()
 		_ = th
 		if said := strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red"); red > 0 && (!said || strings.Contains(ansi.Strip(m.cardSecond(tw)), " "+strconv.Itoa(red)+" red") || strings.Contains(ansi.Strip(m.cardSecond(tw)), strconv.Itoa(red)+"✗")) {
-			t.Errorf("%dx%d: the test row should count its %d red runs and the card stand down (#349, #367): said %v\n%s", w, h, red, said, view)
+			t.Errorf("%dx%d: the test row should count its %d red runs and the card stand down (#353, #371): said %v\n%s", w, h, red, said, view)
 		}
 		// The footer names the fold key and the way back; the trail's
 		// scroll clauses are not the summary's.
@@ -271,7 +271,7 @@ func TestTheSummaryIsRefusedOffTheLegs(t *testing.T) {
 	}
 	press(narrow, "s")
 	if view := ansi.Strip(narrow.View()); !strings.Contains(view, "the summary is the legs'") || strings.Contains(view, "esc, then s") || !strings.Contains(view, "esc back") || strings.Contains(view, "[summary]") {
-		t.Errorf("s in the reader should say the summary is the legs' — the short note — and keep the reader's `esc back` (#346):\n%s", view)
+		t.Errorf("s in the reader should say the summary is the legs' — the short note — and keep the reader's `esc back` (#350):\n%s", view)
 	}
 }
 
@@ -313,7 +313,7 @@ func TestTheSummaryCountsTheLanes(t *testing.T) {
 		mark := glyphBranch
 		if live, known := o.Agents[br.ToolUseID]; known && !br.Done {
 			if _, hung := laneSilence(live, br, o.Now); hung {
-				mark = fleet.Glyph(state.Stuck) // the trail's own mark for a lane gone quiet (#345)
+				mark = fleet.Glyph(state.Stuck) // the trail's own mark for a lane gone quiet (#349)
 			}
 		}
 		found := -1
@@ -354,7 +354,7 @@ func TestTheHelpNamesTheSummaryOnTheLegs(t *testing.T) {
 	}
 }
 
-// The panel's findings on #344, folded (#345).
+// The panel's findings on #348, folded (#349).
 
 // summaryFrameRows is the frame's rows, stripped.
 func summaryFrameRows(m *Model) []string {
@@ -423,7 +423,7 @@ func TestTheClassRowSumsItsSpanToTheMinute(t *testing.T) {
 	}
 	// The loop is said once per frame: on the class row where the card
 	// above (or the fleet row beside) does not carry it, and not where
-	// it does (#347).
+	// it does (#351).
 	for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}, {220, 48}} {
 		m := summaryModel(t, size[0], size[1])
 		press(m, "s")
@@ -597,7 +597,7 @@ func TestAClassOfOneIsItsLegsOwnRow(t *testing.T) {
 	}
 	pressKey(m, "space")
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "  one leg") || strings.Contains(v, "tab is the trail there") {
-		t.Errorf("space on a class of one should say `one leg` and no more (#346):\n%s", v)
+		t.Errorf("space on a class of one should say `one leg` and no more (#350):\n%s", v)
 	}
 	foot := summaryFrameRows(m)
 	if row := foot[len(foot)-1]; strings.Contains(row, "space open") || !strings.Contains(row, "tab trail there") || !strings.Contains(row, "s/esc trail") {
@@ -714,7 +714,7 @@ func TestTheArchiveTitleAndRowKeepTheirShapeOverTheSummary(t *testing.T) {
 	for _, r := range summaryFrameRows(hm) {
 		if strings.Contains(r, "▸1 ") {
 			if got := strings.Split(r, "│")[0]; got != rowBefore || strings.Contains(got, "relayed") {
-				t.Errorf("the archive's row grew the ask over the summary (#345):\n%q\n%q", rowBefore, got)
+				t.Errorf("the archive's row grew the ask over the summary (#349):\n%q\n%q", rowBefore, got)
 			}
 		}
 	}
@@ -742,12 +742,12 @@ func TestTheLanesRowTalliesWhatTheCardDoesNot(t *testing.T) {
 	porter := find("porter", 4)
 	press(porter, "s")
 	if v := ansi.Strip(porter.View()); !strings.Contains(v, "agent  4 lanes") || !strings.Contains(v, "20m out") || strings.Contains(v, "lanes · 2 silent") {
-		t.Errorf("porter's lanes row should count the lanes with the oldest's clock and its word, and leave `2 silent 18m` to the card (#346):\n%s", v)
+		t.Errorf("porter's lanes row should count the lanes with the oldest's clock and its word, and leave `2 silent 18m` to the card (#350):\n%s", v)
 	}
 	harness := find("harness", 3)
 	press(harness, "s")
 	if v := ansi.Strip(harness.View()); !strings.Contains(v, "agent  3 lanes") || !strings.Contains(v, "1h ago") || strings.Contains(v, "lanes · 1 empty") {
-		t.Errorf("harness's lanes row should count the lanes with the last return's clock and its word (#346):\n%s", v)
+		t.Errorf("harness's lanes row should count the lanes with the last return's clock and its word (#350):\n%s", v)
 	}
 	// The lane list keeps the trail's own link mark.
 	toLanes(t, porter)
@@ -840,7 +840,7 @@ func toLanes(t *testing.T, m *Model) {
 	t.Fatal("no lanes row to stand on")
 }
 
-// The panel's second pass on #344 and #345, folded (#346).
+// The panel's second pass on #348 and #349, folded (#350).
 
 func TestATrailOfOneOfEachIsRefused(t *testing.T) {
 	forceASCII(t)
@@ -855,7 +855,7 @@ func TestATrailOfOneOfEachIsRefused(t *testing.T) {
 	press(m, "s")
 	view := ansi.Strip(m.View())
 	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one of each") {
-		t.Errorf("s on a trail of one of each should refuse with `one of each` (#348):\n%s", view)
+		t.Errorf("s on a trail of one of each should refuse with `one of each` (#352):\n%s", view)
 	}
 	if !strings.Contains(before, "◉") || !strings.Contains(view, "◉") {
 		t.Errorf("the refusal took the ask off the frame")
@@ -869,7 +869,7 @@ func TestATrailOfOneOfEachIsRefused(t *testing.T) {
 	}
 	press(fm, "s")
 	if v := ansi.Strip(fm.View()); !strings.Contains(v, "no leg yet") || strings.Contains(v, "[summary]") {
-		t.Errorf("s on a trail with no leg should say `no leg yet` (#347):\n%s", v)
+		t.Errorf("s on a trail with no leg should say `no leg yet` (#351):\n%s", v)
 	}
 	// The legs' row names no summary key where the key is refused.
 	if foot := summaryFrameRows(fm); strings.Contains(foot[len(foot)-1], "s summary") {
@@ -919,7 +919,7 @@ func TestGOnTheSummaryIsThePresent(t *testing.T) {
 		t.Errorf("G should stand on the class holding HEAD (build), not %+v", at)
 	}
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "▸build  2 legs · for ") {
-		t.Errorf("the running class's row should say how much of its sum is now, `for …` (#349):\n%s", v)
+		t.Errorf("the running class's row should say how much of its sum is now, `for …` (#353):\n%s", v)
 	}
 }
 
@@ -1055,7 +1055,7 @@ func TestTheSummaryHangsTheQuestionUnderHead(t *testing.T) {
 		t.Fatalf("the summary did not open:\n%s", view)
 	}
 	if !strings.Contains(view, "[office CIDR / keep bastion]") {
-		t.Errorf("the question's options are not hung under HEAD's row in the summary (#346):\n%s", view)
+		t.Errorf("the question's options are not hung under HEAD's row in the summary (#350):\n%s", view)
 	}
 	// The cursor steps over the question's lines.
 	press(m, "G")
@@ -1086,8 +1086,8 @@ func TestTheRedCountIsSaidOncePerFrame(t *testing.T) {
 		return nil
 	}
 	// The class row says its own red count at every width; the title
-	// and the card stand down for it while the summary is up (#348,
-	// #367).
+	// and the card stand down for it while the summary is up (#352,
+	// #371).
 	for _, size := range [][2]int{{80, 24}, {100, 30}} {
 		m := find(size[0], size[1])
 		rows := summaryFrameRows(m)
@@ -1111,7 +1111,7 @@ func TestTheRedCountIsSaidOncePerFrame(t *testing.T) {
 		tw, _ := m.trailBox()
 		card := ansi.Strip(m.cardSecond(tw))
 		if !strings.Contains(v, "2 legs · 1 red") || strings.Contains(card, " 1 red") || strings.Contains(card, "1✗") {
-			t.Errorf("%dx%d: the class row should carry the red count and the card stand down (#367): card %q\n%s", size[0], size[1], card, v)
+			t.Errorf("%dx%d: the class row should carry the red count and the card stand down (#371): card %q\n%s", size[0], size[1], card, v)
 		}
 		if n := strings.Count(v, "1 red") + strings.Count(v, "1✗"); n != 1 {
 			t.Errorf("%dx%d: the red count is on the frame %d times, not once:\n%s", size[0], size[1], n, v)
@@ -1128,12 +1128,12 @@ func TestNoHelpGlossIsWiderThanThePageKeysRow(t *testing.T) {
 	}
 	for _, k := range helpKeys {
 		if n := len([]rune(k[1])); n > widest {
-			t.Errorf("the %q gloss is %d cells, wider than the page keys' row (%d): it would narrow the keys column at 152 (#345, #346)", k[0], n, widest)
+			t.Errorf("the %q gloss is %d cells, wider than the page keys' row (%d): it would narrow the keys column at 152 (#349, #350)", k[0], n, widest)
 		}
 	}
 }
 
-// The panel's third pass, folded (#347).
+// The panel's third pass, folded (#351).
 
 func TestAParkedHeadKeepsItsOwnNameInTheSummary(t *testing.T) {
 	forceASCII(t)
@@ -1142,7 +1142,7 @@ func TestAParkedHeadKeepsItsOwnNameInTheSummary(t *testing.T) {
 	pressKey(m, "space")
 	view := ansi.Strip(m.View())
 	if strings.Contains(view, "Measuring DLA") {
-		t.Errorf("the summary names the parked lead after the work it gave its lane (#347):\n%s", view)
+		t.Errorf("the summary names the parked lead after the work it gave its lane (#351):\n%s", view)
 	}
 	if !strings.Contains(view, "● build  implement s6e encoder tests") {
 		t.Errorf("HEAD's own row under its class does not carry its own name:\n%s", view)
@@ -1187,7 +1187,7 @@ func TestADigitOntoAnotherSessionStartsTheSummaryAfresh(t *testing.T) {
 	pressKey(m, cli)
 	view = ansi.Strip(m.View())
 	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one of each") {
-		t.Errorf("a digit onto a trail of one of each should draw the trail with the reason on this frame (#347):\n%s", view)
+		t.Errorf("a digit onto a trail of one of each should draw the trail with the reason on this frame (#351):\n%s", view)
 	}
 	was := m.cursor
 	press(m, "k")
@@ -1216,7 +1216,7 @@ func TestAReturnedLaneSaysWhatItFound(t *testing.T) {
 	pressKey(m, "space")
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "Seven of nine kickoffs") {
-		t.Errorf("a lane back with a finding does not say it in the summary (#347):\n%s", view)
+		t.Errorf("a lane back with a finding does not say it in the summary (#351):\n%s", view)
 	}
 	press(m, "j")
 	if rows := m.summaryRowsHere(); rows[m.summaryCursor].kind != "lane" {
@@ -1261,7 +1261,7 @@ func TestTheArchiveRoundTripKeepsTheSummary(t *testing.T) {
 	pressKey(m, "A")
 	poll(m, sc)
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || m.summaryCursor != at || len(m.summaryOpen) != open {
-		t.Errorf("A and back should return to the summary it left (#343, #347): cursor %d (was %d), open %v\n%s", m.summaryCursor, at, m.summaryOpen, v)
+		t.Errorf("A and back should return to the summary it left (#343, #351): cursor %d (was %d), open %v\n%s", m.summaryCursor, at, m.summaryOpen, v)
 	}
 }
 
@@ -1343,7 +1343,7 @@ func TestTheHungQuestionIsOnTheTrailColumn(t *testing.T) {
 	}
 	under := summaryTrailCell(m, rows[at+1])
 	if !strings.Contains(under, "└ ") || !strings.Contains(strings.Join([]string{under, summaryTrailCell(m, rows[min(at+2, len(rows)-1)])}, " "), "[office CIDR / keep bastion]") {
-		t.Errorf("the question is not hung under HEAD's row on the trail column (#346, #347):\n%s", strings.Join(rows, "\n"))
+		t.Errorf("the question is not hung under HEAD's row on the trail column (#350, #351):\n%s", strings.Join(rows, "\n"))
 	}
 	press(m, "G")
 	press(m, "j")
@@ -1391,7 +1391,7 @@ func TestTheHiddenLiveRowKeepsItsShapeOverTheSummaryAtEveryWidth(t *testing.T) {
 	}
 }
 
-// The panel's fourth pass, folded (#348).
+// The panel's fourth pass, folded (#352).
 
 func TestTheSummaryIsSettledInTheArchiveToo(t *testing.T) {
 	forceASCII(t)
@@ -1430,21 +1430,21 @@ func TestTheSummaryIsSettledInTheArchiveToo(t *testing.T) {
 		t.Fatalf("tab in the archive did not open the legs: level %d, archive %v", m.level, m.archiveView)
 	}
 	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || !strings.Contains(v, "one of each") {
-		t.Errorf("the archive's legs draw the summary over a trail of one of each, or say nothing (#348):\n%s", v)
+		t.Errorf("the archive's legs draw the summary over a trail of one of each, or say nothing (#352):\n%s", v)
 	}
 	pressKey(m, "esc")
 	poll(m, sc)
 	pressKey(m, "A")
 	poll(m, sc)
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || len(m.summaryOpen) != len(opened) {
-		t.Errorf("A back should return to the summary it left, with its class open (#348): open %v (was %v)\n%s", m.summaryOpen, opened, v)
+		t.Errorf("A back should return to the summary it left, with its class open (#352): open %v (was %v)\n%s", m.summaryOpen, opened, v)
 	}
 }
 
 // twoToolsWaiting is the two-tools scene on its claude api session: one
 // of each leg, and four prompts four minutes apart — a 12m wait on you
 // that no single prompt row wears, the summary's only count there, and
-// the session whose card wears the verdict (#353).
+// the session whose card wears the verdict (#357).
 func twoToolsWaiting(t *testing.T, w, h int) (*Model, scene) {
 	t.Helper()
 	sc := sceneTwoTools()
@@ -1481,7 +1481,7 @@ func TestTheSummaryRowNamesTheGrab(t *testing.T) {
 	}
 	foot := summaryFrameRows(m)
 	if row := foot[len(foot)-1]; !strings.Contains(row, "g grab") {
-		t.Errorf("the summary's row does not name g grab where it acts (#348): %q", strings.TrimSpace(row))
+		t.Errorf("the summary's row does not name g grab where it acts (#352): %q", strings.TrimSpace(row))
 	}
 }
 
@@ -1498,7 +1498,7 @@ func TestTheHungQuestionIsCutAtTheRail(t *testing.T) {
 	press(m, "s")
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "keep the bastion?") || strings.Contains(view, "keep the bast…") {
-		t.Errorf("the question's line is cut short of the row it hangs on (#348):\n%s", view)
+		t.Errorf("the question's line is cut short of the row it hangs on (#352):\n%s", view)
 	}
 }
 
@@ -1528,7 +1528,7 @@ func TestTheWaitIsARowOfTheDocument(t *testing.T) {
 	tm, _ := twoToolsWaiting(t, 120, 34)
 	press(tm, "s")
 	if v := ansi.Strip(tm.View()); !strings.Contains(v, "[summary]") || !strings.Contains(v, "◉ waited on you") {
-		t.Errorf("a trail whose only count is the wait on you should open the summary on it (#348):\n%s", v)
+		t.Errorf("a trail whose only count is the wait on you should open the summary on it (#352):\n%s", v)
 	}
 }
 
@@ -1540,15 +1540,15 @@ func TestASilentLaneHangsItsOwnLine(t *testing.T) {
 	found := false
 	for _, r := range summaryFrameRows(m) {
 		if cell := summaryTrailCell(m, r); strings.Contains(cell, "nothing written") {
-			found = true // the trail column's own row, not the conversation beside it (#351)
+			found = true // the trail column's own row, not the conversation beside it (#355)
 		}
 	}
 	if !found {
-		t.Errorf("a lane gone quiet hangs nothing under it in the summary (#348):\n%s", ansi.Strip(m.View()))
+		t.Errorf("a lane gone quiet hangs nothing under it in the summary (#352):\n%s", ansi.Strip(m.View()))
 	}
 }
 
-// The panel's fifth pass, folded (#349).
+// The panel's fifth pass, folded (#353).
 
 func TestTheScenesWalkTheSummarysRefusalsAndLanes(t *testing.T) {
 	ends := func(extra []string, tail ...string) bool {
@@ -1563,13 +1563,13 @@ func TestTheScenesWalkTheSummarysRefusalsAndLanes(t *testing.T) {
 		return true
 	}
 	if !ends(sceneFleetHygiene().extra, "tab", "s", "esc") {
-		t.Errorf("fleet-hygiene's walk does not end on the refusal `one of each` (#348)")
+		t.Errorf("fleet-hygiene's walk does not end on the refusal `one of each` (#352)")
 	}
 	if !ends(sceneFirstSession().extra, "tab", "s") {
-		t.Errorf("first-session's walk does not end on the refusal `no leg yet` (#349)")
+		t.Errorf("first-session's walk does not end on the refusal `no leg yet` (#353)")
 	}
 	if !ends(sceneAlarmStorm().extra, "1", "tab", "s", "esc") {
-		t.Errorf("alarm-storm's walk does not end on the asking session's summary (#347)")
+		t.Errorf("alarm-storm's walk does not end on the asking session's summary (#351)")
 	}
 	found := false
 	for _, k := range sceneSubagents().extra {
@@ -1595,7 +1595,7 @@ func TestTheHungLinesEndInsideTheColumn(t *testing.T) {
 		}
 		view := ansi.Strip(m.View())
 		if !strings.Contains(view, "wrote 40s ago") && !strings.Contains(view, "wrote 4") {
-			t.Errorf("%dx%d: the line under a lane still out lost its clock (#349):\n%s", size[0], size[1], view)
+			t.Errorf("%dx%d: the line under a lane still out lost its clock (#353):\n%s", size[0], size[1], view)
 		}
 	}
 }
@@ -1610,14 +1610,14 @@ func TestHeadsTailIsOnHeadsOwnRowNotTheClassRow(t *testing.T) {
 	pressKey(m, "space")
 	view := ansi.Strip(m.View())
 	if strings.Count(view, "◈3 out 20m") != 2 { // the card, and HEAD's own row under its class
-		t.Errorf("HEAD's tail should be on the card and on HEAD's own row, %d times here (#349):\n%s", strings.Count(view, "◈3 out 20m"), view)
+		t.Errorf("HEAD's tail should be on the card and on HEAD's own row, %d times here (#353):\n%s", strings.Count(view, "◈3 out 20m"), view)
 	}
 	// HEAD's own row wears its lanes' clock, `◈3 out 20m`, not the leg's
 	// span: the class row keeps `for 2h`, which is then on no other row
-	// (#359). Where HEAD's row does carry the span the class row yields
-	// it, pinned on very-long's design class (#352).
+	// (#363). Where HEAD's row does carry the span the class row yields
+	// it, pinned on very-long's design class (#356).
 	if !strings.Contains(view, "2 legs · for ") {
-		t.Errorf("the open class row drops `for …` while HEAD's own row beneath carries a different clock (#359):\n%s", view)
+		t.Errorf("the open class row drops `for …` while HEAD's own row beneath carries a different clock (#363):\n%s", view)
 	}
 	if strings.Count(view, "for 2h") != 1 {
 		t.Errorf("the leg's span should be on the frame once, %d times here:\n%s", strings.Count(view, "for 2h"), view)
@@ -1639,9 +1639,9 @@ func TestTheCardStandsDownForTheSummarysRows(t *testing.T) {
 		}
 	}
 	if strings.Contains(view, plural(ships, "ship")) || strings.Contains(view, fmt.Sprintf("%d⚑", ships)) {
-		t.Errorf("the ships are counted twice, on the card and on the ship row (#349):\n%s", view)
+		t.Errorf("the ships are counted twice, on the card and on the ship row (#353):\n%s", view)
 	}
-	// The red count: on the class row, the card standing down (#367).
+	// The red count: on the class row, the card standing down (#371).
 	red := 0
 	for _, l := range m.trail.Legs {
 		if strings.Contains(legBadge(l), "✗") {
@@ -1657,7 +1657,7 @@ func TestTheCardStandsDownForTheSummarysRows(t *testing.T) {
 	}
 }
 
-// The panel's fifth pass, fleet-hygiene's late report, folded (#350).
+// The panel's fifth pass, fleet-hygiene's late report, folded (#354).
 
 func TestTheHidesNoteStandsAloneWhenTheSummaryCloses(t *testing.T) {
 	forceASCII(t)
@@ -1700,7 +1700,7 @@ func TestTheHidesNoteStandsAloneWhenTheSummaryCloses(t *testing.T) {
 			t.Fatalf("%dx%d: the summary stayed up over a trail of one of each", size[0], size[1])
 		}
 		if !strings.Contains(foot, "is hidden") || strings.Contains(foot, "one of each") {
-			t.Errorf("%dx%d: the hide's note should stand alone (#350): %q", size[0], size[1], strings.TrimSpace(foot))
+			t.Errorf("%dx%d: the hide's note should stand alone (#354): %q", size[0], size[1], strings.TrimSpace(foot))
 		}
 		way := strings.Contains(foot, "esc back") || strings.Contains(foot, "esc board") || strings.Contains(foot, "tab deeper") || strings.Contains(foot, "tab reader")
 		if !way {
@@ -1709,7 +1709,7 @@ func TestTheHidesNoteStandsAloneWhenTheSummaryCloses(t *testing.T) {
 	}
 }
 
-// The panel's sixth pass, folded (#351).
+// The panel's sixth pass, folded (#355).
 
 func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	forceASCII(t)
@@ -1721,15 +1721,15 @@ func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	was := m.selectedKey
 	press(m, "h") // the neighbour: one of each
 	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || m.selectedKey == was || !strings.Contains(v, "[summary waits]") || strings.Count(v, "summary waits") != 1 {
-		t.Fatalf("h did not land on a trail of one of each with the summary suspended and marked once (#353, #354):\n%s", v)
+		t.Fatalf("h did not land on a trail of one of each with the summary suspended and marked once (#357, #358):\n%s", v)
 	}
 	press(m, "j") // a key later the mark still stands
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary waits]") {
-		t.Errorf("the hold's mark did not outlive the note (#354):\n%s", v)
+		t.Errorf("the hold's mark did not outlive the note (#358):\n%s", v)
 	}
 	press(m, "l") // back onto the trail that counts
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || m.selectedKey != was {
-		t.Errorf("the summary should resume on the next trail that counts (#351):\n%s", v)
+		t.Errorf("the summary should resume on the next trail that counts (#355):\n%s", v)
 	}
 	// A deliberate close stays closed.
 	pressKey(m, "esc")
@@ -1738,7 +1738,7 @@ func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	if strings.Contains(ansi.Strip(m.View()), "[summary]") {
 		t.Errorf("a summary closed by hand came back on its own")
 	}
-	// And `s` on the suspended trail ends the hold (#354).
+	// And `s` on the suspended trail ends the hold (#358).
 	press(m, "s")
 	press(m, "h")
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary waits]") {
@@ -1746,7 +1746,7 @@ func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	}
 	press(m, "s")
 	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary waits]") || !strings.Contains(v, "one of each") {
-		t.Errorf("s on a suspended trail should end the hold and say why (#354):\n%s", v)
+		t.Errorf("s on a suspended trail should end the hold and say why (#358):\n%s", v)
 	}
 	press(m, "l")
 	if strings.Contains(ansi.Strip(m.View()), "[summary]") {
@@ -1762,7 +1762,7 @@ func TestTheEdgeRowShedsWholeClauses(t *testing.T) {
 	for _, r := range summaryFrameRows(m) {
 		cell := summaryTrailCell(m, r)
 		if strings.Contains(cell, "▾ ") && strings.Contains(cell, "…") {
-			t.Errorf("the edge row is cut inside a clause (#351): %q", strings.TrimSpace(cell))
+			t.Errorf("the edge row is cut inside a clause (#355): %q", strings.TrimSpace(cell))
 		}
 	}
 	wide := summaryModel(t, 120, 34) // scout open cuts the classes and the wait here, with the room for the clause
@@ -1775,7 +1775,7 @@ func TestTheEdgeRowShedsWholeClauses(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("the edge row at 120 does not count the wait it hides (#349):\n%s", ansi.Strip(wide.View()))
+		t.Errorf("the edge row at 120 does not count the wait it hides (#353):\n%s", ansi.Strip(wide.View()))
 	}
 }
 
@@ -1787,7 +1787,7 @@ func TestTheShipsStandDownWhereTheShipRowCountsThem(t *testing.T) {
 		for _, r := range summaryFrameRows(m) {
 			cell := summaryTrailCell(m, r)
 			if strings.Contains(cell, "TRAIL · ") && (strings.Contains(cell, "⚑") || strings.Contains(cell, " ships")) {
-				t.Errorf("%dx%d: the title counts the ships the ship row counts (#349): %q", size[0], size[1], strings.TrimSpace(cell))
+				t.Errorf("%dx%d: the title counts the ships the ship row counts (#353): %q", size[0], size[1], strings.TrimSpace(cell))
 			}
 		}
 		if !strings.Contains(ansi.Strip(m.View()), "ship   16 legs") {
@@ -1806,7 +1806,7 @@ func TestTheCardsWaitClauseStandsDownAtEveryWidth(t *testing.T) {
 			t.Fatalf("%dx%d: the summary did not open", size[0], size[1])
 		}
 		if strings.Count(v, "on you") != 1 {
-			t.Errorf("%dx%d: the wait on you is said %d times (#349, #351):\n%s", size[0], size[1], strings.Count(v, "on you"), v)
+			t.Errorf("%dx%d: the wait on you is said %d times (#353, #355):\n%s", size[0], size[1], strings.Count(v, "on you"), v)
 		}
 	}
 }
@@ -1831,11 +1831,11 @@ func TestAFindingIsHungWhole(t *testing.T) {
 	pressKey(m, "space")
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "should cache") || !strings.Contains(view, "└ it") || strings.Contains(view, "re-ran the same setup; t…") {
-		t.Errorf("a finding is cut where the trail spells it whole (#351):\n%s", view)
+		t.Errorf("a finding is cut where the trail spells it whole (#355):\n%s", view)
 	}
 }
 
-// The panel's seventh pass, folded (#352).
+// The panel's seventh pass, folded (#356).
 
 func TestTheOpenClassKeepsItsClockWhereHeadsRowIsBelowTheFold(t *testing.T) {
 	forceASCII(t)
@@ -1858,7 +1858,7 @@ func TestTheOpenClassKeepsItsClockWhereHeadsRowIsBelowTheFold(t *testing.T) {
 		t.Fatalf("no design class row on the frame:\n%s", strings.Join(rows, "\n"))
 	}
 	if present == strings.Contains(class, "· for ") {
-		t.Errorf("the present should be on the frame exactly once — the class row's clause where HEAD's own row is below the fold (#352): row %q, HEAD's row drawn %v\n%s", class, present, strings.Join(rows, "\n"))
+		t.Errorf("the present should be on the frame exactly once — the class row's clause where HEAD's own row is below the fold (#356): row %q, HEAD's row drawn %v\n%s", class, present, strings.Join(rows, "\n"))
 	}
 	// At 80 the edge's word for the wait fits whole.
 	pressKey(m, "space")
@@ -1870,7 +1870,7 @@ func TestTheOpenClassKeepsItsClockWhereHeadsRowIsBelowTheFold(t *testing.T) {
 	}
 }
 
-// The panel's eighth pass, alarm-storm, folded (#355).
+// The panel's eighth pass, alarm-storm, folded (#359).
 
 func TestTheSummaryRowKeepsTheReplyOverTheAttach(t *testing.T) {
 	forceASCII(t)
@@ -1889,7 +1889,7 @@ func TestTheSummaryRowKeepsTheReplyOverTheAttach(t *testing.T) {
 		t.Fatalf("the summary did not open on infra")
 	}
 	if !strings.Contains(foot, "r reply") {
-		t.Errorf("the summary's row on the asking session sheds `r reply` (#355): %q", strings.TrimSpace(foot))
+		t.Errorf("the summary's row on the asking session sheds `r reply` (#359): %q", strings.TrimSpace(foot))
 	}
 }
 
@@ -1920,11 +1920,11 @@ func TestTheEdgeSaysTheWaitLongWhereItFits(t *testing.T) {
 		}
 	}
 	if !long {
-		t.Errorf("the 120-column edge should say the wait on you in full (#355)")
+		t.Errorf("the 120-column edge should say the wait on you in full (#359)")
 	}
 }
 
-// The panel's eighth pass, two-tools, folded (#356).
+// The panel's eighth pass, two-tools, folded (#360).
 
 func TestTheClassRowYieldsItsClockToTheCard(t *testing.T) {
 	forceASCII(t)
@@ -1961,7 +1961,7 @@ func TestTheClassRowYieldsItsClockToTheCard(t *testing.T) {
 		onCard := strings.Contains(card, figure)
 		onRow := strings.Contains(v, "legs · "+figure)
 		if onCard && onRow {
-			t.Errorf("%dx%d: the class row repeats the card's `%s` (#356):\n%s", size[0], size[1], figure, v)
+			t.Errorf("%dx%d: the class row repeats the card's `%s` (#360):\n%s", size[0], size[1], figure, v)
 		}
 		if !onCard && !onRow {
 			t.Errorf("%dx%d: the present is on no row: card %q\n%s", size[0], size[1], card, v)
@@ -1978,11 +1978,11 @@ func TestTheEdgeShedsWholeClausesWhereNoFormFits(t *testing.T) {
 		t.Errorf("the short form should stand where the long one cannot: %q", got)
 	}
 	if got := summaryEdge(long, 30); got != "▾ 18 more scout · 6 classes" || strings.Contains(got, "…") {
-		t.Errorf("clauses should shed whole, last first, where no form fits (#351, #356): %q", got)
+		t.Errorf("clauses should shed whole, last first, where no form fits (#355, #360): %q", got)
 	}
 }
 
-// The panel's ninth pass, folded (#357).
+// The panel's ninth pass, folded (#361).
 
 func TestTheLanesRowSaysHowManyCameBackWhereNothingElseDoes(t *testing.T) {
 	forceASCII(t)
@@ -2003,7 +2003,7 @@ func TestTheLanesRowSaysHowManyCameBackWhereNothingElseDoes(t *testing.T) {
 		v := strings.Join(rows, "\n")
 		// Said once on the frame — on the card above where the deck
 		// draws one, on the fleet row beside where that row keeps the
-		// clause, and on the lanes row where neither does (#357).
+		// clause, and on the lanes row where neither does (#361).
 		// The clause's own form, `· 1 back`: harness's `↳ 1 back, empty`
 		// two rows down is another session's landing, not porter's tally.
 		if n := strings.Count(v, "· 1 back"); n != 1 {
@@ -2060,7 +2060,7 @@ func TestVeryLongsWalkEndsOnTheHelpTheSummaryOwesARowTo(t *testing.T) {
 		}
 	}
 	// And the walk ends on the idle session's summary scrolled off the
-	// row `G` goes to, so #361's mark is on a shipped frame (#363).
+	// row `G` goes to, so #365's mark is on a shipped frame (#367).
 	v := ansi.Strip(m.View())
 	if s, ok := m.selected(); !ok || sessionName(s.Info) != "etl" || !strings.Contains(v, "↓ G  [summary]") {
 		t.Errorf("the walk's last frame should be etl's summary wearing `↓ G`:\n%s", v)
@@ -2090,7 +2090,7 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 			t.Fatalf("%dx%d: the present is still on the frame; the pin wants it off:\n%s", size[0], size[1], v)
 		}
 		if title := titleOf(m); !strings.Contains(title, "↓ G  [summary]") {
-			t.Errorf("%dx%d: the running class is off the frame and the title does not say `↓ G` (#357): %q\n%s", size[0], size[1], title, v)
+			t.Errorf("%dx%d: the running class is off the frame and the title does not say `↓ G` (#361): %q\n%s", size[0], size[1], title, v)
 		}
 		press(m, "G")
 		v = ansi.Strip(m.View())
@@ -2110,7 +2110,7 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 		t.Errorf("220x48 has the room for every row; the title says `↓ G`: %q", title)
 	}
 	// A trail with nothing running: the present is the row `G` goes to,
-	// the last one, and the mark says when the window hides it (#361).
+	// the last one, and the mark says when the window hides it (#365).
 	sc := sceneVeryLong()
 	m = sceneModel(sc, 80, 24)
 	pressKey(m, "3")
@@ -2128,7 +2128,7 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 	}
 	press(m, "space") // scout opens, the last row leaves the window
 	if title := titleOf(m); !strings.Contains(title, "↓ G  [summary]") {
-		t.Errorf("the idle summary's last row is off the window and the title does not say `↓ G` (#361): %q\n%s", title, ansi.Strip(m.View()))
+		t.Errorf("the idle summary's last row is off the window and the title does not say `↓ G` (#365): %q\n%s", title, ansi.Strip(m.View()))
 	}
 	press(m, "G")
 	rows := m.summaryRowsHere()
@@ -2141,13 +2141,13 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 	}
 }
 
-// The panel's ninth pass, two-tools, folded (#358).
+// The panel's ninth pass, two-tools, folded (#362).
 
 func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 	forceASCII(t)
 	gloss := "the summary waits for the next trail that counts · s ends the hold"
 	// At 80 too: the row keeps its place on the short body, where a
-	// refused key's row is otherwise the first cut (#360).
+	// refused key's row is otherwise the first cut (#364).
 	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 		m, _ := twoToolsWaiting(t, size[0], size[1])
 		press(m, "s")
@@ -2167,7 +2167,7 @@ func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 		press(m, "?")
 		v := ansi.Strip(m.View())
 		if !strings.Contains(v, gloss) {
-			t.Errorf("%dx%d: the frame draws `[summary waits]` and the help has no row for it (#358):\n%s", size[0], size[1], v)
+			t.Errorf("%dx%d: the frame draws `[summary waits]` and the help has no row for it (#362):\n%s", size[0], size[1], v)
 		}
 		// The row fits the width that draws it, whole, at 80 as well:
 		// the walkthrough's guard never opens the help over a hold.
@@ -2183,7 +2183,7 @@ func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 		}
 		press(m, "?")
 		if v := ansi.Strip(m.View()); strings.Contains(v, "ends the hold") || strings.Contains(v, "summary: the legs by class") {
-			t.Errorf("%dx%d: the hold is over and the help still draws a row for `s`, which refuses here (#344):\n%s", size[0], size[1], v)
+			t.Errorf("%dx%d: the hold is over and the help still draws a row for `s`, which refuses here (#348):\n%s", size[0], size[1], v)
 		}
 	}
 	// The gloss keeps the keys column: no wider than the page keys' row.
@@ -2198,7 +2198,7 @@ func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 	}
 }
 
-// The panel's tenth pass, subagents, folded (#362).
+// The panel's tenth pass, subagents, folded (#366).
 
 func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 	forceASCII(t)
@@ -2219,8 +2219,8 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 		return ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, false, w))
 	}
 	// The card above says the span and HEAD's own row has shed it: the
-	// card's yield stands whatever HEAD's row wears, closed or open (#356,
-	// #364).
+	// card's yield stands whatever HEAD's row wears, closed or open (#360,
+	// #368).
 	for _, open := range []bool{false, true} {
 		o := m.trailOpts(100, 1)
 		o.HeadTail = "◈3 out 20m"
@@ -2229,12 +2229,12 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 		}
 	}
 	// The lanes' clock alone: the span is on no other row, the class
-	// row keeps it (#359).
+	// row keeps it (#363).
 	if r := row(100, "◈3 out 20m"); !strings.Contains(r, "2 legs · "+span) {
 		t.Errorf("HEAD's row wears the lanes' clock alone; the open class row drops the span: %q", r)
 	}
 	// The lanes' clock and the span: HEAD's own row carries it, the
-	// class row yields (#351, #362).
+	// class row yields (#355, #366).
 	if r := row(100, "◈3 out 20m · "+span); strings.Contains(r, "· for ") {
 		t.Errorf("HEAD's row carries `· %s`; the open class row repeats it: %q", span, r)
 	}
@@ -2252,7 +2252,7 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 	}
 }
 
-// The panel's eleventh pass, alarm-storm's correction, folded (#365).
+// The panel's eleventh pass, alarm-storm's correction, folded (#369).
 
 func TestTheSummarysMarkPointsWhereGGoes(t *testing.T) {
 	forceASCII(t)
@@ -2275,7 +2275,7 @@ func TestTheSummarysMarkPointsWhereGGoes(t *testing.T) {
 			t.Fatalf("%dx%d: the present is still on the frame; the pin wants it above:\n%s", size[0], size[1], v)
 		}
 		if title := titleOf(m); !strings.Contains(title, "↑ G  [summary]") || strings.Contains(title, "↓ G") {
-			t.Errorf("%dx%d: the present is above the window and the title's arrow does not point up (#365): %q\n%s", size[0], size[1], title, v)
+			t.Errorf("%dx%d: the present is above the window and the title's arrow does not point up (#369): %q\n%s", size[0], size[1], title, v)
 		}
 		press(m, "G")
 		v = ansi.Strip(m.View())
@@ -2292,7 +2292,7 @@ func TestTheSummarysMarkPointsWhereGGoes(t *testing.T) {
 	}
 }
 
-// The panel's eleventh pass, two-tools, folded (#366).
+// The panel's eleventh pass, two-tools, folded (#370).
 
 func TestTwoToolsWalkShipsTheHeldSummarysRow(t *testing.T) {
 	forceASCII(t)
@@ -2324,7 +2324,7 @@ func TestTwoToolsWalkShipsTheHeldSummarysRow(t *testing.T) {
 			}
 		case help:
 			if !m.showHelp || !strings.Contains(v, "s ends the hold") {
-				t.Errorf("the walk's help frame does not draw the held summary's row (#366):\n%s", v)
+				t.Errorf("the walk's help frame does not draw the held summary's row (#370):\n%s", v)
 			}
 		case help + 1:
 			if m.showHelp || !strings.Contains(v, "[summary waits]") {

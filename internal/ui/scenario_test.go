@@ -751,7 +751,7 @@ func sceneTwoTools() scene {
 		legSpec{journey.Test, "pytest", 3 * time.Minute, nil, "18✓ 2✗", nil},
 		legSpec{journey.Fix, "tokens.py", 2 * time.Minute, []string{"tokens.py"}, "", nil})
 	// Three follow-up prompts four minutes apart: one of each leg, and a
-	// wait on you worth a row — the summary's only count here (#353).
+	// wait on you worth a row — the summary's only count here (#357).
 	if k := sessionKey("api-claude"); true {
 		t := tr[k]
 		at := t.Legs[len(t.Legs)-1].End
@@ -843,7 +843,7 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Build, "the generator", 30 * time.Minute, []string{"gen.py"}, "", nil})
 	ss = append(ss, sess("infra", "infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", state.NeedsYou, n.Add(-7*time.Minute), journey.Design, "", "question", "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]"))
 	tr[sessionKey("infra")] = trailOf(n.Add(-30*time.Minute), "tighten the vpc security groups without breaking the bastion", true,
-		legSpec{journey.Scout, "the vpc", 4 * time.Minute, []string{"vpc.tf"}, "", nil}, // a second scout, so the summary counts here and its question is on a frame (#347)
+		legSpec{journey.Scout, "the vpc", 4 * time.Minute, []string{"vpc.tf"}, "", nil}, // a second scout, so the summary counts here and its question is on a frame (#351)
 		legSpec{journey.Scout, "main.tf and the bastion rules", 10 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "Open port 22 to the office CIDR only, or keep the bastion?", 7 * time.Minute, nil, "", nil})
 	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/backfill", "backfill last week's shards", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 6m mid-turn", "Bash: python backfill.py --all"))
@@ -1071,7 +1071,7 @@ func TestScenarioWalkthrough(t *testing.T) {
 			m := sceneModel(sc, w, h)
 			walked := append([]string{}, keys...)
 			if len(sc.extra) > 0 {
-				walked = append(append(walked, "esc"), sc.extra...) // the scene's own keys are walked and measured too (#349)
+				walked = append(append(walked, "esc"), sc.extra...) // the scene's own keys are walked and measured too (#353)
 			}
 			for _, k := range append(walked, "") {
 				frame := m.View()
@@ -1081,7 +1081,7 @@ func TestScenarioWalkthrough(t *testing.T) {
 					}
 				}
 				if k == "" {
-					break // the frame after the last key is measured too (#351)
+					break // the frame after the last key is measured too (#355)
 				}
 				pressKey(m, k)
 				poll(m, sc)

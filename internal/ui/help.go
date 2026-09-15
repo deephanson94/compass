@@ -60,7 +60,7 @@ type helpOpts struct {
 	board   bool
 	reader  bool // the keys are in the reader: the page keys page it, not the trail (#83, #87)
 	refused []string
-	held    bool // the summary is held for the next trail that counts (#354, #358)
+	held    bool // the summary is held for the next trail that counts (#358, #362)
 	keymap  string
 	tools   bool // the fleet runs two CLIs, so its rows wear the word (#85)
 }
@@ -193,7 +193,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			// `s` is refused on the trail that suspended the summary,
 			// and it is also the key the deck just gave a job there:
 			// the row that names the mark the frame draws keeps its
-			// place at 80, where the cut would take it first (#360).
+			// place at 80, where the cut would take it first (#364).
 			order = slices.DeleteFunc(order, func(k string) bool { return k == "s" })
 		}
 		if !o.board {
@@ -434,14 +434,14 @@ func helpKeyLinesIn(w int, board, reader, held bool, refused ...string) []string
 			}
 		}
 		if key == "s" && refuses(refused, "s") {
-			what = "" // the summary is the legs' view: its row is drawn where the key works (#344)
+			what = "" // the summary is the legs' view: its row is drawn where the key works (#348)
 			if held {
 				// A held summary is a mark the frame draws, `[summary
 				// waits]`, and `s` on the trail that suspended it is the
 				// one key that ends the hold: the help owes the mark a
 				// row, and the key the sentence it acts on here (#40,
-				// #358).
-				what = "the summary waits for the next trail that counts · s ends the hold" // 77 cells with its key at 80, the counting row's own width (#360)
+				// #362).
+				what = "the summary waits for the next trail that counts · s ends the hold" // 77 cells with its key at 80, the counting row's own width (#364)
 			}
 		}
 		if !board {

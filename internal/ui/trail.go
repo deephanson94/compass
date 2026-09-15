@@ -1858,7 +1858,7 @@ func saysSame(sentence, row string) bool {
 
 // summaryGMark is the arrow before `G` on a title: down on the trail,
 // whose present is its last row, and on the summary wherever `G` goes —
-// up where the class holding HEAD is above the window (#365).
+// up where the class holding HEAD is above the window (#369).
 func summaryGMark(off int) string {
 	if off < 0 {
 		return "↑"
@@ -1873,7 +1873,7 @@ func (m *Model) trailColumn(w, h int) []string {
 	if m.summaryShown() {
 		// The title says whether the summary's window draws the present
 		// before the window is drawn: the card's height is its content's,
-		// not the mark's, so it is measured first (#357).
+		// not the mark's, so it is measured first (#361).
 		n := 2
 		if m.sessionView() {
 			n = len(m.sessionCard(w))
@@ -1887,9 +1887,9 @@ func (m *Model) trailColumn(w, h int) []string {
 	droppedTag := false
 	draw := func(h int) []string {
 		if m.summaryShown() {
-			// The summary where the trail was (#344). The title above
+			// The summary where the trail was (#348). The title above
 			// may already carry the wait on you; the summary's own line
-			// for it is drawn only where it does not (#346).
+			// for it is drawn only where it does not (#350).
 			return m.summaryLines(w, h)
 		}
 		return trailRows(m.trail, m.trailOpts(w, h))
@@ -1939,7 +1939,7 @@ func (m *Model) trailColumn(w, h int) []string {
 		// The summary draws no ◉ row, so the loop below never fires and
 		// the title kept the ask — the name and the day's verdict, the
 		// two things the summary is opened to read, pushed off a row the
-		// header bar already spells whole (#345).
+		// header bar already spells whole (#349).
 		rows[0] = m.trailTitleWith(w, true)
 	}
 	if m.archiveView && !m.sessionView() && !m.summaryShown() && len(rows) > 2 {
@@ -2018,9 +2018,9 @@ func (m *Model) sessionCard(w int) []string {
 		right = ""
 	}
 	if m.summaryShown() {
-		right = "[summary]" // the legs counted, not walked (#344)
+		right = "[summary]" // the legs counted, not walked (#348)
 	} else if m.summaryWaits() {
-		right = "[summary waits]" // held, for the next trail that counts (#354)
+		right = "[summary waits]" // held, for the next trail that counts (#358)
 	}
 	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
@@ -2108,7 +2108,7 @@ func (m *Model) cardSecond(w int) string {
 		if m.summaryShown() {
 			// The card gives up the wait, the ships and the red count,
 			// which the summary's rows carry — the reds class by class,
-			// which one total on the card could not (#349, #367).
+			// which one total on the card could not (#353, #371).
 			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · ")), " · "), " · ")
 			if len(day) == 1 && day[0] == "" {
 				day = nil
@@ -2116,7 +2116,7 @@ func (m *Model) cardSecond(w int) string {
 		}
 		parts := append([]string{}, verdict...)
 		if m.summaryShown() {
-			parts = withoutPrefix(parts, "on you ") // the verdict's own wait clause: the summary's row has it to the minute (#349)
+			parts = withoutPrefix(parts, "on you ") // the verdict's own wait clause: the summary's row has it to the minute (#353)
 		}
 		if len(day) > 0 {
 			// The day's total carries the wait; the verdict's clause is
@@ -2185,8 +2185,8 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 	}
 	agents := m.agentsFor(m.selectedKey)
 	return TrailOpts{
-		HeadWaits:    headWaits(m.trail),                                        // a parked HEAD keeps its own name, in the summary too (#347)
-		HeadTail:     headTail(m.trail, m.now, headState != state.Idle, agents), // and its own figure, `◈3 out 20m · 2 silent 18m` (#348)
+		HeadWaits:    headWaits(m.trail),                                        // a parked HEAD keeps its own name, in the summary too (#351)
+		HeadTail:     headTail(m.trail, m.now, headState != state.Idle, agents), // and its own figure, `◈3 out 20m · 2 silent 18m` (#352)
 		HeadClass:    headClass,
 		HeadDead:     dead,
 		HeadActivity: activity,
@@ -2244,7 +2244,7 @@ func (m *Model) trailDayHere(compact bool) string {
 		// The summary's own rows carry the wait on you to the minute,
 		// the ships on the ship row, the red runs on the class that ran
 		// them where no card carries them, and its `◉` row the span
-		// where no reader stands beside (#347, #348, #349).
+		// where no reader stands beside (#351, #352, #353).
 		d = summaryDay(d)
 		if !m.sessionView() && len(m.trail.Prompts) > 0 {
 			d = withoutSpan(d, m.now, m.trail)
@@ -2335,7 +2335,7 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 
 // summaryDay is the day's clauses as the summary's title and card carry
 // them: without the wait on you and the red count, which the summary's own
-// rows say to the minute and on the class that ran them (#347, #348).
+// rows say to the minute and on the class that ran them (#351, #352).
 func summaryDay(d string) string {
 	d = withoutClause(d, " · waited on you ")
 	d = withoutClause(d, " · on you ")
@@ -2499,9 +2499,9 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 		// TRAIL (#20, #64).
 		level = "[legs]"
 		if m.summaryShown() {
-			level = "[summary]" // the legs counted, not walked (#344)
+			level = "[summary]" // the legs counted, not walked (#348)
 		} else if m.summaryWaits() {
-			level = "[summary waits]" // held, for the next trail that counts (#354)
+			level = "[summary waits]" // held, for the next trail that counts (#358)
 		}
 	}
 	// Scrolled off the present, the title says so: the trail is no longer
@@ -2515,8 +2515,8 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 	}
 	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff != 0 {
 		// The summary scrolled off the present says so with the trail's
-		// own word, and `G` is its way back too (#357) — the arrow
-		// pointing where `G` goes, which on the summary can be up (#365).
+		// own word, and `G` is its way back too (#361) — the arrow
+		// pointing where `G` goes, which on the summary can be up (#369).
 		right = strings.TrimSpace(summaryGMark(m.summaryOff) + " G  " + right)
 	}
 	mark := m.titleMark(panelTrail)

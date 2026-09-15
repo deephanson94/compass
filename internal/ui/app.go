@@ -248,16 +248,16 @@ type Model struct {
 	// keeps its newest row on screen without anybody pressing a key.
 	trailScroll int
 	trailPinned bool
-	summaryOff  int // the summary's window hides the present: -1 above, +1 below; the title says `↑ G` or `↓ G` (#357, #365)
+	summaryOff  int // the summary's window hides the present: -1 above, +1 below; the title says `↑ G` or `↓ G` (#361, #369)
 
-	// The summary (#344): the trail's legs counted by class, where the
+	// The summary (#348): the trail's legs counted by class, where the
 	// trail was, while summary is on and the keys are on the legs.
 	summary       bool
 	summaryCursor int             // index into summaryRows
 	summaryScroll int             // the first summary row drawn
 	summaryOpen   map[string]bool // the classes opened into their legs, by name; the lanes under summaryLanes
 	summaryOn     string          // the session the summary was last opened on: back there, it stands where it stood
-	summaryHeld   bool            // the summary is what is being read: a trail that cannot count suspends it, the next that can resumes it (#351)
+	summaryHeld   bool            // the summary is what is being read: a trail that cannot count suspends it, the next that can resumes it (#355)
 
 	// anchor is the reader's own cursor: the document line marked, and the
 	// row Space acts on. It opens on the Lv2 cursor's row — so the two
@@ -282,7 +282,7 @@ type Model struct {
 	archiveView bool
 	restSelKey  string // the other view's selection, also a Key()
 	restLevel   int    // the level the archive was opened from, for the way back (#53)
-	restSummary bool   // and whether the summary was up there, for the same way back (#348)
+	restSummary bool   // and whether the summary was up there, for the same way back (#352)
 	fleetScroll int
 	onBoardBand bool
 	// drawnBand is the stranded band the board's last frame drew under
@@ -899,7 +899,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.note, m.noteYields = "", false // a keypress answers the last note
 
 	if m.level != levelWaypoints && !m.archiveView {
-		m.summary, m.summaryHeld = false, false // the summary is the legs' view: a level away from them it is closed; the archive keeps it for the way back (#347)
+		m.summary, m.summaryHeld = false, false // the summary is the legs' view: a level away from them it is closed; the archive keeps it for the way back (#351)
 	}
 	if m.summaryShown() && m.summaryKey(key) {
 		return m, nil
@@ -909,7 +909,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "s":
-		m.toggleSummary() // refused with the way in wherever it does not work, the reader included (#345)
+		m.toggleSummary() // refused with the way in wherever it does not work, the reader included (#349)
 		return m, nil
 	case "?":
 		m.showHelp = true
@@ -962,7 +962,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.archiveView:
 			// The archive is a list; it opens as one, whatever the depth,
 			// and remembers the depth for the way back.
-			m.restLevel, m.restSummary = from, m.summary // the summary comes back with the level (#348)
+			m.restLevel, m.restSummary = from, m.summary // the summary comes back with the level (#352)
 			if m.level != levelTrail {
 				m.level = levelTrail
 				m.cursor, m.anchor = -1, -1
@@ -3070,9 +3070,9 @@ func (m *Model) viewOnce() string {
 	}
 	if (m.summary || m.summaryHeld) && m.level == levelWaypoints {
 		if m.summaryHeld && !m.summary && !summaryCountsNothing(m.trail) {
-			m.summary = true // the trail that could not count is behind us: the summary resumes (#351)
+			m.summary = true // the trail that could not count is behind us: the summary resumes (#355)
 		}
-		m.summarySync() // afresh on another session, closed on one with nothing to count — on this frame, the archive's too (#347, #348)
+		m.summarySync() // afresh on another session, closed on one with nothing to count — on this frame, the archive's too (#351, #352)
 	}
 
 	bodyHeight := h - 5 // header, hairline, blank, hairline, footer
@@ -4088,7 +4088,7 @@ func (m *Model) summaryFoldKeymap() string {
 // footerSummaryTraded is the legs' row with `s summary` where the row has
 // the room: the clause is not ranked among the keys — a rank re-deals the
 // row, and a re-dealt row traded `x hide` and `g grab` for a clause it did
-// not even draw (#345) — but traded as the archive door is (#328): it
+// not even draw (#349) — but traded as the archive door is (#328): it
 // stands only where the row still names every key it named without it.
 func (m *Model) footerSummaryTraded(keys string, w int) string {
 	const clause = " · s summary"
@@ -4643,7 +4643,7 @@ func (m *Model) keymapOnce() string {
 		// goes before the way out, whichever word this level's way out
 		// wears (#56, #62).
 		if strings.Contains(keys, " · s/esc trail") {
-			keys = strings.Replace(keys, " · s/esc trail", " · s/esc trail · A archive", 1) // the summary's row keeps the door (#346)
+			keys = strings.Replace(keys, " · s/esc trail", " · s/esc trail · A archive", 1) // the summary's row keeps the door (#350)
 		} else if strings.Contains(keys, " · esc back") {
 			keys = strings.Replace(keys, " · esc back", " · esc back · A archive", 1)
 		} else {
@@ -5277,7 +5277,7 @@ func (m *Model) refusedKeys() []string {
 		refused = append(refused, "g", "x") // nothing to grab, and hiding the only session is refused
 	}
 	if m.summaryRefusal() != "" && !m.summaryShown() {
-		refused = append(refused, "s") // the summary is the legs' (#344), and a trail with nothing to count has none (#345)
+		refused = append(refused, "s") // the summary is the legs' (#348), and a trail with nothing to count has none (#349)
 	}
 	return refused
 }
@@ -5458,7 +5458,7 @@ func (m *Model) chapterKeyYields(whole string) bool {
 func (m *Model) chapterYield(whole string, drops []string, fits func(string) bool) []string {
 	if m.summaryShown() {
 		// The summary's row has no chapter key and no stuck key to yield
-		// for: its order stands as ranked (#344).
+		// for: its order stands as ranked (#348).
 		return drops
 	}
 	order := drops
@@ -6070,10 +6070,10 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// The summary's row sheds like the legs' row it stands in for:
 		// the door first, the page key, the session keys, then what acts
 		// here, and the way out last of all, after the fold key the row
-		// exists for and the key that goes back into the trail (#345).
+		// exists for and the key that goes back into the trail (#349).
 		return []string{attachHint, " · ctrl+d/u half page", " · A archive", " · g grab", " · m live pane", " · m conversation", " · h/l session", " · / search", " · x hide", " · x unhide", " · a ask", " · enter · no pane", " · enter attach",
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
-			" · r reply", // after the attach, as the legs' own row ranks it: the reply is the asking session's key (#355)
+			" · r reply", // after the attach, as the legs' own row ranks it: the reply is the asking session's key (#359)
 			" · tab legs", " · tab lanes", " · tab trail there", " · space open", " · space close", " · s/esc trail", "j/k rows · "}
 	}
 	// First to go first. What every level shares — the attach hint, `a
@@ -6226,7 +6226,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 	order = append(order, own...)
 	if m.note == "the summary is the legs'" && m.level < levelReader {
 		// The note's way in is `tab`: the row keeps `tab deeper` over the
-		// attach, or the note sends the person to a key it evicted (#345).
+		// attach, or the note sends the person to a key it evicted (#349).
 		order = keyAfterTheAttach(order, " · tab deeper")
 	}
 	// The row's movement key gives way before the way out and before the
