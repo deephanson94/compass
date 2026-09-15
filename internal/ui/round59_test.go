@@ -2286,3 +2286,45 @@ func TestTheSummarysMarkPointsWhereGGoes(t *testing.T) {
 		t.Errorf("the arrow before G: up above, down below and on the trail")
 	}
 }
+
+// The panel's eleventh pass, two-tools, folded (#366).
+
+func TestTwoToolsWalkShipsTheHeldSummarysRow(t *testing.T) {
+	forceASCII(t)
+	extra := sceneTwoTools().extra
+	help := -1
+	for i := 1; i < len(extra); i++ {
+		if extra[i] == "?" && extra[i-1] == "1" {
+			help = i
+		}
+	}
+	if help < 0 || help+1 >= len(extra) || extra[help+1] != "?" {
+		t.Fatalf("two-tools' walk should open the help over the held summary and close it again: %v", extra)
+	}
+	sc := sceneTwoTools()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range canonicalKeys {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	pressKey(m, "esc")
+	for i, k := range extra {
+		pressKey(m, k)
+		poll(m, sc)
+		v := ansi.Strip(m.View())
+		switch i {
+		case help - 1:
+			if !strings.Contains(v, "[summary waits]") {
+				t.Fatalf("the digit before the help should suspend the summary:\n%s", v)
+			}
+		case help:
+			if !m.showHelp || !strings.Contains(v, "s ends the hold") {
+				t.Errorf("the walk's help frame does not draw the held summary's row (#366):\n%s", v)
+			}
+		case help + 1:
+			if m.showHelp || !strings.Contains(v, "[summary waits]") {
+				t.Errorf("the second ? should close the help onto the mark:\n%s", v)
+			}
+		}
+	}
+}

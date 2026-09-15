@@ -770,7 +770,7 @@ func sceneTwoTools() scene {
 		legSpec{journey.Scout, "main.tf", 18 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "AskUserQuestion", 4 * time.Minute, nil, "", nil})
 	panes, order := paneMap([]string{"api-claude", "api-oc", "docs-oc", "infra"}, []string{"dev:1.0", "dev:2.0", "dev:3.0", "ops:0.0"})
-	return scene{name: "two-tools", extra: []string{"2", "tab", "3", "s", "1", "3", "esc", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "two-tools", extra: []string{"2", "tab", "3", "s", "1", "?", "?", "3", "esc", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The second day: one session live, and yesterday's dozen behind it. The
