@@ -2083,12 +2083,17 @@ func (m *Model) cardSecond(w int) string {
 	for _, compact := range []bool{false, true} {
 		day := dayParts(m.trail, m.now, compact)
 		if m.summaryShown() {
-			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · ")), " · "), " · ")
+			// The card keeps the red count — the class row reads it there
+			// — and gives up the wait and the ships, which are rows (#349).
+			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · "), false), " · "), " · ")
 			if len(day) == 1 && day[0] == "" {
 				day = nil
 			}
 		}
 		parts := append([]string{}, verdict...)
+		if m.summaryShown() {
+			parts = withoutPrefix(parts, "on you ") // the verdict's own wait clause: the summary's row has it to the minute (#349)
+		}
 		if len(day) > 0 {
 			// The day's total carries the wait; the verdict's clause is
 			// the same hour twice on one row.
@@ -2212,10 +2217,11 @@ func legsHiddenAbove(tr journey.Trail, level int, sel []int, top int) int {
 func (m *Model) trailDayHere(compact bool) string {
 	d := trailDay(m.trail, m.now, compact)
 	if m.summaryShown() {
-		// The summary's own rows carry the wait on you to the minute
-		// and the red runs on the class that ran them, and its `◉` row
-		// the span where no reader stands beside (#347, #348).
-		d = summaryDay(d)
+		// The summary's own rows carry the wait on you to the minute,
+		// the ships on the ship row, the red runs on the class that ran
+		// them where no card carries them, and its `◉` row the span
+		// where no reader stands beside (#347, #348, #349).
+		d = summaryDay(d, true)
 		if !m.sessionView() && len(m.trail.Prompts) > 0 {
 			d = withoutSpan(d, m.now, m.trail)
 		}
@@ -2306,15 +2312,21 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 // summaryDay is the day's clauses as the summary's title and card carry
 // them: without the wait on you and the red count, which the summary's own
 // rows say to the minute and on the class that ran them (#347, #348).
-func summaryDay(d string) string {
+func summaryDay(d string, reds bool) string {
 	d = withoutClause(d, " · waited on you ")
 	d = withoutClause(d, " · on you ")
-	d = redClause.ReplaceAllString(d, "")
+	d = shipClause.ReplaceAllString(d, "")
+	if reds {
+		d = redClause.ReplaceAllString(d, "")
+	}
 	d = strings.TrimSuffix(d, " ·")
 	return d
 }
 
-var redClause = regexp.MustCompile(` · \d+ red| \d+✗`)
+var (
+	redClause  = regexp.MustCompile(` · \d+ red| \d+✗`)
+	shipClause = regexp.MustCompile(` · \d+ ships?| \d+⚑`)
+)
 
 // withoutClause is the day's clauses without the one that begins with
 // prefix, whole.

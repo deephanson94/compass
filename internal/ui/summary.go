@@ -40,7 +40,8 @@ type summaryRow struct {
 	leg   int    // a leg row: index into Trail.Legs; else -1
 	lane  int    // a lane row: index into Trail.Branches; else -1
 	solo  bool   // a leg row standing for its class: the class has one leg
-	text  string // an ask row: its line of the question; a report row: the lane's finding
+	text  string // an ask row: its line of the question; a report row: the lane's finding, or what a lane still out says
+	clock string // a report row of a lane still out: its clock, kept at the edge as the trail keeps it
 }
 
 // summaryOrder is the order the classes are counted in: the order work
@@ -53,7 +54,7 @@ const summaryLanes = "agent"
 // summaryRows lists the summary's rows for a trail: a row per class with
 // at least one leg, its legs beneath it where open, and the lanes last.
 // A question HEAD is asking hangs under HEAD's row, at every level (#17).
-func summaryRows(tr journey.Trail, open map[string]bool, ask []string, lanes map[int]string, wait string) []summaryRow {
+func summaryRows(tr journey.Trail, open map[string]bool, ask []string, lanes map[int]laneLine, wait string) []summaryRow {
 	var out []summaryRow
 	askUnder := func(i int) {
 		if !tr.Legs[i].Current {
@@ -97,9 +98,9 @@ func summaryRows(tr journey.Trail, open map[string]bool, ask []string, lanes map
 				if report := strings.TrimSpace(tr.Branches[i].Report); tr.Branches[i].Done && report != "" {
 					// Back with what: the finding, as the trail hangs it (#347).
 					out = append(out, summaryRow{kind: "report", key: summaryLanes, leg: -1, lane: i, text: report})
-				} else if line := lanes[i]; line != "" {
-					// Still out: what its own file says, as the trail hangs it (#348).
-					out = append(out, summaryRow{kind: "report", key: summaryLanes, leg: -1, lane: i, text: line})
+				} else if line, ok := lanes[i]; ok {
+					// Still out: what its own file says, mark and clock, as the trail hangs it (#348, #349).
+					out = append(out, summaryRow{kind: "report", key: summaryLanes, leg: -1, lane: i, text: line.text, clock: line.clock})
 				}
 			}
 		}
@@ -411,11 +412,18 @@ func (m *Model) summaryRowsHere() []summaryRow {
 	return summaryRows(m.trail, m.summaryOpen, m.summaryAsk(o), m.summaryLaneLines(o), wait)
 }
 
+// laneLine is what a lane still out says of itself: the trail's own row
+// for it — mark and text — and its clock.
+type laneLine struct {
+	text  string
+	clock string
+}
+
 // summaryLaneLines is what each lane still out says of itself — its own
 // file's last line and clock, as the trail hangs it under the lane — by
 // index into the trail's branches (#348).
-func (m *Model) summaryLaneLines(o TrailOpts) map[int]string {
-	out := map[int]string{}
+func (m *Model) summaryLaneLines(o TrailOpts) map[int]laneLine {
+	out := map[int]laneLine{}
 	if o.HeadState == state.Idle {
 		return out
 	}
@@ -424,11 +432,8 @@ func (m *Model) summaryLaneLines(o TrailOpts) map[int]string {
 			continue
 		}
 		live, known := o.Agents[br.ToolUseID]
-		if _, text, clock := laneHead(live, br, known, o.Now); text != "" {
-			if clock != "" {
-				text += "  " + clock
-			}
-			out[i] = text
+		if g, text, clock := laneHead(live, br, known, o.Now); text != "" {
+			out[i] = laneLine{text: g + " " + text, clock: clock}
 		}
 	}
 	return out
@@ -578,7 +583,11 @@ func summaryBelow(rows []summaryRow, from int) string {
 		return "▾ the wait on you"
 	}
 	if rest[0].group() || rest[0].solo {
-		return "▾ " + summaryGroups(len(summaryGroupsIn(rest))) + " below"
+		out := "▾ " + summaryGroups(len(summaryGroupsIn(rest))) + " below"
+		if rest[len(rest)-1].kind == "wait" {
+			out += " · the wait on you"
+		}
+		return out
 	}
 	same, groups := 0, 0
 	for _, r := range rest {
@@ -592,6 +601,9 @@ func summaryBelow(rows []summaryRow, from int) string {
 	out := fmt.Sprintf("▾ %d more %s", same, summaryNoun(rest[0]))
 	if groups > 0 {
 		out += " · " + summaryGroups(groups)
+	}
+	if rest[len(rest)-1].kind == "wait" {
+		out += " · the wait on you"
 	}
 	return out
 }
@@ -668,7 +680,7 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 	r := rows[i]
 	switch r.kind {
 	case "class":
-		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.sessionView(), m.summaryLoopSaid(w), w)
+		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), w)
 	case "wait":
 		// To the minute, as every span in the column is (#347); the
 		// title's and the card's own clause for it stand down (#348).
@@ -694,9 +706,37 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 	case "lane":
 		return summaryHang(rows, i) + summaryLaneRow(m.trail.Branches[r.lane], m.trailOpts(w-trailWayWidth, 1), w-trailWayWidth)
 	case "ask", "report":
-		return summaryHang(rows, i) + dimStyle.Render(clip(r.text, w-trailWayWidth)) // the rail is five cells, and so is the cut (#348)
+		// The cut is the width of the rail the row draws — five cells
+		// under a leg, seven under a lane — and a clock keeps the edge,
+		// as the trail keeps it (#348, #349).
+		hang := summaryHang(rows, i)
+		body := w - lipgloss.Width(hang)
+		text := r.text
+		if r.clock != "" {
+			if keep := body - len([]rune(r.clock)) - 2; keep >= trailMinLabel {
+				text = pad(clip(text, keep), keep) + "  " + r.clock
+			}
+		}
+		return hang + dimStyle.Render(clip(text, body))
 	}
 	return ""
+}
+
+// summaryRedSaid reports whether the card above the summary carries the
+// day's red count, `10 red` or `10✗`, so the class row does not say it
+// again — and says it where the card has shed it (#349).
+func (m *Model) summaryRedSaid(w int) bool {
+	if !m.sessionView() {
+		return false
+	}
+	red := 0
+	for _, l := range m.trail.Legs {
+		if strings.Contains(legBadge(l), "✗") {
+			red++
+		}
+	}
+	card := ansi.Strip(m.cardSecond(w))
+	return strings.Contains(card, fmt.Sprintf(" %d red", red)) || strings.Contains(card, fmt.Sprintf(" %d✗", red))
 }
 
 // summaryLoopSaid reports whether the frame already names the loop — the
@@ -783,6 +823,9 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 		if l.Current {
 			end = o.Now
 			glyph, live = headMark(o, l)
+			if strings.HasPrefix(live, "◈") || strings.HasPrefix(live, "for ") {
+				live = "for " + relAge(o.Now, l.Start) // the class's clause is how much of its sum is now; HEAD's tail is on HEAD's own row (#349)
+			}
 		}
 		if end.After(l.Start) {
 			span += end.Sub(l.Start)

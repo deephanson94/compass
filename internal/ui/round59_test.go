@@ -104,8 +104,10 @@ func TestTheSummaryCountsTheLegsByClass(t *testing.T) {
 				red++
 			}
 		}
-		if said := strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red"); red > 0 && said == m.sessionView() {
-			t.Errorf("%dx%d: the test row should count its %d red runs where no card does, and not where one does (#348): said %v\n%s", w, h, red, said, view)
+		tw, th := m.trailBox()
+		_ = th
+		if said := strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red"); red > 0 && said == m.summaryRedSaid(tw) {
+			t.Errorf("%dx%d: the test row should count its %d red runs where the card does not, and not where it does (#349): said %v\n%s", w, h, red, said, view)
 		}
 		// The footer names the fold key and the way back; the trail's
 		// scroll clauses are not the summary's.
@@ -916,8 +918,8 @@ func TestGOnTheSummaryIsThePresent(t *testing.T) {
 	if at.kind != "class" || at.class != journey.Build {
 		t.Errorf("G should stand on the class holding HEAD (build), not %+v", at)
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "▸build  2 legs · ◈3 out 20m") {
-		t.Errorf("the running class's row does not carry HEAD's own figure — parked on its agents, `◈3 out 20m · 2 silent 18m` (#348):\n%s", v)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "▸build  2 legs · for ") {
+		t.Errorf("the running class's row should say how much of its sum is now, `for …` (#349):\n%s", v)
 	}
 }
 
@@ -1547,5 +1549,104 @@ func TestASilentLaneHangsItsOwnLine(t *testing.T) {
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "nothing written") {
 		t.Errorf("a lane gone quiet hangs nothing under it in the summary (#348):\n%s", view)
+	}
+}
+
+// The panel's fifth pass, folded (#349).
+
+func TestTheScenesWalkTheSummarysRefusalsAndLanes(t *testing.T) {
+	ends := func(extra []string, tail ...string) bool {
+		if len(extra) < len(tail) {
+			return false
+		}
+		for i := range tail {
+			if extra[len(extra)-len(tail)+i] != tail[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if !ends(sceneFleetHygiene().extra, "tab", "s", "esc") {
+		t.Errorf("fleet-hygiene's walk does not end on the refusal `one of each` (#348)")
+	}
+	if !ends(sceneFirstSession().extra, "tab", "s") {
+		t.Errorf("first-session's walk does not end on the refusal `no leg yet` (#349)")
+	}
+	if !ends(sceneAlarmStorm().extra, "1", "tab", "s", "esc") {
+		t.Errorf("alarm-storm's walk does not end on the asking session's summary (#347)")
+	}
+	found := false
+	for _, k := range sceneSubagents().extra {
+		if k == "s" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("subagents' walk never opens the summary")
+	}
+}
+
+func TestTheHungLinesEndInsideTheColumn(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := porterSummary(t, size[0], size[1])
+		toLanes(t, m)
+		pressKey(m, "space")
+		for _, r := range summaryFrameRows(m) {
+			if x := lipgloss.Width(r); x > size[0] {
+				t.Errorf("%dx%d: a row runs past the terminal (%d): %q", size[0], size[1], x, r)
+			}
+		}
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "wrote 40s ago") && !strings.Contains(view, "wrote 4") {
+			t.Errorf("%dx%d: the line under a lane still out lost its clock (#349):\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+func TestHeadsTailIsOnHeadsOwnRowNotTheClassRow(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 152, 40)
+	press(m, "j")
+	pressKey(m, "space")
+	view := ansi.Strip(m.View())
+	if strings.Count(view, "◈3 out 20m") != 2 { // the card, and HEAD's own row under its class
+		t.Errorf("HEAD's tail should be on the card and on HEAD's own row, %d times here (#349):\n%s", strings.Count(view, "◈3 out 20m"), view)
+	}
+	if !strings.Contains(view, "2 legs · for ") {
+		t.Errorf("the class row should say how much of its sum is now, `for …`:\n%s", view)
+	}
+}
+
+func TestTheCardStandsDownForTheSummarysRows(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 220, 48)
+	press(m, "s")
+	view := ansi.Strip(m.View())
+	if strings.Count(view, "on you") != 1 {
+		t.Errorf("the wait on you is said %d times at 220:\n%s", strings.Count(view, "on you"), view)
+	}
+	ships := 0
+	for _, l := range m.trail.Legs {
+		if l.Class == journey.Ship {
+			ships++
+		}
+	}
+	if strings.Contains(view, plural(ships, "ship")) || strings.Contains(view, fmt.Sprintf("%d⚑", ships)) {
+		t.Errorf("the ships are counted twice, on the card and on the ship row (#349):\n%s", view)
+	}
+	// The red count: on the card where it carries it, and then not on the row.
+	red := 0
+	for _, l := range m.trail.Legs {
+		if strings.Contains(legBadge(l), "✗") {
+			red++
+		}
+	}
+	tw, _ := m.trailBox()
+	card := ansi.Strip(m.cardSecond(tw))
+	onCard := strings.Contains(card, fmt.Sprintf(" %d red", red)) || strings.Contains(card, fmt.Sprintf(" %d✗", red))
+	onRow := strings.Contains(view, fmt.Sprintf("32 legs · %d red", red))
+	if onCard == onRow {
+		t.Errorf("the red count should be said exactly once: card %v, row %v\n%s", onCard, onRow, view)
 	}
 }

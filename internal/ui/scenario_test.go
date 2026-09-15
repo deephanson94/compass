@@ -730,7 +730,7 @@ func sceneFirstSession() scene {
 	ss[0].Info.StartedAt = n.Add(-50 * time.Second)
 	tr[sessionKey("hello")] = journey.Trail{Prompts: []journey.Prompt{{Text: "add a --version flag", At: n.Add(-50 * time.Second)}}}
 	panes, order := paneMap([]string{"hello"}, []string{"main:0.0"})
-	return scene{name: "first-session", story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "first-session", extra: []string{"tab", "s"}, story: "Someone opened compass for the first time, fifty seconds after typing their first prompt into their first session. No history, no archive, one column.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Two tools: a fleet where opencode sessions sit beside claude ones, each
@@ -1059,7 +1059,11 @@ func TestScenarioWalkthrough(t *testing.T) {
 		for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
 			w, h := size[0], size[1]
 			m := sceneModel(sc, w, h)
-			for _, k := range append([]string{}, keys...) {
+			walked := append([]string{}, keys...)
+			if len(sc.extra) > 0 {
+				walked = append(append(walked, "esc"), sc.extra...) // the scene's own keys are walked and measured too (#349)
+			}
+			for _, k := range walked {
 				frame := m.View()
 				for _, line := range strings.Split(frame, "\n") {
 					if x := lipgloss.Width(line); x > w {
