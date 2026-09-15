@@ -976,9 +976,18 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 		if l.Current {
 			end = o.Now
 			glyph, live = headMark(o, l)
-			parked = strings.HasPrefix(live, "◈")
-			if parked || strings.HasPrefix(live, "for ") {
-				live = "for " + relAge(o.Now, l.Start) // the class's clause is how much of its sum is now; HEAD's tail is on HEAD's own row (#349)
+			if strings.HasPrefix(live, "◈") || strings.HasPrefix(live, "for ") {
+				span := "for " + relAge(o.Now, l.Start)
+				// Parked is not "the tail begins ◈": a lead with lanes
+				// out that has worked since the newest left wears
+				// `◈3 out 20m · for 2h`, and that row carries the span
+				// — and a narrow row sheds it. Ask HEAD's own row as
+				// the summary draws it, under its class (#359, #362).
+				oo := o
+				oo.Width = w - trailWayWidth
+				label, narrated := legLabel(l, oo)
+				parked = !strings.Contains(ansi.Strip(legRow(l, label, narrated, oo)), span)
+				live = span // the class's clause is how much of its sum is now; HEAD's tail is on HEAD's own row (#349)
 			}
 		}
 		if end.After(l.Start) {
@@ -989,8 +998,9 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 	var badge []string
 	if live != "" && (!open || parked) {
 		// Open, HEAD's own row beneath says it (#351) — unless that row
-		// wears the lanes' clock, `◈3 out 20m`, and the leg's span is
-		// then on no row but this one (#359).
+		// does not carry the span, wearing the lanes' clock alone or
+		// shedding the clause, and it is then on no row but this one
+		// (#359, #362).
 		badge = append(badge, live)
 	}
 	if red > 0 && !redSaid {

@@ -2171,3 +2171,47 @@ func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 		t.Errorf("the held gloss is %d cells, wider than the page keys' row (%d)", len([]rune(gloss)), widest)
 	}
 }
+
+// The panel's tenth pass, subagents, folded (#362).
+
+func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 120, 34)
+	var head journey.Leg
+	for _, l := range m.trail.Legs {
+		if l.Current {
+			head = l
+		}
+	}
+	if !head.Current || head.Class != journey.Build {
+		t.Fatalf("porter's HEAD should be a running build leg")
+	}
+	span := "for " + relAge(m.now, head.Start)
+	row := func(w int, tail string) string {
+		o := m.trailOpts(w, 1)
+		o.HeadTail = tail
+		return ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, true, w))
+	}
+	// The lanes' clock alone: the span is on no other row, the class
+	// row keeps it (#359).
+	if r := row(100, "◈3 out 20m"); !strings.Contains(r, "2 legs · "+span) {
+		t.Errorf("HEAD's row wears the lanes' clock alone; the open class row drops the span: %q", r)
+	}
+	// The lanes' clock and the span: HEAD's own row carries it, the
+	// class row yields (#351, #362).
+	if r := row(100, "◈3 out 20m · "+span); strings.Contains(r, "· for ") {
+		t.Errorf("HEAD's row carries `· %s`; the open class row repeats it: %q", span, r)
+	}
+	// The same tail on a row too narrow to keep the clause: HEAD's row
+	// sheds it, so the class row keeps it.
+	narrow := 46
+	o := m.trailOpts(narrow-trailWayWidth, 1)
+	o.HeadTail = "◈3 out 20m · " + span
+	label, narrated := legLabel(head, o)
+	if drawn := ansi.Strip(legRow(head, label, narrated, o)); strings.Contains(drawn, span) {
+		t.Fatalf("at %d HEAD's row should shed the span, got %q", narrow, drawn)
+	}
+	if r := row(narrow, "◈3 out 20m · "+span); !strings.Contains(r, span) {
+		t.Errorf("HEAD's narrow row sheds the span; the open class row drops it too: %q", r)
+	}
+}
