@@ -1294,6 +1294,13 @@ func redNow(tr journey.Trail) bool {
 // owes you, not merely nothing is amber.
 func (m *Model) obligation(s fleet.Session) int {
 	tr := m.trails[s.Info.Key()]
+	if s.Waiting {
+		// A question you walked away from: nothing is happening in it, and
+		// nothing will until you answer, so it keeps its column however
+		// long that takes — under the alarms of the moment, which are the
+		// ones a keypress clears first (#344).
+		return rankWaiting
+	}
 	switch s.Snap.State {
 	case state.NeedsYou:
 		if s.Snap.APIError {
@@ -1327,14 +1334,15 @@ func (m *Model) obligation(s fleet.Session) int {
 }
 
 // The obligation ranks, in board order: what a keypress ends first, then
-// what only time or a person elsewhere can clear, then work in flight, then
-// what stopped short of done.
+// what only time or a person elsewhere can clear, then the question you left
+// behind, then work in flight, then what stopped short of done.
 const (
 	rankNeedsYou = iota
 	rankStuck
 	rankCircling
 	rankAPIError
 	rankParked
+	rankWaiting
 	rankWorking
 	rankOwed
 	rankUnread

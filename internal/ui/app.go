@@ -927,6 +927,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		m.toggleHidden()
 		return m, nil
+	case "X":
+		m.sweepWaiting()
+		return m, nil
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
 		// stays selected, per view, so coming back lands where you left. It is
@@ -2051,6 +2054,12 @@ func (m *Model) onBoard(s fleet.Session) bool {
 	if !m.hidden[s.Info.Key()] {
 		return true
 	}
+	if s.Waiting {
+		// The alarm an old question raises is the one you *can* put down:
+		// `x` on it is a decision — "not that one" — and a decision that
+		// came back on the next poll would not be one (#344).
+		return false
+	}
 	if _, _, loop := circling(m.trails[s.Info.Key()]); loop {
 		return true
 	}
@@ -2066,6 +2075,70 @@ func (m *Model) hiddenCount() int {
 		}
 	}
 	return n
+}
+
+// sweepWaiting is `X`: the set where `x` is one row. On the live fleet it
+// takes every session that is on the board only because it is holding an old
+// question of yours — the pile that builds up while you are not looking — off
+// it in one key; in the archive it brings every hidden session back, so the
+// key that made the pile disappear is the key that gets it back (#344).
+//
+// It never empties the board: where the pile is the whole of it, the row the
+// board draws first stays, as `x` leaves the last live session standing.
+func (m *Model) sweepWaiting() {
+	if m.hidden == nil {
+		m.hidden = map[string]bool{}
+	}
+	if m.archiveView {
+		n := len(m.hidden)
+		if n == 0 {
+			m.note = "nothing is hidden"
+			return
+		}
+		m.hidden = map[string]bool{}
+		m.saveHidden()
+		m.note = plural(n, "session") + " back on the board"
+		return
+	}
+
+	// The board's own order, so the row that stays below is the one the
+	// frame draws first.
+	var keys []string
+	for _, i := range m.viewOrder() {
+		s := m.sessions[i]
+		if s.Waiting && !m.hidden[s.Info.Key()] {
+			keys = append(keys, s.Info.Key())
+		}
+	}
+	if len(keys) == 0 {
+		m.note = "nothing is waiting on an old question"
+		return
+	}
+	stayed := false
+	if m.liveCount()-len(keys) < 1 {
+		// The last row on the board is not a pile. What stays is the row
+		// the board draws first — the question that has waited longest,
+		// which is the one it puts first for the same reason.
+		keys, stayed = keys[1:], true
+	}
+	if len(keys) == 0 {
+		m.note = "the live one stays" // the sentence `x` gives for the same rule
+		return
+	}
+	for _, key := range keys {
+		m.hidden[key] = true
+	}
+	m.saveHidden()
+	m.note = fmt.Sprintf("%d waiting hidden · A, then X", len(keys))
+	if stayed {
+		m.note = fmt.Sprintf("%d waiting hidden · one stays", len(keys))
+	}
+	if order := m.viewOrder(); len(order) > 0 {
+		if m.hidden[m.selectedKey] {
+			m.pointQuiet(m.sessions[order[0]].Info.Key())
+		}
+	}
+	m.clampSelection()
 }
 
 // toggleHidden is `x`: the selected session leaves the board — a test
@@ -2255,7 +2328,10 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		return "the live one stays"
 	case s.Snap.APIError:
 		return name + " stays · dead on the API"
-	case s.Snap.State == state.NeedsYou:
+	case s.Snap.State == state.NeedsYou && !s.Waiting:
+		// The refusal is about an alarm you are in the middle of. A
+		// question nothing has moved on since you walked away is the one
+		// `x` is for: it is the pile this key exists to keep down (#344).
 		return name + " stays · it is asking"
 	case s.Snap.State == state.Stuck:
 		return name + " stays · it hangs"
@@ -2831,9 +2907,28 @@ func (m *Model) move(delta int) {
 // fleet is already sorted that way. Only a live session can be waiting on you
 // (an archived one is idle by construction), so the archive is never searched;
 // pressing `g` while browsing it comes back to the live fleet first.
+//
+// It goes in two passes: the sessions asking you in today's fleet, then the
+// questions you walked away from (#344). Both are needs-you and both are
+// reachable, but a question from Tuesday is not what `g` means while
+// something is asking now.
 func (m *Model) selectOldestNeedsYou() bool {
+	if m.grabNeedsYou(false) {
+		return true
+	}
+	// Nothing is asking in today's fleet: the questions left behind are
+	// what `g` has, oldest first, and answering one is what clears it.
+	return m.grabNeedsYou(true)
+}
+
+// grabNeedsYou is one pass of `g` over the fleet: the sessions held open by
+// an old question of yours, or the ones that are not (#344).
+func (m *Model) grabNeedsYou(waiting bool) bool {
 	for _, s := range m.sessions {
-		if s.Live && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
+		if s.Waiting != waiting {
+			continue
+		}
+		if s.Live && m.onBoard(s) && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
 			// A session dead on the API is not one a keypress helps.
 			if m.archiveView {
 				// Out of the archive as `A` goes: at the level it was

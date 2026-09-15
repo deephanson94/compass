@@ -61,6 +61,16 @@ just switches. `g` grabs whichever session has been waiting on you longest and
 attaches to it. Nothing to manage: compass never creates or owns tmux sessions,
 windows, or panes.
 
+A session that ended its turn on a question — *which of these should I do next?*
+— keeps its place on the board until you answer it, however long that takes and
+whether or not its pane is still open: the question is read off the transcript
+itself, so closing the pane, quitting compass or rebooting does not lose it, and
+replying is what clears it. Questions from before today sit under the alarms of
+the moment, `asks you · waiting 2d` under the name, and `g` takes today's first.
+When the pile is one you are not going to work through, `x` puts one down for
+good and `X` takes every one of them off the board — `A`, then `X`, brings them
+all back.
+
 The trail reads like the conversation does — oldest at the top, the newest work
 at the bottom, and it stays pinned there so the latest is always on screen.
 `Tab` opens one session: the trail on the left with a cursor on the present,
@@ -126,6 +136,7 @@ compass                              # the deck, full screen — run it in its o
 compass -readonly                    # observe only: Enter no longer attaches
 compass -narrator off                # heuristic labels only, no claude calls
 compass -live-within 0               # only sessions tmux is holding count as live
+                                     #   (an unanswered question stops holding one too)
 compass -opencode-db ""              # leave OpenCode's sessions out (default: its store, if present)
 compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1"
 compass panes                        # diagnostic: which pane holds which session
@@ -168,6 +179,8 @@ root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root ov
 narrator = "haiku"      # narration model; "off" disables
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
+                        # (a session holding an unanswered question stays live
+                        #  whatever this says, unless it says "0")
 reply = "please continue"   # the stock lines `r` offers, one per line, up to nine
 reply = "report status"
 hook = "tmux display-message \"compass: $COMPASS_SESSION $COMPASS_EVENT\""

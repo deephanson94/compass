@@ -27,18 +27,41 @@ func (m *Manager) MarkPaneMapped(ids map[string]bool)
 
 // SetLiveWindow sets the recency door: a session with no pane still counts as
 // live while now−LastEventAt ≤ d. Default 5 minutes; 0 closes the door (panes
-// only). The door exists because pane matching is a heuristic — a session that
-// is WRITING ITS TRANSCRIPT RIGHT NOW must never be hidden by a matching miss.
+// only) — and with it the ask door below. The door exists because pane matching
+// is a heuristic — a session that is WRITING ITS TRANSCRIPT RIGHT NOW must never
+// be hidden by a matching miss.
 func (m *Manager) SetLiveWindow(d time.Duration)
 ```
 
 Rules:
-1. **live** = pane-mapped ∪ (LastEventAt within the live window). Everything
-   else is **archived**.
+1. **live** = pane-mapped ∪ (LastEventAt within the live window) ∪ **asked**.
+   Everything else is **archived**.
+
+   **The ask door (#344, 2026-09-15).** A session whose transcript's last word
+   is the model's, asking you something nobody has answered, is live however
+   long ago it asked. `SessionInfo.Asked` is read off the file in the same tail
+   peek that dates it, so it survives the pane closing and compass restarting —
+   which is the point, since a question you forgot is one you were not
+   watching. It reads the file the way the machine reads the fold: a person's
+   words settle it (nothing waits), a call still out is work in flight unless
+   it is `AskUserQuestion`, and otherwise rule 4's own test decides. The
+   harness's own turns settle nothing, and a refused call is not a question.
+   The door clears itself — reply, and the last word is yours.
+
+   Such a session is flagged `Waiting` when nothing else would have kept it:
+   no pane, outside the window. `Waiting` is the fleet's word for "you walked
+   away from this one", and it sorts under the live alarms (needs-you, stuck)
+   and over the work in flight. `StatusLine` leaves it out: the bar answers
+   "is anything happening", and a question from last week is not. The board
+   ranks it the same way, lets `x` put it down for good, and sweeps the pile
+   with `X` (docs/SPEC.md #344).
 2. Only live sessions are tailed and state-machined per Refresh. An archived
    session's Snap is always `{Idle, Since: LastEventAt, Reason: "archived",
    Activity: "idle"}` — the archive can never be amber, so `g` and the
-   attention chips stay truthful by construction.
+   attention chips stay truthful by construction. A session holding a question
+   open is amber because it is *live*, not because the archive grew a state:
+   it is tailed and state-machined like any other live session, and the amber
+   is its machine's own verdict.
 3. A session crossing archive→live (its pane appears, or its file grows) gets
    a tailer from scratch (full replay, as any first sight); live→archive drops
    its tailer and machine.

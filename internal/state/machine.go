@@ -69,6 +69,11 @@ type Snapshot struct {
 // asking you something" — no quiet threshold applies.
 const askUserQuestion = "AskUserQuestion"
 
+// AskUserQuestion is that tool's name, for the readers that walk a transcript
+// without building a machine: the fleet's peek asks the same question of a
+// file's last lines that rule 2 asks of the fold.
+const AskUserQuestion = askUserQuestion
+
 type pendingUse struct {
 	use transcript.ToolUse
 	at  time.Time
@@ -417,6 +422,12 @@ func stuckReason(quiet time.Duration) string {
 // questionTrim is the trailing noise a model's closing question may wear:
 // whitespace plus markdown decoration.
 const questionTrim = " \t\r\n*_`)"
+
+// EndsWithQuestion is rule 4's test — "the turn ended with a question" — for
+// callers outside the machine. The fleet's peek uses it on the last lines of a
+// transcript nothing is tailing, so a question found in a file and a question
+// found in the fold are the same question.
+func EndsWithQuestion(text string) bool { return endsWithQuestion(text) }
 
 // endsWithQuestion reports whether text closes on a question mark once
 // whitespace and markdown decoration are peeled off the right.

@@ -124,7 +124,9 @@ func (m *Manager) MarkPaneMapped(keys map[string]bool) {
 }
 
 // SetLiveWindow sets the recency door: a paneless session still counts as live
-// while now−LastEventAt ≤ d; 0 closes the door (panes only).
+// while now−LastEventAt ≤ d; 0 closes the door — and with it the ask door
+// (#344), since "panes only" is an answer to the whole question of what is
+// live, not to one of its clauses.
 func (m *Manager) SetLiveWindow(d time.Duration) {
 	if d < 0 {
 		d = 0
@@ -134,16 +136,38 @@ func (m *Manager) SetLiveWindow(d time.Duration) {
 	m.liveWindow = d
 }
 
-// isLive answers rule 1: a session is live if tmux has it, or if its
-// transcript moved inside the window. Caller holds the mutex.
+// isLive answers rule 1: a session is live if tmux has it, if its transcript
+// moved inside the window, or if it is holding a question open. Caller holds
+// the mutex.
 func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
 	if m.paneMapped[info.Key()] {
 		return true
 	}
+	// A window of zero is the person saying "tmux panes only", and it shuts
+	// every door but that one — the question's included. It is the off
+	// switch for #344 as it is for the recency door.
+	if m.liveWindow <= 0 {
+		return false
+	}
+	return info.Asked || m.inWindow(info, now)
+}
+
+// inWindow is the recency door alone: the transcript moved this recently.
+// Caller holds the mutex.
+func (m *Manager) inWindow(info SessionInfo, now time.Time) bool {
 	if m.liveWindow <= 0 || info.LastEventAt.IsZero() {
 		return false // the door is shut, or there is nothing to hold it open
 	}
 	return !info.LastEventAt.Before(now.Add(-m.liveWindow))
+}
+
+// isWaiting marks the sessions the third door admits and nothing else would:
+// no pane, nothing written for longer than the window, and a question of
+// yours still unanswered. They are live — amber, tailed, reachable — but they
+// are not today's fleet, and the board ranks them accordingly (#344). Caller
+// holds the mutex.
+func (m *Manager) isWaiting(info SessionInfo, now time.Time) bool {
+	return info.Asked && m.liveWindow > 0 && !m.paneMapped[info.Key()] && !m.inWindow(info, now)
 }
 
 // UseResumeCache tells the Manager to pick live sessions up where an earlier
@@ -196,8 +220,9 @@ func normalizeDir(path string) string {
 
 // Refresh re-discovers sessions, polls each live tailer, feeds the machines and
 // returns the fleet in display order: the live block first — needs-you (longest
-// waiting first), stuck (longest first), working (most recent activity first),
-// idle (most recent first) — then the archive, newest last event first.
+// waiting first), stuck (longest first), the questions walked away from
+// (longest first), working (most recent activity first), idle (most recent
+// first) — then the archive, newest last event first.
 //
 // Only live sessions are tailed and state-machined. The archive is real and
 // readable but it can never be amber, which is what keeps `g` and the attention
@@ -273,7 +298,8 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
 			out = append(out, Session{
 				Info: e.info, Snap: e.machine.Evaluate(now), Live: true,
-				Class: e.class, HasClass: e.hasClass,
+				Waiting: m.isWaiting(e.info, now),
+				Class:   e.class, HasClass: e.hasClass,
 				Outcome: e.outcome(),
 			})
 		} else {
@@ -378,6 +404,10 @@ func (e *entry) merge(info SessionInfo) {
 	if !e.sawEvent && info.LastEventAt.After(e.info.LastEventAt) {
 		e.info.LastEventAt = info.LastEventAt // file mtime, until events say otherwise
 	}
+	// The question is the scan's to answer, every time: it is read off the
+	// end of the file, and the end of the file is what moves when somebody
+	// finally replies (#344).
+	e.info.Asked, e.info.AskedAt = info.Asked, info.AskedAt
 }
 
 // absorb folds an event's identity fields into what we know about the session.
@@ -441,25 +471,45 @@ func rank(s state.State) int {
 	case state.Stuck:
 		return 1
 	case state.Working:
-		return 2
+		return rankLiveWorking
 	default:
-		return 3
+		return rankLiveIdle
 	}
 }
 
+// rankWaiting is where a session held open by an old question of yours sorts:
+// under the alarms of the moment, over the work in flight. It is still amber
+// and `g` still reaches it, but a session asking you now is asked first
+// (#344).
+const (
+	rankWaiting     = 2
+	rankLiveWorking = 3
+	rankLiveIdle    = 4
+)
+
+// fleetRank is a session's sorting bucket: its state, except that a session
+// only the ask door keeps live waits its turn behind the live alarms.
+func fleetRank(s Session) int {
+	if s.Waiting {
+		return rankWaiting
+	}
+	return rank(s.Snap.State)
+}
+
 // SortFleet orders sessions the way the fleet shows them — needs-you longest
-// wait first, then stuck, working, and idle newest first — for a harness that
-// builds a fleet by hand and wants it in the order Refresh would return.
+// wait first, then stuck, then the questions left behind (longest wait first
+// too), then working and idle newest first — for a harness that builds a
+// fleet by hand and wants it in the order Refresh would return.
 func SortFleet(ss []Session) { sortFleet(ss) }
 
 func sortFleet(ss []Session) {
 	sort.SliceStable(ss, func(i, j int) bool {
 		a, b := ss[i], ss[j]
-		ra, rb := rank(a.Snap.State), rank(b.Snap.State)
+		ra, rb := fleetRank(a), fleetRank(b)
 		if ra != rb {
 			return ra < rb
 		}
-		if ra <= 1 {
+		if ra <= rankWaiting {
 			// Waiting states: the longest wait rises to the top.
 			if !a.Snap.Since.Equal(b.Snap.Since) {
 				return a.Snap.Since.Before(b.Snap.Since)
@@ -523,7 +573,10 @@ func (m *Manager) StatusLine(now time.Time) string {
 
 	counts := map[state.State]int{}
 	for _, s := range sessions {
-		if !s.Live {
+		if !s.Live || s.Waiting {
+			// A question from last week is not news the status bar breaks:
+			// the line answers "is anything happening", and the board is
+			// where a forgotten one is kept (#344).
 			continue
 		}
 		counts[s.Snap.State]++

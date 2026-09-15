@@ -46,6 +46,17 @@ type SessionInfo struct {
 	// two sessions in one directory are told apart by more than a name.
 	Tool  string
 	Model string
+
+	// Asked says the last word in this transcript is the model's and it was a
+	// question: the session stopped on something only you can answer, and
+	// nobody has. It is read off the file itself, not off a machine, so it
+	// survives the pane closing and compass restarting — which is the whole
+	// point, since a question you forgot is one you were not watching
+	// (#344). AskedAt is when it was asked.
+	//
+	// It clears itself: the moment you reply, the last word is yours.
+	Asked   bool
+	AskedAt time.Time
 }
 
 // ToolName is the tool a session runs under, "claude" when unsaid.
@@ -76,6 +87,13 @@ type Session struct {
 	// is the archive — real, readable, and never amber
 	// (docs/dev/M5-CONTRACT.md).
 	Live bool
+
+	// Waiting says this session is live only because it is holding a question
+	// open: no pane, nothing written for longer than the live window, and the
+	// last word in its transcript is the model's, asking you something. It is
+	// the session you walked away from — amber, reachable, and ranked under
+	// the alarms of the moment so today's fleet is still read first (#344).
+	Waiting bool
 
 	// Class is the kind of work the session is doing right now, in the trail's
 	// own vocabulary, so the fleet and the trail describe it the same way.
@@ -218,6 +236,10 @@ func peek(info *SessionInfo, size int64) {
 	if tail.name != "" {
 		info.Name = tail.name // the newest rename wins
 	}
+	info.Asked, info.AskedAt = tail.asked, tail.askedAt
+	if info.Asked && info.AskedAt.IsZero() {
+		info.AskedAt = info.LastEventAt
+	}
 }
 
 // tailState is what the last few kilobytes of a transcript say about a session
@@ -228,6 +250,16 @@ type tailState struct {
 	branch  string
 	located bool // a line of this session's own named a cwd
 	name    string
+
+	// asked is the verdict of the ask walk (seeAsk), settled is whether it
+	// has its answer — a line that settled it, or the end of the one window
+	// it is given — and answered are the tool calls
+	// whose results are already in the file — collected on the way back, so
+	// a call still out is one no result has answered.
+	asked    bool
+	askedAt  time.Time
+	settled  bool
+	answered map[string]bool
 }
 
 func peekHead(f *os.File, info *SessionInfo) {
@@ -296,6 +328,12 @@ func peekTailState(f *os.File, size int64) tailState {
 			start = 0
 		}
 		scanTail(f, size, start, &out)
+		// The ask walk gets the last window and no more, whatever it found:
+		// a question is the last thing in a file or it is not the question
+		// this door is for, and widening for it would re-read a megabyte of
+		// a subagent's output every second on a session mid-Task — the very
+		// case the widening below exists to survive cheaply.
+		out.settled = true
 		if out.located || start == 0 {
 			break
 		}
@@ -349,9 +387,65 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 		if out.name == "" && ev.Name != "" {
 			out.name = ev.Name // walking backwards: the newest rename
 		}
-		if !out.at.IsZero() && out.located {
+		out.seeAsk(ev)
+		if !out.at.IsZero() && out.located && out.settled {
 			return
 		}
+	}
+}
+
+// seeAsk walks one line of the backwards scan and, on the first line that
+// settles it, says whether this transcript ends on a question nobody has
+// answered. It reads the file the way the state machine reads the fold, so the
+// two agree on what "needs you" means:
+//
+//   - a person's words are the answer to anything above them — nothing waits;
+//   - a call still out (no result for it further down the file) is work in
+//     flight, except AskUserQuestion, which is the model asking in as many
+//     words;
+//   - otherwise the model's last words decide it, by rule 4's own test.
+//
+// The harness's own user turns ("Continue from where you left off.") settle
+// nothing: nobody typed them, so they answer nothing — exactly as the machine
+// treats them. A line with neither words nor a call is skipped for the same
+// reason, and the walk keeps going back.
+func (t *tailState) seeAsk(ev transcript.Event) {
+	if t.settled || ev.IsSidechain {
+		return // a subagent's conversation is not this session speaking
+	}
+	switch ev.Type {
+	case transcript.EventUser:
+		for _, r := range ev.ToolResults {
+			if t.answered == nil {
+				t.answered = make(map[string]bool)
+			}
+			t.answered[r.ToolUseID] = true
+		}
+		if strings.TrimSpace(ev.Text) != "" && !ev.Machinery() {
+			t.settleAsk(false, time.Time{})
+		}
+	case transcript.EventAssistant:
+		for _, u := range ev.ToolUses {
+			if t.answered[u.ID] {
+				continue
+			}
+			t.settleAsk(u.Name == state.AskUserQuestion, ev.Timestamp)
+			return
+		}
+		if strings.TrimSpace(ev.Text) == "" {
+			return
+		}
+		// A refused call is not the model asking: nothing you type into the
+		// pane clears a 403, and `g` skips those for the same reason.
+		t.settleAsk(!ev.APIError && state.EndsWithQuestion(ev.Text), ev.Timestamp)
+	}
+}
+
+// settleAsk records the walk's verdict and stops it.
+func (t *tailState) settleAsk(asked bool, at time.Time) {
+	t.asked, t.askedAt, t.settled = asked, at, true
+	if !asked {
+		t.askedAt = time.Time{}
 	}
 }
 

@@ -255,13 +255,29 @@ func askedQuestionAt(t *testing.T, root, slug, id string, age time.Duration) (as
 	return askedAt, lastAt
 }
 
+// stalledCallAt writes a session that stopped mid-turn: a tool call was
+// issued and no result ever came, then a bookkeeping line moved the clock.
+// Tailed, it is amber (stuck); archived, it must be idle — and unlike a
+// question, nothing holds its door open (#344).
+func stalledCallAt(t *testing.T, root, slug, id string, age time.Duration) (calledAt, lastAt time.Time) {
+	t.Helper()
+	calledAt = ago(age + 5*time.Minute)
+	lastAt = ago(age)
+	newTranscript(t, id, "/home/user/alpha", "main").
+		prompt(ago(age+10*time.Minute), "review the migration plan").
+		tool(calledAt, "toolu_"+id[:4], "Bash", map[string]any{"command": "go build ./..."}).
+		bookkeeping(lastAt).
+		write(root, slug)
+	return calledAt, lastAt
+}
+
 // ---------------------------------------------------------------- T54
 
 // t54Root builds the four-session cast the contract's T54 row describes.
 //
 //	(a) idStalePane     — 3h stale, will be pane-mapped, idle  → LIVE
 //	(b) idFreshUnmapped — 1m old, no pane (inside the 5m door)  → LIVE
-//	(c) idArchived2h    — 2h old, no pane, needs-you SHAPED     → archived
+//	(c) idArchived2h    — 2h old, no pane, stuck SHAPED         → archived
 //	(d) idArchived5h    — 5h old, no pane                       → archived
 //
 // The ages are chosen adversarially: (a) is *older* than (c) and both evaluate
@@ -272,7 +288,11 @@ func t54Root(t *testing.T) string {
 	root := t.TempDir()
 	idleAt(t, root, slugBeta, idStalePane, 3*time.Hour)
 	needsYouAt(t, root, slugAlpha, idFreshUnmapped, 1*time.Minute)
-	needsYouAt(t, root, slugAlpha, idArchived2h, 2*time.Hour)
+	// Shaped so that tailing it would be amber, and still archived: a
+	// question would not be, since the ask door admits one however old
+	// (#344). What the archive may never do is wear a state nothing is
+	// holding open.
+	stuckAt(t, root, slugAlpha, idArchived2h, 2*time.Hour)
 	idleAt(t, root, slugBeta, idArchived5h, 5*time.Hour)
 	return root
 }
@@ -375,7 +395,7 @@ func TestT54ArchiveTiesBreakOnID(t *testing.T) {
 // An all-archive fleet is still a fleet: every entry present, none of them live.
 func TestT54AllArchivedFleet(t *testing.T) {
 	root := t.TempDir()
-	needsYouAt(t, root, slugAlpha, idArchived2h, 2*time.Hour)
+	idleAt(t, root, slugBeta, idArchived2h, 2*time.Hour)
 	idleAt(t, root, slugBeta, idArchived5h, 5*time.Hour)
 	stuckAt(t, root, slugAlpha, idStalePane, 90*time.Minute)
 
@@ -396,9 +416,9 @@ func TestT54AllArchivedFleet(t *testing.T) {
 // live replays the transcript so the real state appears.
 func TestT55ArchivedSnapshotIsAlwaysArchivedIdle(t *testing.T) {
 	root := t.TempDir()
-	askedAt, lastAt := askedQuestionAt(t, root, slugAlpha, idArchQuestion, 2*time.Hour)
-	if askedAt.Equal(lastAt) {
-		t.Fatalf("fixture broken: askedAt == lastAt, so Since cannot be told from LastEventAt")
+	calledAt, lastAt := stalledCallAt(t, root, slugAlpha, idArchQuestion, 2*time.Hour)
+	if calledAt.Equal(lastAt) {
+		t.Fatalf("fixture broken: calledAt == lastAt, so Since cannot be told from LastEventAt")
 	}
 
 	sessions := mustRefresh(t, fleet.NewManager(root), fleetNow)
@@ -409,12 +429,12 @@ func TestT55ArchivedSnapshotIsAlwaysArchivedIdle(t *testing.T) {
 
 	assertArchivedSnap(t, s)
 	if !s.Snap.Since.Equal(lastAt) {
-		t.Errorf("Since = %v, want LastEventAt %v (not the question at %v)", s.Snap.Since, lastAt, askedAt)
+		t.Errorf("Since = %v, want LastEventAt %v (not the call at %v)", s.Snap.Since, lastAt, calledAt)
 	}
-	if s.Snap.Since.Equal(askedAt) {
-		t.Errorf("Since = %v, which is the question's instant: the archived snapshot must be dated by LastEventAt", askedAt)
+	if s.Snap.Since.Equal(calledAt) {
+		t.Errorf("Since = %v, which is the call's instant: the archived snapshot must be dated by LastEventAt", calledAt)
 	}
-	if s.Snap.Reason == "turn ended with a question" {
+	if strings.Contains(s.Snap.Reason, "mid-turn") {
 		t.Errorf("the archived snapshot leaked the real reason %q", s.Snap.Reason)
 	}
 	if !s.Info.LastEventAt.Equal(lastAt) {
@@ -437,7 +457,7 @@ func TestT55ArchivedSnapshotIsAlwaysArchivedIdle(t *testing.T) {
 // state — including amber — appears on the very next Refresh.
 func TestT55ArchiveToLiveCrossingReplaysTheTranscript(t *testing.T) {
 	root := t.TempDir()
-	askedAt, lastAt := askedQuestionAt(t, root, slugAlpha, idArchQuestion, 2*time.Hour)
+	calledAt, lastAt := stalledCallAt(t, root, slugAlpha, idArchQuestion, 2*time.Hour)
 
 	m := fleet.NewManager(root)
 
@@ -450,18 +470,18 @@ func TestT55ArchiveToLiveCrossingReplaysTheTranscript(t *testing.T) {
 	if !crossed.Live {
 		t.Fatalf("after MarkPaneMapped: Live = false, want true")
 	}
-	if crossed.Snap.State != state.NeedsYou {
-		t.Fatalf("after crossing to live: state = %s, want needs-you — the crossing must replay the transcript",
+	if crossed.Snap.State != state.Stuck {
+		t.Fatalf("after crossing to live: state = %s, want stuck — the crossing must replay the transcript",
 			crossed.Snap.State)
 	}
-	if !crossed.Snap.Since.Equal(askedAt) {
-		t.Errorf("Since = %v, want the question's instant %v", crossed.Snap.Since, askedAt)
+	if !crossed.Snap.Since.Equal(calledAt) {
+		t.Errorf("Since = %v, want the call's instant %v", crossed.Snap.Since, calledAt)
 	}
-	if crossed.Snap.Reason != "turn ended with a question" {
-		t.Errorf("Reason = %q, want %q", crossed.Snap.Reason, "turn ended with a question")
+	if !strings.Contains(crossed.Snap.Reason, "mid-turn") {
+		t.Errorf("Reason = %q, want the silence mid-turn", crossed.Snap.Reason)
 	}
-	if crossed.Snap.Activity != "awaiting your reply" {
-		t.Errorf("Activity = %q, want %q", crossed.Snap.Activity, "awaiting your reply")
+	if !strings.Contains(crossed.Snap.Activity, "go build") {
+		t.Errorf("Activity = %q, want the call that never came back", crossed.Snap.Activity)
 	}
 	if !crossed.Info.LastEventAt.Equal(lastAt) {
 		t.Errorf("Info.LastEventAt = %v, want %v", crossed.Info.LastEventAt, lastAt)
@@ -478,8 +498,8 @@ func TestT55ArchiveToLiveCrossingReplaysTheTranscript(t *testing.T) {
 	// And the crossing is repeatable, not a one-shot.
 	m.MarkPaneMapped(panesFor(t, root, idArchQuestion))
 	againLive := pick(t, mustRefresh(t, m, fleetNow), idArchQuestion)
-	if againLive.Snap.State != state.NeedsYou {
-		t.Errorf("second crossing: state = %s, want needs-you", againLive.Snap.State)
+	if againLive.Snap.State != state.Stuck {
+		t.Errorf("second crossing: state = %s, want stuck", againLive.Snap.State)
 	}
 }
 
