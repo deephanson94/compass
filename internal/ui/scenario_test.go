@@ -971,7 +971,7 @@ func sceneLeftBehind() scene {
 	// time. Three of them had never been rendered by any route on any
 	// scene (round 61).
 	return scene{name: "left-behind", extra: []string{"g", "esc", "3", "x", "X", "X", "A", "x"},
-		story: "Two sessions in this morning's tmux — one asking, one working — and three that stopped days ago on a question nobody answered. Which of them is the deck's first row, and how does the pile go away when it is not today's problem?",
+		story:    "Two sessions in this morning's tmux — one asking, one working — and three that stopped days ago on a question nobody answered. Which of them is the deck's first row, and how does the pile go away when it is not today's problem?",
 		sessions: ss, trails: tr, panes: panes, order: order}
 }
 
