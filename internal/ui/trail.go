@@ -1998,6 +1998,8 @@ func (m *Model) sessionCard(w int) []string {
 	}
 	if m.summaryShown() {
 		right = "[summary]" // the legs counted, not walked (#344)
+	} else if m.summaryWaits() {
+		right = "[summary waits]" // held, for the next trail that counts (#354)
 	}
 	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
@@ -2478,6 +2480,8 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 		level = "[legs]"
 		if m.summaryShown() {
 			level = "[summary]" // the legs counted, not walked (#344)
+		} else if m.summaryWaits() {
+			level = "[summary waits]" // held, for the next trail that counts (#354)
 		}
 	}
 	// Scrolled off the present, the title says so: the trail is no longer

@@ -1708,8 +1708,12 @@ func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	}
 	was := m.selectedKey
 	press(m, "h") // the neighbour: one of each
-	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || m.selectedKey == was || !strings.Contains(v, "summary waits") {
-		t.Fatalf("h did not land on a trail of one of each with the summary suspended and said so (#353):\n%s", v)
+	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || m.selectedKey == was || !strings.Contains(v, "[summary waits]") || strings.Count(v, "summary waits") != 1 {
+		t.Fatalf("h did not land on a trail of one of each with the summary suspended and marked once (#353, #354):\n%s", v)
+	}
+	press(m, "j") // a key later the mark still stands
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary waits]") {
+		t.Errorf("the hold's mark did not outlive the note (#354):\n%s", v)
 	}
 	press(m, "l") // back onto the trail that counts
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || m.selectedKey != was {
@@ -1721,6 +1725,20 @@ func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
 	press(m, "l")
 	if strings.Contains(ansi.Strip(m.View()), "[summary]") {
 		t.Errorf("a summary closed by hand came back on its own")
+	}
+	// And `s` on the suspended trail ends the hold (#354).
+	press(m, "s")
+	press(m, "h")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary waits]") {
+		t.Fatalf("the summary is not held on the neighbour:\n%s", v)
+	}
+	press(m, "s")
+	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary waits]") || !strings.Contains(v, "one of each") {
+		t.Errorf("s on a suspended trail should end the hold and say why (#354):\n%s", v)
+	}
+	press(m, "l")
+	if strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Errorf("the hold ended by s came back on its own")
 	}
 }
 
@@ -1837,5 +1855,117 @@ func TestTheOpenClassKeepsItsClockWhereHeadsRowIsBelowTheFold(t *testing.T) {
 		if cell := summaryTrailCell(m, r); strings.Contains(cell, "▾ ") && strings.Contains(cell, "…") {
 			t.Errorf("the edge row is cut inside a clause: %q", strings.TrimSpace(cell))
 		}
+	}
+}
+
+// The panel's eighth pass, alarm-storm, folded (#355).
+
+func TestTheSummaryRowKeepsTheReplyOverTheAttach(t *testing.T) {
+	forceASCII(t)
+	sc := sceneAlarmStorm()
+	m := sceneModel(sc, 80, 24)
+	pressKey(m, "1")
+	poll(m, sc)
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	rows := summaryFrameRows(m)
+	foot := rows[len(rows)-1]
+	if !strings.Contains(foot, "[summary]") && !strings.Contains(strings.Join(rows, "\n"), "[summary]") {
+		t.Fatalf("the summary did not open on infra")
+	}
+	if !strings.Contains(foot, "r reply") {
+		t.Errorf("the summary's row on the asking session sheds `r reply` (#355): %q", strings.TrimSpace(foot))
+	}
+}
+
+func TestTheEdgeSaysTheWaitLongWhereItFits(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 80, 24)
+	press(m, "s")
+	pressKey(m, "space") // scout open: the long edge does not fit
+	short := false
+	for _, r := range summaryFrameRows(m) {
+		if cell := summaryTrailCell(m, r); strings.Contains(cell, "▾ ") {
+			if strings.Contains(cell, "the wait on you") || strings.Contains(cell, "…") {
+				t.Errorf("the 80-column edge should take the short form whole: %q", strings.TrimSpace(cell))
+			}
+			short = strings.Contains(cell, "· the wait")
+		}
+	}
+	if !short {
+		t.Errorf("the 80-column edge dropped the wait where the short form fits")
+	}
+	wide := summaryModel(t, 120, 34)
+	press(wide, "s")
+	pressKey(wide, "space")
+	long := false
+	for _, r := range summaryFrameRows(wide) {
+		if cell := summaryTrailCell(wide, r); strings.Contains(cell, "▾ ") && strings.Contains(cell, "the wait on you") {
+			long = true
+		}
+	}
+	if !long {
+		t.Errorf("the 120-column edge should say the wait on you in full (#355)")
+	}
+}
+
+// The panel's eighth pass, two-tools, folded (#356).
+
+func TestTheClassRowYieldsItsClockToTheCard(t *testing.T) {
+	forceASCII(t)
+	sc := sceneFewOngoing()
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sc, size[0], size[1])
+		found := false
+		for _, d := range []string{"1", "2", "3", "4"} {
+			pressKey(m, d)
+			poll(m, sc)
+			if s, ok := m.selected(); ok && sessionName(s.Info) == "webapp" && !summaryCountsNothing(m.trails[m.selectedKey]) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%dx%d: no webapp session that counts", size[0], size[1])
+		}
+		for m.level < levelWaypoints {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		press(m, "s")
+		v := ansi.Strip(m.View())
+		tw, _ := m.trailBox()
+		card := ansi.Strip(m.cardSecond(tw))
+		var cur journey.Leg
+		for _, l := range m.trail.Legs {
+			if l.Current {
+				cur = l
+			}
+		}
+		figure := "for " + relAge(m.now, cur.Start)
+		onCard := strings.Contains(card, figure)
+		onRow := strings.Contains(v, "legs · "+figure)
+		if onCard && onRow {
+			t.Errorf("%dx%d: the class row repeats the card's `%s` (#356):\n%s", size[0], size[1], figure, v)
+		}
+		if !onCard && !onRow {
+			t.Errorf("%dx%d: the present is on no row: card %q\n%s", size[0], size[1], card, v)
+		}
+	}
+}
+
+func TestTheEdgeShedsWholeClausesWhereNoFormFits(t *testing.T) {
+	long := "▾ 18 more scout · 6 classes · the wait on you"
+	if got := summaryEdge(long, 60); got != long {
+		t.Errorf("an edge that fits was changed: %q", got)
+	}
+	if got := summaryEdge(long, 40); got != "▾ 18 more scout · 6 classes · the wait" {
+		t.Errorf("the short form should stand where the long one cannot: %q", got)
+	}
+	if got := summaryEdge(long, 30); got != "▾ 18 more scout · 6 classes" || strings.Contains(got, "…") {
+		t.Errorf("clauses should shed whole, last first, where no form fits (#351, #356): %q", got)
 	}
 }

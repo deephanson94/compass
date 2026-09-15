@@ -6070,8 +6070,9 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// the door first, the page key, the session keys, then what acts
 		// here, and the way out last of all, after the fold key the row
 		// exists for and the key that goes back into the trail (#345).
-		return []string{attachHint, " · ctrl+d/u half page", " · A archive", " · g grab", " · m live pane", " · m conversation", " · h/l session", " · / search", " · x hide", " · x unhide", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
+		return []string{attachHint, " · ctrl+d/u half page", " · A archive", " · g grab", " · m live pane", " · m conversation", " · h/l session", " · / search", " · x hide", " · x unhide", " · a ask", " · enter · no pane", " · enter attach",
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
+			" · r reply", // after the attach, as the legs' own row ranks it: the reply is the asking session's key (#355)
 			" · tab legs", " · tab lanes", " · tab trail there", " · space open", " · space close", " · s/esc trail", "j/k rows · "}
 	}
 	// First to go first. What every level shares — the attach hint, `a

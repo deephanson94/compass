@@ -187,10 +187,18 @@ func (m *Model) toggleSummary() {
 	}
 	if why := m.summaryRefusal(); why != "" {
 		m.note = why
+		m.summaryHeld = false // a deliberate `s` on a trail that cannot count ends the hold (#354)
 		return
 	}
 	m.summary, m.summaryHeld = true, true
 	m.summarySync()
+}
+
+// summaryWaits reports whether a held summary is suspended on the trail
+// under it: the title wears `[summary waits]` so the state has a mark
+// that outlives a note (#354).
+func (m *Model) summaryWaits() bool {
+	return m.summaryHeld && !m.summary && m.level == levelWaypoints && !m.showHelp
 }
 
 // summarySync starts the summary afresh where the session under it is
@@ -206,10 +214,7 @@ func (m *Model) summarySync() {
 			// says what the hide did, and the reason would cost the row
 			// its way back (#350); the trail drawn says the rest. Held,
 			// the note says the summary is coming back (#353).
-			m.note = m.summaryRefusal()
-			if m.summaryHeld {
-				m.note += " · summary waits"
-			}
+			m.note = m.summaryRefusal() // the title's `[summary waits]` says the rest (#354)
 		}
 		return
 	}
@@ -560,7 +565,7 @@ func (m *Model) summaryLines(w, h int) []string {
 		if drawn {
 			continue
 		}
-		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), false, w)
+		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryLiveSaid(w), w)
 		if i == m.summaryCursor {
 			text = summaryCursored(text, w)
 		}
@@ -568,7 +573,7 @@ func (m *Model) summaryLines(w, h int) []string {
 	}
 	body := make([]string, 0, h)
 	if head {
-		body = append(body, dimStyle.Render(shedClauses(summaryAbove(rows, top+1), w)))
+		body = append(body, dimStyle.Render(summaryEdge(summaryAbove(rows, top+1), w)))
 	}
 	end := min(top+h, len(lines))
 	if more {
@@ -576,9 +581,22 @@ func (m *Model) summaryLines(w, h int) []string {
 	}
 	body = append(body, lines[top+len(body):end]...)
 	if more {
-		body = append(body, dimStyle.Render(shedClauses(summaryBelow(rows, end), w))) // clauses shed whole, last first (#351)
+		body = append(body, dimStyle.Render(summaryEdge(summaryBelow(rows, end), w)))
 	}
 	return fit(append(out, body...), h+len(out))
+}
+
+// summaryEdge fits an edge row to its column: the wait's long form where
+// it fits, its short form where it does not, then clauses shed whole,
+// last first (#351, #355).
+func summaryEdge(row string, w int) string {
+	if lipgloss.Width(row) <= w {
+		return row
+	}
+	if short := strings.Replace(row, "the wait on you", "the wait", 1); short != row && lipgloss.Width(short) <= w {
+		return short
+	}
+	return shedClauses(row, w)
 }
 
 // summaryAbove is the first row's word for what the window hides above
@@ -618,12 +636,12 @@ func summaryBelow(rows []summaryRow, from int) string {
 		return ""
 	}
 	if rest[0].kind == "wait" {
-		return "▾ the wait"
+		return "▾ the wait on you"
 	}
 	if rest[0].group() || rest[0].solo {
 		out := "▾ " + summaryGroups(len(summaryGroupsIn(rest))) + " below"
 		if rest[len(rest)-1].kind == "wait" {
-			out += " · the wait" // the row beneath says whose (#352)
+			out += " · the wait on you" // `the wait` where the column cannot take it (#355)
 		}
 		return out
 	}
@@ -641,7 +659,7 @@ func summaryBelow(rows []summaryRow, from int) string {
 		out += " · " + summaryGroups(groups)
 	}
 	if rest[len(rest)-1].kind == "wait" {
-		out += " · the wait"
+		out += " · the wait on you"
 	}
 	return out
 }
@@ -718,7 +736,7 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 	r := rows[i]
 	switch r.kind {
 	case "class":
-		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryOpen[r.key], w)
+		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryOpen[r.key] || m.summaryLiveSaid(w), w)
 	case "wait":
 		// To the minute, as every span in the column is (#347); the
 		// title's and the card's own clause for it stand down (#348).
@@ -775,6 +793,22 @@ func (m *Model) summaryRedSaid(w int) bool {
 	}
 	card := ansi.Strip(m.cardSecond(w))
 	return strings.Contains(card, fmt.Sprintf(" %d red", red)) || strings.Contains(card, fmt.Sprintf(" %d✗", red))
+}
+
+// summaryLiveSaid reports whether the card above the summary already
+// says how long HEAD has run — `· for 4m` in its verdict — so the class
+// row does not say it again (#356). The fleet row beside, at 80 and
+// 100, is the #348 hold.
+func (m *Model) summaryLiveSaid(w int) bool {
+	if !m.sessionView() {
+		return false
+	}
+	for _, l := range m.trail.Legs {
+		if l.Current {
+			return strings.Contains(ansi.Strip(m.cardSecond(w)), "for "+relAge(m.now, l.Start))
+		}
+	}
+	return false
 }
 
 // summaryLoopSaid reports whether the frame already names the loop — the
