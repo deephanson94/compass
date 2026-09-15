@@ -948,6 +948,7 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 	n, red, runs := 0, 0, 0
 	var span time.Duration
 	glyph, live := glyphLeg, ""
+	parked := false // HEAD's own row wears its lanes' clock, not the leg's span
 	for _, l := range tr.Legs {
 		if l.Class != c {
 			continue
@@ -965,7 +966,8 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 		if l.Current {
 			end = o.Now
 			glyph, live = headMark(o, l)
-			if strings.HasPrefix(live, "◈") || strings.HasPrefix(live, "for ") {
+			parked = strings.HasPrefix(live, "◈")
+			if parked || strings.HasPrefix(live, "for ") {
 				live = "for " + relAge(o.Now, l.Start) // the class's clause is how much of its sum is now; HEAD's tail is on HEAD's own row (#349)
 			}
 		}
@@ -975,8 +977,11 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 	}
 	head := classStyle(c).Render(glyph + " " + pad(c.String(), trailVerbWidth))
 	var badge []string
-	if live != "" && !open {
-		badge = append(badge, live) // open, HEAD's own row beneath says it (#351)
+	if live != "" && (!open || parked) {
+		// Open, HEAD's own row beneath says it (#351) — unless that row
+		// wears the lanes' clock, `◈3 out 20m`, and the leg's span is
+		// then on no row but this one (#359).
+		badge = append(badge, live)
 	}
 	if red > 0 && !redSaid {
 		// The card above carries the day's red count where there is

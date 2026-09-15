@@ -1607,8 +1607,15 @@ func TestHeadsTailIsOnHeadsOwnRowNotTheClassRow(t *testing.T) {
 	if strings.Count(view, "◈3 out 20m") != 2 { // the card, and HEAD's own row under its class
 		t.Errorf("HEAD's tail should be on the card and on HEAD's own row, %d times here (#349):\n%s", strings.Count(view, "◈3 out 20m"), view)
 	}
-	if strings.Contains(view, "2 legs · for ") {
-		t.Errorf("the open class row repeats the clock HEAD's own row beneath it carries (#351):\n%s", view)
+	// HEAD's own row wears its lanes' clock, `◈3 out 20m`, not the leg's
+	// span: the class row keeps `for 2h`, which is then on no other row
+	// (#359). Where HEAD's row does carry the span the class row yields
+	// it, pinned on very-long's design class (#352).
+	if !strings.Contains(view, "2 legs · for ") {
+		t.Errorf("the open class row drops `for …` while HEAD's own row beneath carries a different clock (#359):\n%s", view)
+	}
+	if strings.Count(view, "for 2h") != 1 {
+		t.Errorf("the leg's span should be on the frame once, %d times here:\n%s", strings.Count(view, "for 2h"), view)
 	}
 }
 
