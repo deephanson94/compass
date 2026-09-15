@@ -1910,7 +1910,14 @@ func (m *Model) trailColumn(w, h int) []string {
 	if len(rows) > 1 && m.sessionView() && !droppedTag {
 		cardKeepsOnlyItsTag(rows)
 	}
-	if m.archiveView && !m.sessionView() && len(rows) > 2 {
+	if m.archiveView && !m.sessionView() && m.summaryShown() && len(rows) > 0 {
+		// The summary draws no ◉ row, so the loop below never fires and
+		// the title kept the ask — the name and the day's verdict, the
+		// two things the summary is opened to read, pushed off a row the
+		// header bar already spells whole (#345).
+		rows[0] = m.trailTitleWith(w, true)
+	}
+	if m.archiveView && !m.sessionView() && !m.summaryShown() && len(rows) > 2 {
 		// The archive's title carries the ask (#59) so a row is named,
 		// not its group; where the ◉ row draws that ask whole two rows
 		// below, in the same panel, the title's clipped copy named it

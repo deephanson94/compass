@@ -255,6 +255,7 @@ type Model struct {
 	summaryCursor int             // index into summaryRows
 	summaryScroll int             // the first summary row drawn
 	summaryOpen   map[string]bool // the classes opened into their legs, by name; the lanes under summaryLanes
+	summaryOn     string          // the session the summary was last opened on: back there, it stands where it stood
 
 	// anchor is the reader's own cursor: the document line marked, and the
 	// row Space acts on. It opens on the Lv2 cursor's row — so the two
@@ -905,10 +906,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "s":
-		if m.level >= levelReader {
-			break // the reader's keys are its own
-		}
-		m.toggleSummary()
+		m.toggleSummary() // refused with the way in wherever it does not work, the reader included (#345)
 		return m, nil
 	case "?":
 		m.showHelp = true
@@ -4043,6 +4041,58 @@ func (m *Model) footerLine(w int) string {
 	return m.footerTraded(keys, w)
 }
 
+// keyAfterTheAttach is the shed order with one key moved to just after the
+// attach's last form, so the attach gives way before it.
+func keyAfterTheAttach(order []string, key string) []string {
+	last := -1
+	for i, d := range order {
+		if strings.HasPrefix(strings.TrimPrefix(d, " · "), "enter") {
+			last = i
+		}
+	}
+	if last < 0 {
+		return order
+	}
+	out := make([]string, 0, len(order)+1)
+	for i, d := range order {
+		if d == key {
+			continue
+		}
+		out = append(out, d)
+		if i == last {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// summaryFoldKeymap is the summary row's clause for `space`: `· space open`,
+// `· space close`, or nothing on a class of one, where `space` only says so.
+func (m *Model) summaryFoldKeymap() string {
+	if word := m.summaryFoldWord(); word != "" {
+		return " · space " + word
+	}
+	return ""
+}
+
+// footerSummaryTraded is the legs' row with `s summary` where the row has
+// the room: the clause is not ranked among the keys — a rank re-deals the
+// row, and a re-dealt row traded `x hide` and `g grab` for a clause it did
+// not even draw (#345) — but traded as the archive door is (#328): it
+// stands only where the row still names every key it named without it.
+func (m *Model) footerSummaryTraded(keys string, w int) string {
+	const clause = " · s summary"
+	if m.level != levelWaypoints || m.summaryShown() || m.summaryRefusal() != "" || !strings.Contains(keys, " · ? help") || strings.Contains(keys, clause) {
+		return m.footerTradedOnce(keys, w)
+	}
+	with := m.footerTradedOnce(strings.Replace(keys, " · ? help", clause+" · ? help", 1), w)
+	without := m.footerTradedOnce(keys, w)
+	if footerNamesAll(without, with) {
+		return with // the clause cost the row no key
+	}
+	return without
+}
+
 // noPaneClauseGone is a drawn row with the keymap's own `enter · no pane`
 // taken out, in whichever form the row drew it, so the row under the
 // refusal can be read against the row beside it key for key.
@@ -4102,7 +4152,7 @@ func (m *Model) replyRefusalSaid(whole string) string {
 // the deck below the board's width — there is no trade: the clause is the
 // frame's only naming of the archive, not a second one (#328).
 func (m *Model) footerTraded(keys string, w int) string {
-	return m.footerDrawn("traded", keys, w, m.footerTradedOnce)
+	return m.footerDrawn("traded", keys, w, m.footerSummaryTraded)
 }
 
 // footerTradedOnce is the draw itself: the memo above is what keeps
@@ -4444,17 +4494,9 @@ func (m *Model) keymapOnce() string {
 	case m.level >= levelReader:
 		keys = "j/k rows · ctrl+d/u half page · space unfold · / search · n/N · [ ] turns · r reply · a ask · " + m.hideKeymap() + " · " + m.enterKeymap() + " · esc back · ? help · q quit"
 	case m.summaryShown() && m.sessionView():
-		keys = "j/k rows · space " + m.summaryFoldWord() + " · tab " + m.summaryTabWord() + " · h/l session · r reply · a ask · " + m.enterKeymap() + " · s trail · esc trail · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · h/l session · r reply · a ask · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
 	case m.summaryShown():
-		keys = "j/k rows · space " + m.summaryFoldWord() + " · tab " + m.summaryTabWord() + " · r reply · a ask · " + m.enterKeymap() + " · s trail · esc trail · ? help · q quit"
-	case m.level >= levelWaypoints && m.summaryRefusal() != "":
-		// A trail with nothing to count names no summary key (#344):
-		// the rows below, without their `s summary` clause.
-		if m.sessionView() {
-			keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
-		} else {
-			keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
-		}
+		keys = "j/k rows · ctrl+d/u half page" + m.summaryFoldKeymap() + " · tab " + m.summaryTabWord() + " · r reply · a ask · " + m.enterKeymap() + " · s/esc trail · ? help · q quit"
 	case m.level >= levelWaypoints && m.sessionView():
 		// `/` opens the fleet search here as it does on the board, on a
 		// list and in the reader: pressed at this level it takes the
@@ -4491,9 +4533,9 @@ func (m *Model) keymapOnce() string {
 		// very level has said `rows` all along, so one key, one act, one
 		// level now wears one name (#220, #307). The two words are the
 		// same width: no row's keys move.
-		keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · s summary · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · h/l session · [ ] chapters · m live pane · r reply · a ask · / search · " + m.hideKeymap() + " · g grab · tab reader · " + m.enterKeymap() + " · esc board · ? help · q quit"
 	case m.level >= levelWaypoints:
-		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · s summary · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
+		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
 	if m.archiveView && m.level < levelReader && !m.showHelp && !m.searching && !m.replying && !strings.Contains(keys, " · g grab") {
 		// `g` is the fleet's key and it acts in the archive too: pressed
@@ -5222,8 +5264,8 @@ func (m *Model) refusedKeys() []string {
 	if m.liveCount() == 1 && !m.archiveView {
 		refused = append(refused, "g", "x") // nothing to grab, and hiding the only session is refused
 	}
-	if m.level != levelWaypoints {
-		refused = append(refused, "s") // the summary is the legs' (#344): elsewhere the key says the way in
+	if m.summaryRefusal() != "" && !m.summaryShown() {
+		refused = append(refused, "s") // the summary is the legs' (#344), and a trail with nothing to count has none (#345)
 	}
 	return refused
 }
@@ -5954,8 +5996,8 @@ func keysActGained(was, now string, drops []string, yield string, stuck map[stri
 		if had && !in && d != yield {
 			return "" // something the row drew is gone
 		}
-		if in && !had && d != " · enter · no pane" && d != attachHint && d != " · s summary" && !stuck[d] {
-			return d // the summary's key takes only spare room: no yield is spent on it (#344)
+		if in && !had && d != " · enter · no pane" && d != attachHint && !stuck[d] {
+			return d
 		}
 	}
 	return ""
@@ -6014,11 +6056,12 @@ func (m *Model) readerPageFits() bool {
 func (m *Model) shedOrder(chapter bool) []string {
 	if m.summaryShown() {
 		// The summary's row sheds like the legs' row it stands in for:
-		// the door first, the session keys, then what acts here, and the
-		// way out last of all, after the fold key the row exists for.
-		return []string{attachHint, " · h/l session", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
+		// the door first, the page key, the session keys, then what acts
+		// here, and the way out last of all, after the fold key the row
+		// exists for and the key that goes back into the trail (#345).
+		return []string{attachHint, " · ctrl+d/u half page", " · h/l session", " · a ask", " · r reply", " · enter · no pane", " · enter attach",
 			"enter attach (prefix d returns) · ", "enter attach · ", "enter · no pane · ",
-			" · tab legs", " · tab lanes", " · tab trail there", " · s trail", " · esc trail", " · space open", " · space close", "j/k rows · "}
+			" · tab legs", " · tab lanes", " · s/esc trail", " · tab trail there", " · space open", " · space close", "j/k rows · "}
 	}
 	// First to go first. What every level shares — the attach hint, `a
 	// ask`, the between-sessions keys — goes before anything a level owns,
@@ -6040,11 +6083,6 @@ func (m *Model) shedOrder(chapter bool) []string {
 	// above matches nothing — the head form #56 gave the attach key and
 	// #200 gave `space unfold`.
 	order := []string{attachHint, " · ctrl+d/u half page", "ctrl+d/u half page · "}
-	if m.level == levelWaypoints {
-		// The summary's key takes only spare room: it goes before the
-		// page key and the door, which a row of the legs owes (#344).
-		order = append([]string{" · s summary"}, order...)
-	}
 	// The archive door yields to every key that acts (#328): with a fleet
 	// it sheds second, right behind the page key and before anything else
 	// on the row — and it goes after the keys that take only spare room
@@ -6173,6 +6211,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 		own = append(own, " · A archive")
 	}
 	order = append(order, own...)
+	if m.note == "the summary is the legs'" {
+		// The note's way in is `tab`: the row keeps `tab deeper` over the
+		// attach, or the note sends the person to a key it evicted (#345).
+		order = keyAfterTheAttach(order, " · tab deeper")
+	}
 	// The row's movement key gives way before the way out and before the
 	// keys a note is about: the arrows move too, and a footer that kept
 	// `j/k rows` and shed `esc back` left `q quit` as the only named exit.

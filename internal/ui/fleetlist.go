@@ -1226,6 +1226,9 @@ func (m *Model) askBeside(s fleet.Session) bool {
 	if !m.archiveView || s.Info.Key() != m.selectedKey || len(m.trailRows) == 0 {
 		return false
 	}
+	if m.summaryShown() {
+		return true // the header bar names the ask over the summary, whose rows have no ◉ (#345)
+	}
 	ask := archiveHeadline(s)
 	for i, r := range m.trailRows {
 		if m.boxCoversRow(i) {
