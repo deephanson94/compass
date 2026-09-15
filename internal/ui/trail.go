@@ -1859,6 +1859,17 @@ func saysSame(sentence, row string) bool {
 // trailColumn is the deck's right-hand panel: the title, one line of air, and
 // the graph.
 func (m *Model) trailColumn(w, h int) []string {
+	m.summaryOff = false
+	if m.summaryShown() {
+		// The title says whether the summary's window draws the present
+		// before the window is drawn: the card's height is its content's,
+		// not the mark's, so it is measured first (#357).
+		n := 2
+		if m.sessionView() {
+			n = len(m.sessionCard(w))
+		}
+		m.summaryOff = m.summaryOffPresent(h - n)
+	}
 	rows := []string{m.trailTitle(w), ""}
 	if m.sessionView() {
 		rows = m.sessionCard(w)
@@ -2004,7 +2015,7 @@ func (m *Model) sessionCard(w int) []string {
 	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
-	if !m.trailPinned && !m.summaryShown() {
+	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff {
 		right = strings.TrimSpace("↓ G  " + right)
 	}
 	body := w - 1
@@ -2493,7 +2504,9 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
-	if !m.trailPinned && !m.summaryShown() {
+	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff {
+		// The summary scrolled off the present says so with the trail's
+		// own word, and `G` is its way back too (#357).
 		right = strings.TrimSpace("↓ G  " + right)
 	}
 	mark := m.titleMark(panelTrail)

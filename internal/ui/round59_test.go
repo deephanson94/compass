@@ -1969,3 +1969,118 @@ func TestTheEdgeShedsWholeClausesWhereNoFormFits(t *testing.T) {
 		t.Errorf("clauses should shed whole, last first, where no form fits (#351, #356): %q", got)
 	}
 }
+
+// The panel's ninth pass, folded (#357).
+
+func TestTheLanesRowSaysHowManyCameBackWhereNothingElseDoes(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := porterSummary(t, size[0], size[1])
+		back, out := 0, 0
+		for _, br := range m.trails[m.selectedKey].Branches {
+			if br.Done {
+				back++
+			} else {
+				out++
+			}
+		}
+		if back != 1 || out != 3 {
+			t.Fatalf("porter should have one lane back and three out, not %d and %d", back, out)
+		}
+		rows := summaryFrameRows(m)
+		v := strings.Join(rows, "\n")
+		// Said once on the frame — on the card above where the deck
+		// draws one, on the fleet row beside where that row keeps the
+		// clause, and on the lanes row where neither does (#357).
+		// The clause's own form, `· 1 back`: harness's `↳ 1 back, empty`
+		// two rows down is another session's landing, not porter's tally.
+		if n := strings.Count(v, "· 1 back"); n != 1 {
+			t.Errorf("%dx%d: `· 1 back` is on the frame %d times, not once:\n%s", size[0], size[1], n, v)
+		}
+		lanes := ""
+		for _, r := range rows {
+			if cell := summaryTrailCell(m, r); strings.Contains(cell, "agent") && strings.Contains(cell, "lanes") {
+				lanes = cell
+			}
+		}
+		if lanes == "" {
+			t.Fatalf("%dx%d: no lanes row on the summary:\n%s", size[0], size[1], v)
+		}
+		onRow := strings.Contains(lanes, "4 lanes · 1 back")
+		if onRow == m.summaryBackSaid(m.width) {
+			t.Errorf("%dx%d: the lanes row %q carries the clause %v while the frame says it elsewhere %v:\n%s", size[0], size[1], lanes, onRow, !onRow, v)
+		}
+		if size[0] <= 100 && !onRow {
+			t.Errorf("%dx%d: no card is drawn and the fleet row sheds `1 back`; the lanes row must say it: %q", size[0], size[1], lanes)
+		}
+		if size[0] >= 120 && onRow {
+			t.Errorf("%dx%d: the card says `1 back`; the lanes row says it again: %q", size[0], size[1], lanes)
+		}
+	}
+	// A trail whose lanes are all back, or all out, has nothing to add up:
+	// the count is the fleet row's `◈3 back` or the lanes row's `20m out`.
+	if row := ansi.Strip(summaryLanesRow(journey.Trail{Branches: []journey.Branch{{Done: true}, {Done: true}}}, TrailOpts{}, 60, false)); strings.Contains(row, "back") {
+		t.Errorf("all lanes back: the row should not count them: %q", row)
+	}
+}
+
+func TestVeryLongsWalkEndsOnTheHelpTheSummaryOwesARowTo(t *testing.T) {
+	extra := sceneVeryLong().extra
+	if len(extra) < 2 || extra[len(extra)-1] != "?" || extra[len(extra)-2] != "esc" {
+		t.Fatalf("very-long's walk should close the summary and open the help, so the `s` gloss is on a shipped frame: %v", extra)
+	}
+	sc := sceneVeryLong()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range extra {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	v := ansi.Strip(m.View())
+	if !m.showHelp || !strings.Contains(v, "summary: the legs by class") {
+		t.Errorf("the walk's last frame does not draw the help's `s` row:\n%s", v)
+	}
+}
+
+func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
+	forceASCII(t)
+	titleOf := func(m *Model) string {
+		for _, r := range summaryFrameRows(m) {
+			// The title row, or on the wide deck the card's first row.
+			if cell := summaryTrailCell(m, r); strings.Contains(cell, "[summary]") {
+				return cell
+			}
+		}
+		return ""
+	}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "s")
+		if title := titleOf(m); strings.Contains(title, "↓ G") {
+			t.Errorf("%dx%d: the summary opens on the present; the title says it is off it: %q", size[0], size[1], title)
+		}
+		press(m, "space") // scout opens: 22 legs push the running class off the window
+		v := ansi.Strip(m.View())
+		if strings.Contains(v, "for 39m") {
+			t.Fatalf("%dx%d: the present is still on the frame; the pin wants it off:\n%s", size[0], size[1], v)
+		}
+		if title := titleOf(m); !strings.Contains(title, "↓ G  [summary]") {
+			t.Errorf("%dx%d: the running class is off the frame and the title does not say `↓ G` (#357): %q\n%s", size[0], size[1], title, v)
+		}
+		press(m, "G")
+		v = ansi.Strip(m.View())
+		if title := titleOf(m); strings.Contains(title, "↓ G") || !strings.Contains(v, "for 39m") {
+			t.Errorf("%dx%d: `G` is the present; the title still says `↓ G` or the present is off: %q\n%s", size[0], size[1], title, v)
+		}
+		press(m, "tab")
+		press(m, "s")
+		if m.summaryOff {
+			t.Errorf("%dx%d: the summary reopened on the present should not wear the mark", size[0], size[1])
+		}
+	}
+	m := summaryModel(t, 220, 48)
+	press(m, "s")
+	press(m, "space")
+	if title := titleOf(m); strings.Contains(title, "↓ G") {
+		t.Errorf("220x48 has the room for every row; the title says `↓ G`: %q", title)
+	}
+}

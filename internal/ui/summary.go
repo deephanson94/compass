@@ -742,7 +742,7 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 		// title's and the card's own clause for it stand down (#348).
 		return summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(m.trail.Prompts), "prompt"), nil, r.text, w)
 	case "lanes":
-		return summaryLanesRow(m.trail, m.trailOpts(w, 1), w)
+		return summaryLanesRow(m.trail, m.trailOpts(w, 1), w, m.summaryBackSaid(w))
 	case "leg":
 		width := w
 		if !r.solo {
@@ -832,6 +832,76 @@ func (m *Model) summaryLoopSaid(w int) bool {
 		}
 	}
 	return false
+}
+
+// summaryOffPresent reports whether the summary drawn h rows tall hides
+// the present — the class holding HEAD, and HEAD's own row under it when
+// the class is open — so the title can say `↓ G` as the trail's does when
+// it is scrolled off the newest work (#357). The window is the one
+// summaryLines draws: the same rows, cursor and scroll, and the prompt row
+// taken off the top where no reader beside says what was asked.
+func (m *Model) summaryOffPresent(h int) bool {
+	rows := m.summaryRowsHere()
+	if len(rows) == 0 {
+		return false
+	}
+	m.summaryClamp(rows)
+	if !m.sessionView() && len(m.trail.Prompts) > 0 && h > 2 {
+		h--
+	}
+	if h < 1 {
+		h = 1
+	}
+	top, head, more := summaryWindow(len(rows), h, m.summaryCursor, m.summaryScroll)
+	first, last := top, min(top+h, len(rows))
+	if head {
+		first++
+	}
+	if more {
+		last--
+	}
+	off := false
+	for i, r := range rows {
+		live := false
+		switch r.kind {
+		case "class":
+			for _, l := range m.trail.Legs {
+				if l.Current && l.Class == r.class {
+					live = true
+				}
+			}
+		case "leg":
+			live = m.trail.Legs[r.leg].Current
+		}
+		if !live {
+			continue
+		}
+		if i >= first && i < last {
+			return false // the present is on the frame, on the class row or HEAD's own
+		}
+		off = true
+	}
+	return off
+}
+
+// summaryBackSaid reports whether the frame already says how many lanes
+// came back — the card above the summary, or the fleet row beside it as
+// it is drawn, which sheds `· 1 back` first at 80 and 100 — so the lanes
+// row says it exactly where nothing else on the frame does (#357).
+func (m *Model) summaryBackSaid(w int) bool {
+	if m.sessionView() {
+		return strings.Contains(ansi.Strip(m.cardSecond(w)), " back")
+	}
+	fw, _, _ := m.layout(m.width - 2*edgePad)
+	if fw == 0 {
+		return false
+	}
+	s, ok := m.selected()
+	if !ok {
+		return false
+	}
+	// The fleet row's second line, at the width entryLines draws it.
+	return strings.Contains(ansi.Strip(m.secondLineUnder(s, fw-4, "")), " back")
 }
 
 // summaryHang is the rail a row under a class hangs on: `│  ├ ` for one
@@ -948,8 +1018,10 @@ func spanText(d time.Duration) string {
 // out — the total, which the card does not add up — and the clock of the
 // oldest still out, or of the last one back, with the lane rows' own word
 // on it: the age column is a span everywhere else, and a lane's clock is
-// not one (#346). The silent and the empty are the card's, said there.
-func summaryLanesRow(tr journey.Trail, o TrailOpts, w int) string {
+// not one (#346). The silent and the empty are the card's, said there;
+// how many came back is the card's too, and the row's where the frame
+// draws no card and the fleet row beside has shed it (#357).
+func summaryLanesRow(tr journey.Trail, o TrailOpts, w int, backSaid bool) string {
 	var oldest, latest time.Time
 	for _, br := range tr.Branches {
 		if br.Done {
@@ -974,7 +1046,17 @@ func summaryLanesRow(tr journey.Trail, o TrailOpts, w int) string {
 	case !latest.IsZero():
 		age = relAge(o.Now, latest) + " ago"
 	}
-	return summaryFigureRow(head, plural(len(tr.Branches), "lane"), nil, age, w)
+	back := 0
+	for _, br := range tr.Branches {
+		if br.Done {
+			back++
+		}
+	}
+	var badge []string
+	if back > 0 && back < len(tr.Branches) && !backSaid {
+		badge = append(badge, fmt.Sprintf("%d back", back))
+	}
+	return summaryFigureRow(head, plural(len(tr.Branches), "lane"), badge, age, w)
 }
 
 // summaryFigureRow lays a count row out on the leg row's grid: the head,
