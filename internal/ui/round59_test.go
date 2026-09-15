@@ -1546,9 +1546,14 @@ func TestASilentLaneHangsItsOwnLine(t *testing.T) {
 	m := porterSummary(t, 152, 40)
 	toLanes(t, m)
 	pressKey(m, "space")
-	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "nothing written") {
-		t.Errorf("a lane gone quiet hangs nothing under it in the summary (#348):\n%s", view)
+	found := false
+	for _, r := range summaryFrameRows(m) {
+		if cell := summaryTrailCell(m, r); strings.Contains(cell, "nothing written") {
+			found = true // the trail column's own row, not the conversation beside it (#351)
+		}
+	}
+	if !found {
+		t.Errorf("a lane gone quiet hangs nothing under it in the summary (#348):\n%s", ansi.Strip(m.View()))
 	}
 }
 
@@ -1607,14 +1612,17 @@ func TestTheHungLinesEndInsideTheColumn(t *testing.T) {
 func TestHeadsTailIsOnHeadsOwnRowNotTheClassRow(t *testing.T) {
 	forceASCII(t)
 	m := porterSummary(t, 152, 40)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "2 legs · for ") {
+		t.Errorf("the closed class row should say how much of its sum is now, `for …`:\n%s", v)
+	}
 	press(m, "j")
 	pressKey(m, "space")
 	view := ansi.Strip(m.View())
 	if strings.Count(view, "◈3 out 20m") != 2 { // the card, and HEAD's own row under its class
 		t.Errorf("HEAD's tail should be on the card and on HEAD's own row, %d times here (#349):\n%s", strings.Count(view, "◈3 out 20m"), view)
 	}
-	if !strings.Contains(view, "2 legs · for ") {
-		t.Errorf("the class row should say how much of its sum is now, `for …`:\n%s", view)
+	if strings.Contains(view, "2 legs · for ") {
+		t.Errorf("the open class row repeats the clock HEAD's own row beneath it carries (#351):\n%s", view)
 	}
 }
 
@@ -1700,5 +1708,113 @@ func TestTheHidesNoteStandsAloneWhenTheSummaryCloses(t *testing.T) {
 		if !way {
 			t.Errorf("%dx%d: the row after the hide names no way on: %q", size[0], size[1], strings.TrimSpace(foot))
 		}
+	}
+}
+
+// The panel's sixth pass, folded (#351).
+
+func TestTheSummaryResumesOnTheNextTrailThatCounts(t *testing.T) {
+	forceASCII(t)
+	m, _ := twoToolsWaiting(t, 120, 34)
+	press(m, "s")
+	if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Fatalf("the summary did not open")
+	}
+	was := m.selectedKey
+	press(m, "h") // the neighbour: one of each
+	if strings.Contains(ansi.Strip(m.View()), "[summary]") || m.selectedKey == was {
+		t.Fatalf("h did not land on a trail of one of each with the summary suspended")
+	}
+	press(m, "l") // back onto the trail that counts
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || m.selectedKey != was {
+		t.Errorf("the summary should resume on the next trail that counts (#351):\n%s", v)
+	}
+	// A deliberate close stays closed.
+	pressKey(m, "esc")
+	press(m, "h")
+	press(m, "l")
+	if strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Errorf("a summary closed by hand came back on its own")
+	}
+}
+
+func TestTheEdgeRowShedsWholeClauses(t *testing.T) {
+	forceASCII(t)
+	m := summaryModel(t, 80, 24)
+	press(m, "s")
+	pressKey(m, "space") // scout open: the edge cuts scout, the classes and the wait
+	for _, r := range summaryFrameRows(m) {
+		cell := summaryTrailCell(m, r)
+		if strings.Contains(cell, "▾ ") && strings.Contains(cell, "…") {
+			t.Errorf("the edge row is cut inside a clause (#351): %q", strings.TrimSpace(cell))
+		}
+	}
+	wide := summaryModel(t, 120, 34) // scout open cuts the classes and the wait here, with the room for the clause
+	press(wide, "s")
+	pressKey(wide, "space")
+	found := false
+	for _, r := range summaryFrameRows(wide) {
+		if cell := summaryTrailCell(wide, r); strings.Contains(cell, "▾ ") && strings.Contains(cell, "the wait on you") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the edge row at 120 does not count the wait it hides (#349):\n%s", ansi.Strip(wide.View()))
+	}
+}
+
+func TestTheShipsStandDownWhereTheShipRowCountsThem(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "s")
+		for _, r := range summaryFrameRows(m) {
+			cell := summaryTrailCell(m, r)
+			if strings.Contains(cell, "TRAIL · ") && (strings.Contains(cell, "⚑") || strings.Contains(cell, " ships")) {
+				t.Errorf("%dx%d: the title counts the ships the ship row counts (#349): %q", size[0], size[1], strings.TrimSpace(cell))
+			}
+		}
+		if !strings.Contains(ansi.Strip(m.View()), "ship   16 legs") {
+			t.Errorf("%dx%d: the ship row is missing", size[0], size[1])
+		}
+	}
+}
+
+func TestTheCardsWaitClauseStandsDownAtEveryWidth(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m, _ := twoToolsWaiting(t, size[0], size[1])
+		press(m, "s")
+		v := ansi.Strip(m.View())
+		if !strings.Contains(v, "[summary]") {
+			t.Fatalf("%dx%d: the summary did not open", size[0], size[1])
+		}
+		if strings.Count(v, "on you") != 1 {
+			t.Errorf("%dx%d: the wait on you is said %d times (#349, #351):\n%s", size[0], size[1], strings.Count(v, "on you"), v)
+		}
+	}
+}
+
+func TestAFindingIsHungWhole(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	m := sceneModel(sc, 80, 24)
+	for _, d := range []string{"1", "2", "3", "4", "5"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if s, ok := m.selected(); ok && sessionName(s.Info) == "harness" && len(m.trails[m.selectedKey].Branches) == 3 {
+			break
+		}
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	toLanes(t, m)
+	pressKey(m, "space")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "should cache") || !strings.Contains(view, "└ it") || strings.Contains(view, "re-ran the same setup; t…") {
+		t.Errorf("a finding is cut where the trail spells it whole (#351):\n%s", view)
 	}
 }

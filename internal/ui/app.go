@@ -256,6 +256,7 @@ type Model struct {
 	summaryScroll int             // the first summary row drawn
 	summaryOpen   map[string]bool // the classes opened into their legs, by name; the lanes under summaryLanes
 	summaryOn     string          // the session the summary was last opened on: back there, it stands where it stood
+	summaryHeld   bool            // the summary is what is being read: a trail that cannot count suspends it, the next that can resumes it (#351)
 
 	// anchor is the reader's own cursor: the document line marked, and the
 	// row Space acts on. It opens on the Lv2 cursor's row — so the two
@@ -897,7 +898,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.note, m.noteYields = "", false // a keypress answers the last note
 
 	if m.level != levelWaypoints && !m.archiveView {
-		m.summary = false // the summary is the legs' view: a level away from them it is closed; the archive keeps it for the way back (#347)
+		m.summary, m.summaryHeld = false, false // the summary is the legs' view: a level away from them it is closed; the archive keeps it for the way back (#347)
 	}
 	if m.summaryShown() && m.summaryKey(key) {
 		return m, nil
@@ -3066,7 +3067,10 @@ func (m *Model) viewOnce() string {
 	if inner < 10 {
 		inner = w
 	}
-	if m.summary && m.level == levelWaypoints {
+	if (m.summary || m.summaryHeld) && m.level == levelWaypoints {
+		if m.summaryHeld && !m.summary && !summaryCountsNothing(m.trail) {
+			m.summary = true // the trail that could not count is behind us: the summary resumes (#351)
+		}
 		m.summarySync() // afresh on another session, closed on one with nothing to count — on this frame, the archive's too (#347, #348)
 	}
 

@@ -760,7 +760,7 @@ func sceneTwoTools() scene {
 		legSpec{journey.Scout, "main.tf", 18 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "AskUserQuestion", 4 * time.Minute, nil, "", nil})
 	panes, order := paneMap([]string{"api-claude", "api-oc", "docs-oc", "infra"}, []string{"dev:1.0", "dev:2.0", "dev:3.0", "ops:0.0"})
-	return scene{name: "two-tools", extra: []string{"2", "tab", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "two-tools", extra: []string{"2", "tab", "3", "s", "h", "l", "3"}, story: "Two claude sessions and two opencode sessions in one fleet, two of them in the same directory called api: which row is which tool, on which model, without attaching.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // The second day: one session live, and yesterday's dozen behind it. The
@@ -1063,12 +1063,15 @@ func TestScenarioWalkthrough(t *testing.T) {
 			if len(sc.extra) > 0 {
 				walked = append(append(walked, "esc"), sc.extra...) // the scene's own keys are walked and measured too (#349)
 			}
-			for _, k := range walked {
+			for _, k := range append(walked, "") {
 				frame := m.View()
 				for _, line := range strings.Split(frame, "\n") {
 					if x := lipgloss.Width(line); x > w {
 						t.Errorf("%s %dx%d before %q: line runs past the terminal (%d): %q", sc.name, w, h, k, x, line)
 					}
+				}
+				if k == "" {
+					break // the frame after the last key is measured too (#351)
 				}
 				pressKey(m, k)
 				poll(m, sc)
