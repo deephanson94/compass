@@ -72,6 +72,13 @@ type fleetMsg struct {
 	// board was not polled (a narrow terminal). The selected session's is in
 	// here and in trail both.
 	trails map[string]journey.Trail
+
+	// paired says the poll ran after the tmux panes had been paired with a
+	// fleet: its liveness is the whole rule, a pane or the recency door,
+	// not the door alone. Before the pairing a session sitting in a pane it
+	// went quiet in five minutes ago is not yet live, and a fleet read then
+	// is one session short of what the next poll says.
+	paired bool
 }
 
 // Narrator is the deck's view of the narration service (internal/narrator):
@@ -94,6 +101,10 @@ type Narrator interface {
 type panesMsg struct {
 	panes map[string]tmuxop.Pane
 	list  []tmuxop.Pane
+	// against is how many sessions the listing was paired with. Init lists
+	// panes before the fleet arrives and pairs nothing; a listing against a
+	// fleet is the one the Manager's liveness is settled by.
+	against int
 }
 
 type captureMsg struct {
@@ -311,6 +322,9 @@ type Model struct {
 	seen        map[string]time.Time // when each session's trail or pane was last opened
 	seenFile    string               // where the seen-times persist; "" = memory only (harness)
 	boardForced bool                 // the deck left the board only because the terminal narrowed
+	paired      bool                 // the panes have been paired with a fleet: liveness is settled
+	pairOwed    bool                 // the launch's first poll found no fleet to pair against; the first that does re-lists
+	settled     bool                 // the fleet-of-one rule was decided, or the person took the keys
 	boardShapes map[string]string    // each column's trail shape its labels were read for
 	refreshing  bool                 // a refresh is in flight; the tick does not launch another
 
@@ -446,9 +460,13 @@ func (m *Model) SetSize(width, height int) {
 	switch {
 	case m.level == levelBoard && !m.boardFits():
 		m.level, m.boardForced = levelTrail, true
-	case m.boardForced && m.level == levelTrail && m.boardFits():
+	case m.boardForced && m.level == levelTrail && m.boardFits() && !m.archiveView:
 		// The width came back — a tmux zoom, a window snap — and so does
-		// the view it took away.
+		// the view it took away. In the archive the list stays, since the
+		// archive has no board (#340), and the debt stands with it: the
+		// live board is where `A` or `⇧tab` lands when the person leaves,
+		// and where the width goes and comes back again before that, the
+		// board it took away is still owed (#343).
 		m.level, m.boardForced = levelBoard, false
 	}
 	// A window that changed size is still looking at the row it was
@@ -534,6 +552,7 @@ func (m *Model) refresh() tea.Cmd {
 	}
 	m.refreshing = true
 	selected, root := m.selectedKey, mgr.Root()
+	paired := m.paired
 	// The todo file on disk is named after the session id, not the key: the id
 	// is what claude itself writes under. Two sessions sharing an id share that
 	// plan, which is the truth on disk — not something compass may invent.
@@ -553,7 +572,7 @@ func (m *Model) refresh() tea.Cmd {
 	return func() tea.Msg {
 		now := time.Now()
 		sessions, err := mgr.Refresh(now)
-		msg := fleetMsg{sessions: sessions, err: err, at: now}
+		msg := fleetMsg{sessions: sessions, err: err, at: now, paired: paired}
 		// The agents' own files, for every open lane of every trail polled:
 		// paired by the call's id, never by its name.
 		pollAgents := func(key string, tr journey.Trail) {
@@ -623,12 +642,14 @@ func (m *Model) relistPanes() tea.Cmd {
 	return func() tea.Msg {
 		panes, err := tmuxop.ListPanes(runner)
 		if err != nil || len(panes) == 0 {
+			// No tmux, or none of it: the pairing is done all the same,
+			// and the fleet it was done against is as live as it gets.
 			markMapped(mgr, nil)
-			return panesMsg{panes: map[string]tmuxop.Pane{}}
+			return panesMsg{panes: map[string]tmuxop.Pane{}, against: len(infos)}
 		}
 		mapped := tmuxop.MapSessions(infos, panes, proc)
 		markMapped(mgr, mapped)
-		return panesMsg{panes: mapped, list: panes}
+		return panesMsg{panes: mapped, list: panes, against: len(infos)}
 	}
 }
 
@@ -713,15 +734,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agents != nil || msg.hasTrail {
 			m.agents = msg.agents // a poll that read the lanes' files replaces what was known
 		}
+		// The poll is where a fleet arrives, so it is where the digits are
+		// given (#342): SetSessions gives them to a harness's fleet, and
+		// nothing else ever called it, so the deck that shipped numbered no
+		// live session and `1` opened the band's first archived row.
+		m.assignDigits()
 		m.clampSelection()
+		if first && len(m.sessions) == 0 {
+			// Nothing on disk at all: the launch's choice of level is made,
+			// and a session that appears later never moves the person. The
+			// pairing is still owed, by the first poll that finds a fleet.
+			m.settled, m.pairOwed = true, true
+		}
 		if first && len(m.sessions) > 0 {
 			m.refreshBoard(msg.trails)
-			if m.level == levelBoard && m.boardFits() && len(m.viewOrder()) == 1 {
-				// One session: a board of one column filled a corner of a
-				// wide screen and read as half-drawn. Open the session.
-				m.zoomIn()
-			}
+			m.openFleetOfOne(msg.paired)
 			return m, tea.Batch(m.titleCmd(), m.relistPanes())
+		}
+		cmds := []tea.Cmd{m.titleCmd()}
+		if m.pairOwed && len(m.sessions) > 0 {
+			// The launch's first poll found nothing to pair the panes
+			// against: the first fleet re-lists now rather than at the
+			// pane tick five seconds on. Once, as the first poll does —
+			// every other poll leaves the cadence to the tick.
+			m.pairOwed = false
+			cmds = append(cmds, m.relistPanes())
 		}
 		if msg.trailFor != "" && msg.trailFor == m.selectedKey {
 			items := msg.todos
@@ -741,8 +778,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// After the selected session's own narration request, so the column
 		// being read is never starved of the one batch in flight.
 		m.refreshBoard(msg.trails)
+		m.openFleetOfOne(msg.paired)
 		m.fireHooks()
-		return m, m.titleCmd()
+		return m, tea.Batch(cmds...)
 
 	case narratedMsg:
 		m.refreshLabels()
@@ -758,6 +796,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case panesMsg:
 		m.panes, m.paneList = msg.panes, msg.list
+		if msg.against > 0 {
+			m.paired = true // from here every poll's liveness is the whole rule
+		}
 		m.clampSelection()
 		return m, nil
 
@@ -806,6 +847,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	// A key is the person at the deck: from here compass chooses no level
+	// for them (openFleetOfOne).
+	m.settled = true
 	// The page keys are the half-page keys: a person reaching for PgDn on
 	// a long trail should get the move the deck offers, not a dead key.
 	switch key {
@@ -853,8 +897,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.zoomIn()
 		return m, nil
 	case "shift+tab":
-		m.zoomOut()
-		return m, nil
+		return m, m.zoomOut()
 	case "esc":
 		// At Lv3 a standing search clears first; the second Esc zooms out.
 		if m.level >= levelReader && m.query != "" {
@@ -867,8 +910,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearQuery()
 			return m, nil
 		}
-		m.zoomOut()
-		return m, nil
+		return m, m.zoomOut()
 	case "/":
 		if m.level < levelReader {
 			// The fleet's search: the board, the list and the archive
@@ -904,27 +946,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.level = levelTrail
 				m.cursor, m.anchor = -1, -1
 			}
-		case !m.archiveView && (!m.boardFits() || len(m.viewOrder()) == 1) && m.restLevel >= levelWaypoints:
-			// Back where `A` was pressed: the legs with their cursor, or
-			// the reader — a fleet of one has no board to land on (#47),
-			// and a narrow deck's list beside one trail had lost its
-			// cursor on the way back (#53).
-			m.level = levelWaypoints
-			m.cursor, m.anchor = -1, -1
-			m.cursorMove(0)
-			if m.restLevel >= levelReader {
-				m.enterReader()
-			}
-		case !m.archiveView && m.boardFits() && len(m.viewOrder()) == 1:
-			m.level = levelWaypoints
-			m.cursor, m.anchor = -1, -1
-			m.cursorMove(0)
-		case !m.archiveView && m.boardFits():
-			// And leaving it goes back to the board, which is where `A`
-			// was pressed: the fleet list beside one trail is not a
-			// level a terminal with a board has.
-			m.level = levelBoard
-			m.cursor, m.anchor = -1, -1
+		default:
+			m.leaveArchive(m.restLevel)
 		}
 		return m, m.refresh()
 	case "m":
@@ -1770,10 +1793,56 @@ func (m *Model) zoomIn() {
 	}
 }
 
+// leaveArchive lands the deck back on the live fleet, the archive just
+// closed (toggleArchive), at the level rest names: where `A` was pressed,
+// or the board when the way out was `⇧tab` (#340). The session view and
+// the reader exist at every width, so a person who left them comes back
+// to them, the legs with their cursor and the reader anchored on it
+// (#53, #343); the board is for `⇧tab` and for an `A` pressed on it. A
+// fleet of one has no board to land on at any width (#47), search or no
+// search (#343): the count is the live one, not the searched one.
+//
+// A standing search comes along only where the live selection answers
+// it: the search was the archive's, and a board it would hide the
+// session that comes back from answers `no session matches` over its
+// keys and nothing else — the same board `zoomOut` drops the search on
+// its way out of a session (#343). Where it stays, the row the search
+// remembers to put the selection back on (`querySel`) is an archive row,
+// which the live view cannot land on, so it is forgotten.
+func (m *Model) leaveArchive(rest int) {
+	if m.fleetQuery != "" {
+		if s, ok := m.selected(); !ok || !m.matchesQuery(s) {
+			m.fleetQuery, m.querySel = "", ""
+			m.note = "search cleared"
+		} else if q, ok := m.session(m.querySel); m.querySel != "" && (!ok || !m.onBoard(q)) {
+			m.querySel = ""
+		}
+	}
+	switch {
+	case rest >= levelWaypoints:
+		m.level = levelWaypoints
+		m.cursor, m.anchor = -1, -1
+		m.cursorMove(0)
+		if rest >= levelReader {
+			m.enterReader()
+		}
+	case m.boardFits() && m.liveCount() == 1:
+		m.level = levelWaypoints
+		m.cursor, m.anchor = -1, -1
+		m.cursorMove(0)
+	case m.boardFits():
+		m.level = levelBoard
+		m.cursor, m.anchor = -1, -1
+	}
+}
+
 // zoomOut is Shift+Tab: one level back up. From the single trail it is the
 // board, on a terminal wide enough for one; on a narrow terminal Lv1 is the
-// top, and zooming out of the trail would be zooming out of compass.
-func (m *Model) zoomOut() {
+// top, and zooming out of the trail would be zooming out of compass. From
+// the archive's list it is the live board: the archive has no board of its
+// own. The command it returns is the refresh a change of selection needs,
+// nil where none changed.
+func (m *Model) zoomOut() tea.Cmd {
 	switch {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
@@ -1786,7 +1855,7 @@ func (m *Model) zoomOut() {
 			if s, ok := m.selected(); ok && m.fleetQuery != "" && !m.matchesQuery(s) {
 				m.clearQuery() // no board to go out to: the query the session fails goes here instead
 			}
-			return
+			return nil
 		}
 		m.level = levelTrail
 		m.cursor, m.anchor = -1, -1
@@ -1800,6 +1869,18 @@ func (m *Model) zoomOut() {
 				m.clearQuery()
 			}
 		}
+	case m.level == levelTrail && m.archiveView && m.boardFits():
+		// The archive is a list under the live fleet, not a fleet with a
+		// board of its own (#340): its board drew the archived sessions
+		// dim in columns where the person who pressed `⇧tab board` was
+		// looking for the live ones. One level up from the list is the
+		// live board, the level `A` opened the archive from — and where
+		// the live fleet is one session, that session, as `A` lands it.
+		// The live selection comes back with the view (toggleArchive), so
+		// the trail beside it is polled now, as `A` polls it.
+		m.toggleArchive()
+		m.leaveArchive(levelBoard)
+		return m.refresh()
 	case m.level > levelBoard && m.boardFits() && !m.boardShown():
 		// The board fits but the view has no session to put in a column,
 		// so one level down the deck draws this very list again — the
@@ -1813,8 +1894,8 @@ func (m *Model) zoomOut() {
 	case m.level > levelBoard && m.boardFits():
 		m.level = levelBoard
 		m.commitLook(m.selectedKey)
-	case m.level == levelTrail && m.liveCount() == 1 && !m.archiveView:
-		m.note = "nothing to zoom out to" // no board at any width (#31)
+	case m.level == levelTrail && m.liveCount() == 1:
+		m.note = "nothing to zoom out to" // no board at any width (#31), the archive's list included (#343)
 	case m.level == levelTrail:
 		m.note = fmt.Sprintf("no board under %d columns", deckWideCols)
 	case m.level == levelBoard && !m.boardShown():
@@ -1822,6 +1903,7 @@ func (m *Model) zoomOut() {
 	case m.level == levelBoard:
 		m.note = "the board is the top"
 	}
+	return nil
 }
 
 // escClearsQuery answers whether Esc, pressed on this very frame, drops the
@@ -1829,8 +1911,9 @@ func (m *Model) zoomOut() {
 // board or a list the key clears first, which is the branch `esc` takes
 // above; deeper, Esc is one level out, and the query goes only where that
 // step lands on the board and the selected session fails the search
-// (zoomOut). On a narrow deck, in the archive or from the reader it does
-// not, and no row may say it does.
+// (zoomOut, leaveArchive). From a session view on a narrow deck, from the
+// archive below its list, or from the reader it does not, and no row may
+// say it does.
 func (m *Model) escClearsQuery() bool {
 	if m.fleetQuery == "" {
 		return false
@@ -1877,6 +1960,29 @@ func (m *Model) liveCount() int {
 		}
 	}
 	return n
+}
+
+// openFleetOfOne is the launch's one choice of level: a fleet of one opens
+// on its session, since a board of one column filled a corner of a wide
+// screen and read as half-drawn. It is made once, on the first poll whose
+// liveness is settled — paired says the tmux panes had been paired with
+// the fleet when the poll ran — and never after a key has been pressed.
+//
+// It was made at first sight before, and first sight is one session short:
+// Init lists panes against a fleet that has not arrived, so the first poll
+// knows no panes and only the recency door admits anyone. A deck opened
+// beside three panes, two of them quiet for ten minutes, saw a fleet of
+// one, opened its session, and the next poll's fleet of three stood behind
+// a session view until `⇧tab` found the board that was meant to be the
+// opening frame.
+func (m *Model) openFleetOfOne(paired bool) {
+	if m.settled || !paired {
+		return
+	}
+	m.settled = true
+	if m.level == levelBoard && m.boardFits() && len(m.viewOrder()) == 1 {
+		m.zoomIn()
+	}
 }
 
 // commitLook records a look that is over: the session was read and closed,
@@ -1977,14 +2083,6 @@ func (m *Model) toggleHidden() {
 	if m.hidden[key] {
 		delete(m.hidden, key)
 		m.saveHidden()
-		if m.archiveView && m.level == levelBoard && !m.boardShown() {
-			// That row was the last one the archive's board had: the
-			// board is gone from under the keys and the deck draws the
-			// list in its place, so the level is the list's too. Left at
-			// the board's, `tab deeper` landed on the same rows one level
-			// down and `⇧tab` called that list a board.
-			m.level = levelTrail
-		}
 		// The note wears the number of the view it names, as the hide
 		// note does (#256): the row leaves the archive the moment the
 		// key acts, so the frame that follows draws it nowhere, and on
@@ -2738,7 +2836,11 @@ func (m *Model) selectOldestNeedsYou() bool {
 		if s.Live && s.Snap.State == state.NeedsYou && !s.Snap.APIError {
 			// A session dead on the API is not one a keypress helps.
 			if m.archiveView {
+				// Out of the archive as `A` goes: at the level it was
+				// pressed on. Left at the list's level, a wide deck drew
+				// the live list where its board fits (#343).
 				m.toggleArchive()
+				m.leaveArchive(m.restLevel)
 			}
 			m.point(s.Info.Key())
 			return true
@@ -4294,33 +4396,18 @@ func (m *Model) keymapOnce() string {
 	case m.replying:
 		keys = fmt.Sprintf("reply: 1–%d · t types a line · esc closes", len(m.replyChoices()))
 	case m.level == levelBoard && m.boardShown():
+		// The live board's: the archive is never at the board's level
+		// (#340).
 		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit"
-		if m.archiveView {
-			// The archive's board goes one level to the archive's list,
-			// not to the session view: `zoomIn` stops at `levelTrail`
-			// wherever the archive is open (#18's three levels are the
-			// live board's), so the live board's `tab session` — true
-			// there, where the key lands on the panel chipped
-			// `[session]` — named a level this key does not reach, and
-			// landed on the one chipped `[fleet]`, whose own footer then
-			// names `tab deeper` for the step that is left. The word is
-			// the archive's own at every other level (#40, #246).
-			// `a` acts here on the very row the caret is on — the
-			// historian for the selected session, `case "a"` at every
-			// level — and the archive is where it is the reason to be
-			// (#264, and the shed's own comment below). The archive's
-			// list one `tab deeper` away names it, so does the live
-			// board this branch was copied from before `a ask` existed,
-			// and the board's own footer stood 82 cells wide in 120 with
-			// the key nowhere on it: a key that acts and is never named
-			// is the one thing a footer is for (#24, #175, #187).
-			keys = "h/l columns · " + m.enterKeymap() + " · tab deeper · r reply · a ask · / search · x unhide · A fleet · ? help · q quit"
-		}
+	case m.level == levelTrail && m.archiveView && m.boardFits():
+		// The archive's list wherever the board fits — the empty archive
+		// included, whose `boardShown` is false since it asks whether the
+		// archive has a row for a column: `⇧tab` leaves for the live board
+		// on the same test (`zoomOut`), so the row names it on the same
+		// test (#343). The chapter keys act here too (#193).
+		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit"
 	case m.level == levelTrail && m.boardShown():
 		keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · [ ] chapters · r reply · a ask · / search · ⇧tab board · g grab · ? help · q quit"
-		if m.archiveView {
-			keys = "j/k move · ctrl+d/u half page · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · ⇧tab board · A fleet · ? help · q quit" // the chapter keys act here too (#193)
-		}
 	case m.level >= levelReader && m.sessionView():
 		// `m` is the deck's key, not a level's, and here it always acts:
 		// pressed in the reader it takes the deck to the session view

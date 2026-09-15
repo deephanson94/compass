@@ -23,7 +23,7 @@ func TestTheOnlySessionClearsAFailingQuery(t *testing.T) {
 	m := New(nil)
 	m.SetSize(152, 40)
 	s := sess("s-hello", "hello", "/home/user/hello", "main", "add a --version flag", state.Working, fixtureBase, journey.Scout, "", "tool call in flight", "thinking…")
-	m.Update(fleetMsg{sessions: []fleet.Session{s}, at: fixtureBase.Add(40 * time.Second), trails: map[string]journey.Trail{}})
+	m.Update(fleetMsg{sessions: []fleet.Session{s}, at: fixtureBase.Add(40 * time.Second), trails: map[string]journey.Trail{}, paired: true})
 	press(m, "/")
 	for _, r := range "zzz" {
 		press(m, string(r))

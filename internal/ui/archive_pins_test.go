@@ -597,57 +597,6 @@ func TestTheArchiveReaderTitleClockGoesWithItsClause(t *testing.T) {
 	}
 }
 
-// ---- round 73, fleet-hygiene, the one thing ----
-// A hidden live column names its pane once. On the archive board the
-// hidden session's row draws `⌁ work:2.0 · main` (#53's "where it lives")
-// two rows over the column's tag row, which draws `⌁ work:2.0` again —
-// the repeat #64, #105, #110, #120, #138 and #179 each folded. The tag
-// row is the invariant ("the third row is the tag's row, always"); the
-// row above it keeps the branch, which the tag cannot say.
-func TestTheHiddenColumnNamesItsPaneOnce(t *testing.T) {
-	tag := regexp.MustCompile(`⌁ [^ │]+`)
-	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
-		m := sceneModel(sceneManyIdle(), size[0], size[1])
-		for _, s := range m.sessions {
-			if s.Live && sessionName(s.Info) == "webapp" {
-				m.point(s.Info.Key())
-			}
-		}
-		pressKey(m, "x")   // webapp leaves the board
-		pressKey(m, "A")   // the archive, as a list
-		pressKey(m, "esc") // one level out: the archive as a board
-		rows := strings.Split(ansi.Strip(m.View()), "\n")
-		found := false
-		for i := 0; i+2 < len(rows); i++ {
-			cols := strings.Split(rows[i], "│")
-			second := strings.Split(rows[i+1], "│")
-			third := strings.Split(rows[i+2], "│")
-			for k := range cols {
-				if k >= len(second) || k >= len(third) {
-					break
-				}
-				if !strings.Contains(cols[k], "○ webapp") {
-					continue
-				}
-				found = true
-				a := tag.FindAllString(second[k], -1)
-				b := tag.FindAllString(third[k], -1)
-				for _, x := range a {
-					for _, y := range b {
-						if x == y {
-							t.Errorf("%dx%d: the hidden column names %s twice:\n %s\n %s\n %s",
-								size[0], size[1], x, cols[k], second[k], third[k])
-						}
-					}
-				}
-			}
-		}
-		if !found {
-			t.Fatalf("%dx%d: the hidden column is not on the archive board:\n%s", size[0], size[1], strings.Join(rows, "\n"))
-		}
-	}
-}
-
 // ---- round 73, fleet-hygiene, second finding ----
 // A hide refused keeps the way deeper. `billing stays · dead on the API`
 // and `etl stays · it is looping` are 31 and 24 cells against the twelve
@@ -740,7 +689,7 @@ func TestTheArchiveReaderTitleSaysWhatTheHeaderDoesNot(t *testing.T) {
 func TestTheShipRowIsNotAClippedCopyOfTheAsk(t *testing.T) {
 	forceASCII(t)
 	ship := regexp.MustCompile(`ship\s+(\S[^│]*?)…`)
-	routes := [][]string{{"A"}, {"2", "tab"}} // the archive board, and the trail of the session that shipped
+	routes := [][]string{{"A"}, {"2", "tab"}} // the archive's list, and the trail of the session that shipped
 	for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}} {
 		for _, route := range routes {
 			m := sceneModel(sceneSecondDay(), size[0], size[1])
@@ -790,7 +739,7 @@ func TestTheShipRowIsNotAClippedCopyOfTheAsk(t *testing.T) {
 }
 
 // ---- round 75, second-day, second finding ----
-// The archive board's footer names the chapter keys it answers to. `[`
+// The archive list's footer names the chapter keys it answers to. `[`
 // and `]` act on the archive's Lv1 list as on the live one and refuse
 // with `no earlier prompt` there, but the archive keymap was written out
 // without them: 133 idle cells at 220 and no `[ ] chapters`, while one

@@ -1046,12 +1046,12 @@ type r105fhRoute struct {
 	what string
 }
 
-// r105fhWalks are the ways to a paneless row: the archive at its list, its
-// board and its session view — every archived session is paneless — and,
-// on the fleets that have one, the live session with no pane.
+// r105fhWalks are the ways to a paneless row: the archive at its list and
+// its session view — every archived session is paneless (the archive's
+// board went with #340) — and, on the fleets that have one, the live
+// session with no pane.
 var r105fhWalks = []r105fhRoute{
 	{[]string{"A"}, "archive list"},
-	{[]string{"A", "shift+tab"}, "archive board"},
 	{[]string{"A", "tab"}, "archive session view"},
 	{[]string{"3"}, "live list, the third session"},
 }
@@ -1144,14 +1144,13 @@ type r106fhWalk struct {
 	what string
 }
 
-// r106fhWalks are the ways to a paneless row: the archive at its list, its
-// board and its own session view, and the live list's third session — the
+// r106fhWalks are the ways to a paneless row: the archive at its list and
+// its own session view, and the live list's third session — the
 // fleet-hygiene fleet's session with no pane. They are #299's four, one
 // level out from the session view, whose own row keeps every key it names
 // and says the fact twice for them (recorded, not folded).
 var r106fhWalks = []r106fhWalk{
 	{[]string{"A"}, "archive list"},
-	{[]string{"A", "shift+tab"}, "archive board"},
 	{[]string{"A", "tab"}, "archive session view"},
 	{[]string{"3"}, "live list, the third session"},
 }
