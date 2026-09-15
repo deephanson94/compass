@@ -284,30 +284,6 @@ func (m *Model) boardLines(w, h int) []string {
 		}
 		return fit(miss, h)
 	}
-	// The head yields the ask only where the row it leaves still tells
-	// this card from every other card the frame draws. #265's own reason —
-	// "on the card the ask is three rows down and still tells them apart" —
-	// is the eye's, not the row's: the head is the row the caret marks and
-	// the digit opens, and the band caps at nine digits (#260), so on an
-	// archive of one project the yield drew five cards headed `○ api  2d`
-	// and nothing else, byte for byte the same row five times over. Where
-	// the name and the age it falls back to are another drawn card's too,
-	// the head keeps what was asked (#86: four project names cannot tell
-	// forty sessions apart).
-	keepsAsk := map[string]bool{}
-	if m.archiveView {
-		seen := map[string]int{}
-		for _, k := range keys {
-			if r, ok := rowOf[k]; ok {
-				seen[archiveHeadKey(m, r)]++
-			}
-		}
-		for _, k := range keys {
-			if r, ok := rowOf[k]; ok && seen[archiveHeadKey(m, r)] > 1 {
-				keepsAsk[k] = true
-			}
-		}
-	}
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
@@ -356,28 +332,6 @@ func (m *Model) boardLines(w, h int) []string {
 					if saysSame(second, oneSpace(strings.Replace(ansi.Strip(c.rows[k]), "\u25b8", " ", 1))) || saysSame(second, wrappedLabel(c.rows, k, bh)) {
 						c.rows[1] = ""
 						blanked = true
-						break
-					}
-				}
-				// The archive's card draws what was asked on its own ◉
-				// row, and its head drew the same sentence three rows up
-				// (#64, #107 — the card yields what a row below it says).
-				// The head yields it here, where the frame is known to
-				// draw that row, and keeps the name the archive gives the
-				// session instead.
-				if m.archiveView && !keepsAsk[colKeys[ci]] {
-					ask := archiveHeadline(m.sessions[m.boardRows()[colKeys[ci]].sess])
-					for k := 3; k < len(c.rows) && k < bh; k++ {
-						if m.panelHides(x, c.width, y+k) {
-							continue
-						}
-						if !sameAsk(ask, saidAsk(c.rows[k])) {
-							continue
-						}
-						m.askBelow = true
-						head := m.columnHeader(colKeys[ci], m.boardRows()[colKeys[ci]], c.width)
-						m.askBelow = false
-						c.rows[0] = head[0]
 						break
 					}
 				}
@@ -532,9 +486,6 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 // overlap — the clauses that keep its row even when every session has a
 // column.
 func (m *Model) stripHasClauses() bool {
-	if m.archiveView {
-		return true
-	}
 	return m.archivedCount() > 0 || m.hiddenCount() > 0 || len(m.overlaps()) > 0
 }
 
@@ -828,15 +779,7 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 		if shown[key] {
 			continue
 		}
-		glyph := m.rowGlyph(s)
-		if m.archiveView && !s.Live {
-			glyph = fleet.Glyph(state.Idle)
-		}
-		who := sessionName(s.Info)
-		if m.archiveView && !s.Live {
-			who = archiveHeadline(s) // the archive's rows headline by what was asked; four names cannot tell forty apart (#86)
-		}
-		name := glyph + " " + who + " " + m.age(s.Info.LastEventAt)
+		name := m.rowGlyph(s) + " " + sessionName(s.Info) + " " + m.age(s.Info.LastEventAt)
 		if r, ok := rowOf[key]; ok && r.num > 0 {
 			name = fmt.Sprintf("%d %s", r.num, name)
 		}
@@ -846,18 +789,12 @@ func (m *Model) boardStrip(keys []string, rowOf map[string]fleetRow, w int) stri
 	// archive — are kept whole; the names of what owes nothing take the
 	// width that is left, and are the part that is cut.
 	var fixed []string
-	if !m.archiveView {
-		fixed = append(fixed, m.overlaps()...)
-		if n := m.hiddenCount(); n > 0 {
-			fixed = append(fixed, m.hiddenClause(n))
-		}
-		if n := m.archivedCount(); n > 0 {
-			fixed = append(fixed, fmt.Sprintf("%s archived%s", m.archiveDoorCount(n), m.archiveDoorKey()))
-		}
-	} else {
-		if c := m.liveDoorClause(); c != "" {
-			fixed = append(fixed, c)
-		}
+	fixed = append(fixed, m.overlaps()...)
+	if n := m.hiddenCount(); n > 0 {
+		fixed = append(fixed, m.hiddenClause(n))
+	}
+	if n := m.archivedCount(); n > 0 {
+		fixed = append(fixed, fmt.Sprintf("%s archived%s", m.archiveDoorCount(n), m.archiveDoorKey()))
 	}
 	tail := strings.Join(fixed, "   ")
 	if len(rest) > 0 {
@@ -2318,13 +2255,4 @@ func sameAsk(a, b string) bool {
 		return false
 	}
 	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
-}
-
-// archiveHeadKey is the row a yielded archive card head draws, less its
-// digit and its glyph: the name the archive gives the session (#79, #11)
-// and the right-aligned age beside it (§4). Two cards that agree on both
-// draw the same head row, and one of them has to keep the ask.
-func archiveHeadKey(m *Model, r fleetRow) string {
-	s := m.sessions[r.sess]
-	return sessionName(s.Info) + "\x00" + m.age(s.Info.LastEventAt)
 }

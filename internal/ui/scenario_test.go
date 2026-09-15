@@ -935,7 +935,7 @@ func sceneModel(sc scene, w, h int) *Model {
 	// and events.
 	poll := func(first string) {
 		m.Update(fleetMsg{sessions: sc.sessions, at: sceneNow, trailFor: first, hasTrail: first != "", trail: sc.trails[first],
-			events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails, agents: sc.agents})
+			events: eventsBehind(sc.trails[first], sc.activity(first)), trails: sc.trails, agents: sc.agents, paired: true})
 	}
 	poll("")
 	first := ""

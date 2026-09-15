@@ -203,7 +203,7 @@ run and nothing else.
 | `h`/`l` | across the board's columns, or to the neighbouring session |
 | `m` | the live tmux pane beside the trail instead of the conversation; sticks until pressed again |
 | `g` | grab the session that has waited on you longest, and go to it |
-| `A` | browse the archive: every past session, grouped by project |
+| `A` | browse the archive: every past session, grouped by project. `A` again comes back where it was pressed; `Shift+Tab` or `Esc` on the archive's list is the live board |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |

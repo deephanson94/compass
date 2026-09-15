@@ -399,20 +399,6 @@ func TestTheBandsHeaderKeepsTheHiddenCount(t *testing.T) {
 	}
 }
 
-// The archive's strip headlines its sessions by what was asked (#86).
-func TestTheArchiveStripHeadlinesByPrompt(t *testing.T) {
-	forceASCII(t)
-	m := sceneModel(sceneFleetHygiene(), 120, 34)
-	press(m, "A")
-	press(m, "esc") // the archive's board, where the strip is drawn (#88)
-	if m.level != levelBoard || !m.archiveView {
-		t.Fatalf("expected the archive's board, level %d archive %v", m.level, m.archiveView)
-	}
-	if view := ansi.Strip(m.View()); strings.Contains(view, "○ api 7d · ○ api") || strings.Contains(view, "○ harness 7d · ○ harness") {
-		t.Errorf("the strip names forty sessions with four words:\n%s", view)
-	}
-}
-
 // The wide help never ends a definition inside a parenthesis it opened (#87).
 func TestTheHelpNeverClipsInsideAnOpenParenthesis(t *testing.T) {
 	for _, w := range []int{152, 220} {
@@ -478,18 +464,24 @@ func TestATracesClockGoesWholeOrNotAtAll(t *testing.T) {
 	}
 }
 
-// The board always draws the selected session (#16, #90): esc out of the
-// archive onto a session the pack would trim lands it in the last column.
+// The board always draws the selected session (#16, #90). The route was
+// esc out of the archive onto its board; the archive has no board now
+// (#340), so esc lands on the live board with the live selection back,
+// and that session's column wears the caret.
 func TestTheBoardAlwaysDrawsTheSelectedSession(t *testing.T) {
 	forceASCII(t)
-	m := sceneModel(sceneSecondDay(), 120, 34)
+	m := sceneModel(sceneFleetHygiene(), 120, 34)
+	live := m.selectedKey
 	press(m, "A")
 	for i := 0; i < 6; i++ {
 		press(m, "j")
 	}
 	press(m, "esc")
-	if m.level != levelBoard {
-		t.Fatalf("esc should land on the archive's board, level %d", m.level)
+	if m.level != levelBoard || m.archiveView {
+		t.Fatalf("esc should land on the live board, level %d archive %v", m.level, m.archiveView)
+	}
+	if m.selectedKey != live {
+		t.Errorf("the live selection did not come back: %q, not %q", m.selectedKey, live)
 	}
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "▸") {
 		t.Errorf("the board marks no row for the selected session:\n%s", view)
