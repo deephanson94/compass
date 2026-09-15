@@ -2033,18 +2033,32 @@ func TestTheLanesRowSaysHowManyCameBackWhereNothingElseDoes(t *testing.T) {
 
 func TestVeryLongsWalkEndsOnTheHelpTheSummaryOwesARowTo(t *testing.T) {
 	extra := sceneVeryLong().extra
-	if len(extra) < 2 || extra[len(extra)-1] != "?" || extra[len(extra)-2] != "esc" {
+	help := -1
+	for i := 1; i < len(extra); i++ {
+		if extra[i] == "?" && extra[i-1] == "esc" {
+			help = i
+		}
+	}
+	if help < 0 {
 		t.Fatalf("very-long's walk should close the summary and open the help, so the `s` gloss is on a shipped frame: %v", extra)
 	}
 	sc := sceneVeryLong()
 	m := sceneModel(sc, 80, 24)
-	for _, k := range extra {
+	for i, k := range extra {
 		pressKey(m, k)
 		poll(m, sc)
+		if i == help {
+			v := ansi.Strip(m.View())
+			if !m.showHelp || !strings.Contains(v, "summary: the legs by class") {
+				t.Errorf("the walk's help frame does not draw the `s` row:\n%s", v)
+			}
+		}
 	}
+	// And the walk ends on the idle session's summary scrolled off the
+	// row `G` goes to, so #361's mark is on a shipped frame (#363).
 	v := ansi.Strip(m.View())
-	if !m.showHelp || !strings.Contains(v, "summary: the legs by class") {
-		t.Errorf("the walk's last frame does not draw the help's `s` row:\n%s", v)
+	if s, ok := m.selected(); !ok || sessionName(s.Info) != "etl" || !strings.Contains(v, "↓ G  [summary]") {
+		t.Errorf("the walk's last frame should be etl's summary wearing `↓ G`:\n%s", v)
 	}
 }
 
@@ -2149,6 +2163,13 @@ func TestTheHelpOwesTheHeldSummaryARow(t *testing.T) {
 		v := ansi.Strip(m.View())
 		if !strings.Contains(v, gloss) {
 			t.Errorf("%dx%d: the frame draws `[summary waits]` and the help has no row for it (#358):\n%s", size[0], size[1], v)
+		}
+		// The row fits the width that draws it, whole, at 80 as well:
+		// the walkthrough's guard never opens the help over a hold.
+		for _, line := range strings.Split(m.View(), "\n") {
+			if x := lipgloss.Width(line); x > size[0] {
+				t.Errorf("%dx%d: the held help runs past the terminal (%d): %q", size[0], size[1], x, ansi.Strip(line))
+			}
 		}
 		press(m, "?")
 		press(m, "s") // ends the hold
