@@ -625,7 +625,7 @@ func sceneSubagents() scene {
 		legSpec{journey.Test, "go test", 3 * time.Minute, nil, "40✓", nil},
 	)
 	panes, order := paneMap([]string{"porter", "harness", "redteam", "cli"}, []string{"tinker:0.0", "harness:0.0", "harness:1.0", "tools:0.0"})
-	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "j", "tab", "esc", "s", "G", "space", "j", "tab", "s", "3", "G", "space", "esc"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "j", "tab", "esc", "s", "j", "j", "j", "space", "j", "tab", "s", "3", "j", "j", "j", "space", "esc"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
 }
 
 // Two very long sessions — a day of work each, every class, dozens of prompts
@@ -833,7 +833,8 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Build, "the generator", 30 * time.Minute, []string{"gen.py"}, "", nil})
 	ss = append(ss, sess("infra", "infra", "/home/user/infra", "tf/vpc", "tighten the vpc security groups", state.NeedsYou, n.Add(-7*time.Minute), journey.Design, "", "question", "Open port 22 to the office CIDR only, or keep the bastion? [office CIDR / keep bastion]"))
 	tr[sessionKey("infra")] = trailOf(n.Add(-30*time.Minute), "tighten the vpc security groups without breaking the bastion", true,
-		legSpec{journey.Scout, "main.tf and the bastion rules", 14 * time.Minute, []string{"main.tf"}, "", nil},
+		legSpec{journey.Scout, "the vpc", 4 * time.Minute, []string{"vpc.tf"}, "", nil}, // a second scout, so the summary counts here and its question is on a frame (#347)
+		legSpec{journey.Scout, "main.tf and the bastion rules", 10 * time.Minute, []string{"main.tf"}, "", nil},
 		legSpec{journey.Design, "Open port 22 to the office CIDR only, or keep the bastion?", 7 * time.Minute, nil, "", nil})
 	ss = append(ss, sess("etl", "etl", "/home/user/etl", "feat/backfill", "backfill last week's shards", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 6m mid-turn", "Bash: python backfill.py --all"))
 	ss[len(ss)-1].Info.LastEventAt = n.Add(-6 * time.Minute)
@@ -857,7 +858,7 @@ func sceneAlarmStorm() scene {
 		legSpec{journey.Scout, "the command table", 5 * time.Minute, []string{"main.go"}, "", nil},
 		legSpec{journey.Build, "the flag", 15 * time.Minute, []string{"main.go"}, "", nil})
 	panes, order := paneMap([]string{"billing", "mobile", "docs-site", "infra", "etl", "api", "cli"}, []string{"work:0.0", "work:1.0", "work:2.0", "ops:0.0", "work:3.0", "work:4.0", "tools:0.0"})
-	return scene{name: "alarm-storm", extra: []string{"4", "r", "1", "3", "x", "3", "tab", "esc", "g", "7", "tab"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
+	return scene{name: "alarm-storm", extra: []string{"4", "r", "1", "3", "x", "3", "tab", "esc", "g", "7", "tab", "esc", "1", "tab", "s", "esc"}, story: "Seven sessions and everything went wrong at once: three died on the daily quota, one is asking a question, one has hung, one is going round the same failing test for the fourth time, one is fine. Which first?", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Fleet hygiene: two live sessions with one name in one tmux session, a

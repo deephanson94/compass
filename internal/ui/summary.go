@@ -34,13 +34,13 @@ import (
 // a lane under it, or a line of the question HEAD is asking, which the
 // cursor steps over as it does on the trail.
 type summaryRow struct {
-	kind  string // "class", "leg", "lanes", "lane" or "ask"
+	kind  string // "class", "leg", "lanes", "lane", "ask" or "report"
 	class journey.Class
 	key   string // what open is keyed by: the class's name, or summaryLanes
 	leg   int    // a leg row: index into Trail.Legs; else -1
 	lane  int    // a lane row: index into Trail.Branches; else -1
 	solo  bool   // a leg row standing for its class: the class has one leg
-	text  string // an ask row: its line of the question
+	text  string // an ask row: its line of the question; a report row: the lane's finding
 }
 
 // summaryOrder is the order the classes are counted in: the order work
@@ -94,6 +94,10 @@ func summaryRows(tr journey.Trail, open map[string]bool, ask []string) []summary
 		if open[summaryLanes] {
 			for i := range tr.Branches {
 				out = append(out, summaryRow{kind: "lane", key: summaryLanes, leg: -1, lane: i})
+				if report := strings.TrimSpace(tr.Branches[i].Report); tr.Branches[i].Done && report != "" {
+					// Back with what: the finding, as the trail hangs it (#347).
+					out = append(out, summaryRow{kind: "report", key: summaryLanes, leg: -1, lane: i, text: report})
+				}
 			}
 		}
 	}
@@ -108,7 +112,7 @@ func (r summaryRow) group() bool {
 // stands reports whether the cursor can stand on the row: a question's
 // lines are HEAD's, not rows of their own (#346).
 func (r summaryRow) stands() bool {
-	return r.kind != "ask"
+	return r.kind != "ask" && r.kind != "report"
 }
 
 // summaryShown reports whether the trail column draws the summary: it is
@@ -140,13 +144,19 @@ func summaryCountsNothing(tr journey.Trail) bool {
 // keep to what the row beside them cannot say: `tab deeper` and `esc
 // back` are on the row (#345, #346).
 func (m *Model) summaryRefusal() string {
+	tr := m.trail
+	if t, ok := m.trails[m.selectedKey]; ok && m.level < levelWaypoints {
+		tr = t // the board's selection, before its trail is the deck's
+	}
 	switch {
+	case len(tr.Legs) == 0 && len(tr.Branches) == 0:
+		return "no leg yet" // HEAD's row is the fleet's, not a leg (#347)
+	case summaryCountsNothing(tr):
+		return "one leg a class" // the fact, where `nothing to count` contradicted the legs on the frame (#347)
 	case m.level == levelBoard && m.boardShown():
 		return "the summary is one trail's · tab into it"
 	case m.level == levelBoard || m.level == levelTrail || m.level >= levelReader:
 		return "the summary is the legs'"
-	case summaryCountsNothing(m.trail):
-		return "nothing to count"
 	}
 	return ""
 }
@@ -173,6 +183,15 @@ func (m *Model) toggleSummary() {
 // not the one it was opened on — a digit, `h`/`l` — so a session's first
 // summary frame is its own counts, not another trail's fold (#346).
 func (m *Model) summarySync() {
+	if summaryCountsNothing(m.trail) {
+		// Stepped onto a trail with nothing to count: the trail is what
+		// there is to show, on this frame, not the next (#347).
+		m.summary = false
+		if m.note == "" {
+			m.note = m.summaryRefusal()
+		}
+		return
+	}
 	if m.summaryOpen != nil && m.summaryOn == m.selectedKey {
 		return
 	}
@@ -215,19 +234,20 @@ func (m *Model) summaryStep(rows []summaryRow, delta int) bool {
 // summaryPresent is the row of the class that holds the present — HEAD's
 // class, or HEAD's own row where its class is one leg — or -1.
 func summaryPresent(tr journey.Trail, rows []summaryRow) int {
+	at := -1
 	for i, r := range rows {
 		switch {
-		case r.kind == "leg" && r.solo && tr.Legs[r.leg].Current:
-			return i
-		case r.kind == "class":
+		case r.kind == "leg" && tr.Legs[r.leg].Current:
+			return i // HEAD's own row, solo or under its open class (#347)
+		case r.kind == "class" && at < 0:
 			for _, l := range tr.Legs {
 				if l.Class == r.class && l.Current {
-					return i
+					at = i
 				}
 			}
 		}
 	}
-	return -1
+	return at
 }
 
 // summaryKey handles a key while the summary is up. It reports whether the
@@ -235,15 +255,11 @@ func summaryPresent(tr journey.Trail, rows []summaryRow) int {
 // reply, ask — keep their meaning at every level and fall through.
 func (m *Model) summaryKey(key string) bool {
 	m.summarySync()
+	if !m.summary {
+		return false // closed by the sync: the key is the trail's
+	}
 	rows := m.summaryRowsHere()
 	m.summaryClamp(rows)
-	if len(rows) == 0 || summaryCountsNothing(m.trail) {
-		// The trail lost its count from under the summary (a session
-		// swap onto one of each): the trail is what there is to show.
-		m.summary = false
-		m.note = "nothing to count"
-		return true
-	}
 	row := rows[m.summaryCursor]
 	switch key {
 	case "s", "esc":
@@ -441,8 +457,7 @@ func (m *Model) summaryTabWord() string {
 // on its last — the legs cut of one class, and the counts beyond. Under
 // the counts, where the room is, the time the session spent waiting on
 // you: the one number of the day the counts do not hold (#346).
-func (m *Model) summaryLines(w, h int, waitSaid bool) []string {
-	m.summarySync()
+func (m *Model) summaryLines(w, h int) []string {
 	rows := m.summaryRowsHere()
 	m.summaryClamp(rows)
 	if len(rows) == 0 {
@@ -467,8 +482,10 @@ func (m *Model) summaryLines(w, h int, waitSaid bool) []string {
 		lines = append(lines, text)
 	}
 	var tail []string
-	if d := promptWaits(m.trail); !waitSaid && d >= waitNotable && len(lines)+1 < h {
-		tail = append(tail, summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(m.trail.Prompts), "prompt"), nil, relDuration(d), w))
+	if d := promptWaits(m.trail); d >= waitNotable && len(lines)+1 < h {
+		// To the minute, as every span in the column is (#347); the
+		// title's own clause for it stands down while the summary is up.
+		tail = append(tail, summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(m.trail.Prompts), "prompt"), nil, spanText(d), w))
 	}
 	top, head, more := summaryWindow(len(lines), h, m.summaryCursor, m.summaryScroll)
 	m.summaryScroll = top
@@ -616,7 +633,7 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 	r := rows[i]
 	switch r.kind {
 	case "class":
-		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedWord(w), w)
+		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedWord(w), m.summaryLoopSaid(w), w)
 	case "lanes":
 		return summaryLanesRow(m.trail, m.trailOpts(w, 1), w)
 	case "leg":
@@ -637,10 +654,33 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 		return summaryHang(rows, i) + legRow(l, label, narrated, o)
 	case "lane":
 		return summaryHang(rows, i) + summaryLaneRow(m.trail.Branches[r.lane], m.trailOpts(w-trailWayWidth, 1), w-trailWayWidth)
-	case "ask":
-		return summaryHang(rows, i) + dimStyle.Render(clip(r.text, w-trailWayWidth))
+	case "ask", "report":
+		return summaryHang(rows, i) + dimStyle.Render(clip(r.text, w-trailWayWidth-3))
 	}
 	return ""
+}
+
+// summaryLoopSaid reports whether the frame already names the loop — the
+// card above the summary, or the fleet row beside it — so the class row
+// does not say `4th failure` a second time on one frame (#347).
+func (m *Model) summaryLoopSaid(w int) bool {
+	if m.sessionView() {
+		return strings.Contains(ansi.Strip(m.cardSecond(w)), " failure")
+	}
+	inner := m.width - 2*edgePad
+	if fw, _, _ := m.layout(inner); fw == 0 {
+		return false
+	}
+	live := false
+	if s, ok := m.selected(); ok {
+		live = s.Live
+	}
+	for _, p := range verdictParts(m.trail, m.now, live) {
+		if strings.Contains(p, " failure") {
+			return true
+		}
+	}
+	return false
 }
 
 // summaryRedWord is the class row's word for a red run: the card's, where
@@ -666,11 +706,11 @@ func summaryHang(rows []summaryRow, i int) string {
 	if i+1 >= len(rows) || rows[i+1].group() || rows[i+1].solo {
 		mark = wayEnd
 	}
-	if r.kind == "ask" {
-		if i+1 >= len(rows) || rows[i+1].kind != "ask" {
+	if r.kind == "ask" || r.kind == "report" {
+		if i+1 >= len(rows) || rows[i+1].kind != r.kind {
 			mark = wayEnd
 		}
-		if rows[summaryGroupRow(rows, i)].kind == "class" && !rows[summaryGroupRow(rows, i)].solo && !summarySoloAbove(rows, i) {
+		if r.kind == "report" || (rows[summaryGroupRow(rows, i)].kind == "class" && !summarySoloAbove(rows, i)) {
 			return ruleStyle.Render(railStroke+"  "+railStroke+" "+mark) + " "
 		}
 		return ruleStyle.Render(railStroke+"  "+mark) + " "
@@ -697,7 +737,7 @@ func summarySoloAbove(rows []summaryRow, i int) bool {
 // sum is mostly now on a session that is looping. The class that holds
 // the present wears HEAD's own glyph: a class whose leg is silent or
 // asking is not done (#345, #346).
-func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redWord string, w int) string {
+func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redWord string, loopSaid bool, w int) string {
 	n, red, runs := 0, 0, 0
 	var span time.Duration
 	glyph, live := glyphLeg, ""
@@ -735,8 +775,8 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redWord str
 			badge = append(badge, fmt.Sprintf("%d %s", red, redWord)) // the card's word for a red run (#345)
 		}
 	}
-	if runs >= 2 {
-		badge = append(badge, ordinal(runs)+" failure") // the fleet row's word for the loop
+	if runs >= 2 && !loopSaid {
+		badge = append(badge, ordinal(runs)+" failure") // the fleet row's word for the loop, where the frame has not said it
 	}
 	return summaryFigureRow(head, plural(n, "leg"), badge, spanText(span), w)
 }

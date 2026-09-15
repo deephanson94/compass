@@ -1868,13 +1868,7 @@ func (m *Model) trailColumn(w, h int) []string {
 			// The summary where the trail was (#344). The title above
 			// may already carry the wait on you; the summary's own line
 			// for it is drawn only where it does not (#346).
-			said := false
-			for _, r := range rows {
-				if strings.Contains(ansi.Strip(r), "on you") {
-					said = true
-				}
-			}
-			return m.summaryLines(w, h, said)
+			return m.summaryLines(w, h)
 		}
 		return trailRows(m.trail, m.trailOpts(w, h))
 	}
@@ -2154,6 +2148,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		dead, activity = s.Snap.APIError, s.Snap.Activity
 	}
 	return TrailOpts{
+		HeadWaits:    headWaits(m.trail), // a parked HEAD keeps its own name, in the summary too (#347)
 		HeadClass:    headClass,
 		HeadDead:     dead,
 		HeadActivity: activity,
@@ -2207,6 +2202,16 @@ func legsHiddenAbove(tr journey.Trail, level int, sel []int, top int) int {
 // taught the eye to skip the clause (#22), and the totals stay (#138).
 func (m *Model) trailDayHere(compact bool) string {
 	d := trailDay(m.trail, m.now, compact)
+	if m.summaryShown() {
+		// The summary's own rows carry the wait on you to the minute,
+		// and its `◉` row the span where no reader stands beside (#347).
+		d = withoutClause(d, " · waited on you ")
+		d = withoutClause(d, " · on you ")
+		if !m.sessionView() && len(m.trail.Prompts) > 0 {
+			d = withoutSpan(d, m.now, m.trail)
+		}
+		return d
+	}
 	if d == "" || len(m.trail.Prompts) == 0 || m.replyBox.on {
 		return d // the box covers the trail's rows (#108): no row draws the span
 	}
@@ -2287,6 +2292,40 @@ func trailDay(tr journey.Trail, now time.Time, compact bool) string {
 		out += " · waited on you " + relDuration(d)
 	}
 	return out
+}
+
+// withoutClause is the day's clauses without the one that begins with
+// prefix, whole.
+func withoutClause(d, prefix string) string {
+	i := strings.Index(d, prefix)
+	if i < 0 {
+		return d
+	}
+	rest := d[i+len(prefix):]
+	if j := strings.Index(rest, " · "); j >= 0 {
+		return d[:i] + rest[j:]
+	}
+	return d[:i]
+}
+
+// withoutSpan is the day's clauses without the span the trail's own first
+// row draws — trailDayHere's rule, for a first row that is not the trail's.
+func withoutSpan(d string, now time.Time, tr journey.Trail) string {
+	span := strings.TrimPrefix(d, " · ")
+	if i := strings.Index(span, " "); i > 0 {
+		span = span[:i]
+	}
+	if relAge(now, tr.Prompts[0].At) != span {
+		return d
+	}
+	rest := strings.TrimPrefix(d, " · "+span)
+	switch {
+	case strings.HasPrefix(rest, " · "):
+		return rest
+	case rest == "":
+		return ""
+	}
+	return " ·" + rest
 }
 
 // Waiting on you. A session that has finished its turn is waiting for your

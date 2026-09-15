@@ -268,8 +268,8 @@ func TestTheSummaryIsRefusedOffTheLegs(t *testing.T) {
 		t.Errorf("the reader's frame says summary")
 	}
 	press(narrow, "s")
-	if view := ansi.Strip(narrow.View()); !strings.Contains(view, "the summary is the legs'") || !strings.Contains(view, "esc back") || strings.Contains(view, "[summary]") {
-		t.Errorf("s in the reader should say the summary is the legs' and keep the reader's `esc back` (#346):\n%s", view)
+	if view := ansi.Strip(narrow.View()); !strings.Contains(view, "the summary is the legs'") || strings.Contains(view, "esc, then s") || !strings.Contains(view, "esc back") || strings.Contains(view, "[summary]") {
+		t.Errorf("s in the reader should say the summary is the legs' — the short note — and keep the reader's `esc back` (#346):\n%s", view)
 	}
 }
 
@@ -419,10 +419,18 @@ func TestTheClassRowSumsItsSpanToTheMinute(t *testing.T) {
 	if !strings.Contains(view, "32 legs · 10 red") || strings.Contains(view, "10✗   ") {
 		t.Errorf("the test row does not say `10 red`:\n%s", view)
 	}
-	wide := summaryModel(t, 220, 48)
-	press(wide, "s")
-	if v := ansi.Strip(wide.View()); !strings.Contains(v, "32 legs · 10 red · 10th failure") {
-		t.Errorf("the test row at 220 does not name the loop:\n%s", v)
+	// The loop is said once per frame: on the class row where the card
+	// above (or the fleet row beside) does not carry it, and not where
+	// it does (#347).
+	for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}, {220, 48}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "s")
+		v := ansi.Strip(m.View())
+		row := strings.Contains(v, "32 legs · 10 red · 10th failure")
+		elsewhere := strings.Count(v, "10th failure") - map[bool]int{true: 1, false: 0}[row]
+		if row == (elsewhere > 0) {
+			t.Errorf("%dx%d: the loop is on the class row %v and elsewhere on the frame %d times:\n%s", size[0], size[1], row, elsewhere, v)
+		}
 	}
 }
 
@@ -844,8 +852,8 @@ func TestATrailOfOneOfEachIsRefused(t *testing.T) {
 	before := ansi.Strip(m.View())
 	press(m, "s")
 	view := ansi.Strip(m.View())
-	if strings.Contains(view, "[summary]") || !strings.Contains(view, "nothing to count") {
-		t.Errorf("s on a trail of one of each should refuse with `nothing to count`:\n%s", view)
+	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one leg a class") {
+		t.Errorf("s on a trail of one of each should refuse with `one leg a class` (#347):\n%s", view)
 	}
 	if !strings.Contains(before, "◉") || !strings.Contains(view, "◉") {
 		t.Errorf("the refusal took the ask off the frame")
@@ -858,8 +866,8 @@ func TestATrailOfOneOfEachIsRefused(t *testing.T) {
 		poll(fm, first)
 	}
 	press(fm, "s")
-	if v := ansi.Strip(fm.View()); !strings.Contains(v, "nothing to count") || strings.Contains(v, "[summary]") {
-		t.Errorf("s on a trail with no leg should say `nothing to count`:\n%s", v)
+	if v := ansi.Strip(fm.View()); !strings.Contains(v, "no leg yet") || strings.Contains(v, "[summary]") {
+		t.Errorf("s on a trail with no leg should say `no leg yet` (#347):\n%s", v)
 	}
 	// The legs' row names no summary key where the key is refused.
 	if foot := summaryFrameRows(fm); strings.Contains(foot[len(foot)-1], "s summary") {
@@ -948,21 +956,28 @@ func TestTheSummaryKeepsTheAskWhereNoReaderStandsBeside(t *testing.T) {
 	}
 }
 
-func TestTheSummarySaysTheWaitOnceAndOnlyWhereTheTitleDoesNot(t *testing.T) {
+func TestTheSummarySaysTheWaitOnceAndToTheMinute(t *testing.T) {
 	forceASCII(t)
-	m := summaryModel(t, 80, 24)
-	press(m, "s")
-	view := ansi.Strip(m.View())
-	if strings.Count(view, "on you") != 1 {
-		t.Errorf("80x24: the wait on you is said %d times:\n%s", strings.Count(view, "on you"), view)
-	}
-	if !strings.Contains(view, "◉ waited on you · 12 prompts") {
-		t.Errorf("80x24: the summary does not say what the day's counts leave out:\n%s", view)
-	}
-	wide := summaryModel(t, 100, 30)
-	press(wide, "s")
-	if v := ansi.Strip(wide.View()); strings.Count(v, "on you") != 1 {
-		t.Errorf("100x30: the wait on you is said %d times:\n%s", strings.Count(v, "on you"), v)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {220, 48}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "s")
+		view := ansi.Strip(m.View())
+		want := spanText(promptWaits(m.trail))
+		if !strings.Contains(want, "h") || !strings.Contains(want, "m") {
+			t.Fatalf("the fixture's wait %s would not show the floor", want)
+		}
+		if strings.Count(view, "on you") != 1 {
+			t.Errorf("%dx%d: the wait on you is said %d times:\n%s", size[0], size[1], strings.Count(view, "on you"), view)
+		}
+		row := ""
+		for _, r := range strings.Split(view, "\n") {
+			if strings.Contains(r, "◉ waited on you · 12 prompts") {
+				row = strings.TrimRight(summaryTrailCell(m, r), " ")
+			}
+		}
+		if row == "" || !strings.HasSuffix(row, " "+want) {
+			t.Errorf("%dx%d: the wait line is missing or floored (want %s): %q\n%s", size[0], size[1], want, row, view)
+		}
 	}
 }
 
@@ -1089,6 +1104,264 @@ func TestNoHelpGlossIsWiderThanThePageKeysRow(t *testing.T) {
 	for _, k := range helpKeys {
 		if n := len([]rune(k[1])); n > widest {
 			t.Errorf("the %q gloss is %d cells, wider than the page keys' row (%d): it would narrow the keys column at 152 (#345, #346)", k[0], n, widest)
+		}
+	}
+}
+
+// The panel's third pass, folded (#347).
+
+func TestAParkedHeadKeepsItsOwnNameInTheSummary(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 120, 34)
+	press(m, "j") // build, the class holding HEAD
+	pressKey(m, "space")
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "Measuring DLA") {
+		t.Errorf("the summary names the parked lead after the work it gave its lane (#347):\n%s", view)
+	}
+	if !strings.Contains(view, "● build  implement s6e encoder tests") {
+		t.Errorf("HEAD's own row under its class does not carry its own name:\n%s", view)
+	}
+}
+
+func TestADigitOntoAnotherSessionStartsTheSummaryAfresh(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 120, 34)
+	press(m, "j")
+	pressKey(m, "space") // build open, cursor on it
+	// Onto harness, the session with three lanes back: afresh.
+	var harness string
+	for d := 1; d <= 5; d++ {
+		for _, s := range m.sessions {
+			if m.digits[s.Info.Key()] == d && sessionName(s.Info) == "harness" && len(m.trails[s.Info.Key()].Branches) == 3 {
+				harness = fmt.Sprint(d)
+			}
+		}
+	}
+	if harness == "" {
+		t.Fatal("no digit for harness")
+	}
+	pressKey(m, harness)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "[summary]") || m.summaryCursor != 0 || len(m.summaryOpen) != 0 {
+		t.Errorf("the digit carried porter's fold onto harness: cursor %d, open %v\n%s", m.summaryCursor, m.summaryOpen, view)
+	}
+	// Onto cli, one of each: the trail, on this frame, with the reason —
+	// and the next key is the trail's.
+	var cli string
+	for d := 1; d <= 5; d++ {
+		for _, s := range m.sessions {
+			if m.digits[s.Info.Key()] == d && sessionName(s.Info) == "cli" {
+				cli = fmt.Sprint(d)
+			}
+		}
+	}
+	if cli == "" {
+		t.Fatal("no digit for cli")
+	}
+	pressKey(m, cli)
+	view = ansi.Strip(m.View())
+	if strings.Contains(view, "[summary]") || !strings.Contains(view, "one leg a class") {
+		t.Errorf("a digit onto a trail of one of each should draw the trail with the reason on this frame (#347):\n%s", view)
+	}
+	was := m.cursor
+	press(m, "k")
+	if m.cursor == was || m.summary {
+		t.Errorf("the key after the refusal was eaten: cursor %d (was %d), summary %v", m.cursor, was, m.summary)
+	}
+}
+
+func TestAReturnedLaneSaysWhatItFound(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	m := sceneModel(sc, 120, 34)
+	for _, d := range []string{"1", "2", "3", "4", "5"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if s, ok := m.selected(); ok && sessionName(s.Info) == "harness" && len(m.trails[m.selectedKey].Branches) == 3 {
+			break
+		}
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	toLanes(t, m)
+	pressKey(m, "space")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "Seven of nine kickoffs") {
+		t.Errorf("a lane back with a finding does not say it in the summary (#347):\n%s", view)
+	}
+	press(m, "j")
+	if rows := m.summaryRowsHere(); rows[m.summaryCursor].kind != "lane" {
+		t.Errorf("the cursor stands on a report line: %+v", rows[m.summaryCursor])
+	}
+}
+
+func TestTheArchiveRoundTripKeepsTheSummary(t *testing.T) {
+	forceASCII(t)
+	// many-idle: an archive to go to, and a live session (etl, two build
+	// legs) whose summary counts.
+	sc := sceneManyIdle()
+	m := sceneModel(sc, 152, 40)
+	found := false
+	for _, d := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if !summaryCountsNothing(m.trails[m.selectedKey]) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no live session that counts")
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+		t.Fatalf("the live session's summary did not open:\n%s", ansi.Strip(m.View()))
+	}
+	pressKey(m, "space")
+	at := m.summaryCursor
+	open := len(m.summaryOpen)
+	pressKey(m, "A")
+	poll(m, sc)
+	if v := ansi.Strip(m.View()); strings.Contains(v, "[summary]") || !m.archiveView {
+		t.Fatalf("A did not open the archive list, or the list draws the summary:\n%s", v)
+	}
+	pressKey(m, "A")
+	poll(m, sc)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "[summary]") || m.summaryCursor != at || len(m.summaryOpen) != open {
+		t.Errorf("A and back should return to the summary it left (#343, #347): cursor %d (was %d), open %v\n%s", m.summaryCursor, at, m.summaryOpen, v)
+	}
+}
+
+func TestGPrefersTheRunningLegInsideAnOpenClass(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 120, 34)
+	press(m, "j")
+	pressKey(m, "space")
+	press(m, "k")
+	press(m, "G")
+	rows := m.summaryRowsHere()
+	at := rows[m.summaryCursor]
+	if at.kind != "leg" || !m.trail.Legs[at.leg].Current {
+		t.Errorf("G with the class open should stand on the running leg's own row, not %+v", at)
+	}
+}
+
+func TestTheSummaryRowNamesTheMirrorAndTheSearch(t *testing.T) {
+	forceASCII(t)
+	m := porterSummary(t, 220, 48)
+	foot := summaryFrameRows(m)
+	row := foot[len(foot)-1]
+	for _, want := range []string{"m live pane", "/ search", "x hide"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("the summary's row does not name %q where it acts and has the room: %q", want, strings.TrimSpace(row))
+		}
+	}
+}
+
+func TestTheTitleDoesNotRepeatTheAskRowsAge(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "s")
+		rows := summaryFrameRows(m)
+		title, ask := "", ""
+		for _, r := range rows {
+			cell := summaryTrailCell(m, r)
+			switch {
+			case strings.Contains(cell, "TRAIL · "):
+				title = cell
+			case strings.Contains(cell, "◉ 1/"):
+				ask = cell
+			}
+		}
+		age := relAge(m.now, m.trail.Prompts[0].At)
+		if !strings.Contains(ask, age+" ago") {
+			t.Fatalf("%dx%d: the ask row does not carry the span: %q", size[0], size[1], ask)
+		}
+		if strings.Contains(title, " "+age+" ") || strings.Contains(title, " "+age+"  ") || strings.Contains(title, "on you") {
+			t.Errorf("%dx%d: the title repeats the span the ask row carries, or the wait the summary carries: %q", size[0], size[1], title)
+		}
+	}
+}
+
+func TestTheHungQuestionIsOnTheTrailColumn(t *testing.T) {
+	forceASCII(t)
+	sc := sceneAlarmStorm()
+	m := sceneModel(sc, 152, 40)
+	pressKey(m, "1")
+	poll(m, sc)
+	if s, ok := m.selected(); !ok || sessionName(s.Info) != "infra" {
+		t.Fatalf("1 is not infra")
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	press(m, "s")
+	rows := summaryFrameRows(m)
+	at := -1
+	for i, r := range rows {
+		if strings.Contains(summaryTrailCell(m, r), "design Open port 22") {
+			at = i
+		}
+	}
+	if at < 0 || at+1 >= len(rows) {
+		t.Fatalf("no design row in the summary:\n%s", strings.Join(rows, "\n"))
+	}
+	under := summaryTrailCell(m, rows[at+1])
+	if !strings.Contains(under, "└ ") || !strings.Contains(strings.Join([]string{under, summaryTrailCell(m, rows[min(at+2, len(rows)-1)])}, " "), "[office CIDR / keep bastion]") {
+		t.Errorf("the question is not hung under HEAD's row on the trail column (#346, #347):\n%s", strings.Join(rows, "\n"))
+	}
+	press(m, "G")
+	press(m, "j")
+	if r := m.summaryRowsHere(); !r[m.summaryCursor].stands() {
+		t.Errorf("the cursor stands on a question line")
+	}
+}
+
+func TestTheHiddenLiveRowKeepsItsShapeOverTheSummaryAtEveryWidth(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, size := range [][2]int{{100, 30}, {152, 40}} {
+		m := sceneModel(sc, size[0], size[1])
+		for _, d := range []string{"1", "2", "3", "4", "5"} {
+			pressKey(m, d)
+			poll(m, sc)
+			if s, ok := m.selected(); ok && sessionName(s.Info) == "porter" && len(m.trails[m.selectedKey].Branches) == 4 {
+				break
+			}
+		}
+		for _, k := range []string{"x", "A", "1"} {
+			pressKey(m, k)
+			poll(m, sc)
+		}
+		for m.level < levelWaypoints {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		row := func() string {
+			for _, r := range summaryFrameRows(m) {
+				if strings.Contains(r, "▸1 ") {
+					return strings.Split(r, "│")[0]
+				}
+			}
+			return ""
+		}
+		before := row()
+		press(m, "s")
+		if !strings.Contains(ansi.Strip(m.View()), "[summary]") {
+			t.Fatalf("%dx%d: s did not open on the hidden porter", size[0], size[1])
+		}
+		if after := row(); after != before {
+			t.Errorf("%dx%d: the archive's row changed across s:\n%q\n%q", size[0], size[1], before, after)
 		}
 	}
 }
