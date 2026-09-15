@@ -106,8 +106,8 @@ func TestTheSummaryCountsTheLegsByClass(t *testing.T) {
 		}
 		tw, th := m.trailBox()
 		_ = th
-		if said := strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red"); red > 0 && said == m.summaryRedSaid(tw) {
-			t.Errorf("%dx%d: the test row should count its %d red runs where the card does not, and not where it does (#349): said %v\n%s", w, h, red, said, view)
+		if said := strings.Contains(view, plural(counts[journey.Test], "leg")+" · "+strconv.Itoa(red)+" red"); red > 0 && (!said || strings.Contains(ansi.Strip(m.cardSecond(tw)), " "+strconv.Itoa(red)+" red") || strings.Contains(ansi.Strip(m.cardSecond(tw)), strconv.Itoa(red)+"✗")) {
+			t.Errorf("%dx%d: the test row should count its %d red runs and the card stand down (#349, #367): said %v\n%s", w, h, red, said, view)
 		}
 		// The footer names the fold key and the way back; the trail's
 		// scroll clauses are not the summary's.
@@ -1085,9 +1085,9 @@ func TestTheRedCountIsSaidOncePerFrame(t *testing.T) {
 		t.Fatal("no session with two test legs")
 		return nil
 	}
-	// Where the card above carries the day's red count, the class row
-	// does not; where there is no card, the title stands down and the
-	// class row says it (#348).
+	// The class row says its own red count at every width; the title
+	// and the card stand down for it while the summary is up (#348,
+	// #367).
 	for _, size := range [][2]int{{80, 24}, {100, 30}} {
 		m := find(size[0], size[1])
 		rows := summaryFrameRows(m)
@@ -1105,11 +1105,16 @@ func TestTheRedCountIsSaidOncePerFrame(t *testing.T) {
 			t.Errorf("%dx%d: the red count should be on the class row alone: title %q, row %q", size[0], size[1], title, row)
 		}
 	}
-	for _, size := range [][2]int{{120, 34}, {152, 40}} {
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
 		m := find(size[0], size[1])
 		v := ansi.Strip(m.View())
-		if strings.Contains(v, "2 legs · 1 red") || strings.Contains(v, "2 legs · 1✗") {
-			t.Errorf("%dx%d: the class row repeats the red count the card carries:\n%s", size[0], size[1], v)
+		tw, _ := m.trailBox()
+		card := ansi.Strip(m.cardSecond(tw))
+		if !strings.Contains(v, "2 legs · 1 red") || strings.Contains(card, " 1 red") || strings.Contains(card, "1✗") {
+			t.Errorf("%dx%d: the class row should carry the red count and the card stand down (#367): card %q\n%s", size[0], size[1], card, v)
+		}
+		if n := strings.Count(v, "1 red") + strings.Count(v, "1✗"); n != 1 {
+			t.Errorf("%dx%d: the red count is on the frame %d times, not once:\n%s", size[0], size[1], n, v)
 		}
 	}
 }
@@ -1636,7 +1641,7 @@ func TestTheCardStandsDownForTheSummarysRows(t *testing.T) {
 	if strings.Contains(view, plural(ships, "ship")) || strings.Contains(view, fmt.Sprintf("%d⚑", ships)) {
 		t.Errorf("the ships are counted twice, on the card and on the ship row (#349):\n%s", view)
 	}
-	// The red count: on the card where it carries it, and then not on the row.
+	// The red count: on the class row, the card standing down (#367).
 	red := 0
 	for _, l := range m.trail.Legs {
 		if strings.Contains(legBadge(l), "✗") {
@@ -1647,8 +1652,8 @@ func TestTheCardStandsDownForTheSummarysRows(t *testing.T) {
 	card := ansi.Strip(m.cardSecond(tw))
 	onCard := strings.Contains(card, fmt.Sprintf(" %d red", red)) || strings.Contains(card, fmt.Sprintf(" %d✗", red))
 	onRow := strings.Contains(view, fmt.Sprintf("32 legs · %d red", red))
-	if onCard == onRow {
-		t.Errorf("the red count should be said exactly once: card %v, row %v\n%s", onCard, onRow, view)
+	if onCard || !onRow {
+		t.Errorf("the red count should be on the class row alone: card %v, row %v\n%s", onCard, onRow, view)
 	}
 }
 
@@ -2211,7 +2216,7 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 	row := func(w int, tail string) string {
 		o := m.trailOpts(w, 1)
 		o.HeadTail = tail
-		return ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, true, false, w))
+		return ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, false, w))
 	}
 	// The card above says the span and HEAD's own row has shed it: the
 	// card's yield stands whatever HEAD's row wears, closed or open (#356,
@@ -2219,7 +2224,7 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		o := m.trailOpts(100, 1)
 		o.HeadTail = "◈3 out 20m"
-		if r := ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, open, true, 100)); strings.Contains(r, "· for ") {
+		if r := ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, open, true, 100)); strings.Contains(r, "· for ") {
 			t.Errorf("the card carries the span (open %v); the class row repeats it: %q", open, r)
 		}
 	}

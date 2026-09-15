@@ -2106,9 +2106,10 @@ func (m *Model) cardSecond(w int) string {
 	for _, compact := range []bool{false, true} {
 		day := dayParts(m.trail, m.now, compact)
 		if m.summaryShown() {
-			// The card keeps the red count — the class row reads it there
-			// — and gives up the wait and the ships, which are rows (#349).
-			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · "), false), " · "), " · ")
+			// The card gives up the wait, the ships and the red count,
+			// which the summary's rows carry — the reds class by class,
+			// which one total on the card could not (#349, #367).
+			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · "), true), " · "), " · ")
 			if len(day) == 1 && day[0] == "" {
 				day = nil
 			}

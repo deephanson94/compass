@@ -565,7 +565,7 @@ func (m *Model) summaryLines(w, h int) []string {
 		if drawn {
 			continue
 		}
-		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), false, m.summaryLiveSaid(w), w)
+		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryLoopSaid(w), false, m.summaryLiveSaid(w), w)
 		if i == m.summaryCursor {
 			text = summaryCursored(text, w)
 		}
@@ -736,7 +736,7 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 	r := rows[i]
 	switch r.kind {
 	case "class":
-		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryOpen[r.key], m.summaryLiveSaid(w), w)
+		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryLoopSaid(w), m.summaryOpen[r.key], m.summaryLiveSaid(w), w)
 	case "wait":
 		// To the minute, as every span in the column is (#347); the
 		// title's and the card's own clause for it stand down (#348).
@@ -776,23 +776,6 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 		return hang + dimStyle.Render(clip(text, body))
 	}
 	return ""
-}
-
-// summaryRedSaid reports whether the card above the summary carries the
-// day's red count, `10 red` or `10✗`, so the class row does not say it
-// again — and says it where the card has shed it (#349).
-func (m *Model) summaryRedSaid(w int) bool {
-	if !m.sessionView() {
-		return false
-	}
-	red := 0
-	for _, l := range m.trail.Legs {
-		if strings.Contains(legBadge(l), "✗") {
-			red++
-		}
-	}
-	card := ansi.Strip(m.cardSecond(w))
-	return strings.Contains(card, fmt.Sprintf(" %d red", red)) || strings.Contains(card, fmt.Sprintf(" %d✗", red))
 }
 
 // summaryLiveSaid reports whether the card above the summary already
@@ -956,7 +939,7 @@ func summarySoloAbove(rows []summaryRow, i int) bool {
 // sum is mostly now on a session that is looping. The class that holds
 // the present wears HEAD's own glyph: a class whose leg is silent or
 // asking is not done (#345, #346).
-func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, loopSaid, open, cardSaid bool, w int) string {
+func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, loopSaid, open, cardSaid bool, w int) string {
 	n, red, runs := 0, 0, 0
 	var span time.Duration
 	glyph, live := glyphLeg, ""
@@ -1007,10 +990,11 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 		// never for the card (#364).
 		badge = append(badge, live)
 	}
-	if red > 0 && !redSaid {
-		// The card above carries the day's red count where there is
-		// one; where there is not, the title stands down and the class
-		// row says it, in the card's word (#345, #348).
+	if red > 0 {
+		// The class's own red count, in the card's word: the title and
+		// the card stand down for it while the summary is up, since a
+		// total on the card is not the breakdown the rows are (#345,
+		// #348, #367).
 		badge = append(badge, fmt.Sprintf("%d red", red))
 	}
 	if runs >= 2 && !loopSaid {
