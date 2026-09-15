@@ -1856,10 +1856,20 @@ func saysSame(sentence, row string) bool {
 	return strings.Contains(row, strings.TrimSpace(pre)) && strings.HasSuffix(row, strings.TrimSpace(post))
 }
 
+// summaryGMark is the arrow before `G` on a title: down on the trail,
+// whose present is its last row, and on the summary wherever `G` goes —
+// up where the class holding HEAD is above the window (#365).
+func summaryGMark(off int) string {
+	if off < 0 {
+		return "↑"
+	}
+	return "↓"
+}
+
 // trailColumn is the deck's right-hand panel: the title, one line of air, and
 // the graph.
 func (m *Model) trailColumn(w, h int) []string {
-	m.summaryOff = false
+	m.summaryOff = 0
 	if m.summaryShown() {
 		// The title says whether the summary's window draws the present
 		// before the window is drawn: the card's height is its content's,
@@ -2015,8 +2025,8 @@ func (m *Model) sessionCard(w int) []string {
 	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
-	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff {
-		right = strings.TrimSpace("↓ G  " + right)
+	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff != 0 {
+		right = strings.TrimSpace(summaryGMark(m.summaryOff) + " G  " + right)
 	}
 	body := w - 1
 	hw := body
@@ -2504,10 +2514,11 @@ func (m *Model) trailTitleWith(w int, bare bool) string {
 	if n := m.legsAbove(); n > 0 && !m.summaryShown() {
 		right = strings.TrimSpace(fmt.Sprintf("↑ %s  %s", plural(n, "leg"), right))
 	}
-	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff {
+	if (!m.trailPinned && !m.summaryShown()) || m.summaryOff != 0 {
 		// The summary scrolled off the present says so with the trail's
-		// own word, and `G` is its way back too (#357).
-		right = strings.TrimSpace("↓ G  " + right)
+		// own word, and `G` is its way back too (#357) — the arrow
+		// pointing where `G` goes, which on the summary can be up (#365).
+		right = strings.TrimSpace(summaryGMark(m.summaryOff) + " G  " + right)
 	}
 	mark := m.titleMark(panelTrail)
 	body := w - 1

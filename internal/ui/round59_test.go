@@ -2094,7 +2094,7 @@ func TestTheSummaryScrolledOffThePresentSaysSo(t *testing.T) {
 		}
 		press(m, "tab")
 		press(m, "s")
-		if m.summaryOff {
+		if m.summaryOff != 0 {
 			t.Errorf("%dx%d: the summary reopened on the present should not wear the mark", size[0], size[1])
 		}
 	}
@@ -2244,5 +2244,45 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 	}
 	if r := row(narrow, "◈3 out 20m · "+span); !strings.Contains(r, span) {
 		t.Errorf("HEAD's narrow row sheds the span; the open class row drops it too: %q", r)
+	}
+}
+
+// The panel's eleventh pass, alarm-storm's correction, folded (#365).
+
+func TestTheSummarysMarkPointsWhereGGoes(t *testing.T) {
+	forceASCII(t)
+	titleOf := func(m *Model) string {
+		for _, r := range summaryFrameRows(m) {
+			if cell := summaryTrailCell(m, r); strings.Contains(cell, "[summary]") {
+				return cell
+			}
+		}
+		return ""
+	}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}} {
+		m := summaryModel(t, size[0], size[1])
+		press(m, "s")
+		press(m, "j")
+		press(m, "j")
+		press(m, "space") // build opens under design, the class holding HEAD
+		v := ansi.Strip(m.View())
+		if strings.Contains(v, "for 39m") {
+			t.Fatalf("%dx%d: the present is still on the frame; the pin wants it above:\n%s", size[0], size[1], v)
+		}
+		if title := titleOf(m); !strings.Contains(title, "↑ G  [summary]") || strings.Contains(title, "↓ G") {
+			t.Errorf("%dx%d: the present is above the window and the title's arrow does not point up (#365): %q\n%s", size[0], size[1], title, v)
+		}
+		press(m, "G")
+		v = ansi.Strip(m.View())
+		if title := titleOf(m); strings.Contains(title, " G  ") || !strings.Contains(v, "for 39m") {
+			t.Errorf("%dx%d: `G` is the present; the mark stays or the present is off: %q\n%s", size[0], size[1], title, v)
+		}
+		rows := m.summaryRowsHere()
+		if at := summaryPresent(m.trail, rows); m.summaryCursor != at {
+			t.Errorf("%dx%d: `G` should stand on the present (%d), cursor %d", size[0], size[1], at, m.summaryCursor)
+		}
+	}
+	if summaryGMark(-1) != "↑" || summaryGMark(1) != "↓" || summaryGMark(0) != "↓" {
+		t.Errorf("the arrow before G: up above, down below and on the trail")
 	}
 }

@@ -248,7 +248,7 @@ type Model struct {
 	// keeps its newest row on screen without anybody pressing a key.
 	trailScroll int
 	trailPinned bool
-	summaryOff  bool // the summary's window hides the present; the title says `↓ G` (#357)
+	summaryOff  int // the summary's window hides the present: -1 above, +1 below; the title says `↑ G` or `↓ G` (#357, #365)
 
 	// The summary (#344): the trail's legs counted by class, where the
 	// trail was, while summary is on and the keys are on the legs.

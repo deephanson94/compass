@@ -834,16 +834,20 @@ func (m *Model) summaryLoopSaid(w int) bool {
 	return false
 }
 
-// summaryOffPresent reports whether the summary drawn h rows tall hides
-// the present — the class holding HEAD, and HEAD's own row under it when
-// the class is open — so the title can say `↓ G` as the trail's does when
-// it is scrolled off the newest work (#357). The window is the one
-// summaryLines draws: the same rows, cursor and scroll, and the prompt row
-// taken off the top where no reader beside says what was asked.
-func (m *Model) summaryOffPresent(h int) bool {
+// summaryOffPresent reports which side of the summary's window, drawn h
+// rows tall, the present is on — the class holding HEAD, and HEAD's own
+// row under it when the class is open — so the title can say `↑ G` or
+// `↓ G` as the trail's does when it is scrolled off the newest work
+// (#357, #365): 0 where a present row is drawn, -1 where the row `G`
+// goes to is above the window, +1 where it is below. The window is the
+// one summaryLines draws: the same rows, cursor and scroll, and the
+// prompt row taken off the top where no reader beside says what was
+// asked. Nothing running, the present is the last standing row, `G`'s
+// own fallback, which is always below (#361).
+func (m *Model) summaryOffPresent(h int) int {
 	rows := m.summaryRowsHere()
 	if len(rows) == 0 {
-		return false
+		return 0
 	}
 	m.summaryClamp(rows)
 	if !m.sessionView() && len(m.trail.Prompts) > 0 && h > 2 {
@@ -860,7 +864,6 @@ func (m *Model) summaryOffPresent(h int) bool {
 	if more {
 		last--
 	}
-	off := false
 	for i, r := range rows {
 		live := false
 		switch r.kind {
@@ -873,25 +876,24 @@ func (m *Model) summaryOffPresent(h int) bool {
 		case "leg":
 			live = m.trail.Legs[r.leg].Current
 		}
-		if !live {
-			continue
+		if live && i >= first && i < last {
+			return 0 // the present is on the frame, on the class row or HEAD's own
 		}
-		if i >= first && i < last {
-			return false // the present is on the frame, on the class row or HEAD's own
-		}
-		off = true
 	}
-	if !off {
-		// Nothing is running: the newest work is the row `G` goes to, the
-		// last row, as it is on the trail — which wears `↓ G` on an idle
-		// session too (#361).
-		at := len(rows) - 1
+	at := summaryPresent(m.trail, rows)
+	if at < 0 {
+		at = len(rows) - 1
 		for at > 0 && !rows[at].stands() {
 			at--
 		}
-		return at < first || at >= last
 	}
-	return off
+	switch {
+	case at < first:
+		return -1
+	case at >= last:
+		return 1
+	}
+	return 0
 }
 
 // summaryBackSaid reports whether the frame already says how many lanes
