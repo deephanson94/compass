@@ -93,9 +93,18 @@ func (m *Model) viewOrder() []int {
 		}
 		return out
 	}
+	return m.liveOrder(true)
+}
+
+// liveOrder is the live board's order whatever view is open — needs-you,
+// stuck, working, idle by recency — narrowed to the standing search when
+// asked. The digits are given in this order (assignDigits) on every poll,
+// the archive open or not, so a session's number is the live board's
+// and never the archive's own (#32).
+func (m *Model) liveOrder(searched bool) []int {
 	var out []int
 	for i, s := range m.sessions {
-		if m.onBoard(s) && m.matchesQuery(s) {
+		if m.onBoard(s) && (!searched || m.matchesQuery(s)) {
 			out = append(out, i)
 		}
 	}
@@ -649,8 +658,10 @@ func (m *Model) assignDigits() {
 	for _, d := range m.digits {
 		taken[d] = true
 	}
-	// New sessions take the lowest free digit, in the board's own order.
-	for _, i := range m.viewOrder() {
+	// New sessions take the lowest free digit, in the board's own order —
+	// the live board's, whatever view is open, and search or no search: a
+	// number is kept for a session's life and a search is not.
+	for _, i := range m.liveOrder(false) {
 		key := m.sessions[i].Info.Key()
 		if _, ok := m.digits[key]; ok {
 			continue

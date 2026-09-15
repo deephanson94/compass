@@ -689,7 +689,7 @@ func TestTheArchiveReaderTitleSaysWhatTheHeaderDoesNot(t *testing.T) {
 func TestTheShipRowIsNotAClippedCopyOfTheAsk(t *testing.T) {
 	forceASCII(t)
 	ship := regexp.MustCompile(`ship\s+(\S[^│]*?)…`)
-	routes := [][]string{{"A"}, {"2", "tab"}} // the archive board, and the trail of the session that shipped
+	routes := [][]string{{"A"}, {"2", "tab"}} // the archive's list, and the trail of the session that shipped
 	for _, size := range [][2]int{{80, 24}, {120, 34}, {152, 40}} {
 		for _, route := range routes {
 			m := sceneModel(sceneSecondDay(), size[0], size[1])
@@ -739,7 +739,7 @@ func TestTheShipRowIsNotAClippedCopyOfTheAsk(t *testing.T) {
 }
 
 // ---- round 75, second-day, second finding ----
-// The archive board's footer names the chapter keys it answers to. `[`
+// The archive list's footer names the chapter keys it answers to. `[`
 // and `]` act on the archive's Lv1 list as on the live one and refuse
 // with `no earlier prompt` there, but the archive keymap was written out
 // without them: 133 idle cells at 220 and no `[ ] chapters`, while one
