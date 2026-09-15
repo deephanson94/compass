@@ -2211,7 +2211,17 @@ func TestTheClassRowAsksHeadsOwnRowForTheSpan(t *testing.T) {
 	row := func(w int, tail string) string {
 		o := m.trailOpts(w, 1)
 		o.HeadTail = tail
-		return ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, true, w))
+		return ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, true, false, w))
+	}
+	// The card above says the span and HEAD's own row has shed it: the
+	// card's yield stands whatever HEAD's row wears, closed or open (#356,
+	// #364).
+	for _, open := range []bool{false, true} {
+		o := m.trailOpts(100, 1)
+		o.HeadTail = "◈3 out 20m"
+		if r := ansi.Strip(summaryClassRow(m.trail, journey.Build, o, true, true, open, true, 100)); strings.Contains(r, "· for ") {
+			t.Errorf("the card carries the span (open %v); the class row repeats it: %q", open, r)
+		}
 	}
 	// The lanes' clock alone: the span is on no other row, the class
 	// row keeps it (#359).

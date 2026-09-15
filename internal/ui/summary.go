@@ -565,7 +565,7 @@ func (m *Model) summaryLines(w, h int) []string {
 		if drawn {
 			continue
 		}
-		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryLiveSaid(w), w)
+		text := summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), false, m.summaryLiveSaid(w), w)
 		if i == m.summaryCursor {
 			text = summaryCursored(text, w)
 		}
@@ -736,7 +736,7 @@ func (m *Model) summaryRow(rows []summaryRow, i, w int) string {
 	r := rows[i]
 	switch r.kind {
 	case "class":
-		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryOpen[r.key] || m.summaryLiveSaid(w), w)
+		return summaryClassRow(m.trail, r.class, m.trailOpts(w, 1), m.summaryRedSaid(w), m.summaryLoopSaid(w), m.summaryOpen[r.key], m.summaryLiveSaid(w), w)
 	case "wait":
 		// To the minute, as every span in the column is (#347); the
 		// title's and the card's own clause for it stand down (#348).
@@ -954,7 +954,7 @@ func summarySoloAbove(rows []summaryRow, i int) bool {
 // sum is mostly now on a session that is looping. The class that holds
 // the present wears HEAD's own glyph: a class whose leg is silent or
 // asking is not done (#345, #346).
-func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, loopSaid, open bool, w int) string {
+func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, loopSaid, open, cardSaid bool, w int) string {
 	n, red, runs := 0, 0, 0
 	var span time.Duration
 	glyph, live := glyphLeg, ""
@@ -996,11 +996,13 @@ func summaryClassRow(tr journey.Trail, c journey.Class, o TrailOpts, redSaid, lo
 	}
 	head := classStyle(c).Render(glyph + " " + pad(c.String(), trailVerbWidth))
 	var badge []string
-	if live != "" && (!open || parked) {
-		// Open, HEAD's own row beneath says it (#351) — unless that row
-		// does not carry the span, wearing the lanes' clock alone or
-		// shedding the clause, and it is then on no row but this one
-		// (#359, #362).
+	if live != "" && !cardSaid && (!open || parked) {
+		// Two yields, kept apart: the card above says it (#356), or the
+		// class is open and HEAD's own row beneath says it (#351) —
+		// unless that row does not carry the span, wearing the lanes'
+		// clock alone or shedding the clause, and it is then on no row
+		// but this one (#359, #362). Parked answers for HEAD's row only,
+		// never for the card (#364).
 		badge = append(badge, live)
 	}
 	if red > 0 && !redSaid {
