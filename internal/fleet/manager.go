@@ -35,6 +35,15 @@ type entry struct {
 	// outcomes is the last thing this session *finished* — a test run's counts,
 	// a commit — which is what a fleet row says about it. Live sessions only.
 	outcomes *journey.Outcomes
+
+	// askDenied says the ask door opened this session and the fold did not
+	// agree: the file ends on something that reads as a question, and the
+	// machine — which folds the whole file, where the walk reads its last
+	// lines — calls it hung, idle or refused. The door then closes again
+	// and does not knock twice on a file that has not moved, so the entry
+	// remembers rather than replaying it every second. `merge` clears it
+	// the moment the transcript grows (round 60).
+	askDenied bool
 }
 
 // DefaultLiveWindow is the recency door a new Manager opens: a session with no
@@ -271,7 +280,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		}
 		e.merge(info)
 
-		live := m.isLive(e.info, now)
+		live := m.isLive(e.info, now) && !(e.askDenied && m.isWaiting(e.info, now))
 		if live {
 			// Waking from the archive means a tailer from scratch: the whole
 			// file replays, exactly as it does at first sight.
@@ -298,10 +307,25 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		}
 
 		if live {
+			snap := e.machine.Evaluate(now)
+			waiting := m.isWaiting(e.info, now)
+			if waiting && (snap.State != state.NeedsYou || snap.APIError) {
+				// The door is the file's word and the fold is the
+				// machine's, and where they differ the machine wins: it
+				// reads the whole transcript, and a row that said
+				// `waiting 1d` over a session the machine calls hung was
+				// the board saying two things at once. The session goes
+				// back to the archive and the door stays shut until the
+				// file moves (round 60).
+				e.askDenied = true
+				e.sleep()
+				archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
+				continue
+			}
 			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
 			out = append(out, Session{
-				Info: e.info, Snap: e.machine.Evaluate(now), Live: true,
-				Waiting: m.isWaiting(e.info, now),
+				Info: e.info, Snap: snap, Live: true,
+				Waiting: waiting,
 				Class:   e.class, HasClass: e.hasClass,
 				Outcome: e.outcome(),
 			})
@@ -410,7 +434,11 @@ func (e *entry) merge(info SessionInfo) {
 	// The question is the scan's to answer, every time: it is read off the
 	// end of the file, and the end of the file is what moves when somebody
 	// finally replies (#344).
+	moved := !e.info.Asked && info.Asked || !e.info.AskedAt.Equal(info.AskedAt) || info.LastEventAt.After(e.info.LastEventAt)
 	e.info.Asked, e.info.AskedAt = info.Asked, info.AskedAt
+	if moved {
+		e.askDenied = false // the file grew: the door is worth another knock
+	}
 }
 
 // absorb folds an event's identity fields into what we know about the session.

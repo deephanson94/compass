@@ -55,8 +55,14 @@ Rules:
    other call still out is work in flight, and a turn whose calls all came
    back is one the model is still in the middle of. A subagent's lines never
    open the door and any of them closes it, which is how the machine reads
-   them too. The invariant that falls out, and is pinned: **`Waiting` implies
-   needs-you.**
+   them too.
+
+   **`Waiting` implies needs-you, and it is enforced rather than hoped for**
+   (#346): the walk reads the end of a file where the machine folds all of
+   it, so where the two differ the machine wins — the session goes back to
+   the archive and the door does not knock again until the transcript grows.
+   A door the fold refused is remembered on the entry, not re-litigated
+   every second.
 
    Such a session is flagged `Waiting` when nothing else would have kept it:
    no pane, outside the window. `Waiting` is the fleet's word for "you walked
@@ -70,8 +76,10 @@ Rules:
    good, and sweeps the pile with `X` (docs/SPEC.md #344, #345).
 
    The other store answers the same question of its own rows
-   (`internal/opencode/asked.go`): one fleet, one rule, or "waiting" means
-   two things in one list.
+   (`internal/opencode/asked.go`): one fleet, one rule, or the word means
+   two things in one list. It reads what that store's own reader reads — a
+   part left `pending` is a call the reader skips, so the door skips it too
+   (#346).
 2. Only live sessions are tailed and state-machined per Refresh. An archived
    session's Snap is always `{Idle, Since: LastEventAt, Reason: "archived",
    Activity: "idle"}` — the archive can never be amber, so `g` and the

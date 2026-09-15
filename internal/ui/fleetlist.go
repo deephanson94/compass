@@ -653,11 +653,14 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 // board, so the way back is where the strip said it was. It names both keys
 // because `X` brings back everything here, the rows put down one at a time
 // included — the blast radius belongs where the key is pressed, and the
-// board's own note promised an undo it could not keep (round 59).
+// board's own note promised an undo it could not keep (round 59). It pays
+// for the second key out of the first's own words: at eighty the label
+// column is thirty cells, and `x brings one back, X all` clipped to a bare
+// `X…` welded against the group's own `▲` (round 60).
 // hiddenGroupWord
 // is the group without that way — the word the header keeps when the key
 // is not the deck's to give (groupLabel).
-const hiddenGroup = "hidden · x brings one back, X all"
+const hiddenGroup = "hidden · x one back, X all"
 const hiddenGroupWord = "hidden"
 
 // groupLabel is the name a group header draws. Only the hidden group's
@@ -1726,11 +1729,13 @@ func headline(s fleet.Session) string {
 	if s.Waiting {
 		// Four rows reading `▲ needs you` where one of them was asked six
 		// minutes ago and three were asked days ago told the person
-		// nothing about which was which (round 59). The word the trail
-		// already uses for the same thing says which: `waiting 9d` is a
-		// question nobody has answered, `needs you 6m` is one being asked
-		// now. Two cells cheaper, too.
-		return "waiting"
+		// nothing about which was which (round 59). One word says which:
+		// `unanswered 9d` is a question nobody has come back to,
+		// `needs you 6m` is one being asked now. It is not the trail's
+		// `waiting 6m` — that marker sits on the open leg of a session
+		// that is asking you *now*, and spending the same word on both
+		// put two meanings on one frame (round 60).
+		return "unanswered"
 	}
 	switch s.Snap.State {
 	case state.NeedsYou, state.Stuck:

@@ -1599,7 +1599,7 @@ func TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped(t *testing.T) 
 						continue // the group is not on this frame
 					}
 					shed++
-					if strings.Contains(label, "brings one back") {
+					if strings.Contains(label, "one back") {
 						t.Errorf("%s %s %dx%d %v: the archive's hidden header names a key the typed line has taken: %q over %q",
 							prof.name, sc.name, w, h, route, label, r103fhLastRow(view))
 					} else if label != "hidden" {
@@ -1620,7 +1620,7 @@ func TestTheArchivesHiddenHeaderDropsItsKeyWhileALineIsBeingTyped(t *testing.T) 
 					if !m.archiveView || m.searching || m.replying {
 						continue
 					}
-					if label, ok := r103fhGroupHeader(m.View()); ok && strings.Contains(label, "brings one back") {
+					if label, ok := r103fhGroupHeader(m.View()); ok && strings.Contains(label, "one back") {
 						kept++
 					}
 				}

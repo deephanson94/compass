@@ -145,3 +145,58 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// The statuses the store's own reader acts on, and the one it skips. A
+// `question` part left pending is a call the harness never dispatched:
+// `events` skips it, so the machine never sees it, and a door that opened
+// on it would put `waiting 9d` on a row the machine calls hung — the
+// invariant the fleet pins, broken through the one package its transcripts
+// cannot reach (round 60).
+func TestAPendingQuestionIsNotAnOpenDoor(t *testing.T) {
+	for _, status := range []string{"pending", "running", "completed"} {
+		t.Run(status, func(t *testing.T) {
+			asked, _ := askedInfo(t, askStore(t, callMsg("msg_z", "question", status)))
+			if want := status == "running"; asked != want {
+				t.Errorf("a %s question: Asked = %v, want %v", status, asked, want)
+			}
+		})
+	}
+}
+
+// A turn the gateway refused is recorded on the message, and opencode may
+// write no part for it at all: an inner join never reached such a turn, so
+// the same question with an error turn over it answered two ways depending
+// on whether a step marker happened to be written (round 60).
+func TestARefusedTurnWithNoPartsClosesTheDoor(t *testing.T) {
+	path := askStore(t, func(must func(string, ...any), sessionID string) {
+		saidMsg("msg_z", "Two designs fit. Which should I build?")(must, sessionID)
+		must(`insert into message values ('msg_err', ?, 1788688893000, 1788688893000,
+			'{"role":"assistant","modelID":"mock-1","providerID":"mock","time":{"created":1788688893000,"completed":1788688893100},"error":{"name":"APIError","data":{"message":"429 rate limited"}}}')`, sessionID)
+	})
+	if asked, _ := askedInfo(t, path); asked {
+		t.Errorf("Asked = true under a refused turn: nothing you type clears a 429")
+	}
+}
+
+// A turn's words are read in the order it wrote them. The walk took the
+// parts back newest-first inside the message too, so a turn that ends on a
+// question read as one that does not, and one that merely contains a
+// question read as one that ends on it (round 60).
+func TestATurnsWordsAreReadInTheOrderItWroteThem(t *testing.T) {
+	two := func(first, second string) func(func(string, ...any), string) {
+		return func(must func(string, ...any), sessionID string) {
+			must(`insert into message values ('msg_z', ?, 1788688887339, 1788688892636,
+				'{"role":"assistant","modelID":"mock-1","providerID":"mock","time":{"created":1788688887339,"completed":1788688892634},"finish":"stop"}')`, sessionID)
+			must(`insert into part values ('prt_a', 'msg_z', ?, 1788688892768, 1788688892773, ?)`,
+				sessionID, fmt.Sprintf(`{"type":"text","text":%q}`, first))
+			must(`insert into part values ('prt_b', 'msg_z', ?, 1788688892774, 1788688892775, ?)`,
+				sessionID, fmt.Sprintf(`{"type":"text","text":%q}`, second))
+		}
+	}
+	if asked, _ := askedInfo(t, askStore(t, two("Which should I build?", "I will start on the first."))); asked {
+		t.Errorf("Asked = true on a turn that asks and then answers itself")
+	}
+	if asked, _ := askedInfo(t, askStore(t, two("I looked at both designs.", "Which should I build?"))); !asked {
+		t.Errorf("Asked = false on a turn that ends on its question")
+	}
+}

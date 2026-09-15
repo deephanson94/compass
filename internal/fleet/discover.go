@@ -130,6 +130,13 @@ type cachedInfo struct {
 	size    int64
 	modTime time.Time
 	info    SessionInfo
+	// wide says the peek that produced this info read the whole tail for a
+	// question rather than one window. A file peeked while it was still
+	// moving is cached narrow, and a file that then goes quiet never moves
+	// again — so without this the widening only ever ran after a restart,
+	// never for the session you walked away from while compass was up,
+	// which is the field finding's own timeline (round 60).
+	wide bool
 }
 
 // scanProjects walks the projects tree once. Given the previous scan's cache
@@ -174,7 +181,8 @@ func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]S
 				continue
 			}
 			path := filepath.Join(dir, f.Name())
-			if c, ok := prev[path]; ok && c.size == fi.Size() && c.modTime.Equal(fi.ModTime()) {
+			wide := fi.ModTime().Before(quiet)
+			if c, ok := prev[path]; ok && c.size == fi.Size() && c.modTime.Equal(fi.ModTime()) && (c.wide || !wide) {
 				out = append(out, c.info)
 				next[path] = c
 				continue
@@ -186,12 +194,13 @@ func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]S
 				LastEventAt:    fi.ModTime(), // refined to the last event time by the Manager
 			}
 			// A file that has not moved since the quiet mark is one whose
-			// question is load-bearing — nothing else can keep it live,
-			// and the cache will not open it again until it moves — so its
-			// ask walk gets the whole widening (round 59).
-			peek(&info, fi.Size(), fi.ModTime().Before(quiet))
+			// question is load-bearing — nothing else can keep it live —
+			// so its ask walk gets the whole widening (round 59). The
+			// crossing is what re-opens it: a file peeked narrow while it
+			// was moving is read again, once, when it falls quiet.
+			peek(&info, fi.Size(), wide)
 			out = append(out, info)
-			next[path] = cachedInfo{size: fi.Size(), modTime: fi.ModTime(), info: info}
+			next[path] = cachedInfo{size: fi.Size(), modTime: fi.ModTime(), info: info, wide: wide}
 		}
 	}
 

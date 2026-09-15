@@ -449,24 +449,147 @@ func TestTheWalkWidensForAFileThatHasGoneQuiet(t *testing.T) {
 
 // The invariant the board, the ranks and the SPEC row all rest on: a
 // session the ask door keeps live is a session the machine calls needs-you.
-// Where the two could disagree, the door yields — it is the machine that
-// draws the row (round 59).
+// Where the two differ the machine wins — it folds the whole file where the
+// walk reads its last lines — and the door closes again.
+//
+// The round-59 pin for this built five sessions by hand and asserted over
+// them; a hand-made session cannot disagree with a machine that never ran.
+// This one is transcripts, and its cases are the shapes the panel broke the
+// invariant with (round 60).
 func TestWaitingIsAlwaysNeedsYou(t *testing.T) {
+	cases := []struct {
+		name  string
+		write func(t *testing.T, root, id string)
+	}{
+		{"a call that never came back, then a resume and a question", func(t *testing.T, root, id string) {
+			newTranscript(t, id, "/home/user/alpha", "main").
+				prompt(ago(30*time.Hour), "build the release binary").
+				tool(ago(29*time.Hour), "toolu_b1", "Bash", map[string]any{"command": "go build ./..."}).
+				meta(ago(28*time.Hour), "Continue from where you left off.").
+				text(ago(27*time.Hour), "The build never finished. Shall I retry it?").
+				write(root, slugAlpha)
+		}},
+		{"a question, then a wordless assistant line", func(t *testing.T, root, id string) {
+			newTranscript(t, id, "/home/user/alpha", "main").
+				prompt(ago(30*time.Hour), "review the migration plan").
+				text(ago(29*time.Hour), "The plan is drafted. Shall I proceed?").
+				text(ago(28*time.Hour), "").
+				write(root, slugAlpha)
+		}},
+		{"a call out, a question, then the result", func(t *testing.T, root, id string) {
+			newTranscript(t, id, "/home/user/alpha", "main").
+				prompt(ago(30*time.Hour), "find the gate").
+				tool(ago(29*time.Hour), "toolu_g1", "Grep", map[string]any{"pattern": "gate"}).
+				text(ago(28*time.Hour), "Which of the two files defines the gate?").
+				result(ago(27*time.Hour), "toolu_g1", "gate.go:12").
+				write(root, slugAlpha)
+		}},
+		{"a question, then a subagent's words", func(t *testing.T, root, id string) {
+			newTranscript(t, id, "/home/user/alpha", "main").
+				prompt(ago(30*time.Hour), "map the payments module").
+				text(ago(29*time.Hour), "Two designs fit. Which should I build?").
+				sidechainText(ago(28*time.Hour), "The manifest is unsigned.").
+				write(root, slugAlpha)
+		}},
+		{"a question, then a refused call with no words of its own", func(t *testing.T, root, id string) {
+			newTranscript(t, id, "/home/user/alpha", "main").
+				prompt(ago(30*time.Hour), "run the backfill").
+				text(ago(29*time.Hour), "The shards are ready. Shall I start?").
+				apiError(ago(28*time.Hour), 403, "authentication_failed", "").
+				write(root, slugAlpha)
+		}},
+		{"the plain case, which must still be waiting", func(t *testing.T, root, id string) {
+			askedQuestionAt(t, root, slugAlpha, id, 26*time.Hour)
+		}},
+	}
+
+	waited := 0
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			c.write(t, root, idWaitingDay)
+			s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingDay)
+			if s.Waiting {
+				waited++
+				if s.Snap.State != state.NeedsYou || s.Snap.APIError {
+					t.Errorf("Waiting with state %s (apiError %v) — the door opened on a verdict the machine does not share",
+						s.Snap.State, s.Snap.APIError)
+				}
+			}
+		})
+	}
+	if waited == 0 {
+		t.Errorf("no case came out waiting: the invariant held vacuously")
+	}
+}
+
+// A door the fold refused stays shut while the file sits still, and opens
+// again the moment the file grows: the alternative is replaying a whole
+// transcript every second to reach the same answer (round 60).
+func TestARefusedDoorDoesNotKnockTwiceUntilTheFileMoves(t *testing.T) {
 	root := t.TempDir()
-	askedQuestionAt(t, root, slugAlpha, idWaitingDay, 26*time.Hour)
-	stalledCallAt(t, root, slugAlpha, idArchQuestion, 26*time.Hour)
-	needsYouAt(t, root, slugAlpha, idFreshUnmapped, time.Minute)
-	workingAt(t, root, slugBeta, idLiveWorker, 10*time.Second)
+	// A call that never came back under a question: the walk says asked,
+	// the machine says hung.
 	newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
-		prompt(ago(27*time.Hour), "map the payments module").
-		text(ago(26*time.Hour), "Two designs fit. Which should I build?").
-		sidechainPrompt(ago(25*time.Hour), "scout the payments module").
+		prompt(ago(30*time.Hour), "build the release binary").
+		tool(ago(29*time.Hour), "toolu_b2", "Bash", map[string]any{"command": "go build ./..."}).
+		meta(ago(28*time.Hour), "Continue from where you left off.").
+		text(ago(27*time.Hour), "The build never finished. Shall I retry it?").
 		write(root, slugAlpha)
 
-	for _, s := range mustRefresh(t, fleet.NewManager(root), fleetNow) {
-		if s.Waiting && s.Snap.State != state.NeedsYou {
-			t.Errorf("%s: Waiting with state %s — the door opened on a verdict the machine does not share",
-				s.Info.ID, s.Snap.State)
-		}
+	m := fleet.NewManager(root)
+	first := pick(t, mustRefresh(t, m, fleetNow), idWaitingWeek)
+	if first.Live || first.Waiting {
+		t.Fatalf("Live/Waiting = %v/%v, want the archive: the machine calls this hung", first.Live, first.Waiting)
 	}
+	assertArchivedSnap(t, first)
+	assertArchivedSnap(t, pick(t, mustRefresh(t, m, fleetNow), idWaitingWeek))
+
+	// The file grows into a shape the machine agrees with: the result
+	// lands, and a question is the last word.
+	at := ago(20 * time.Hour)
+	appendLines(t, root, slugAlpha, idWaitingWeek,
+		continueTranscript(t, idWaitingWeek, "/home/user/alpha", "main", 4).
+			result(at, "toolu_b2", "ok").
+			text(at.Add(time.Second), "The build is green. Shall I tag it?"),
+		at.Add(time.Second))
+
+	assertWaiting(t, pick(t, mustRefresh(t, m, fleetNow), idWaitingWeek), time.Time{})
+}
+
+// The widening is reached by the file falling quiet, not only by a restart.
+// A session you walk away from is peeked while it is still moving — narrow,
+// because the recency door has it — and the (size, mtime) cache would then
+// serve that narrow verdict for the rest of the run, so the question behind
+// a long tail was found only by a compass started after the fact (round 60).
+func TestAFileThatFallsQuietIsReadAgain(t *testing.T) {
+	root := t.TempDir()
+	bulk := strings.Repeat("resumed. ", 12000) // ~108KB, past one window
+	askedAt := ago(3 * time.Minute)
+	newTranscript(t, idWaitingDay, "/home/user/alpha", "main").
+		prompt(ago(4*time.Minute), "review the migration plan").
+		text(askedAt, "The plan is drafted. Shall I proceed?").
+		meta(ago(2*time.Minute), bulk).
+		write(root, slugAlpha)
+
+	m := fleet.NewManager(root)
+	// While it is moving: one window, no question found, and live anyway.
+	moving := pick(t, mustRefresh(t, m, fleetNow), idWaitingDay)
+	if moving.Info.Asked {
+		t.Fatalf("a file still being written read past its window")
+	}
+	if !moving.Live || moving.Waiting {
+		t.Fatalf("Live/Waiting = %v/%v, want live on the recency door", moving.Live, moving.Waiting)
+	}
+
+	// Ten minutes later nothing has been written and nobody has restarted
+	// compass. The file has not moved, so the cache holds its narrow
+	// answer — and the question is exactly what decides whether this
+	// session is still on the board.
+	later := fleetNow.Add(10 * time.Minute)
+	quiet := pick(t, mustRefresh(t, m, later), idWaitingDay)
+	if !quiet.Info.Asked {
+		t.Errorf("Info.Asked = false once the file fell quiet: the widening waited for a restart")
+	}
+	assertWaiting(t, quiet, askedAt)
 }

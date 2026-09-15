@@ -80,9 +80,14 @@ func (s *Store) keepAsks(live map[string]bool) {
 func (s *Store) walkAsk(sessionID string) (bool, time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`select m.id, m.data, p.data, m.time_created
-		from part p join message m on m.id = p.message_id
-		where p.session_id = ? order by m.time_created desc, m.id desc, p.id desc limit ?`,
+	// Left join, and the parts of a message in the order it wrote them: an
+	// inner join hid a turn that carries no part at all — the refusal
+	// opencode records on the message alone — and `p.id desc` handed the
+	// text blocks back reversed, so "ends with a question" read the wrong
+	// end of the turn (round 60).
+	rows, err := s.db.Query(`select m.id, m.data, coalesce(p.data, ''), m.time_created
+		from message m left join part p on m.id = p.message_id
+		where m.session_id = ? order by m.time_created desc, m.id desc, p.id asc limit ?`,
 		sessionID, askRows)
 	if err != nil {
 		return false, time.Time{}
@@ -119,6 +124,9 @@ func (s *Store) walkAsk(sessionID string) (bool, time.Time) {
 				continue
 			}
 		}
+		if pdata == "" {
+			continue // a message with no parts of its own: its own fields decide
+		}
 		var p part
 		if unmarshal(pdata, &p) == nil {
 			parts = append(parts, p)
@@ -150,6 +158,13 @@ func askedIn(msg message, parts []part, created int64) (bool, time.Time, bool) {
 	calls, out := 0, 0
 	for _, p := range parts {
 		if p.Type != "tool" {
+			continue
+		}
+		if p.State.Status == "pending" {
+			// The store's own reader skips a pending part (`events`), so
+			// the machine never sees it and would call this session hung
+			// while the door called it a question. The door reads what the
+			// reader reads (round 60).
 			continue
 		}
 		calls++

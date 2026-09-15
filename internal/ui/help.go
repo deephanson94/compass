@@ -23,7 +23,7 @@ var helpKeys = [][2]string{
 	{"[ ]", "previous / next prompt — the chapters of a trail"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
-	{"x", "hide a session — A lists it, x there brings it back · X, every one waiting"},
+	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
 	{"a", "ask: a claude grounded in this session's transcript"},
 	{"space", "reader: fold / unfold a tool output"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
@@ -459,7 +459,7 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 				// sheds for the sentence — `x there brings it back` — is
 				// said by the archive's own group header, two rows above
 				// the rows it applies to.
-				key, what = "x X A", "hide a session · A browses the archive · X, every one waiting"
+				key, what = "x X A", "hide a session · A browses the archive · X, every one unanswered"
 			case "A":
 				what = ""
 			case "m":

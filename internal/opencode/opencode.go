@@ -472,9 +472,22 @@ func toolInput(raw json.RawMessage) json.RawMessage {
 	// the words go.
 	if q, ok := m["question"]; ok {
 		if _, has := m["questions"]; !has {
-			one := map[string]json.RawMessage{"question": q}
+			one := map[string]any{"question": q}
 			if opts, ok := m["options"]; ok {
-				one["options"] = opts
+				// The labels may be bare strings where Claude Code's tool
+				// takes objects, and the reader decodes the whole input or
+				// nothing — so a shape it cannot read loses the question
+				// text as well as the options (round 60).
+				var plain []string
+				if json.Unmarshal(opts, &plain) == nil {
+					labels := make([]any, 0, len(plain))
+					for _, l := range plain {
+						labels = append(labels, map[string]any{"label": l})
+					}
+					one["options"] = labels
+				} else {
+					one["options"] = opts
+				}
 			}
 			if raw, err := json.Marshal([]any{one}); err == nil {
 				m["questions"] = raw

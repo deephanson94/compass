@@ -2106,7 +2106,11 @@ func (m *Model) sweepWaiting() {
 	var keys []string
 	for _, i := range m.viewOrder() {
 		s := m.sessions[i]
-		if s.Waiting && !m.hidden[s.Info.Key()] {
+		// Only what `x` would take: the plural of a key cannot reach
+		// further than the key. A sweep that skipped the refusals hid rows
+		// `x` had just refused to hide, and `onBoard` then kept them off
+		// for good (round 60).
+		if s.Waiting && !m.hidden[s.Info.Key()] && m.hideRefusal(s) == "" {
 			keys = append(keys, s.Info.Key())
 		}
 	}
@@ -2135,11 +2139,13 @@ func (m *Model) sweepWaiting() {
 		m.hidden[key] = true
 	}
 	m.saveHidden()
-	// The route back is `A`, and the archive's own group header names the
-	// keys there: the note promised `A, then X` as this key's undo, and `X`
-	// there brings back everything hidden, the rows put down one at a time
-	// with `x` included (round 59).
-	m.note = fmt.Sprintf("%d waiting hidden · A lists them", len(keys))
+	// The route back is `A`, and the key there is `x` — the one that brings
+	// back the row you pick. The note promised `A, then X` as this key's
+	// own undo, and `X` there brings back everything hidden, the rows put
+	// down one at a time with `x` included (round 59); it says `A, then x`
+	// now, which is the grammar the hide note beside it already uses and a
+	// promise the archive keeps (round 60).
+	m.note = fmt.Sprintf("%d waiting hidden · A, then x", len(keys))
 	if stayed != "" {
 		m.note = fmt.Sprintf("%d waiting hidden · %s stays", len(keys), stayed)
 	}
@@ -2318,7 +2324,7 @@ func (m *Model) hideRefusal(s fleet.Session) string {
 		// So the sentence yields the last of what the frame supplies and
 		// answers the key's own question instead. In the archive `x`
 		// brings a hidden row back (§3), and the archive's own header
-		// says `hidden · x brings one back` of the rows it does bring
+		// says `hidden · x one back, X all` of the rows it does bring
 		// back (#291): this row is not one of them. Where the row is is
 		// what the frame says three ways already — `▌FLEET · archive`,
 		// the header's `archive 12` chip and the row's own `○` (#175,
@@ -3909,7 +3915,7 @@ func (m *Model) statusChips() string {
 		// Dim, where the alarms are warm: the glyph says what it is, the
 		// word says it is not today's, and the age is the oldest question
 		// on the board — the number `X` clears in one key.
-		parts = append(parts, dimStyle.Render(fmt.Sprintf("%s%d waiting %s", fleet.GlyphNeedsYou, waits, m.age(waitSince))))
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("%s%d unanswered %s", fleet.GlyphNeedsYou, waits, m.age(waitSince))))
 	}
 	for _, st := range []state.State{state.Working, state.Idle} {
 		if n := counts[st]; n > 0 {
@@ -4501,7 +4507,7 @@ func (m *Model) keymapOnce() string {
 		// keys act here as they do on the live list, and answered
 		// `no earlier prompt` on a row that did not name them (#193).
 		// `r reply` stands here too: the archive draws and selects live
-		// rows — the hidden one under `hidden · x brings one back` (#29),
+		// rows — the hidden one under `hidden · x one back, X all` (#29),
 		// and the live session an archive with nothing in it keeps (#244,
 		// #248) — and for those the pane is real. Which of the two writes
 		// a row is offered is the pane's question, not the view's (#53):

@@ -12,6 +12,7 @@ import (
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
+	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
 // Round fifty-nine, asked for: the question you walked away from (#344).
@@ -128,8 +129,8 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 	if m.hidden[sessionKey("s-api")] || m.hidden[sessionKey("s-etl")] {
 		t.Errorf("X took a session that is not waiting on an old question")
 	}
-	if !strings.Contains(m.note, "2 waiting hidden · A lists them") {
-		t.Errorf("note = %q, want the count and the route back", m.note)
+	if !strings.Contains(m.note, "2 waiting hidden · A, then x") {
+		t.Errorf("note = %q, want the count and the route back in the grammar its neighbours use", m.note)
 	}
 	if strings.Contains(m.note, "then X") {
 		t.Errorf("note = %q promises an undo X does not keep: it brings back every hidden row", m.note)
@@ -226,8 +227,8 @@ func TestTheHeaderCountsTodaysAlarmsApartFromThePile(t *testing.T) {
 	if !strings.Contains(chips, "▲1 4m") {
 		t.Errorf("chips = %q, want one alarm of the moment with its own wait", chips)
 	}
-	if !strings.Contains(chips, "▲2 waiting 3d") {
-		t.Errorf("chips = %q, want the pile counted apart, in its own words, at the oldest question's age", chips)
+	if !strings.Contains(chips, "▲2 unanswered 3d") {
+		t.Errorf("chips = %q, want the pile counted apart, in its own word, at the oldest question's age", chips)
 	}
 	if strings.Contains(chips, "▲3") || strings.Contains(chips, "▲4") {
 		t.Errorf("chips = %q: the pile is still being counted as alarms", chips)
@@ -252,7 +253,7 @@ func TestABoardOfOnlyWaitingIsNeitherCalmNorAnAlarm(t *testing.T) {
 	fleet.SortFleet(only)
 	m.Update(fleetMsg{sessions: only, at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
 	chips := ansi.Strip(m.statusChips())
-	if !strings.Contains(chips, "▲2 waiting 3d") {
+	if !strings.Contains(chips, "▲2 unanswered 3d") {
 		t.Errorf("chips = %q, want the pile's own chip", chips)
 	}
 	if strings.Contains(chips, "all calm") {
@@ -294,14 +295,14 @@ func TestThePileNeverTakesTheColumnsOfTodaysWork(t *testing.T) {
 func TestAWaitingRowSaysItIsWaiting(t *testing.T) {
 	m := r59Model(t)
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "waiting") {
-		t.Fatalf("no row says it is waiting:\n%s", view)
+	if !strings.Contains(view, "unanswered") {
+		t.Fatalf("no row says the question is unanswered:\n%s", view)
 	}
 	for _, s := range m.sessions {
 		got := headline(s)
 		want := "needs you"
 		if s.Waiting {
-			want = "waiting"
+			want = "unanswered"
 		}
 		if s.Snap.State == state.Working {
 			want = ""
@@ -319,6 +320,15 @@ func TestTheGroupHoldingThePileWearsItsMark(t *testing.T) {
 	forceASCII(t)
 	m := New(nil)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	// The sessions that are live today sit in a tmux group, so `elsewhere`
+	// holds the questions and nothing else: with an alarm of the moment in
+	// it the echo is a `▲` either way, and the pin measured nothing (round
+	// 60's finding on this very fold).
+	panes := map[string]tmuxop.Pane{
+		sessionKey("s-api"): {Target: "work:0.0"},
+		sessionKey("s-etl"): {Target: "work:1.0"},
+	}
+	m.Update(panesMsg{panes: panes, against: len(r59Fleet())})
 	m.Update(fleetMsg{sessions: r59Fleet(), at: fixtureBase, trails: map[string]journey.Trail{}, paired: true})
 	var pile fleetGroup
 	for _, g := range m.liveGroups() {
@@ -328,6 +338,12 @@ func TestTheGroupHoldingThePileWearsItsMark(t *testing.T) {
 	}
 	if len(pile.entries) == 0 {
 		t.Fatalf("no elsewhere group: the paneless questions are grouped somewhere else")
+	}
+	for _, i := range pile.entries {
+		if !m.sessions[i].Waiting {
+			t.Fatalf("the elsewhere group holds %s, which is not waiting: the fixture measures nothing",
+				sessionName(m.sessions[i].Info))
+		}
 	}
 	if got := m.groupEcho(pile); got != fleet.GlyphNeedsYou {
 		t.Errorf("the group holding every unanswered question echoes %q, want %q", got, fleet.GlyphNeedsYou)
@@ -379,7 +395,37 @@ func TestTheHelpRowForTheGrabSaysWhichQuestionItTakes(t *testing.T) {
 // everything hidden — the rows put down one at a time with `x` included.
 // The board's note no longer promises that undo.
 func TestTheArchiveNamesTheKeyThatBringsThemAllBack(t *testing.T) {
-	if !strings.Contains(hiddenGroup, "x brings one back") || !strings.Contains(hiddenGroup, "X all") {
-		t.Errorf("the hidden group's header = %q, want both keys named where they are pressed", hiddenGroup)
+	forceASCII(t)
+	// On the frame, at the width that pays for it: the header was asserted
+	// against the Go constant and stood green while eighty columns cut the
+	// sentence to a bare `X…` welded against the group's own mark (round
+	// 60). Eighty is where the label column is thirty cells.
+	sc := sceneLeftBehind()
+	for _, w := range []int{80, 100, 152} {
+		// Tall enough that the list draws the group whatever order it
+		// sorts in: the clip this pins is a function of the label column's
+		// width, not of the rows.
+		m := sceneModel(sc, w, 40)
+		poll(m, sc)
+		pressKey(m, "X")
+		pressKey(m, "A")
+		poll(m, sc)
+		row := ""
+		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+			if strings.Contains(l, "hidden ·") {
+				row = l
+			}
+		}
+		if row == "" {
+			t.Fatalf("%d columns: the archive draws no header for what the sweep hid:\n%s", w, ansi.Strip(m.View()))
+		}
+		for _, want := range []string{"x one back", "X all"} {
+			if !strings.Contains(row, want) {
+				t.Errorf("%d columns: the header %q does not name %q where the key is pressed", w, strings.TrimSpace(row), want)
+			}
+		}
+		if strings.Contains(row, "…") {
+			t.Errorf("%d columns: the header is cut mid-sentence: %q", w, strings.TrimSpace(row))
+		}
 	}
 }
