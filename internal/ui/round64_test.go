@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -271,3 +273,251 @@ func TestTheBlockEndsOnItsSeam(t *testing.T) {
 		t.Errorf("a trail with no block should draw no seam")
 	}
 }
+
+// The panel's first pass on #374, subagents, folded (#376).
+
+func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sc, size[0], size[1])
+		for _, d := range []string{"1", "2", "3", "4", "5"} {
+			pressKey(m, d)
+			poll(m, sc)
+			if s, ok := m.selected(); ok && sessionName(s.Info) == "porter" && len(m.trails[m.selectedKey].Branches) == 4 {
+				break
+			}
+		}
+		for _, level := range []string{"board or list", "legs"} {
+			v := ansi.Strip(m.View())
+			lanes := ""
+			for _, line := range strings.Split(v, "\n") {
+				if strings.Contains(line, "◈ agent  4 lanes") {
+					lanes = line
+				}
+			}
+			if lanes == "" {
+				t.Fatalf("%dx%d %s: porter's lanes row is not on the frame:\n%s", size[0], size[1], level, v)
+			}
+			// The oldest lane's clock is on the frame once: on the fleet
+			// row beside, the card, the column header or HEAD's own row —
+			// and then not on the lanes row (#376).
+			said := strings.Contains(v, "◈3 out 20m") || strings.Contains(v, "20m out")
+			onRow := strings.Contains(lanes, "20m out")
+			if !said {
+				t.Errorf("%dx%d %s: no row carries the oldest lane's clock:\n%s", size[0], size[1], level, v)
+			}
+			if onRow && strings.Count(v, "20m out")+strings.Count(v, "◈3 out 20m") > 1 {
+				t.Errorf("%dx%d %s: the lanes row repeats the clock the frame carries: %q\n%s", size[0], size[1], level, lanes, v)
+			}
+			if level == "board or list" {
+				for m.level < levelWaypoints {
+					pressKey(m, "tab")
+					poll(m, sc)
+				}
+			}
+		}
+	}
+}
+
+// The panel's first pass on #374 — alarm-storm, fleet-hygiene, two-tools
+// and second-day's second — folded (#377).
+
+// boardColumnsDrawn counts the columns a board frame draws, by the digit
+// and glyph that head each.
+func boardColumnsDrawn(v string) int {
+	n := 0
+	for _, line := range strings.Split(v, "\n") {
+		if strings.Contains(line, "│") || strings.HasPrefix(strings.TrimSpace(line), "▸") || len(line) > 2 && line[1] >= '1' && line[1] <= '9' {
+			// a header row: every column's first row carries a digit
+			for _, cell := range strings.Split(line, "│") {
+				t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(cell), "▸"))
+				if len(t) > 1 && t[0] >= '1' && t[0] <= '9' && t[1] == ' ' {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+
+func TestTheBlockNeverCostsASessionItsColumn(t *testing.T) {
+	forceASCII(t)
+	for _, sc := range []scene{sceneAlarmStorm(), sceneManyIdle()} {
+		m := sceneModel(sc, 120, 34)
+		v := ansi.Strip(m.View())
+		if got := boardColumnsDrawn(v); got < 6 {
+			t.Errorf("%s at 120x34 should draw six columns as it did before the block, drew %d:\n%s", sc.name, got, v)
+		}
+		if !strings.Contains(v, " legs") || !strings.Contains(v, "│ the trail ─") {
+			t.Errorf("%s at 120x34 should keep its blocks while it keeps its columns:\n%s", sc.name, v)
+		}
+	}
+	// Where the board has the rows, the block stands over the whole trail.
+	m := sceneModel(sceneVeryLong(), 220, 48)
+	if m.blockInTrail {
+		t.Errorf("the flag should not outlive the frame")
+	}
+}
+
+func TestTheBoardsFoldRowAndTheBlockClose(t *testing.T) {
+	forceASCII(t)
+	sc := sceneVeryLong()
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {220, 48}} {
+		m := sceneModel(sc, size[0], size[1])
+		v := ansi.Strip(m.View())
+		for _, line := range strings.Split(v, "\n") {
+			for _, cell := range strings.Split(line, "│") {
+				c := strings.TrimSpace(cell)
+				if !strings.HasPrefix(c, "↑ ") || !strings.Contains(c, " legs") {
+					continue
+				}
+				var hidden int
+				if _, err := fmt.Sscanf(c, "↑ %d legs", &hidden); err != nil {
+					continue
+				}
+				// The fold row plus the legs drawn under it is the block's
+				// sum: auth 160, etl 120.
+				_ = hidden
+			}
+		}
+		// Pin the arithmetic directly on the column the fold row is drawn on.
+		key := m.viewOrderKeys()[0]
+		tr := m.trails[key]
+		r := m.boardRows()[key]
+		_, cw := boardColumns(size[0]-2*edgePad, m.drawnCount(m.viewOrder()))
+		col := m.boardColumn(key, r, cw, 30)
+		hidden, drawn := -1, 0
+		for _, line := range col {
+			c := ansi.Strip(line)
+			if strings.Contains(c, "↑ ") && strings.Contains(c, " legs") {
+				fmt.Sscanf(strings.TrimSpace(c), "↑ %d legs", &hidden)
+				continue
+			}
+			// A leg row: its mark, or the rail where a run of one class
+			// continues, then the class word — never a block row.
+			if hidden >= 0 && legRowPattern.MatchString(c) && !strings.Contains(c, " legs") {
+				drawn++
+			}
+		}
+		if hidden < 0 {
+			t.Fatalf("%dx%d: no fold row on the column:\n%s", size[0], size[1], strings.Join(col, "\n"))
+		}
+		if hidden+drawn != len(tr.Legs) {
+			t.Errorf("%dx%d: the fold row (%d) and the legs beneath it (%d) do not close on the block's %d (#377):\n%s", size[0], size[1], hidden, drawn, len(tr.Legs), strings.Join(col, "\n"))
+		}
+	}
+}
+
+func TestAWaitWorthARowCountsAlone(t *testing.T) {
+	forceASCII(t)
+	m, _ := twoToolsWaiting(t, 80, 24)
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "◉ waited on you · 4 prompts") || !strings.Contains(v, "│ the trail ─") {
+		t.Errorf("a trail of one of each with a wait worth a row should draw the wait row and its seam (#357, #377):\n%s", v)
+	}
+	if strings.Contains(v, " legs ") {
+		t.Errorf("a trail of one of each should draw no class row:\n%s", v)
+	}
+}
+
+func TestTheCardKeepsTheClauseItShedForATagItDropped(t *testing.T) {
+	forceASCII(t)
+	m, _ := twoToolsWaiting(t, 120, 34)
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "on you 12m today") && !strings.Contains(v, "◉ waited on you") {
+		t.Errorf("at 120 the api session's wait should be on the card or the block (#377):\n%s", v)
+	}
+}
+
+func TestTheTitleKeepsItsRedsWhereTheReplyBoxCoversTheBlock(t *testing.T) {
+	forceASCII(t)
+	sc := sceneManyIdle()
+	m := sceneModel(sc, 80, 24)
+	found := false
+	for _, d := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if blockCounts(m.trail) && strings.Contains(trailDay(m.trail, m.now, false), " red") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Skip("no many-idle session with a block and a red count")
+	}
+	pressKey(m, "r")
+	poll(m, sc)
+	if !m.replyBox.on {
+		t.Skip("r did not open the reply box here")
+	}
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, " legs") && !strings.Contains(v, " red") {
+		t.Errorf("the box covers the block and the title gave its reds away: nothing on the frame counts them (#377):\n%s", v)
+	}
+	pressKey(m, "esc")
+}
+
+func TestAStuckHeadsFigureIsSaidOnceAcrossTheSeam(t *testing.T) {
+	forceASCII(t)
+	sc := sceneFewOngoing()
+	m := sceneModel(sc, 80, 24)
+	found := false
+	for _, d := range []string{"1", "2", "3", "4", "5", "6"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if strings.Contains(ansi.Strip(m.View()), "silent 4m") && blockCounts(m.trail) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Skip("no few-ongoing session with a stuck HEAD under a block")
+	}
+	cells := trailCells(m)
+	col := strings.Join(cells, "\n")
+	if strings.Count(col, "silent 4m") > 1 {
+		t.Errorf("the class row repeats the stuck figure HEAD's own row says beneath the seam (#377):\n%s", col)
+	}
+}
+
+// twoToolsWaiting opens two-tools' Claude api session, which waits on you
+// over a trail of one of each, on its legs at w×h.
+func twoToolsWaiting(t *testing.T, w, h int) (*Model, scene) {
+	t.Helper()
+	sc := sceneTwoTools()
+	m := sceneModel(sc, w, h)
+	key := sessionKey("api-claude")
+	if promptWaits(sc.trails[key]) < waitNotable {
+		t.Fatalf("the scene's claude api session waits %s, under the threshold", promptWaits(sc.trails[key]))
+	}
+	found := false
+	for _, d := range []string{"1", "2", "3", "4"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if m.selectedKey == key {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no digit reaches the claude api session")
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	return m, sc
+}
+
+// viewOrderKeys is the board's sessions, by key, in the board's order.
+func (m *Model) viewOrderKeys() []string {
+	var keys []string
+	for _, i := range m.viewOrder() {
+		keys = append(keys, m.sessions[i].Info.Key())
+	}
+	return keys
+}
+
+// legRowPattern is the shape of a leg row on a board column.
+var legRowPattern = regexp.MustCompile(`^[◆●◍▲│]▸? ?(scout|design|build|fix|test|ship|docs) `)

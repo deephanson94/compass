@@ -270,6 +270,17 @@ func (m *Model) boardLines(w, h int) []string {
 		m.noLaneHeads = false
 	}
 	defer func() { m.noLaneHeads = false }()
+	// The block is the same kind of spare-row spend: over a trail that
+	// keeps every row, where the board has the rows, and out of the
+	// trail's own rows where it would cost a session its column — the
+	// counts stand either way (#374, #377).
+	m.blockInTrail = true
+	if tight, tightH := m.boardPack(n, cw, body); len(tight) > len(keys) {
+		keys, heights = tight, tightH
+	} else {
+		m.blockInTrail = false
+	}
+	defer func() { m.blockInTrail = false }()
 	if len(keys) == 0 && m.fleetQuery != "" {
 		// A search nothing answers keeps the board and says so, rather
 		// than silently turning into the deck. Under the note, the band
@@ -615,7 +626,13 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 		Dense: true, Looked: m.looked(key), NoLaneHeads: m.noLaneHeads,
 	})
-	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the trail (#374)
+	if m.blockInTrail {
+		// The block out of the trail's own rows: the column measures what
+		// its trail needs, or its block over two rows of trail, whichever
+		// is taller, so the bands pack as they packed before it (#377).
+		return 3 + max(len(doc), blockHeight(tr)+2)
+	}
+	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the whole trail (#374)
 }
 
 // boardRows numbers the board's sessions in the board's own order — the
@@ -1951,7 +1968,18 @@ func headSince(s fleet.Session) time.Time {
 // hiddenAbove counts the legs a pinned column keeps above its first row.
 func hiddenAbove(tr journey.Trail, o TrailOpts) int {
 	doc, sel := trailDoc(tr, o)
-	return legsHiddenAbove(tr, o.Level, sel, trailTop(len(doc), o))
+	top := trailTop(len(doc), o)
+	n := legsHiddenAbove(tr, o.Level, sel, top)
+	// The fold row is drawn over the viewport's first row: where that row
+	// is a leg, it is hidden too, and the count says so — the trail
+	// column's title counts the same trail at the same scroll one higher
+	// otherwise, and since #374 the block above sums the legs (#377).
+	if rows := TrailRows(tr, o.Level); n > 0 && top < len(sel) {
+		if j := sel[top]; j >= 0 && j < len(rows) && rows[j].Kind == "leg" {
+			n++
+		}
+	}
+	return n
 }
 
 // boardMuted says whether a column is drawn dim. Bright means there is

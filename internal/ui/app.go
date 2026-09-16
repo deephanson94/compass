@@ -290,13 +290,14 @@ type Model struct {
 	// matter while nobody is looking at the deck — a question, a hang, a
 	// refusal, a loop, agents returning. hookRun is the seam a harness
 	// replaces; before is what each session was at the last refresh.
-	hook        string
-	hookRun     func(event, session, tmux, detail string)
-	before      map[string]hookState
-	pulse       bool // HEAD's breath is on its off-beat
-	noLaneHeads bool // the board packed tighter than its lanes' heads (round 47)
-	askBelow    bool // the card below this row draws its ask on its own ◉ row (#107)
-	readonly    bool
+	hook         string
+	hookRun      func(event, session, tmux, detail string)
+	before       map[string]hookState
+	pulse        bool // HEAD's breath is on its off-beat
+	noLaneHeads  bool // the board packed tighter than its lanes' heads (round 47)
+	blockInTrail bool // the board packed its blocks out of their trails' rows, not the board's (#377)
+	askBelow     bool // the card below this row draws its ask on its own ◉ row (#107)
+	readonly     bool
 
 	// The board's data: one trail per column, and each column's narrated
 	// labels. The selected session's trail is here as well as in trail.

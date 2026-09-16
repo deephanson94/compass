@@ -2074,6 +2074,12 @@ func (m *Model) cardSecond(w int) string {
 	// The tag beside the sentence as it would be drawn whole: the ladder
 	// gives way to the whole sentence first, then keeps its floor (#56).
 	tmux := m.tagFor(s, room, 24, strings.Join(sentence(room), " · "))
+	if tmux != "" && m.headerSaysTag(tmux) {
+		// The header two rows up says every clause of the rung, and the
+		// row is stripped of it anyway (cardKeepsOnlyItsTag): a verdict
+		// clause shed to make room for it was shed for nothing (#377).
+		tmux = ""
+	}
 	// The tmux session is always kept — `enter` attaches from here — and
 	// the day is added after the verdict, so joinFit sheds the day's
 	// clauses before the verdict's; the long form when it all fits, the

@@ -312,7 +312,7 @@ func spanText(d time.Duration) string {
 // not one (#350). The silent and the empty are the card's, said there;
 // how many came back is the card's too, and the row's where the frame
 // draws no card and the fleet row beside has shed it (#361).
-func summaryLanesRow(tr journey.Trail, o TrailOpts, w int, backSaid bool) string {
+func summaryLanesRow(tr journey.Trail, o TrailOpts, w int, backSaid, outSaid bool) string {
 	var oldest, latest time.Time
 	for _, br := range tr.Branches {
 		if br.Done {
@@ -336,6 +336,13 @@ func summaryLanesRow(tr journey.Trail, o TrailOpts, w int, backSaid bool) string
 		age = relAge(o.Now, oldest) + " out"
 	case !latest.IsZero():
 		age = relAge(o.Now, latest) + " ago"
+	}
+	if outSaid {
+		// The frame already carries the oldest lane's clock — the card,
+		// the fleet row beside, the column header or HEAD's own row
+		// beneath — and one clock said twice on one frame is the thing
+		// #22 and #64 forbid. The row spends the room on the tally instead.
+		age = ""
 	}
 	back := 0
 	for _, br := range tr.Branches {
@@ -389,7 +396,11 @@ func blockCounts(tr journey.Trail) bool {
 			return true
 		}
 	}
-	return false
+	// Two lanes, or a wait on you worth a row, count too: the lanes row
+	// and the wait row are counts the leg rows do not hold, and a trail
+	// of one of each with a notable wait counted for `s` as well (#357,
+	// #377).
+	return len(tr.Branches) >= 2 || promptWaits(tr) >= waitNotable
 }
 
 // classCounts is how many legs a trail has of each class.
@@ -439,7 +450,7 @@ func blockHeight(tr journey.Trail) int {
 // above its block, so a row does not say it twice (#347, #356, #357):
 // the loop, the running leg's `for` clause, and the lanes' tally.
 type blockSaid struct {
-	loop, live, back bool
+	loop, live, back, out bool
 }
 
 // blockLines draws a trail's block w cells wide on its own head options:
@@ -459,7 +470,7 @@ func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said block
 		case "wait":
 			lines = append(lines, summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(tr.Prompts), "prompt"), nil, r.text, w))
 		case "lanes":
-			lines = append(lines, summaryLanesRow(tr, o, w, said.back))
+			lines = append(lines, summaryLanesRow(tr, o, w, said.back, said.out))
 		case "leg":
 			l := tr.Legs[r.leg]
 			lo := o
@@ -472,10 +483,72 @@ func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said block
 	return append(lines, seamRule(w)) // the block ends on its seam (#375)
 }
 
+// lanesClock is the clock the lanes row would wear: the oldest lane
+// still out, or the last one back.
+func lanesClock(tr journey.Trail, now time.Time) string {
+	var oldest, latest time.Time
+	for _, br := range tr.Branches {
+		if br.Done {
+			back := br.End
+			if back.IsZero() {
+				back = br.Start
+			}
+			if back.After(latest) {
+				latest = back
+			}
+			continue
+		}
+		if oldest.IsZero() || br.Start.Before(oldest) {
+			oldest = br.Start
+		}
+	}
+	switch {
+	case !oldest.IsZero():
+		return relAge(now, oldest) + " out"
+	case !latest.IsZero():
+		return relAge(now, latest) + " ago"
+	}
+	return ""
+}
+
+// blockSaysOut reports whether the frame already carries that clock, in
+// either idiom the fleet writes it in: "◈3 out 20m" or "⋯ 20m out".
+func blockSaysOut(tr journey.Trail, now time.Time, lines ...string) bool {
+	age := lanesClock(tr, now)
+	if age == "" {
+		return false
+	}
+	clock := strings.Fields(age)[0]
+	for _, l := range lines {
+		t := ansi.Strip(l)
+		if strings.Contains(t, clock+" out") || strings.Contains(t, "out "+clock) {
+			return true
+		}
+	}
+	return false
+}
+
 // blockShown says whether the trail column draws a block for the
-// selected trail: the trail counts (#374).
+// selected trail on this frame: the trail counts, and the reply box does
+// not cover every row of it — the title and the card stand down for
+// rows the frame draws, not rows it paints over (#17, #63, #377).
 func (m *Model) blockShown() bool {
-	return blockCounts(m.trail)
+	if !blockCounts(m.trail) {
+		return false
+	}
+	if m.replyBox.on {
+		top := trailChrome
+		if m.sessionView() {
+			top = 3
+		}
+		for i := top; i < top+blockHeight(m.trail); i++ {
+			if !m.boxCoversRow(i) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // trailBlock is the selected trail's block, for the trail column, over
@@ -489,21 +562,34 @@ func (m *Model) trailBlock(w int, below []string) []string {
 	}
 	o := m.trailOpts(w, 1)
 	said := blockSaid{loop: m.summaryLoopSaid(w), live: m.summaryLiveSaid(w), back: m.summaryBackSaid(w)}
-	return blockLines(m.trail, o, w, headSaysLive(m.trail, m.now, below), said)
+	beside := []string{m.cardSecond(w)}
+	if fw, _, _ := m.layout(m.width - 2*edgePad); fw > 0 {
+		if s, ok := m.selected(); ok {
+			beside = append(beside, m.secondLineUnder(s, fw-4, ""))
+		}
+	}
+	said.out = blockSaysOut(m.trail, m.now, append(beside, below...)...)
+	return blockLines(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said)
 }
 
 // headSaysLive reports whether the rows drawn beneath a block carry the
-// running leg's own clause, `for 39m`: the class row then yields it, as
-// it yields to the card (#351, #356, #374).
-func headSaysLive(tr journey.Trail, now time.Time, below []string) bool {
+// running leg's own clause — `for 39m`, or the figure HEAD wears when it
+// is stuck or waiting, `silent 4m`, `waiting 7m` — so the class row yields
+// it, as it yields to the card (#351, #356, #374, #377).
+func headSaysLive(tr journey.Trail, now time.Time, o TrailOpts, below []string) bool {
 	for _, l := range tr.Legs {
 		if !l.Current {
 			continue
 		}
-		want := "for " + relAge(now, l.Start)
-		for _, line := range below {
-			if strings.Contains(ansi.Strip(line), want) {
-				return true
+		wants := []string{"for " + relAge(now, l.Start)}
+		if _, fig := headMark(o, l); fig != "" {
+			wants = append(wants, fig)
+		}
+		for _, want := range wants {
+			for _, line := range below {
+				if strings.Contains(ansi.Strip(line), want) {
+					return true
+				}
 			}
 		}
 	}
@@ -525,10 +611,11 @@ func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o Tra
 		text += ansi.Strip(line) + "\n"
 	}
 	said := blockSaid{loop: strings.Contains(text, " failure"), back: strings.Contains(text, " back")}
+	said.out = blockSaysOut(tr, m.now, append([]string{text}, below...)...)
 	for _, l := range tr.Legs {
 		if l.Current {
 			said.live = strings.Contains(text, "for "+relAge(m.now, l.Start))
 		}
 	}
-	return blockLines(tr, so, w, headSaysLive(tr, m.now, below), said)
+	return blockLines(tr, so, w, headSaysLive(tr, m.now, so, below), said)
 }
