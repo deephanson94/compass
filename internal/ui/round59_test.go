@@ -499,3 +499,64 @@ func TestTheSweepTakesOnlyWhatTheHideWouldTake(t *testing.T) {
 		t.Errorf("X left the question it is for: note %q", m.note)
 	}
 }
+
+// r62FirstGroup is the first group header the archive's list pane draws:
+// the first non-empty row left of the divider that is not the panel's
+// title, the header line or the rule, read off the frame rather than off
+// the slice the ordering sorts.
+func r62FirstGroup(m *Model) string {
+	for _, r := range strings.Split(ansi.Strip(m.View()), "\n") {
+		t := strings.TrimSpace(strings.SplitN(r, "│", 2)[0])
+		if t == "" || strings.HasPrefix(t, "▌") || strings.HasPrefix(t, "⌂") || strings.HasPrefix(t, "─") ||
+			strings.HasPrefix(t, "FLEET") || strings.HasPrefix(t, "BOARD") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// TestTheArchivesHiddenGroupStandsFirst is the archive's own name, on the
+// frame: what `x` and `X` took off the board is the first thing `A` shows.
+// The group sorted by its newest row like any other, so a swept pile of
+// old questions sank under the recent archive and the note that sends the
+// person there — `A, then x` — sent them looking for it (#347, round 61).
+// Every route of r105ttArchiveRoutes that fills the group is a stand.
+func TestTheArchivesHiddenGroupStandsFirst(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, sc := range allScenes() {
+		for _, size := range r105ttArchiveSizes {
+			w, h := size[0], size[1]
+			for _, route := range r105ttArchiveRoutes {
+				m := sceneModel(sc, w, h)
+				for _, k := range route {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				if !m.archiveView || m.level >= levelReader {
+					continue
+				}
+				hidden := 0
+				for _, g := range m.archiveGroups() {
+					if g.name == hiddenGroup {
+						hidden = len(g.entries)
+					}
+				}
+				if hidden == 0 {
+					continue
+				}
+				stands++
+				first := r62FirstGroup(m)
+				if !strings.HasPrefix(first, hiddenGroupWord) {
+					t.Errorf("%s %v %dx%d: %d row(s) `x` took off the board are in the archive, and the first group `A` draws is %q — the pile the key just made is not where the key that made it says it is",
+						sc.name, route, w, h, hidden, first)
+				}
+			}
+		}
+	}
+	if stands < 20 {
+		t.Fatalf("the pin reached the hidden group on only %d stands — its routes no longer fill it", stands)
+	}
+	t.Logf("archive frames with a hidden group: %d", stands)
+}
