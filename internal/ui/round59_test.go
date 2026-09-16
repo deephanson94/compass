@@ -598,6 +598,17 @@ func TestTheLegendNamesTheMarkThisFeatureAdded(t *testing.T) {
 		if !strings.Contains(view, "X, every unanswered one") {
 			t.Errorf("%dx%d: the help does not say what `X` takes", w, h)
 		}
+		// The rows differ in their other half, and exactly one of the two
+		// is drawn at any width: the narrow row sends you to the archive,
+		// the full one names the key that brings a row back from it. Both
+		// rendered whole and neither was held by anything (round 62).
+		back := "x there brings it back"
+		if w < 120 {
+			back = "A browses the archive"
+		}
+		if !strings.Contains(view, back) {
+			t.Errorf("%dx%d: the help row that teaches `x` lost its other half — it says what `X` takes and not what `x` does", w, h)
+		}
 	}
 }
 
@@ -612,7 +623,7 @@ func TestTheLegendNamesTheMarkThisFeatureAdded(t *testing.T) {
 // header says, the cell left of its echo is air.
 func TestTheHiddenGroupsNameLeavesRoomForItsEcho(t *testing.T) {
 	forceASCII(t)
-	stands := 0
+	stands, narrow := 0, 0
 	for _, sc := range allScenes() {
 		for _, size := range r105ttArchiveSizes {
 			w, h := size[0], size[1]
@@ -635,6 +646,9 @@ func TestTheHiddenGroupsNameLeavesRoomForItsEcho(t *testing.T) {
 						continue
 					}
 					stands++
+					if w == 80 {
+						narrow++
+					}
 					if r[len(r)-2] != ' ' {
 						t.Errorf("%s %v %dx%d: the archive's hidden group welds its echo to its name — %q",
 							sc.name, route, w, h, string(r))
@@ -643,8 +657,14 @@ func TestTheHiddenGroupsNameLeavesRoomForItsEcho(t *testing.T) {
 			}
 		}
 	}
-	if stands == 0 {
-		t.Fatal("the pin reached no hidden-group header wearing an echo — its routes no longer fill the group with a row that wants you")
+	// The floor is the narrow stands, not the total: the weld is a
+	// narrow-column phenomenon — at 100 and up the label has twelve cells
+	// of air or more — so every tooth this pin has is at eighty. A bare
+	// `stands == 0` passed the four-cell bait with the hidden group's
+	// ordering reverted, which drops the eighty stands and leaves the pin
+	// measuring nothing while still reporting stands.
+	if narrow < 2 {
+		t.Fatalf("the pin reached %d hidden-group header(s) at eighty, where the weld lives — its routes no longer fill the group with a row that wants you", narrow)
 	}
-	t.Logf("hidden-group headers wearing an echo: %d", stands)
+	t.Logf("hidden-group headers wearing an echo: %d (%d at eighty)", stands, narrow)
 }
