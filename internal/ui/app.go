@@ -4273,7 +4273,7 @@ func noPaneClauseGone(row string) string {
 // refusal — the note that already says it — or "" anywhere else. The attach
 // refusal's clause is taken one layer in (attachRefusalSaid, #299). Every
 // other stuck key stays under its own note, because its note does not say
-// what the clause says: `infra stays · asked 6m ago` never mentions the
+// what the clause says: `infra stays · asked 4m ago` never mentions the
 // pane, so the row refusing `x` must (#24, #57).
 func (m *Model) replyRefusalSaid(whole string) string {
 	if m.note != "reply needs a pane" {
@@ -5865,8 +5865,8 @@ func (m *Model) stuckKeysOnce(whole string) []string {
 
 // attachRefusalSaid is the row's own `enter · no pane` under the note that
 // already says it — or "" anywhere else. Every other stuck key stays under
-// its own note because the note does not name it: `infra stays · it is
-// asking` never says `x`, so the row refusing `x` must (#24, #57). The
+// its own note because the note does not name it: `infra stays · asked
+// 4m ago` never says `x`, so the row refusing `x` must (#24, #57). The
 // attach refusal is the one whose note does name it — #165 gave it the
 // form `mirror needs 110 columns` already used, `attach needs a pane`,
 // precisely so that naming the key would buy a key back — and beside that
