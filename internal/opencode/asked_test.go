@@ -276,3 +276,48 @@ func TestARefusedTurnWithNoPartsReachesTheReader(t *testing.T) {
 		t.Errorf("the refusal reads %q, want the gateway's own words", last.Text)
 	}
 }
+
+// TestTheSecondPollSeesATurnThatMovedNoPart is the other half of the
+// refusal's road to the reader. The poll skips a session whose clock has
+// not moved since the last call — that is what keeps a store of hundreds
+// cheap — and the clock it read was the newest `part`. A turn the gateway
+// refused carries no part at all, so it moved no part clock, and the poll
+// that would have reported it never ran: the first call after such a turn
+// returned nothing and the row went on drawing the question above it
+// (round 61). Both clocks are read now, and this is the call that proves
+// it — the first poll cannot, because there is nothing to skip yet.
+func TestTheSecondPollSeesATurnThatMovedNoPart(t *testing.T) {
+	path := askStore(t, saidMsg("msg_z", "Two designs fit. Which should I build?"))
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src := st.NewSource(sess)
+	if _, err := src.Poll(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Newer than every part in the store, on the message's own clock.
+	if _, err := db.Exec(`insert into message values ('msg_err', ?, 1788688899000, 1788688899000,
+		'{"role":"assistant","modelID":"mock-1","providerID":"mock","time":{"created":1788688899000,"completed":1788688899100},"error":{"name":"APIError","data":{"message":"429 rate limited"}}}')`, sess); err != nil {
+		t.Fatal(err)
+	}
+
+	evs, err := src.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) == 0 {
+		t.Fatal("the poll after a refused turn returned nothing — it read the part clock, which the turn never moved, and the row keeps the question above it")
+	}
+	last := evs[len(evs)-1]
+	if !last.APIError || !contains(last.Text, "429") {
+		t.Fatalf("the newest event is %+v, want the gateway's refusal", last)
+	}
+}

@@ -70,6 +70,13 @@ type Event struct {
 	// line and on a failed call.
 	Model string
 
+	// MessageID is the id of the turn this line belongs to. Claude Code
+	// writes one content block per line and repeats the id across them, so
+	// a turn that said something and called two tools is four lines with
+	// one id — and a reader that treats a line as a turn sees the blocks
+	// in isolation. Empty on a line that carries no message id (#348).
+	MessageID string
+
 	// APIError marks an assistant event that is not the model speaking but the
 	// call to it failing: a quota refusal, an expired login, a 5xx. Status and
 	// ErrorKey are the API's own, e.g. 403 and "authentication_failed"; Text
@@ -151,6 +158,7 @@ type rawLine struct {
 
 type rawMessage struct {
 	Role    string          `json:"role"`
+	ID      string          `json:"id"`      // the turn's own id, shared by its lines
 	Content json.RawMessage `json:"content"` // string OR array of blocks
 
 	// Claude Code writes a failed API call as a synthetic assistant message —
@@ -223,6 +231,7 @@ func ParseLine(line []byte) (Event, error) {
 			// which is what the person sees on their screen.
 			ev.Status, ev.ErrorKey = firstNonZero(msg.APIStatus, raw.LineStatus), firstNonEmpty(msg.APIErrorKey, raw.LineErrorKey)
 			ev.APIError = msg.IsAPIError || raw.LineAPIError || msg.Model == "<synthetic>"
+			ev.MessageID = msg.ID
 			if ev.Type == EventAssistant && msg.Model != "" && msg.Model != "<synthetic>" {
 				ev.Model = msg.Model
 			}

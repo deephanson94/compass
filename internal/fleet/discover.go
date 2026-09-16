@@ -273,6 +273,15 @@ type tailState struct {
 	askedAt  time.Time
 	settled  bool
 	answered map[string]bool
+	// heldMsg is a turn whose call is still out, waiting to see whether an
+	// older line of the same turn is the question. Claude Code writes one
+	// content block per line and repeats the message id across them, so
+	// the batch #344's either-order rule is about is never one line: the
+	// walk meets the Task first and would settle on it, archiving a
+	// question the machine calls needs-you. The hold ends at a line of a
+	// different message, or at the start of the file — never at the end of
+	// a window, which is what tells the walk to widen (#373).
+	heldMsg string
 	// busy is a subagent writing under whatever the walk finds next: the
 	// session is doing something, so its words are not a question you owe
 	// — but a question the harness is holding open outranks that, as the
@@ -340,12 +349,33 @@ func peekTailState(f *os.File, size int64, wide bool) tailState {
 	// session mid-Task can have a whole window with nothing of its own in it.
 	// Falling back to the head there would file the session at a directory it
 	// left, which is exactly the failure this function exists to prevent.
+	//
+	// `walked` is the offset from which every line has already been read
+	// whole, so each window walks only the lines below it and a line is fed
+	// to the walk once. Re-feeding the previous window's lines is not the
+	// no-op it looks like: a line the first pass skipped with nothing held
+	// — a hook's own user line, a thinking-only line of another turn —
+	// settles the walk on the second pass, once a turn is held. The verdict
+	// then depended on where the boundary happened to fall, and 700 bytes
+	// of tool output between the same lines changed the answer. It also
+	// read k windows for the k-th, 8.5MB by the sixteenth (round 62).
+	walked := size
 	for end := int64(1); end <= peekWindows; end++ {
 		start := size - end*peekTail
 		if start < 0 {
 			start = 0
 		}
-		scanTail(f, size, start, &out)
+		walked = scanTail(f, walked, start, &out)
+		if start == 0 {
+			// Only where the file itself runs out. A turn held at a window
+			// boundary is a turn whose older lines are in the next window,
+			// and closing it here settled the walk false — after which
+			// every later window is a no-op and the widening this loop
+			// exists for never reaches the question. One 64KB tool result
+			// written between a turn's lines was enough, which is the
+			// ordinary size of the shape the hold is for (round 62).
+			out.endHeld()
+		}
 		if !wide {
 			// A file that is still being written is live on the recency
 			// door whatever this walk decides, so its ask gets one window
@@ -365,8 +395,10 @@ func peekTailState(f *os.File, size int64, wide bool) tailState {
 // scan.
 const peekWindows = 16
 
-// scanTail walks one window backwards, filling whatever `out` still lacks.
-func scanTail(f *os.File, size, start int64, out *tailState) {
+// scanTail walks the lines between start and upto backwards, filling
+// whatever `out` still lacks, and returns the offset from which lines have
+// now been read whole — the next window's upto.
+func scanTail(f *os.File, upto, start int64, out *tailState) int64 {
 	// Read one byte further back than the window needs. That byte decides
 	// whether the window opens mid-line or exactly at the start of one: with
 	// it included, the first slice of the split is the earlier line's tail in
@@ -377,13 +409,18 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 	if start > 0 {
 		from--
 	}
-	buf := make([]byte, size-from)
+	buf := make([]byte, upto-from)
 	if _, err := f.ReadAt(buf, from); err != nil {
-		return
+		return upto
 	}
 
 	lines := strings.Split(string(buf), "\n")
+	walked := start
 	if start > 0 && len(lines) > 0 {
+		if len(lines) == 1 {
+			return upto // no line ends in this window: nothing new is whole
+		}
+		walked = start + int64(len(lines[0])) // the byte after the first newline
 		lines = lines[1:]
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -408,9 +445,10 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 		}
 		out.seeAsk(ev)
 		if !out.at.IsZero() && out.located && out.settled {
-			return
+			return walked
 		}
 	}
+	return walked
 }
 
 // seeAsk walks one line of the backwards scan and, on the first line that
@@ -452,22 +490,43 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 	}
 	switch ev.Type {
 	case transcript.EventUser:
+		// A turn's lines are not always adjacent: the harness writes each
+		// call's result between them, so a turn that called twice is two
+		// assistant lines with a `tool_result` line in the middle. Reading
+		// that result as the end of the held turn stopped the walk one
+		// line short of the question, on the one shape a batched
+		// `AskUserQuestion` is written in (round 62).
+		//
+		// The results are collected whether or not a turn is held, because
+		// a call that came back is answered wherever its result sits.
 		for _, r := range ev.ToolResults {
 			if t.answered == nil {
 				t.answered = make(map[string]bool)
 			}
 			t.answered[r.ToolUseID] = true
 		}
-		if strings.TrimSpace(ev.Text) != "" && !ev.Machinery() {
+		if strings.TrimSpace(ev.Text) == "" {
+			return // a bare result line: it says nothing about whose turn it is
+		}
+		if !ev.Machinery() || t.heldMsg != "" {
+			// Your own words, wherever they land; or anything written
+			// below a held turn that is not one of its results, which
+			// means the turn is over and its call is the last word in it.
 			t.settleAsk(false, time.Time{})
 		}
 	case transcript.EventAssistant:
-		// The whole message decides, not its first block. Claude Code
-		// batches calls, so an AskUserQuestion is written beside the Task
-		// it was dispatched with, in whatever order the model wrote them —
-		// and the machine reads the turn, not the block, so a walk that
-		// settled on the first call disagreed with it whenever the
-		// question was written second (#344, round 59).
+		// The whole message decides, not its first block — and a message
+		// is not a line. Claude Code writes one block per line and repeats
+		// `message.id` across them, so a turn that asked you something and
+		// dispatched an agent in the same breath is two lines, the agent's
+		// first. Settling on it archived a question the machine calls
+		// needs-you, which is the either-order rule failing on the only
+		// shape the harness actually writes (#344 round 59, measured and
+		// fixed in #348).
+		if t.heldMsg != "" && ev.MessageID != t.heldMsg {
+			t.settleAsk(false, time.Time{}) // the held turn ended: its call stands
+			return
+		}
 		out := 0
 		for _, u := range ev.ToolUses {
 			if t.answered[u.ID] {
@@ -479,7 +538,28 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			}
 			out++
 		}
+		if t.heldMsg != "" {
+			// Still inside the held turn — a line of thinking or narration
+			// between its calls decides nothing, and neither does a
+			// subagent writing under it. A turn is read to its start
+			// before anything about work in flight is concluded, because
+			// the question may be in a line of it the walk has not reached
+			// and rule 2 precedes rule 3.
+			return
+		}
 		if out > 0 || t.busy {
+			if out > 0 && ev.MessageID != "" {
+				// Hold it while the rest of this turn is still to come:
+				// an older line of the same message may be the question.
+				// `busy` does not refuse the hold — an agent in flight is
+				// rule 3, and a question the harness is holding open
+				// outranks it. Refusing it made the guarantee depend on
+				// which block the harness wrote first: `[Ask, Task]` with
+				// an agent running answered archived where `[Task, Ask]`
+				// answered waiting, on the same turn (round 62).
+				t.heldMsg = ev.MessageID
+				return
+			}
 			t.settleAsk(false, time.Time{}) // a call still out: work in flight
 			return
 		}
@@ -489,6 +569,15 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			// the model's to continue. The machine calls that working or
 			// hung; a door that read the text would call it a question
 			// nobody was ever asked.
+			//
+			// The rest of the turn is still read first: a batch whose other
+			// calls came back may hold a question that has not, and rule 2
+			// precedes rule 3 wherever in the turn the question sits. The
+			// hold settles false of its own accord at the turn's end.
+			if ev.MessageID != "" {
+				t.heldMsg = ev.MessageID
+				return
+			}
 			t.settleAsk(false, time.Time{})
 			return
 		}
@@ -498,6 +587,16 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 		// A refused call is not the model asking: nothing you type into the
 		// pane clears a 403, and `g` skips those for the same reason.
 		t.settleAsk(!t.busy && !ev.APIError && state.EndsWithQuestion(ev.Text), ev.Timestamp)
+	}
+}
+
+// endHeld closes a turn the walk was still inside when it ran out of file:
+// nothing older is coming, so the call it was holding is the last word. Its
+// caller runs it at the start of the file and nowhere else — a hold that
+// outlives a window is what tells the loop to widen.
+func (t *tailState) endHeld() {
+	if t.heldMsg != "" && !t.settled {
+		t.settleAsk(false, time.Time{})
 	}
 }
 

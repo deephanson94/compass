@@ -57,6 +57,34 @@ Rules:
    open the door and any of them closes it, which is how the machine reads
    them too.
 
+   **A message is not a line, and its lines are not always adjacent.** Claude
+   Code writes one content block per line and repeats `message.id` across
+   them, and on a turn that calls several times it writes each call's result
+   between the calls. So "the whole message" is every line carrying that id,
+   `user` lines in the gaps and all: the walk holds a turn it is inside until
+   a line of a different message arrives or the file runs out, and a bare
+   `tool_result` line records the call it answers without ending anything
+   (#373). A turn whose calls all came back is read to its start for the same
+   reason, because the question may be in an earlier line of it. "The file
+   runs out" is the file, not the window: the walk reads backwards in 64KB
+   windows, a hold that outlives one is what tells it to widen, and each
+   line is walked exactly once however many windows it takes — re-reading a
+   line under a hold it was first read without changes the answer, so the
+   verdict must not depend on where a boundary falls. A subagent writing in
+   the lead's own file does not refuse the hold either: a question the
+   harness is holding open is rule 2, an agent in flight is rule 3, and
+   refusing it made the guarantee depend on which block of a turn the
+   harness wrote first. A question further back than sixteen windows is not
+   found, and the session archives; a single line that long is outside what
+   this walk reads.
+
+   **Where a subagent's lines live.** Discovery reads one project directory
+   deep and skips every entry that is a directory, so the transcripts it opens
+   are `projects/<slug>/<id>.jsonl` and never `<id>/subagents/agent-*.jsonl`.
+   A lead whose agents are doing all the writing is therefore dated by an
+   mtime nobody refreshes, and `isSidechain` lines in the lead's own file —
+   which the rule above is written for — are rarer than the rule suggests.
+
    **`Waiting` implies needs-you, and it is enforced rather than hoped for**
    (#346): the walk reads the end of a file where the machine folds all of
    it, so where the two differ the machine wins — the session goes back to

@@ -136,6 +136,13 @@ func TestParseLineAssistantJoinsTextBlocksAndIgnoresThinking(t *testing.T) {
 	if strings.Contains(ev.Text, "secret scratch work") {
 		t.Error("Text included a thinking block; the contract says thinking is ignored")
 	}
+	// The id the harness repeats across the lines of one turn. It is what
+	// tells a reader that this line and the next are the same message, and
+	// the fleet's ask door is built on it (#373); nothing in this package
+	// read it back until now.
+	if ev.MessageID != "msg_01" {
+		t.Errorf("MessageID = %q, want %q — the lines of one turn are told apart by nothing else", ev.MessageID, "msg_01")
+	}
 }
 
 func TestParseLineAssistantToolUse(t *testing.T) {
