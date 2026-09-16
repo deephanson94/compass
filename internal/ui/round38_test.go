@@ -214,9 +214,10 @@ func TestTheOverlayDrawsNoMarkForAnEmptyPeek(t *testing.T) {
 // surviving row wears the mark at its head (#64).
 func TestTheFoldMarksTheLineItPaintedOver(t *testing.T) {
 	forceASCII(t)
-	// Twenty-six rows tall: the block over the trail takes two at 80,
-	// so the fold stands where it stood at 24 before it (#374).
-	m := sceneModel(sceneSubagents(), 80, 26)
+	// Twenty-seven rows tall: the block over the trail takes two at 80
+	// and its seam a third, so the fold stands where it stood at 24
+	// before them (#374, #375).
+	m := sceneModel(sceneSubagents(), 80, 27)
 	press(m, "2")
 	pressTab(m)
 	view := ansi.Strip(m.View())

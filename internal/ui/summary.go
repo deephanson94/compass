@@ -426,9 +426,13 @@ func blockRows(tr journey.Trail) []summaryRow {
 	return out
 }
 
-// blockHeight is how many rows the block spends above a trail (#374).
+// blockHeight is how many rows the block spends above a trail: its rows
+// and the seam under them (#374, #375).
 func blockHeight(tr journey.Trail) int {
-	return len(blockRows(tr))
+	if n := len(blockRows(tr)); n > 0 {
+		return n + 1
+	}
+	return 0
 }
 
 // blockSaid is what the frame already says about a trail beside or
@@ -444,7 +448,11 @@ type blockSaid struct {
 // loop and the lanes' tally likewise (#347, #351, #356, #357, #374).
 func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said blockSaid) []string {
 	var lines []string
-	for _, r := range blockRows(tr) {
+	rows := blockRows(tr)
+	if len(rows) == 0 {
+		return nil
+	}
+	for _, r := range rows {
 		switch r.kind {
 		case "class":
 			lines = append(lines, summaryClassRow(tr, r.class, o, said.loop, headDrawn, said.live, w))
@@ -461,7 +469,7 @@ func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said block
 			lines = append(lines, legRow(l, label, narrated, lo))
 		}
 	}
-	return lines
+	return append(lines, seamRule(w)) // the block ends on its seam (#375)
 }
 
 // blockShown says whether the trail column draws a block for the

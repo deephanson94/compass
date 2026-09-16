@@ -232,3 +232,42 @@ func TestTheParkedLeadsBlockOnTheBoardAndItsLegs(t *testing.T) {
 		t.Errorf("the parked lead's span should be said once:\n%s", v)
 	}
 }
+
+// The panel's first pass on #374, second-day, folded (#375).
+
+func TestTheBlockEndsOnItsSeam(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		m, _ := longSession(t, size[0], size[1])
+		cells := trailCells(m)
+		seam := -1
+		for i, c := range cells {
+			if strings.HasPrefix(strings.TrimSpace(c), "│ the trail ─") {
+				seam = i
+			}
+		}
+		if seam < 0 {
+			t.Fatalf("%dx%d: no seam under the block:\n%s", size[0], size[1], strings.Join(cells, "\n"))
+		}
+		if !strings.Contains(cells[seam-1], "◉ waited on you") {
+			t.Errorf("%dx%d: the seam should follow the block's last row: %q", size[0], size[1], cells[seam-1])
+		}
+		if strings.TrimSpace(cells[seam+1]) == "" || strings.Contains(cells[seam+1], " legs") {
+			t.Errorf("%dx%d: the trail should begin right under the seam: %q", size[0], size[1], cells[seam+1])
+		}
+		if n := strings.Count(strings.Join(cells, "\n"), "│ the trail ─"); n != 1 {
+			t.Errorf("%dx%d: the seam is drawn %d times", size[0], size[1], n)
+		}
+	}
+	// The board's columns end their blocks on the seam too; a column with
+	// no block draws none.
+	sc := sceneVeryLong()
+	m := sceneModel(sc, 152, 40)
+	if n := strings.Count(ansi.Strip(m.View()), "│ the trail ─"); n != 2 {
+		t.Errorf("the board should draw one seam per counted column, %d drawn", n)
+	}
+	fresh := sceneModel(sceneFirstSession(), 80, 24)
+	if strings.Contains(ansi.Strip(fresh.View()), "the trail ─") {
+		t.Errorf("a trail with no block should draw no seam")
+	}
+}

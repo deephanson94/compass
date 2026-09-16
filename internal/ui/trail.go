@@ -801,6 +801,17 @@ func lookRule(looked, now time.Time, width int) string {
 	return ruleStyle.Render(clip(row, width))
 }
 
+// seamRule is the rail row between a trail's block and the trail itself:
+// "│ the trail ────", in the rail's own labelled-rule idiom, so the counts
+// above and the rows beneath are never read as one column (#375).
+func seamRule(width int) string {
+	row := railStroke + " the trail "
+	if rest := width - len([]rune(row)); rest > 0 {
+		row += strings.Repeat("─", rest)
+	}
+	return ruleStyle.Render(clip(row, width))
+}
+
 // compactRule is the rail row a compaction falls on: "│ ⟲ context compacted 14:02 ────".
 func compactRule(at time.Time, width int) string {
 	row := railStroke + " " + glyphCompact + " context compacted " + at.Local().Format("15:04") + " "
