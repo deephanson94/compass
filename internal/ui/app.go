@@ -4273,7 +4273,7 @@ func noPaneClauseGone(row string) string {
 // refusal — the note that already says it — or "" anywhere else. The attach
 // refusal's clause is taken one layer in (attachRefusalSaid, #299). Every
 // other stuck key stays under its own note, because its note does not say
-// what the clause says: `infra stays · it is asking` never mentions the
+// what the clause says: `infra stays · asked 6m ago` never mentions the
 // pane, so the row refusing `x` must (#24, #57).
 func (m *Model) replyRefusalSaid(whole string) string {
 	if m.note != "reply needs a pane" {
@@ -5907,7 +5907,7 @@ func (m *Model) hideKeymap() string {
 // hideKeyStuck is the board's or the list's `x hide` on a selection it
 // cannot take off the board — or "" when the row does not offer it or the
 // key acts. `toggleHidden` refuses what owes you an alarm (`infra stays ·
-// it is asking`, `· it hangs`, `· it is looping`, `· dead on the API`),
+// asked 6m ago`, `· it hangs`, `· it is looping`, `· dead on the API`),
 // the same answer at every width and however many times it is pressed,
 // and the keymap already drops the key outright where the fleet is one
 // session — "the keys that move between sessions answer no question" —

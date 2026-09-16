@@ -560,3 +560,91 @@ func TestTheArchivesHiddenGroupStandsFirst(t *testing.T) {
 	}
 	t.Logf("archive frames with a hidden group: %d", stands)
 }
+
+// TestTheLegendNamesTheMarkThisFeatureAdded is the help's side of #344. The
+// fleet legend is a glyph-to-word list — six marks, six words — and the row
+// this feature draws wears `▲` for a reason no line on the page gave: the
+// board's `▲ needs you` is a session that wants you now, the archive's is a
+// question you walked away from, and the legend named the first and not the
+// second.
+//
+// It is a clause on the glyph line, not a row of its own, because a row of
+// its own sheds `(3h+ = away)` at 152 — round 57's pin, which is why this
+// went two rounds as a hold (#347, round 61). The trade is width by width
+// and is the assertion: named at 100, 120 and 220; at 152, where the legend
+// is two columns and the line is reflowed, round 57's definition is what
+// stands; at 80 neither fits and the `?` row that teaches `X` carries the
+// word instead.
+func TestTheLegendNamesTheMarkThisFeatureAdded(t *testing.T) {
+	forceASCII(t)
+	named := map[int]bool{100: true, 120: true, 220: true, 152: false, 80: false}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		m := sceneModel(sceneFleetHygiene(), w, h)
+		press(m, "?")
+		view := ansi.Strip(m.View())
+		if got := strings.Contains(view, "▲ unanswered"); got != named[w] {
+			if named[w] {
+				t.Errorf("%dx%d: the legend names eighteen marks and not the one this feature draws — a ▲ in the archive is a question you walked away from, and the page says only `needs you`", w, h)
+			} else {
+				t.Errorf("%dx%d: the clause took a width it was measured not to fit", w, h)
+			}
+		}
+		if w >= 152 && !strings.Contains(view, "(3h+ = away)") {
+			t.Errorf("%dx%d: the clause was bought with round 57's own definition", w, h)
+		}
+		// Whatever the legend can afford, the key that clears the pile is
+		// taught at every width — the sentence the two help rows share.
+		if !strings.Contains(view, "X, every unanswered one") {
+			t.Errorf("%dx%d: the help does not say what `X` takes", w, h)
+		}
+	}
+}
+
+// TestTheHiddenGroupsNameLeavesRoomForItsEcho is the weld, on the one
+// header this feature added. `groupHeaderLine` clips the label to
+// `w-1-right` and pads to `w-right`, so a label that fills its column is
+// written right up against the echo glyph and `hidden · x one back, X all▲`
+// reads as one word ending in a mark. The shipped name is short enough; a
+// name four cells longer is not, and nothing in the module would have said
+// so — the archive's header pin refuses the ellipsis, never the weld
+// (round 62). The rule is the frame's, not the constant's: whatever the
+// header says, the cell left of its echo is air.
+func TestTheHiddenGroupsNameLeavesRoomForItsEcho(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, sc := range allScenes() {
+		for _, size := range r105ttArchiveSizes {
+			w, h := size[0], size[1]
+			for _, route := range r105ttArchiveRoutes {
+				m := sceneModel(sc, w, h)
+				for _, k := range route {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				if !m.archiveView || m.level >= levelReader {
+					continue
+				}
+				for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+					left := strings.SplitN(line, "│", 2)[0]
+					if !strings.Contains(left, hiddenGroupWord+" ·") && !strings.HasSuffix(strings.TrimSpace(left), hiddenGroupWord) {
+						continue
+					}
+					r := []rune(strings.TrimRight(left, " "))
+					if len(r) < 2 || !strings.ContainsRune("●▲◍○↻⊘", r[len(r)-1]) {
+						continue
+					}
+					stands++
+					if r[len(r)-2] != ' ' {
+						t.Errorf("%s %v %dx%d: the archive's hidden group welds its echo to its name — %q",
+							sc.name, route, w, h, string(r))
+					}
+				}
+			}
+		}
+	}
+	if stands == 0 {
+		t.Fatal("the pin reached no hidden-group header wearing an echo — its routes no longer fill the group with a row that wants you")
+	}
+	t.Logf("hidden-group headers wearing an echo: %d", stands)
+}

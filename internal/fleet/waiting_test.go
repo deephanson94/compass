@@ -32,6 +32,7 @@ const (
 	idAskedTool   = "8100000e-0000-4000-8000-00000000e181" // AskUserQuestion still out
 	idResumed     = "9200000f-0000-4000-8000-00000000f292" // asked, then the harness resumed it
 	idRefused     = "a3000010-0000-4000-8000-000000001a03" // asked nothing: the API refused the call
+	idStatedOnly  = "b4000011-0000-4000-8000-000000001b04" // ended on a report, not a question
 )
 
 // meta is a user line the harness wrote, not the person: the resume prompt,
@@ -264,8 +265,19 @@ func TestTheDoorIsForQuestionsOnly(t *testing.T) {
 		apiError(refusedAt, 403, "authentication_failed", "API Error: 403 · Please run /login").
 		write(root, slugAlpha)
 
+	// The third shape is the one the other two never reach: a turn that
+	// called nothing and was refused by nobody, whose last words are a
+	// report. Both cases above settle before rule 4 is ever asked — the
+	// stalled call on `out > 0`, the refusal on APIError — so with
+	// `EndsWithQuestion` forced true this test still passed, and the rule
+	// the door is named for was observed by nothing (round 62).
+	newTranscript(t, idStatedOnly, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "summarise the backfill").
+		text(ago(26*time.Hour), "The backfill is done. 212 rows moved and the index is rebuilt.").
+		write(root, slugAlpha)
+
 	sessions := mustRefresh(t, fleet.NewManager(root), fleetNow)
-	for _, id := range []string{idArchQuestion, idRefused} {
+	for _, id := range []string{idArchQuestion, idRefused, idStatedOnly} {
 		s := pick(t, sessions, id)
 		if s.Info.Asked {
 			t.Errorf("%s: Info.Asked = true — only a question opens the door", id)
