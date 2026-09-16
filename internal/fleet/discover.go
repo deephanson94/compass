@@ -273,6 +273,14 @@ type tailState struct {
 	askedAt  time.Time
 	settled  bool
 	answered map[string]bool
+	// heldMsg is a turn whose call is still out, waiting to see whether an
+	// older line of the same turn is the question. Claude Code writes one
+	// content block per line and repeats the message id across them, so
+	// the batch #344's either-order rule is about is never one line: the
+	// walk meets the Task first and would settle on it, archiving a
+	// question the machine calls needs-you. heldAt is the clock that
+	// decision was reached at (#348).
+	heldMsg string
 	// busy is a subagent writing under whatever the walk finds next: the
 	// session is doing something, so its words are not a question you owe
 	// — but a question the harness is holding open outranks that, as the
@@ -346,6 +354,7 @@ func peekTailState(f *os.File, size int64, wide bool) tailState {
 			start = 0
 		}
 		scanTail(f, size, start, &out)
+		out.endHeld()
 		if !wide {
 			// A file that is still being written is live on the recency
 			// door whatever this walk decides, so its ask gets one window
@@ -452,6 +461,12 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 	}
 	switch ev.Type {
 	case transcript.EventUser:
+		if t.heldMsg != "" {
+			// Anything of yours or the harness's below the held turn means
+			// the turn is over and its call is the last word in it.
+			t.settleAsk(false, time.Time{})
+			return
+		}
 		for _, r := range ev.ToolResults {
 			if t.answered == nil {
 				t.answered = make(map[string]bool)
@@ -462,12 +477,18 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			t.settleAsk(false, time.Time{})
 		}
 	case transcript.EventAssistant:
-		// The whole message decides, not its first block. Claude Code
-		// batches calls, so an AskUserQuestion is written beside the Task
-		// it was dispatched with, in whatever order the model wrote them —
-		// and the machine reads the turn, not the block, so a walk that
-		// settled on the first call disagreed with it whenever the
-		// question was written second (#344, round 59).
+		// The whole message decides, not its first block — and a message
+		// is not a line. Claude Code writes one block per line and repeats
+		// `message.id` across them, so a turn that asked you something and
+		// dispatched an agent in the same breath is two lines, the agent's
+		// first. Settling on it archived a question the machine calls
+		// needs-you, which is the either-order rule failing on the only
+		// shape the harness actually writes (#344 round 59, measured and
+		// fixed in #348).
+		if t.heldMsg != "" && ev.MessageID != t.heldMsg {
+			t.settleAsk(false, time.Time{}) // the held turn ended: its call stands
+			return
+		}
 		out := 0
 		for _, u := range ev.ToolUses {
 			if t.answered[u.ID] {
@@ -480,7 +501,19 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			out++
 		}
 		if out > 0 || t.busy {
+			if out > 0 && ev.MessageID != "" && !t.busy {
+				// Hold it while the rest of this turn is still to come:
+				// an older line of the same message may be the question,
+				// and rule 2 precedes rule 3.
+				t.heldMsg = ev.MessageID
+				return
+			}
 			t.settleAsk(false, time.Time{}) // a call still out: work in flight
+			return
+		}
+		if t.heldMsg != "" {
+			// Still inside the held turn — a line of thinking or narration
+			// between its calls decides nothing.
 			return
 		}
 		if len(ev.ToolUses) > 0 {
@@ -498,6 +531,14 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 		// A refused call is not the model asking: nothing you type into the
 		// pane clears a 403, and `g` skips those for the same reason.
 		t.settleAsk(!t.busy && !ev.APIError && state.EndsWithQuestion(ev.Text), ev.Timestamp)
+	}
+}
+
+// endHeld closes a turn the walk was still inside when it ran out of file:
+// nothing older is coming, so the call it was holding is the last word.
+func (t *tailState) endHeld() {
+	if t.heldMsg != "" && !t.settled {
+		t.settleAsk(false, time.Time{})
 	}
 }
 

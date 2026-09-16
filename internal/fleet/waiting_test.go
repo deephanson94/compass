@@ -16,6 +16,8 @@ package fleet_test
 // and the question is gone by the time you think to look for it.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +83,34 @@ func (b *transcriptBuilder) sidechainText(ts time.Time, text string) *transcript
 		"stop_reason": "end_turn",
 	}
 	return b.add(o)
+}
+
+// turn is one assistant message as Claude Code actually writes it: one
+// content block per line, every line carrying the same `message.id`. A
+// block is `{kind, id, name}` — kind "text" uses `id` as its words, kind
+// "tool" is a call. Measured on this machine's own transcripts: of 656
+// assistant lines, none carried two tool_use blocks, and 188 message ids
+// spanned more than one line (#348).
+func (b *transcriptBuilder) turn(ts time.Time, msgID string, blocks ...[3]string) *transcriptBuilder {
+	for _, bl := range blocks {
+		o := b.common(ts)
+		o["type"] = "assistant"
+		var content any
+		switch bl[0] {
+		case "text":
+			content = []any{map[string]any{"type": "text", "text": bl[1]}}
+		default:
+			content = []any{map[string]any{
+				"type": "tool_use", "id": bl[1], "name": bl[2], "input": map[string]any{},
+			}}
+		}
+		o["message"] = map[string]any{
+			"role": "assistant", "id": msgID, "model": "claude-fable-5", "type": "message",
+			"content": content, "stop_reason": "tool_use",
+		}
+		b = b.add(o)
+	}
+	return b
 }
 
 // calls is one assistant message carrying several tool_use blocks, the way
@@ -626,4 +656,149 @@ func TestAnAgentInFlightStillClosesTheDoorOnPlainWords(t *testing.T) {
 	if s.Info.Asked || s.Waiting {
 		t.Errorf("Asked/Waiting = %v/%v with an agent still writing", s.Info.Asked, s.Waiting)
 	}
+}
+
+// The either-order rule, on the shape the harness writes. A turn is one
+// line per content block with the id repeated, so the question and the
+// agent it was dispatched with are two lines and the walk meets one of
+// them first. Round 59's rule was pinned on a fixture that put both blocks
+// on one line — a shape this machine's own transcripts never contain — so
+// the guarantee held only in the test (#348).
+func TestTheEitherOrderRuleHoldsOnTheShapeTheHarnessWrites(t *testing.T) {
+	ask := [3]string{"tool", "toolu_ask8", state.AskUserQuestion}
+	task := [3]string{"tool", "toolu_task8", "Task"}
+	words := [3]string{"text", "Two designs fit.", ""}
+
+	for _, c := range []struct {
+		name   string
+		blocks [][3]string
+	}{
+		{"the question written first", [][3]string{ask, task}},
+		{"the agent written first", [][3]string{task, ask}},
+		{"words, then the agent, then the question", [][3]string{words, task, ask}},
+		{"a plain batch with no agent at all", [][3]string{{"tool", "toolu_b8", "Bash"}, ask}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			at := ago(26 * time.Hour)
+			b := newTranscript(t, idAskedTool, "/home/user/alpha", "main").
+				prompt(ago(27*time.Hour), "map the payments module")
+			b.turn(at, "msg_batch_1", c.blocks...)
+			b.write(root, slugAlpha)
+
+			assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idAskedTool), at)
+		})
+	}
+}
+
+// And the other side of the same grouping: a turn whose lines carry no
+// question is work in flight whatever else it said, and a call from an
+// earlier turn is not held open by the next turn's id.
+func TestATurnWithNoQuestionIsStillWorkInFlight(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module").
+		text(ago(26*time.Hour+time.Minute), "Shall I start with the ledger?")
+	b.turn(at, "msg_batch_2",
+		[3]string{"text", "Looking at both.", ""},
+		[3]string{"tool", "toolu_task9", "Task"},
+		[3]string{"tool", "toolu_b9", "Bash"})
+	b.write(root, slugAlpha)
+
+	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingWeek)
+	if s.Info.Asked || s.Waiting {
+		t.Errorf("Asked/Waiting = %v/%v: a turn with two calls out and no question of its own",
+			s.Info.Asked, s.Waiting)
+	}
+}
+
+// What `compass status` costs, pinned. That process is a fresh one every
+// few seconds out of tmux, so every byte it re-reads it re-reads forever.
+// Round 61 fixed two ways this feature had quietly taken its resume away
+// and shipped all of it unpinned; the panel found that by reverting each
+// line and watching the package stay green (#348).
+func TestTheAskDoorKeepsTheStatusLinesResume(t *testing.T) {
+	t.Run("a quiet file peeked wide is not peeked again by the next process", func(t *testing.T) {
+		root := t.TempDir()
+		askedQuestionAt(t, root, slugAlpha, idWaitingDay, 26*time.Hour)
+		path := filepath.Join(root, "projects", slugAlpha, idWaitingDay+".jsonl")
+		cache := filepath.Join(t.TempDir(), "resume.json")
+
+		warm := fleet.NewManager(root)
+		c := fleet.OpenResumeCache(cache)
+		warm.UseResumeCache(c)
+		mustRefresh(t, warm, fleetNow)
+		c.Save()
+
+		// The second process is handed the same bytes. If the cache did
+		// not remember that the peek read wide, it reads the file again —
+		// and on a real home directory that is every quiet transcript,
+		// every few seconds.
+		doctored := strings.Replace(string(readFile(t, path)), "Shall I proceed?", "SERVED FROM CACHE?", 1)
+		writeFile(t, path, doctored, fileTime(t, path))
+
+		next := fleet.NewManager(root)
+		next.UseResumeCache(fleet.OpenResumeCache(cache))
+		s := pick(t, mustRefresh(t, next, fleetNow), idWaitingDay)
+		if !s.Info.Asked {
+			t.Fatalf("Info.Asked = false: the question was lost between processes")
+		}
+		if strings.Contains(s.Snap.Activity+s.Snap.Reason, "SERVED FROM CACHE") {
+			t.Errorf("the scan re-read a file it had already read wide")
+		}
+	})
+
+	t.Run("a door the fold refused still records its mark", func(t *testing.T) {
+		root := t.TempDir()
+		// A question over a call that never came back: the walk says
+		// asked, the machine says hung, so the door is refused.
+		newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+			prompt(ago(30*time.Hour), "build the release binary").
+			tool(ago(29*time.Hour), "toolu_r1", "Bash", map[string]any{"command": "go build ./..."}).
+			meta(ago(28*time.Hour), "Continue from where you left off.").
+			text(ago(27*time.Hour), "The build never finished. Shall I retry it?").
+			write(root, slugAlpha)
+		cache := filepath.Join(t.TempDir(), "resume.json")
+
+		warm := fleet.NewManager(root)
+		c := fleet.OpenResumeCache(cache)
+		warm.UseResumeCache(c)
+		mustRefresh(t, warm, fleetNow)
+		c.Save()
+
+		raw := string(readFile(t, cache))
+		if !strings.Contains(raw, "points") {
+			t.Errorf("the refused session left no mark in %s: every status run replays its whole transcript", raw)
+		}
+	})
+
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return raw
+}
+
+func writeFile(t *testing.T, path, content string, at time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatalf("chtimes %s: %v", path, err)
+	}
+}
+
+func fileTime(t *testing.T, path string) time.Time {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return fi.ModTime()
 }

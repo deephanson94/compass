@@ -2146,7 +2146,10 @@ func (m *Model) sweepWaiting() {
 		}
 	}
 	if len(keys) == 0 {
-		m.note = "nothing is unanswered"
+		// Not "nothing is unanswered": a session asking you right now is
+		// unanswered too, and it may be the row under the cursor while
+		// this sentence is drawn. What is empty is the pile (round 62).
+		m.note = "nothing is left behind"
 		return
 	}
 	stayed := ""

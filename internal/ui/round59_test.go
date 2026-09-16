@@ -147,8 +147,8 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 
 	// A second press has nothing to take, and says so rather than acting.
 	pressKey(m, "X")
-	if !strings.Contains(m.note, "nothing is unanswered") {
-		t.Errorf("note = %q, want the refusal", m.note)
+	if !strings.Contains(m.note, "nothing is left behind") {
+		t.Errorf("note = %q, want a refusal that does not deny the question the board is drawing", m.note)
 	}
 
 	// The archive is where they went, and `X` there brings every one back.
