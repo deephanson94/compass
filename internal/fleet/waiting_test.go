@@ -706,8 +706,9 @@ func TestTheEitherOrderRuleHoldsOnTheShapeTheHarnessWrites(t *testing.T) {
 }
 
 // And the other side of the same grouping: a turn whose lines carry no
-// question is work in flight whatever else it said, and a call from an
-// earlier turn is not held open by the next turn's id.
+// question of its own is work in flight whatever else it said. (What
+// bounds the hold on the older side has its own pin below — this fixture
+// settles on the prompt either way, so it never measured that.)
 func TestATurnWithNoQuestionIsStillWorkInFlight(t *testing.T) {
 	root := t.TempDir()
 	at := ago(26 * time.Hour)
@@ -876,4 +877,57 @@ func TestABatchThatCameBackIsStillReadToItsStart(t *testing.T) {
 	b.write(root, slugAlpha)
 
 	assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idSettledBatch), at)
+}
+
+// TestTheHeldTurnOutlivesTheWindowItStartedIn is the hold's other end. The
+// walk reads the file backwards in 64KB windows and widens while it is
+// still undecided, and it closed a held turn after every window rather
+// than at the start of the file — after which the walk is settled and each
+// later window is a no-op, so the widening the loop exists for never
+// reached the question.
+//
+// One tool result written between a turn's lines was enough to cross the
+// boundary, and 64KB is the ordinary size of that shape: a subagent's
+// report is what sits between the calls of the turn the hold is for. The
+// question does not move; only the bytes under it do (round 62).
+func TestTheHeldTurnOutlivesTheWindowItStartedIn(t *testing.T) {
+	for _, n := range []int{1024, 70 * 1024, 200 * 1024} {
+		root := t.TempDir()
+		at := ago(26 * time.Hour)
+		b := newTranscript(t, idInterleaved, "/home/user/alpha", "main").
+			prompt(ago(27*time.Hour), "map the payments module")
+		b.turn(at,
+			"msg_wide",
+			[3]string{"tool", "toolu_askw", state.AskUserQuestion},
+			[3]string{"tool", "toolu_w1", "Task"})
+		b.result(at.Add(time.Second), "toolu_w1", strings.Repeat("x", n))
+		b.turn(at.Add(2*time.Second), "msg_wide", [3]string{"tool", "toolu_w2", "Task"})
+		b.write(root, slugAlpha)
+
+		s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idInterleaved)
+		if !s.Info.Asked || !s.Waiting {
+			t.Errorf("a %dKB result inside the turn: Asked/Waiting = %v/%v — the question is the same distance from the end of the file, and only the bytes between its lines changed",
+				n/1024, s.Info.Asked, s.Waiting)
+		}
+	}
+}
+
+// And the settle that the hold is bounded by on the other side: a turn
+// whose calls are still out is work in flight, and a question from an
+// *earlier* turn is not its last word. Without the different-id settle the
+// walk reads straight past the boundary into the older turn and answers
+// with a question the newer turn already superseded.
+func TestAQuestionFromAnEarlierTurnIsNotThisTurnsLastWord(t *testing.T) {
+	root := t.TempDir()
+	b := newTranscript(t, idSettledBatch, "/home/user/alpha", "main").
+		prompt(ago(30*time.Hour), "map the payments module")
+	b.turn(ago(29*time.Hour), "msg_old", [3]string{"tool", "toolu_asko", state.AskUserQuestion})
+	b.turn(ago(26*time.Hour), "msg_new", [3]string{"tool", "toolu_bn", "Bash"})
+	b.write(root, slugAlpha)
+
+	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idSettledBatch)
+	if s.Info.Asked || s.Waiting {
+		t.Errorf("Asked/Waiting = %v/%v: the newest turn has a call still out, and the question above it belongs to a turn that ended",
+			s.Info.Asked, s.Waiting)
+	}
 }

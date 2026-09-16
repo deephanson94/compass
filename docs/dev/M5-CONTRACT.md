@@ -65,7 +65,12 @@ Rules:
    a line of a different message arrives or the file runs out, and a bare
    `tool_result` line records the call it answers without ending anything
    (#373). A turn whose calls all came back is read to its start for the same
-   reason, because the question may be in an earlier line of it.
+   reason, because the question may be in an earlier line of it. "The file
+   runs out" is the file, not the window: the walk reads backwards in 64KB
+   windows and a hold that outlives one is what tells it to widen. The one
+   exception is `busy` — a subagent writing in the lead's own file refuses
+   the hold, and a turn already held settles at its next call-less line — so
+   under `busy` the rule above is the machine's rule 3 and not this one.
 
    **Where a subagent's lines live.** Discovery reads one project directory
    deep and skips every entry that is a directory, so the transcripts it opens

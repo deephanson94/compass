@@ -278,8 +278,9 @@ type tailState struct {
 	// content block per line and repeats the message id across them, so
 	// the batch #344's either-order rule is about is never one line: the
 	// walk meets the Task first and would settle on it, archiving a
-	// question the machine calls needs-you. heldAt is the clock that
-	// decision was reached at (#348).
+	// question the machine calls needs-you. The hold ends at a line of a
+	// different message, or at the start of the file — never at the end of
+	// a window, which is what tells the walk to widen (#373).
 	heldMsg string
 	// busy is a subagent writing under whatever the walk finds next: the
 	// session is doing something, so its words are not a question you owe
@@ -354,7 +355,16 @@ func peekTailState(f *os.File, size int64, wide bool) tailState {
 			start = 0
 		}
 		scanTail(f, size, start, &out)
-		out.endHeld()
+		if start == 0 {
+			// Only where the file itself runs out. A turn held at a window
+			// boundary is a turn whose older lines are in the next window,
+			// and closing it here settled the walk false — after which
+			// every later window is a no-op and the widening this loop
+			// exists for never reaches the question. One 64KB tool result
+			// written between a turn's lines was enough, which is the
+			// ordinary size of the shape the hold is for (round 62).
+			out.endHeld()
+		}
 		if !wide {
 			// A file that is still being written is live on the recency
 			// door whatever this walk decides, so its ask gets one window
@@ -553,7 +563,9 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 }
 
 // endHeld closes a turn the walk was still inside when it ran out of file:
-// nothing older is coming, so the call it was holding is the last word.
+// nothing older is coming, so the call it was holding is the last word. Its
+// caller runs it at the start of the file and nowhere else — a hold that
+// outlives a window is what tells the loop to widen.
 func (t *tailState) endHeld() {
 	if t.heldMsg != "" && !t.settled {
 		t.settleAsk(false, time.Time{})
