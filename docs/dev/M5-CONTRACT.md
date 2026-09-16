@@ -57,6 +57,23 @@ Rules:
    open the door and any of them closes it, which is how the machine reads
    them too.
 
+   **A message is not a line, and its lines are not always adjacent.** Claude
+   Code writes one content block per line and repeats `message.id` across
+   them, and on a turn that calls several times it writes each call's result
+   between the calls. So "the whole message" is every line carrying that id,
+   `user` lines in the gaps and all: the walk holds a turn it is inside until
+   a line of a different message arrives or the file runs out, and a bare
+   `tool_result` line records the call it answers without ending anything
+   (#373). A turn whose calls all came back is read to its start for the same
+   reason, because the question may be in an earlier line of it.
+
+   **Where a subagent's lines live.** Discovery reads one project directory
+   deep and skips every entry that is a directory, so the transcripts it opens
+   are `projects/<slug>/<id>.jsonl` and never `<id>/subagents/agent-*.jsonl`.
+   A lead whose agents are doing all the writing is therefore dated by an
+   mtime nobody refreshes, and `isSidechain` lines in the lead's own file —
+   which the rule above is written for — are rarer than the rule suggests.
+
    **`Waiting` implies needs-you, and it is enforced rather than hoped for**
    (#346): the walk reads the end of a file where the machine folds all of
    it, so where the two differ the machine wins — the session goes back to

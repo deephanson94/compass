@@ -461,19 +461,28 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 	}
 	switch ev.Type {
 	case transcript.EventUser:
-		if t.heldMsg != "" {
-			// Anything of yours or the harness's below the held turn means
-			// the turn is over and its call is the last word in it.
-			t.settleAsk(false, time.Time{})
-			return
-		}
+		// A turn's lines are not always adjacent: the harness writes each
+		// call's result between them, so a turn that called twice is two
+		// assistant lines with a `tool_result` line in the middle. Reading
+		// that result as the end of the held turn stopped the walk one
+		// line short of the question, on the one shape a batched
+		// `AskUserQuestion` is written in (round 62).
+		//
+		// The results are collected whether or not a turn is held, because
+		// a call that came back is answered wherever its result sits.
 		for _, r := range ev.ToolResults {
 			if t.answered == nil {
 				t.answered = make(map[string]bool)
 			}
 			t.answered[r.ToolUseID] = true
 		}
-		if strings.TrimSpace(ev.Text) != "" && !ev.Machinery() {
+		if strings.TrimSpace(ev.Text) == "" {
+			return // a bare result line: it says nothing about whose turn it is
+		}
+		if !ev.Machinery() || t.heldMsg != "" {
+			// Your own words, wherever they land; or anything written
+			// below a held turn that is not one of its results, which
+			// means the turn is over and its call is the last word in it.
 			t.settleAsk(false, time.Time{})
 		}
 	case transcript.EventAssistant:
@@ -522,6 +531,15 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			// the model's to continue. The machine calls that working or
 			// hung; a door that read the text would call it a question
 			// nobody was ever asked.
+			//
+			// The rest of the turn is still read first: a batch whose other
+			// calls came back may hold a question that has not, and rule 2
+			// precedes rule 3 wherever in the turn the question sits. The
+			// hold settles false of its own accord at the turn's end.
+			if ev.MessageID != "" {
+				t.heldMsg = ev.MessageID
+				return
+			}
 			t.settleAsk(false, time.Time{})
 			return
 		}

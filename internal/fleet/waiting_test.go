@@ -27,12 +27,14 @@ import (
 )
 
 const (
-	idWaitingDay  = "6f00000c-0000-4000-8000-00000000f60c" // asked a day ago, no pane
-	idWaitingWeek = "70000000-0000-4000-8000-000000000d70" // asked a week ago, no pane
-	idAskedTool   = "8100000e-0000-4000-8000-00000000e181" // AskUserQuestion still out
-	idResumed     = "9200000f-0000-4000-8000-00000000f292" // asked, then the harness resumed it
-	idRefused     = "a3000010-0000-4000-8000-000000001a03" // asked nothing: the API refused the call
-	idStatedOnly  = "b4000011-0000-4000-8000-000000001b04" // ended on a report, not a question
+	idWaitingDay   = "6f00000c-0000-4000-8000-00000000f60c" // asked a day ago, no pane
+	idWaitingWeek  = "70000000-0000-4000-8000-000000000d70" // asked a week ago, no pane
+	idAskedTool    = "8100000e-0000-4000-8000-00000000e181" // AskUserQuestion still out
+	idResumed      = "9200000f-0000-4000-8000-00000000f292" // asked, then the harness resumed it
+	idRefused      = "a3000010-0000-4000-8000-000000001a03" // asked nothing: the API refused the call
+	idStatedOnly   = "b4000011-0000-4000-8000-000000001b04" // ended on a report, not a question
+	idInterleaved  = "c5000012-0000-4000-8000-000000001c05" // one turn, results written inside it
+	idSettledBatch = "d6000013-0000-4000-8000-000000001d06" // a batch whose calls all came back
 )
 
 // meta is a user line the harness wrote, not the person: the resume prompt,
@@ -743,21 +745,28 @@ func TestTheAskDoorKeepsTheStatusLinesResume(t *testing.T) {
 		mustRefresh(t, warm, fleetNow)
 		c.Save()
 
-		// The second process is handed the same bytes. If the cache did
-		// not remember that the peek read wide, it reads the file again —
-		// and on a real home directory that is every quiet transcript,
-		// every few seconds.
-		doctored := strings.Replace(string(readFile(t, path)), "Shall I proceed?", "SERVED FROM CACHE?", 1)
+		// The second process is handed the same bytes, with the question
+		// taken out of them — same length, same mtime, so the entry's
+		// `(size, mtime)` key is untouched and only the cache's own memory
+		// of having read wide decides. A process that forgot it re-reads
+		// the file, finds no question and archives the session; on a real
+		// home directory that is every quiet transcript, every few seconds.
+		//
+		// The replacement has to be the same size: doctoring it longer
+		// invalidated the entry either way, so both the fold and its
+		// revert re-read and both still answered `Asked=true` — the pin
+		// held nothing for a round (round 62).
+		doctored := strings.Replace(string(readFile(t, path)), "Shall I proceed?", "Shall I proceed.", 1)
+		if len(doctored) != len(string(readFile(t, path))) {
+			t.Fatalf("the doctored file is %d bytes against %d: the size key decides it and the cache is never asked", len(doctored), len(string(readFile(t, path))))
+		}
 		writeFile(t, path, doctored, fileTime(t, path))
 
 		next := fleet.NewManager(root)
 		next.UseResumeCache(fleet.OpenResumeCache(cache))
 		s := pick(t, mustRefresh(t, next, fleetNow), idWaitingDay)
 		if !s.Info.Asked {
-			t.Fatalf("Info.Asked = false: the question was lost between processes")
-		}
-		if strings.Contains(s.Snap.Activity+s.Snap.Reason, "SERVED FROM CACHE") {
-			t.Errorf("the scan re-read a file it had already read wide")
+			t.Fatalf("Info.Asked = false: the scan re-read a file it had already read wide, and the question it had is not in these bytes")
 		}
 	})
 
@@ -813,4 +822,58 @@ func fileTime(t *testing.T, path string) time.Time {
 		t.Fatalf("stat %s: %v", path, err)
 	}
 	return fi.ModTime()
+}
+
+// TestTheHeldTurnSurvivesTheResultsWrittenInsideIt is the shape the fold
+// for #348 did not reach. Grouping a turn by `message.id` reassembles the
+// lines that are *adjacent*, and this harness does not always write them
+// that way: on a turn that calls several times it writes each call's
+// result between the calls, so one assistant message is three or four
+// lines with `user` lines in the gaps. Measured on this machine: of 527
+// assistant message ids, 249 span several lines and the two that are not
+// consecutive are exactly the multi-call turns — the only shape this rule
+// is about.
+//
+// The walk reads backwards, so it met a result first and read it as the
+// end of the held turn, one line short of the question. A bare result line
+// says nothing about whose turn it is: it records the call it answers and
+// the hold stands (round 62).
+func TestTheHeldTurnSurvivesTheResultsWrittenInsideIt(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idInterleaved, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module")
+	// The measured shape, with a batched question where one would sit.
+	b.turn(at, "msg_gap",
+		[3]string{"text", "Three of these are independent.", ""},
+		[3]string{"tool", "toolu_askg", state.AskUserQuestion},
+		[3]string{"tool", "toolu_g1", "Task"})
+	b.result(at.Add(time.Second), "toolu_g1", "agent done")
+	b.turn(at.Add(2*time.Second), "msg_gap", [3]string{"tool", "toolu_g2", "Task"})
+	b.result(at.Add(3*time.Second), "toolu_g2", "agent done")
+	b.turn(at.Add(4*time.Second), "msg_gap", [3]string{"tool", "toolu_g3", "Task"})
+	b.write(root, slugAlpha)
+
+	assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idInterleaved), at)
+}
+
+// And the other door into the same turn: a batch whose calls have all come
+// back settled the walk on the spot, without reading the rest of the turn.
+// A question in an earlier line of that same message was never seen, so a
+// batch that asked you something and ran one Bash call archived itself the
+// moment the Bash result landed. The turn is held to its start instead,
+// and the hold settles false of its own accord if no question is in it.
+func TestABatchThatCameBackIsStillReadToItsStart(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idSettledBatch, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module")
+	b.turn(at,
+		"msg_done",
+		[3]string{"tool", "toolu_askd", state.AskUserQuestion},
+		[3]string{"tool", "toolu_bd", "Bash"})
+	b.result(at.Add(time.Second), "toolu_bd", "212 passed")
+	b.write(root, slugAlpha)
+
+	assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idSettledBatch), at)
 }
