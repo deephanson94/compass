@@ -931,3 +931,79 @@ func TestAQuestionFromAnEarlierTurnIsNotThisTurnsLastWord(t *testing.T) {
 			s.Info.Asked, s.Waiting)
 	}
 }
+
+// TestTheVerdictDoesNotDependOnWhereTheWindowFalls is the hold's third
+// size rule, and the one that outlived the first fix. The walk widens by
+// re-reading from the new window's start to the end of the file, so every
+// line of the previous window was fed to it a second time — with the state
+// the first pass left behind. That is not the no-op it looks like: a line
+// the first pass skipped because nothing was held is, on the second pass
+// with a turn held, "written below a held turn and not one of its results",
+// and it settles the walk false. A hook's own user line and a thinking-only
+// line of another turn both do it.
+//
+// So the verdict depended on where the 64KB boundary happened to fall
+// against the question — the same lines, the same question, 700 bytes of
+// tool output apart, waiting at 64000 and archived at 64700. Each line is
+// walked exactly once now; the sizes below sit either side of that band
+// (round 62).
+func TestTheVerdictDoesNotDependOnWhereTheWindowFalls(t *testing.T) {
+	for _, tail := range []string{"a hook's line under the turn", "a thinking-only line of another turn"} {
+		for _, n := range []int{64000, 64700} {
+			root := t.TempDir()
+			at := ago(26 * time.Hour)
+			b := newTranscript(t, idInterleaved, "/home/user/alpha", "main").
+				prompt(ago(27*time.Hour), "map the payments module")
+			b.turn(at, "msg_edge",
+				[3]string{"tool", "toolu_aske", state.AskUserQuestion},
+				[3]string{"tool", "toolu_te", "Task"})
+			b.result(at.Add(time.Second), "toolu_te", strings.Repeat("x", n))
+			if strings.HasPrefix(tail, "a hook") {
+				b.meta(at.Add(2*time.Second), "<hook>stop hook ran</hook>")
+			} else {
+				b.turn(at.Add(2*time.Second), "msg_other", [3]string{"text", "", ""})
+			}
+			b.write(root, slugAlpha)
+
+			s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idInterleaved)
+			if !s.Info.Asked || !s.Waiting {
+				t.Errorf("%s, %d-byte result: Asked/Waiting = %v/%v — the question did not move, only the bytes under it",
+					tail, n, s.Info.Asked, s.Waiting)
+			}
+		}
+	}
+}
+
+// TestTheHeldQuestionOutranksAnAgentOnEitherOrder is round 61's guarantee
+// on the shape the harness writes. A question the harness is holding open
+// outranks an agent in flight — the machine's rule 2 before its rule 3 —
+// and a one-line fixture pinned that. Split over two lines, `busy` refused
+// the hold, so the guarantee depended on which block the harness wrote
+// first: `[Ask, Task]` with an agent running archived the session, where
+// `[Task, Ask]` kept it waiting. Same turn, same agent, same question
+// (round 62).
+func TestTheHeldQuestionOutranksAnAgentOnEitherOrder(t *testing.T) {
+	ask := [3]string{"tool", "toolu_aska", state.AskUserQuestion}
+	task := [3]string{"tool", "toolu_taska", "Task"}
+
+	for _, c := range []struct {
+		name   string
+		blocks [][3]string
+	}{
+		{"the question written first", [][3]string{ask, task}},
+		{"the agent written first", [][3]string{task, ask}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			at := ago(26 * time.Hour)
+			b := newTranscript(t, idAskedTool, "/home/user/alpha", "main").
+				prompt(ago(27*time.Hour), "map the payments module")
+			b.turn(at, "msg_agent", c.blocks...)
+			// The agent it dispatched, writing in the lead's own file.
+			b.sidechainPrompt(at.Add(time.Second), "look at the ledger tables")
+			b.write(root, slugAlpha)
+
+			assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idAskedTool), at)
+		})
+	}
+}

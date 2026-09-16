@@ -349,12 +349,23 @@ func peekTailState(f *os.File, size int64, wide bool) tailState {
 	// session mid-Task can have a whole window with nothing of its own in it.
 	// Falling back to the head there would file the session at a directory it
 	// left, which is exactly the failure this function exists to prevent.
+	//
+	// `walked` is the offset from which every line has already been read
+	// whole, so each window walks only the lines below it and a line is fed
+	// to the walk once. Re-feeding the previous window's lines is not the
+	// no-op it looks like: a line the first pass skipped with nothing held
+	// — a hook's own user line, a thinking-only line of another turn —
+	// settles the walk on the second pass, once a turn is held. The verdict
+	// then depended on where the boundary happened to fall, and 700 bytes
+	// of tool output between the same lines changed the answer. It also
+	// read k windows for the k-th, 8.5MB by the sixteenth (round 62).
+	walked := size
 	for end := int64(1); end <= peekWindows; end++ {
 		start := size - end*peekTail
 		if start < 0 {
 			start = 0
 		}
-		scanTail(f, size, start, &out)
+		walked = scanTail(f, walked, start, &out)
 		if start == 0 {
 			// Only where the file itself runs out. A turn held at a window
 			// boundary is a turn whose older lines are in the next window,
@@ -384,8 +395,10 @@ func peekTailState(f *os.File, size int64, wide bool) tailState {
 // scan.
 const peekWindows = 16
 
-// scanTail walks one window backwards, filling whatever `out` still lacks.
-func scanTail(f *os.File, size, start int64, out *tailState) {
+// scanTail walks the lines between start and upto backwards, filling
+// whatever `out` still lacks, and returns the offset from which lines have
+// now been read whole — the next window's upto.
+func scanTail(f *os.File, upto, start int64, out *tailState) int64 {
 	// Read one byte further back than the window needs. That byte decides
 	// whether the window opens mid-line or exactly at the start of one: with
 	// it included, the first slice of the split is the earlier line's tail in
@@ -396,13 +409,18 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 	if start > 0 {
 		from--
 	}
-	buf := make([]byte, size-from)
+	buf := make([]byte, upto-from)
 	if _, err := f.ReadAt(buf, from); err != nil {
-		return
+		return upto
 	}
 
 	lines := strings.Split(string(buf), "\n")
+	walked := start
 	if start > 0 && len(lines) > 0 {
+		if len(lines) == 1 {
+			return upto // no line ends in this window: nothing new is whole
+		}
+		walked = start + int64(len(lines[0])) // the byte after the first newline
 		lines = lines[1:]
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -427,9 +445,10 @@ func scanTail(f *os.File, size, start int64, out *tailState) {
 		}
 		out.seeAsk(ev)
 		if !out.at.IsZero() && out.located && out.settled {
-			return
+			return walked
 		}
 	}
+	return walked
 }
 
 // seeAsk walks one line of the backwards scan and, on the first line that
@@ -519,20 +538,29 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 			}
 			out++
 		}
+		if t.heldMsg != "" {
+			// Still inside the held turn — a line of thinking or narration
+			// between its calls decides nothing, and neither does a
+			// subagent writing under it. A turn is read to its start
+			// before anything about work in flight is concluded, because
+			// the question may be in a line of it the walk has not reached
+			// and rule 2 precedes rule 3.
+			return
+		}
 		if out > 0 || t.busy {
-			if out > 0 && ev.MessageID != "" && !t.busy {
+			if out > 0 && ev.MessageID != "" {
 				// Hold it while the rest of this turn is still to come:
-				// an older line of the same message may be the question,
-				// and rule 2 precedes rule 3.
+				// an older line of the same message may be the question.
+				// `busy` does not refuse the hold — an agent in flight is
+				// rule 3, and a question the harness is holding open
+				// outranks it. Refusing it made the guarantee depend on
+				// which block the harness wrote first: `[Ask, Task]` with
+				// an agent running answered archived where `[Task, Ask]`
+				// answered waiting, on the same turn (round 62).
 				t.heldMsg = ev.MessageID
 				return
 			}
 			t.settleAsk(false, time.Time{}) // a call still out: work in flight
-			return
-		}
-		if t.heldMsg != "" {
-			// Still inside the held turn — a line of thinking or narration
-			// between its calls decides nothing.
 			return
 		}
 		if len(ev.ToolUses) > 0 {
