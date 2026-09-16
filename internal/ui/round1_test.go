@@ -160,8 +160,8 @@ func TestPinnedColumnSaysWhatIsAbove(t *testing.T) {
 	if !strings.Contains(joined, "legs above · began 1d ago") {
 		t.Errorf("a cut column does not say what is above it:\n%s", joined)
 	}
-	if !strings.Contains(got[3], "↑") {
-		t.Errorf("the notice is not the column's first trail row:\n%s", joined)
+	if first := 3 + blockHeight(m.trails[api]); !strings.Contains(got[first], "↑") {
+		t.Errorf("the notice is not the column's first trail row under its block (#374):\n%s", joined)
 	}
 	// Short enough to fit: no notice.
 	m.trails[api] = fixtureTrail(fixtureBase)
@@ -806,7 +806,7 @@ func TestPromptsAreChapters(t *testing.T) {
 		t.Errorf("note = %q, want the third chapter", m.note)
 	}
 	rows := m.trailColumn(60, 22)
-	if !strings.Contains(rows[2], "fix all the failures first") {
+	if !strings.Contains(rows[2+blockHeight(m.trail)], "fix all the failures first") { // under the block (#374)
 		t.Errorf("the viewport did not open on the prompt:\n%s", strings.Join(rows, "\n"))
 	}
 	press(m, "[")
@@ -1360,7 +1360,9 @@ func TestFoldRowCountsShipsAndRedRuns(t *testing.T) {
 	}
 	m.trails[api] = tr
 	got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 52, 12), "\n")
-	if !strings.Contains(got, "legs above · began") || !strings.Contains(got, "ships · ") || !strings.Contains(got, " red") {
+	// The ships and the reds are the block's rows above the fold; the
+	// fold row keeps what is above it and when it began (#374).
+	if !strings.Contains(got, "legs above · began") || !strings.Contains(got, "◆ ship   4 legs") || !strings.Contains(got, " · 4 red") || strings.Contains(got, "ships · ") {
 		t.Errorf("the fold row does not add the day up:\n%s", got)
 	}
 }
@@ -1441,7 +1443,9 @@ func TestTrailTitleAddsTheDayUp(t *testing.T) {
 	m.SetTrail(tr)
 	m.now = fixtureBase.Add(5 * time.Hour)
 	got := m.trailTitle(90)
-	if !strings.Contains(got, "TRAIL · api · 5h · 4 ships · 4 red") {
+	// The span stays on the title; the ships and the reds are the
+	// block's rows beneath it (#374).
+	if !strings.Contains(got, "TRAIL · api · 5h") || strings.Contains(got, "ships") || strings.Contains(got, " red") {
 		t.Errorf("a long trail's title does not add the day up: %q", got)
 	}
 	// Scrolled off the present it keeps the count beside the way back.
@@ -1512,10 +1516,12 @@ func TestFoldRowGoesCompactWhenNarrow(t *testing.T) {
 		}
 	}
 	m.trails[api] = tr
-	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 34, 12), "\n"); !strings.Contains(got, "⚑") || strings.Contains(got, "…") && strings.Contains(got, "legs above") {
+	// The ships are the block's row at every width; the fold row is
+	// never cut inside a clause (#374).
+	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 34, 12), "\n"); !strings.Contains(got, "◆ ship   4 legs") || strings.Contains(got, "…") && strings.Contains(got, "legs above") {
 		t.Errorf("a narrow column's fold row is not compact:\n%s", got)
 	}
-	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 12), "\n"); !strings.Contains(got, "ships · ") {
+	if got := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 12), "\n"); !strings.Contains(got, "legs above · began") {
 		t.Errorf("a wide column's fold row lost its words:\n%s", got)
 	}
 }
@@ -1880,8 +1886,8 @@ func TestTrailTitleGoesCompact(t *testing.T) {
 	}
 	m.SetTrail(tr)
 	m.now = fixtureBase.Add(5 * time.Hour)
-	if got := m.trailTitle(44); !strings.Contains(got, "⚑") || strings.Contains(got, "…") {
-		t.Errorf("a narrow title is not compact: %q", got)
+	if got := m.trailTitle(44); !strings.Contains(got, "5h") || strings.Contains(got, "…") || strings.Contains(got, "⚑") {
+		t.Errorf("a narrow title should keep its span whole and leave the ships to the block (#374): %q", got)
 	}
 }
 
@@ -2075,8 +2081,8 @@ func TestFoldTallyIsTheWholeDays(t *testing.T) {
 	short := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 10), "\n")
 	tall := strings.Join(m.boardColumn(api, rowFor(t, m, api), 60, 30), "\n")
 	for _, got := range []string{short, tall} {
-		if !strings.Contains(got, "4 ships") {
-			t.Errorf("the fold tally is not the whole day's:\n%s", got)
+		if !strings.Contains(got, "◆ ship   4 legs") {
+			t.Errorf("the tally is not the whole day's, at either height (#374):\n%s", got)
 		}
 	}
 }

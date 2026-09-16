@@ -610,15 +610,12 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		return 4
 	}
 	s := m.sessions[r.sess]
-	if m.boardSummary && boardColumnCounts(tr) {
-		return 3 + len(boardSummaryRows(tr)) // the counts, not the trail (#373)
-	}
 	doc := TrailLines(tr, TrailOpts{
 		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, Agents: m.agentsFor(key),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 		Dense: true, Looked: m.looked(key), NoLaneHeads: m.noLaneHeads,
 	})
-	return 3 + len(doc)
+	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the trail (#374)
 }
 
 // boardRows numbers the board's sessions in the board's own order — the
@@ -1049,23 +1046,17 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		NoLaneHeads:  m.noLaneHeads,
 		Looked:       m.looked(key),
 	}
-	if m.boardSummary && boardColumnCounts(tr) {
-		// The board's summary: the column's counts where its trail was,
-		// on the head options the legs' summary uses for a parked lead's
-		// name and figure (#351, #352, #373).
-		so := opts
-		so.HeadWaits = headWaits(tr)
-		so.HeadTail = headTail(tr, m.now, s.Snap.State != state.Idle, m.agentsFor(key))
-		lines := m.boardSummaryLines(tr, so, rows, w, h-3)
-		if m.boardMuted(s) {
-			for i, line := range lines {
-				lines[i] = dimStyle.Render(ansi.Strip(line))
-			}
-		}
-		return append(rows, lines...)
+	// The block above the trail: the legs counted by class, and the
+	// trail in the rows that are left; the block is drawn after the
+	// trail, whose HEAD row may carry the running leg's clause (#374).
+	bh := blockHeight(tr)
+	opts.Height = h - 3 - bh
+	if opts.Height < 1 {
+		opts.Height = 1
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
+	block := m.columnBlock(key, tr, s, opts, rows, lines, w)
 	// A column pinned to the present with a day above it says so on its
 	// first row — the rail row that would otherwise be a bare stroke — so a
 	// column that begins with ◉ and one that begins ten hours in are not
@@ -1086,7 +1077,14 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 			// with no name.
 			lines[1] = lines[0]
 		}
+		if len(block) > 0 {
+			full = summaryDay(full) // the ships, the reds and the wait are the block's rows (#374)
+		}
 		lines[0] = dimStyle.Render(shedClauses(full, w))
+	}
+	lines = append(block, lines...)
+	if len(lines) > h-3 {
+		lines = lines[:h-3]
 	}
 	if m.boardMuted(s) {
 		for i, line := range lines {
