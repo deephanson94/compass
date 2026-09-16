@@ -250,6 +250,12 @@ type Model struct {
 	trailPinned bool
 	summaryOff  int // the summary's window hides the present: -1 above, +1 below; the title says `↑ G` or `↓ G` (#361, #369)
 
+	// The board's summary (#373): `s` on the board swaps every column's
+	// trail for its legs counted by class, one screen for the fleet.
+	// It stands until `s` or `esc` on the board ends it; `tab` into a
+	// column carries it in as the legs' summary, held.
+	boardSummary bool
+
 	// The summary (#348): the trail's legs counted by class, where the
 	// trail was, while summary is on and the keys are on the legs.
 	summary       bool
@@ -929,6 +935,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// On the board or a list a standing search clears first; in a
 			// session esc is the way back to the board, search or not.
 			m.clearQuery()
+			return m, nil
+		}
+		if m.level == levelBoard && m.boardShown() && m.boardSummary {
+			m.boardSummary = false // the trails where the counts were (#373)
 			return m, nil
 		}
 		return m, m.zoomOut()
@@ -1799,6 +1809,11 @@ func (m *Model) zoomIn() {
 		}
 		if m.level == levelWaypoints {
 			m.cursorMove(0) // the cursor opens on the present; the reader follows
+			if m.boardSummary {
+				// The board's summary goes in with you: the legs open
+				// counted, held as `s` would hold them (#373).
+				m.summary, m.summaryHeld = true, true
+			}
 		}
 	case m.level < levelWaypoints:
 		m.level = levelWaypoints
@@ -3242,7 +3257,7 @@ func (m *Model) viewOnce() string {
 		// A fleet of one at any width has no board (#31): the help that
 		// taught "board → trail" beside a ⇧tab that refuses it was
 		// keyed on the terminal's width, not on what the deck draws (#53).
-		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, reader: m.level >= levelReader, refused: m.refusedKeys(), held: m.summaryHeld && !m.summary && m.level == levelWaypoints, keymap: m.keymapAt(inner), recent: m.archivedCount() > 0, tools: m.toolsAnywhere() > 1})
+		body = helpLinesWith(inner, bodyHeight, helpOpts{board: m.boardFits() && m.liveCount() > 1, reader: m.level >= levelReader, refused: m.refusedKeys(), held: m.summaryHeld && !m.summary && m.level == levelWaypoints, atBoard: m.level == levelBoard && m.boardShown(), keymap: m.keymapAt(inner), recent: m.archivedCount() > 0, tools: m.toolsAnywhere() > 1})
 	case m.err != nil:
 		body = fit([]string{dimStyle.Render(clip("could not read "+m.root()+": "+m.err.Error(), inner))}, bodyHeight)
 	case len(m.sessions) == 0:
@@ -3749,6 +3764,9 @@ func (m *Model) headerLine(w int) string {
 	board := ""
 	if m.level == levelBoard && m.boardShown() {
 		board = " · board"
+		if m.boardSummary {
+			board = " · board · summary" // the columns are counts, not trails (#373)
+		}
 	}
 	digit, name, tag := m.headerName()
 	tool := ""
@@ -4248,15 +4266,26 @@ func (m *Model) summaryFoldKeymap() string {
 // stands only where the row still names every key it named without it.
 func (m *Model) footerSummaryTraded(keys string, w int) string {
 	const clause = " · s summary"
-	if m.level != levelWaypoints || m.summaryShown() || m.summaryRefusal() != "" || !strings.Contains(keys, " · ? help") || strings.Contains(keys, clause) {
+	atBoard := m.level == levelBoard && m.boardShown()
+	if !(m.level == levelWaypoints || atBoard) || m.summaryShown() || m.boardSummary || m.summaryRefusal() != "" || !strings.Contains(keys, " · ? help") || strings.Contains(keys, clause) {
 		return m.footerTradedOnce(keys, w)
 	}
 	with := m.footerTradedOnce(strings.Replace(keys, " · ? help", clause+" · ? help", 1), w)
 	without := m.footerTradedOnce(keys, w)
-	if footerNamesAll(without, with) {
-		return with // the clause cost the row no key
+	if footerNamesAll(without, with) && footerPane(without) == footerPane(with) {
+		return with // the clause cost the row no key, and the pane nothing (#63, #373)
 	}
 	return without
+}
+
+// footerPane is the pane the row ends on, `⌁ dev:2.0`, or "" — the one
+// clause of the note a traded key may not buy (#63).
+func footerPane(row string) string {
+	plain := strings.TrimRight(ansi.Strip(row), " ")
+	if i := strings.LastIndex(plain, "⌁ "); i >= 0 && !strings.Contains(plain[i:], "  ") {
+		return plain[i:]
+	}
+	return ""
 }
 
 // noPaneClauseGone is a drawn row with the keymap's own `enter · no pane`
@@ -4635,6 +4664,9 @@ func (m *Model) keymapOnce() string {
 		// The live board's: the archive is never at the board's level
 		// (#340).
 		keys = "h/l columns · " + m.enterKeymap() + " · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit"
+		if m.boardSummary {
+			keys = strings.Replace(keys, " · ? help", " · s/esc trails · ? help", 1) // the way back from the counts (#373)
+		}
 	case m.level == levelTrail && m.archiveView && m.boardFits():
 		// The archive's list wherever the board fits — the empty archive
 		// included, whose `boardShown` is false since it asks whether the
@@ -6374,7 +6406,7 @@ func (m *Model) shedOrder(chapter bool) []string {
 		// In the archive `a` is the reason to be there — a claude on a
 		// session you can no longer attach to — so it stands with the
 		// archive's own keys; on the live list it is the trail's.
-		own = heads([]string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · tab deeper", " · enter attach", " · enter · no pane", " · x unhide"})
+		own = heads([]string{" · [ ] chapters", " · [ ] turns", " · space unfold", " · a ask", " · n/N", " · / search", " · g grab", " · x hide", " · r reply", " · s/esc trails", " · tab deeper", " · enter attach", " · enter · no pane", " · x unhide"})
 		if m.archiveView {
 			// "enter · no pane" is a refusal, and a refusal goes before
 			// the way in: the archive's `tab deeper` outlasts it (#52).

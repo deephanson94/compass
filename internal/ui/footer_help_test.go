@@ -55,7 +55,11 @@ func TestAShortNoteCostsTheFooterNoKey(t *testing.T) {
 			want = strings.TrimSpace(l)
 		}
 	}
-	if got := strings.TrimSpace(strings.Split(foot, "  ")[0]); got != want {
+	// `s summary` is a traded clause, not a key of the row's rank: it
+	// stands where the row has spare cells and is the first thing the
+	// row gives up (#348, #373), so the compare is over the keys proper.
+	want = strings.Replace(want, " · s summary", "", 1)
+	if got := strings.Replace(strings.TrimSpace(strings.Split(foot, "  ")[0]), " · s summary", "", 1); got != want {
 		t.Errorf("the mirror note costs the board keys:\n note-free %q\n with note %q", want, got)
 	}
 }

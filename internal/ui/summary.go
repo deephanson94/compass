@@ -163,12 +163,17 @@ func (m *Model) summaryRefusal() string {
 		tr = t // the board's selection, before its trail is the deck's
 	}
 	switch {
+	case m.level == levelBoard && m.boardShown():
+		// The board counts every column at once (#373); a board whose
+		// every column is one of each has nothing to add up.
+		if m.boardCountsSomething() {
+			return ""
+		}
+		return "one of each · every column"
 	case len(tr.Legs) == 0 && len(tr.Branches) == 0:
 		return "no leg yet" // HEAD's row is the fleet's, not a leg (#351)
 	case summaryCountsNothing(tr):
 		return "one of each" // the fact, in the cells that keep `a ask` on the row at 100 (#351, #352)
-	case m.level == levelBoard && m.boardShown():
-		return "the summary is one trail's · tab into it"
 	case m.level == levelBoard || m.level == levelTrail || m.level >= levelReader:
 		return "the summary is the legs'"
 	}
@@ -181,6 +186,20 @@ func (m *Model) summaryRefusal() string {
 // invites, lane to trail and back. Opened on another session it starts
 // afresh, or the first frame would depend on a session off screen (#349).
 func (m *Model) toggleSummary() {
+	if m.level == levelBoard && m.boardShown() {
+		// The board's own: every column's counts where its trail was,
+		// and the trails back (#373).
+		if m.boardSummary {
+			m.boardSummary = false
+			return
+		}
+		if why := m.summaryRefusal(); why != "" {
+			m.note = why
+			return
+		}
+		m.boardSummary = true
+		return
+	}
 	if m.summary {
 		m.summary, m.summaryHeld = false, false
 		return
@@ -1160,4 +1179,72 @@ func summaryCursored(text string, w int) string {
 		plain += strings.Repeat(" ", n)
 	}
 	return cursorStyle.Render(plain)
+}
+
+// boardCountsSomething reports whether any column on the board has a
+// trail the summary can add up (#373).
+func (m *Model) boardCountsSomething() bool {
+	for _, i := range m.viewOrder() {
+		if tr, ok := m.trails[m.sessions[i].Info.Key()]; ok && boardColumnCounts(tr) {
+			return true
+		}
+	}
+	return false
+}
+
+// boardColumnCounts says whether a column draws counts under the board's
+// summary: a trail with legs and more than one of some class. The rest
+// keep their trails, which say all there is (#373).
+func boardColumnCounts(tr journey.Trail) bool {
+	return (len(tr.Legs) > 0 || len(tr.Branches) > 0) && !summaryCountsNothing(tr)
+}
+
+// boardSummaryRows is a column's rows under the board's summary: the
+// class rows, a class of one as its leg's own row, the lanes, and the
+// wait — no class open, since the board has no cursor; `tab` into the
+// column opens them (#373).
+func boardSummaryRows(tr journey.Trail) []summaryRow {
+	wait := ""
+	if d := promptWaits(tr); d >= waitNotable {
+		wait = spanText(d)
+	}
+	return summaryRows(tr, nil, nil, nil, wait, 0)
+}
+
+// boardSummaryLines draws a column's counts where its trail was, h rows
+// tall: the rows the legs' summary draws, on the column's own head
+// options, with the loop and the lanes' tally read off the header the
+// column already wears (#347, #357, #373). A column too short for its
+// rows ends on the edge row the legs' summary draws.
+func (m *Model) boardSummaryLines(tr journey.Trail, o TrailOpts, header []string, w, h int) []string {
+	rows := boardSummaryRows(tr)
+	said := ""
+	for _, line := range header {
+		said += ansi.Strip(line) + "\n"
+	}
+	loopSaid := strings.Contains(said, " failure")
+	backSaid := strings.Contains(said, " back")
+	var lines []string
+	for _, r := range rows {
+		switch r.kind {
+		case "class":
+			lines = append(lines, summaryClassRow(tr, r.class, o, loopSaid, false, false, w))
+		case "wait":
+			lines = append(lines, summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(tr.Prompts), "prompt"), nil, r.text, w))
+		case "lanes":
+			lines = append(lines, summaryLanesRow(tr, o, w, backSaid))
+		case "leg":
+			l := tr.Legs[r.leg]
+			lo := o
+			lo.Width = w
+			lo.Ask = askBefore(tr, l.Start)
+			label, narrated := legLabel(l, lo)
+			lines = append(lines, legRow(l, label, narrated, lo))
+		}
+	}
+	if h > 0 && len(lines) > h {
+		keep := max(h-1, 0)
+		lines = append(lines[:keep], dimStyle.Render(summaryEdge(summaryBelow(rows, keep), w)))
+	}
+	return lines
 }

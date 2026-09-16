@@ -61,6 +61,7 @@ type helpOpts struct {
 	reader  bool // the keys are in the reader: the page keys page it, not the trail (#83, #87)
 	refused []string
 	held    bool // the summary is held for the next trail that counts (#358, #362)
+	atBoard bool // the keys are on the board: `s` counts every column (#373)
 	keymap  string
 	tools   bool // the fleet runs two CLIs, so its rows wear the word (#85)
 }
@@ -92,7 +93,7 @@ func helpOffered(key, keymap string) bool {
 
 func helpLinesWith(w, h int, o helpOpts) []string {
 	board, refused := o.board, o.refused
-	keys := helpKeyLinesIn(w, board, o.reader, o.held, refused...)
+	keys := helpKeyLinesIn(w, board, o.reader, o.held, o.atBoard, refused...)
 	// Two columns only when the keys themselves fit: on a body too short for
 	// them, splitting the width buys nothing and costs every key its tail.
 	// Two columns at a width that holds them whole, or at any width past
@@ -120,11 +121,11 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 			legend = kept
 		}
 		return joinColumns(h, []column{
-			{left, withoutRecent(helpKeyLinesIn(left, board, o.reader, o.held, refused...), o.recent)},
+			{left, withoutRecent(helpKeyLinesIn(left, board, o.reader, o.held, o.atBoard, refused...), o.recent)},
 			{right, legend},
 		})
 	}
-	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, o.held, refused...), o.recent)
+	lines := withoutRecent(helpKeyLinesIn(w, board, o.reader, o.held, o.atBoard, refused...), o.recent)
 	legend := helpLegendLines(w, false, o.tools, board)
 	if !o.tools {
 		legend = dropToolGloss(legend)
@@ -398,10 +399,10 @@ func refuses(refused []string, key string) bool {
 // on one too narrow for it, "zoom in: board → trail" describes a level the
 // person cannot reach.
 func helpKeyLinesFor(w int, board bool, refused ...string) []string {
-	return helpKeyLinesIn(w, board, false, false, refused...)
+	return helpKeyLinesIn(w, board, false, false, false, refused...)
 }
 
-func helpKeyLinesIn(w int, board, reader, held bool, refused ...string) []string {
+func helpKeyLinesIn(w int, board, reader, held, atBoard bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
 	for _, k := range helpKeys {
 		key, what := k[0], k[1]
@@ -431,6 +432,22 @@ func helpKeyLinesIn(w int, board, reader, held bool, refused ...string) []string
 				// The grab is a level out, which the aside says where
 				// there is room for it.
 				what = "the start of the conversation, the other end of G; the grab is a level out"
+			}
+		}
+		if atBoard {
+			switch key {
+			case "s":
+				if !refuses(refused, "s") {
+					// On the board the key counts every column at once,
+					// and the way back and the way in are its own (#40,
+					// #373).
+					what = "summary: every column's legs by class · s or esc the trails · tab into one"
+				}
+			case "⇧ tab":
+				// The board is the top: the key refuses here, and its
+				// row is the one the board's `s` row takes, so the help
+				// keeps its two columns at 120x34 (#40, #99, #373).
+				what = ""
 			}
 		}
 		if key == "s" && refuses(refused, "s") {

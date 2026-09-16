@@ -27,4 +27,4 @@
   9 ○ api · "port the client to httpx"                                                                               1d
 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- h/l columns · enter attach · tab session · r reply · a ask · / search · x hide · g grab · ? help · q quit
+ h/l columns · enter attach · tab session · r reply · a ask · / search · x hide · g grab · s summary · ? help · q quit

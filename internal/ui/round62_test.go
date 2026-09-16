@@ -234,9 +234,12 @@ func TestTheSummaryIsRefusedOffTheLegs(t *testing.T) {
 		t.Fatalf("the scene does not open on the board: level %d", m.level)
 	}
 	press(m, "s")
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "the summary is one trail's · tab into it") || strings.Contains(view, "[summary]") {
-		t.Errorf("s on the board should say the way in:\n%s", view)
+	// On the board the key is the board's own since #373: every column
+	// counts; the refusal there is a board of one of each.
+	if view := ansi.Strip(m.View()); !m.boardSummary || !strings.Contains(view, "· board · summary") || strings.Contains(view, "[summary]") {
+		t.Errorf("s on the board should count every column (#373):\n%s", view)
 	}
+	press(m, "esc")
 	narrow := sceneModel(sc, 80, 24)
 	pressKey(narrow, "1")
 	poll(narrow, sc)

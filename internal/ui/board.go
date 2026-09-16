@@ -610,6 +610,9 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		return 4
 	}
 	s := m.sessions[r.sess]
+	if m.boardSummary && boardColumnCounts(tr) {
+		return 3 + len(boardSummaryRows(tr)) // the counts, not the trail (#373)
+	}
 	doc := TrailLines(tr, TrailOpts{
 		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, Agents: m.agentsFor(key),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
@@ -1045,6 +1048,21 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		Dense:        true, // the board always packs: a rail row between every leg halved what fit
 		NoLaneHeads:  m.noLaneHeads,
 		Looked:       m.looked(key),
+	}
+	if m.boardSummary && boardColumnCounts(tr) {
+		// The board's summary: the column's counts where its trail was,
+		// on the head options the legs' summary uses for a parked lead's
+		// name and figure (#351, #352, #373).
+		so := opts
+		so.HeadWaits = headWaits(tr)
+		so.HeadTail = headTail(tr, m.now, s.Snap.State != state.Idle, m.agentsFor(key))
+		lines := m.boardSummaryLines(tr, so, rows, w, h-3)
+		if m.boardMuted(s) {
+			for i, line := range lines {
+				lines[i] = dimStyle.Render(ansi.Strip(line))
+			}
+		}
+		return append(rows, lines...)
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
