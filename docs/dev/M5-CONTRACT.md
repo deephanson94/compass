@@ -46,7 +46,14 @@ Rules:
    words settle it (nothing waits), a call still out is work in flight unless
    it is `AskUserQuestion`, and otherwise rule 4's own test decides. The
    harness's own turns settle nothing, and a refused call is not a question.
-   The door clears itself — reply, and the last word is yours.
+   The door clears itself — reply, and the last word is yours; and it closes
+   when the session does. A question is read off the file, so it outlives the
+   pane and compass's own restart, but `/exit` writes nothing to the file and
+   a question in a session nobody is running is one you already answered by
+   leaving. `<root>/sessions/<pid>.json` is Claude Code's own registry of
+   running sessions and says which those are; where it cannot be read at all
+   the door is what it was, because "I cannot say" must not archive anything
+   (#374).
 
    The walk reads a file that has gone quiet whole, and gives one window to
    a file still being written — that one is live on the recency door whatever
