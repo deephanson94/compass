@@ -1683,7 +1683,10 @@ func (m *Model) trailBox() (int, int) {
 	if h <= 0 {
 		h = 24
 	}
-	height := h - 5 - trailChrome - blockHeight(m.trail) // the block above the trail takes its rows first (#374)
+	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#374, #378)
+	if m.blockShown() {
+		height -= blockHeight(m.trail)
+	}
 	if height < 1 {
 		height = 1
 	}

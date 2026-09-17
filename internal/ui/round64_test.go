@@ -318,6 +318,154 @@ func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 			}
 		}
 	}
+	// The clock's other idiom: harness:0.0's lanes are all back, so its
+	// row's clock is `1h ago`, and the lane that came back last wears the
+	// same clock on its own row beneath (#376, #380).
+	m := sceneModel(sc, 120, 34)
+	v := ansi.Strip(m.View())
+	lanes := ""
+	for _, line := range strings.Split(v, "\n") {
+		for _, cell := range strings.Split(line, "│") {
+			if strings.Contains(cell, "◈ agent  3 lanes") {
+				lanes = cell
+			}
+		}
+	}
+	if lanes == "" {
+		t.Fatalf("harness:0.0's lanes row is not on the board at 120x34:\n%s", v)
+	}
+	if !strings.Contains(v, "✓ 1h ago") {
+		t.Fatalf("no lane row carries the clock the lanes row would repeat:\n%s", v)
+	}
+	if strings.Contains(lanes, "1h ago") {
+		t.Errorf("the lanes row repeats the clock the lanes beneath carry: %q\n%s", lanes, v)
+	}
+}
+
+// The panel's second pass on #377 — two-tools, subagents, fleet-hygiene —
+// folded (#379, #380, #381).
+
+// The reply box's floor and the band below: where the box would paint over a
+// band's head rows, the band stands off the box's floor, or, where it no
+// longer fits, it is the strip's, and the strip stands off the floor too —
+// so the session is named on the frame either way (#379).
+func TestABandTheBoxWouldBeheadStandsOffItsFloor(t *testing.T) {
+	forceASCII(t)
+	sc := sceneTwoTools()
+	for _, c := range []struct {
+		h    int
+		want string
+	}{{34, " 4 ○ docs "}, {28, "+1 more · 4 ○ docs"}} {
+		m := sceneModel(sc, 120, c.h)
+		m.View()
+		pressKey(m, "r")
+		poll(m, sc)
+		v := ansi.Strip(m.View())
+		if !m.replyBox.on {
+			t.Fatalf("120x%d: r opens no box on infra:\n%s", c.h, v)
+		}
+		lines := strings.Split(v, "\n")
+		bottom, docs := -1, -1
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "└") {
+				bottom = i
+			}
+			if strings.Contains(line, c.want) {
+				docs = i
+			}
+		}
+		if bottom < 0 {
+			t.Fatalf("120x%d: no box bottom on the frame:\n%s", c.h, v)
+		}
+		if docs < 0 {
+			t.Errorf("120x%d: the docs session is named nowhere under the box (#379):\n%s", c.h, v)
+		} else if docs != bottom+2 {
+			t.Errorf("120x%d: the docs row should stand one row of air off the box's floor (row %d), stands at %d:\n%s", c.h, bottom+2, docs, v)
+		}
+		if strings.Contains(v, "opencode · gpt-5") && docs < 0 {
+			t.Errorf("120x%d: the docs trail stands with no row naming it:\n%s", c.h, v)
+		}
+		pressKey(m, "esc")
+	}
+}
+
+// A card row nothing is left of goes: the rung the header says was dropped
+// (#377) and no clause stood beside it, so the card is head and delta, as
+// it was before the rung was dropped (#379).
+func TestACardRowNothingIsLeftOfGoes(t *testing.T) {
+	forceASCII(t)
+	sc := sceneTwoTools()
+	for _, w := range []int{120, 152, 220} {
+		m := sceneModel(sc, w, 34)
+		for _, d := range []string{"1", "2", "3", "4"} {
+			pressKey(m, d)
+			poll(m, sc)
+			if s, ok := m.selected(); ok && sessionName(s.Info) == "api" && strings.Contains(m.toolTag(s), "opencode") {
+				break
+			}
+		}
+		for m.level < levelWaypoints {
+			pressKey(m, "tab")
+			poll(m, sc)
+		}
+		cells := trailCells(m)
+		for i, c := range cells {
+			if !strings.Contains(c, "[session]") {
+				continue
+			}
+			if i+2 < len(cells) && strings.TrimSpace(cells[i+2]) == "" && strings.Contains(cells[i+1], "↪ sent") {
+				t.Errorf("%dx34: the card keeps a blank row under its delta (#379):\n%s", w, strings.Join(cells[i:i+3], "\n"))
+			}
+		}
+	}
+}
+
+// The board spends its unspent rows on the bands' debt: a tight pack decides
+// the columns, and the rows it did not spend go back to the bands, smallest
+// debt first, so a column's ask is not folded over blank rows (#381).
+func TestTheBoardSpendsItsSpareRowsOnTheBandsDebt(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneManyIdle(), 220, 48)
+	v := ansi.Strip(m.View())
+	if got := boardColumnsDrawn(v); got < 9 {
+		t.Fatalf("many-idle at 220x48 should draw its columns as before, drew %d:\n%s", got, v)
+	}
+	for _, ask := range []string{`◉ "clean the exploration notebooks"`, `◉ "profile the hot loop"`} {
+		if !strings.Contains(v, ask) {
+			t.Errorf("the rows are there and the ask is folded anyway (#381): %q missing\n%s", ask, v)
+		}
+	}
+	lines := strings.Split(v, "\n")
+	blank := 0
+	for i := len(lines) - 3; i >= 0 && strings.TrimSpace(lines[i]) == ""; i-- {
+		blank++
+	}
+	if blank > 1 {
+		t.Errorf("%d blank rows stand under the strip while a column folds (#381):\n%s", blank, v)
+	}
+}
+
+// Where the fold takes only the ask, the rail stub under it is the fold's
+// row — `↑ began …` — and never a bare stroke under the seam (#381).
+func TestAFoldThatTakesOnlyTheAskSaysSo(t *testing.T) {
+	forceASCII(t)
+	for _, sc := range []scene{sceneManyIdle(), sceneAlarmStorm()} {
+		for h := 40; h <= 48; h++ {
+			m := sceneModel(sc, 220, h)
+			lines := strings.Split(ansi.Strip(m.View()), "\n")
+			for i := 1; i < len(lines); i++ {
+				above, here := []rune(lines[i-1]), []rune(lines[i])
+				for j, r := range here {
+					// A stub in a column's first cell, under the cell the
+					// seam begins in.
+					if r != '╷' || j >= len(above) || !strings.HasPrefix(string(above[j:]), "│ the trail ─") {
+						continue
+					}
+					t.Errorf("%s at 220x%d: a bare rail stub under the seam, its ask folded silently (#381):\n%s", sc.name, h, strings.Join(lines[i-1:i+1], "\n"))
+				}
+			}
+		}
+	}
 }
 
 // The panel's first pass on #374 — alarm-storm, fleet-hygiene, two-tools
@@ -328,7 +476,8 @@ func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 func boardColumnsDrawn(v string) int {
 	n := 0
 	for _, line := range strings.Split(v, "\n") {
-		if strings.Contains(line, "│") || strings.HasPrefix(strings.TrimSpace(line), "▸") || len(line) > 2 && line[1] >= '1' && line[1] <= '9' {
+		lead := strings.TrimLeft(line, " ")
+		if strings.Contains(line, "│") || strings.HasPrefix(lead, "▸") || len(lead) > 2 && lead[0] >= '1' && lead[0] <= '9' && lead[1] == ' ' {
 			// a header row: every column's first row carries a digit
 			for _, cell := range strings.Split(line, "│") {
 				t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(cell), "▸"))
@@ -343,14 +492,23 @@ func boardColumnsDrawn(v string) int {
 
 func TestTheBlockNeverCostsASessionItsColumn(t *testing.T) {
 	forceASCII(t)
-	for _, sc := range []scene{sceneAlarmStorm(), sceneManyIdle()} {
-		m := sceneModel(sc, 120, 34)
+	// The columns of before the block, at the widths the block cost them:
+	// counted from the pre-block corpus (#377, #380).
+	for _, c := range []struct {
+		sc   scene
+		w, h int
+		want int
+	}{
+		{sceneAlarmStorm(), 120, 34, 6}, {sceneManyIdle(), 120, 34, 6}, {sceneSubagents(), 120, 34, 4},
+		{sceneAlarmStorm(), 220, 48, 7}, {sceneManyIdle(), 220, 48, 9}, {sceneSubagents(), 220, 48, 4},
+	} {
+		m := sceneModel(c.sc, c.w, c.h)
 		v := ansi.Strip(m.View())
-		if got := boardColumnsDrawn(v); got < 6 {
-			t.Errorf("%s at 120x34 should draw six columns as it did before the block, drew %d:\n%s", sc.name, got, v)
+		if got := boardColumnsDrawn(v); got < c.want {
+			t.Errorf("%s at %dx%d should draw its %d columns as it did before the block, drew %d:\n%s", c.sc.name, c.w, c.h, c.want, got, v)
 		}
 		if !strings.Contains(v, " legs") || !strings.Contains(v, "│ the trail ─") {
-			t.Errorf("%s at 120x34 should keep its blocks while it keeps its columns:\n%s", sc.name, v)
+			t.Errorf("%s at %dx%d should keep its blocks while it keeps its columns:\n%s", c.sc.name, c.w, c.h, v)
 		}
 	}
 	// Where the board has the rows, the block stands over the whole trail.
@@ -381,30 +539,34 @@ func TestTheBoardsFoldRowAndTheBlockClose(t *testing.T) {
 				_ = hidden
 			}
 		}
-		// Pin the arithmetic directly on the column the fold row is drawn on.
+		// Pin the arithmetic directly on the column the fold row is drawn
+		// on, at every height a band can give it: the row the fold paints
+		// over is a leg at some of them, and the count must close at all.
 		key := m.viewOrderKeys()[0]
 		tr := m.trails[key]
 		r := m.boardRows()[key]
 		_, cw := boardColumns(size[0]-2*edgePad, m.drawnCount(m.viewOrder()))
-		col := m.boardColumn(key, r, cw, 30)
-		hidden, drawn := -1, 0
-		for _, line := range col {
-			c := ansi.Strip(line)
-			if strings.Contains(c, "↑ ") && strings.Contains(c, " legs") {
-				fmt.Sscanf(strings.TrimSpace(c), "↑ %d legs", &hidden)
-				continue
+		for h := 16; h <= 40; h++ {
+			col := m.boardColumn(key, r, cw, h)
+			hidden, drawn := -1, 0
+			for _, line := range col {
+				c := ansi.Strip(line)
+				if strings.Contains(c, "↑ ") && strings.Contains(c, " legs") {
+					fmt.Sscanf(strings.TrimSpace(c), "↑ %d legs", &hidden)
+					continue
+				}
+				// A leg row: its mark, or the rail where a run of one class
+				// continues, then the class word — never a block row.
+				if hidden >= 0 && legRowPattern.MatchString(c) && !strings.Contains(c, " legs") {
+					drawn++
+				}
 			}
-			// A leg row: its mark, or the rail where a run of one class
-			// continues, then the class word — never a block row.
-			if hidden >= 0 && legRowPattern.MatchString(c) && !strings.Contains(c, " legs") {
-				drawn++
+			if hidden < 0 {
+				t.Fatalf("%dx%d at %d rows: no fold row on the column:\n%s", size[0], size[1], h, strings.Join(col, "\n"))
 			}
-		}
-		if hidden < 0 {
-			t.Fatalf("%dx%d: no fold row on the column:\n%s", size[0], size[1], strings.Join(col, "\n"))
-		}
-		if hidden+drawn != len(tr.Legs) {
-			t.Errorf("%dx%d: the fold row (%d) and the legs beneath it (%d) do not close on the block's %d (#377):\n%s", size[0], size[1], hidden, drawn, len(tr.Legs), strings.Join(col, "\n"))
+			if hidden+drawn != len(tr.Legs) {
+				t.Errorf("%dx%d at %d rows: the fold row (%d) and the legs beneath it (%d) do not close on the block's %d (#377):\n%s", size[0], size[1], h, hidden, drawn, len(tr.Legs), strings.Join(col, "\n"))
+			}
 		}
 	}
 }
@@ -428,32 +590,72 @@ func TestTheCardKeepsTheClauseItShedForATagItDropped(t *testing.T) {
 	if !strings.Contains(v, "on you 12m today") && !strings.Contains(v, "◉ waited on you") {
 		t.Errorf("at 120 the api session's wait should be on the card or the block (#377):\n%s", v)
 	}
+	// The card row itself, on a session the block covers nowhere: the
+	// harness card at 120 keeps its running clause on the row the tmux
+	// rung left, and the card is two rows, not three (#377, #379).
+	sc := sceneSubagents()
+	m = sceneModel(sc, 120, 34)
+	for _, d := range []string{"1", "2", "3", "4", "5"} {
+		pressKey(m, d)
+		poll(m, sc)
+		if s, ok := m.selected(); ok && sessionName(s.Info) == "harness" && strings.Contains(ansi.Strip(m.View()), "⌁ harness:1.0") {
+			break
+		}
+	}
+	for m.level < levelWaypoints {
+		pressKey(m, "tab")
+		poll(m, sc)
+	}
+	cells := trailCells(m)
+	head := -1
+	for i, c := range cells {
+		if strings.Contains(c, "[session]") {
+			head = i
+			break
+		}
+	}
+	if head < 0 || head+2 >= len(cells) {
+		t.Fatalf("no session card on the frame:\n%s", ansi.Strip(m.View()))
+	}
+	if !strings.Contains(cells[head+1], "for ") || !strings.Contains(cells[head+1], "scout") {
+		t.Errorf("the card's second row should carry the running clause the rung gave way to (#377): %q", cells[head+1])
+	}
+	if strings.TrimSpace(cells[head+2]) == "" {
+		t.Errorf("the card is head and delta, not a blank third row (#379):\n%s", strings.Join(cells[head:head+4], "\n"))
+	}
 }
 
 func TestTheTitleKeepsItsRedsWhereTheReplyBoxCoversTheBlock(t *testing.T) {
 	forceASCII(t)
 	sc := sceneManyIdle()
 	m := sceneModel(sc, 80, 24)
-	found := false
+	// The corpus's own route: webapp is the session whose block counts a
+	// red and whose pane takes a reply (`many-idle-80x24` after `r`).
 	for _, d := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"} {
 		pressKey(m, d)
 		poll(m, sc)
-		if blockCounts(m.trail) && strings.Contains(trailDay(m.trail, m.now, false), " red") {
-			found = true
+		if s, ok := m.selected(); ok && sessionName(s.Info) == "webapp" {
 			break
 		}
 	}
-	if !found {
-		t.Skip("no many-idle session with a block and a red count")
+	if s, ok := m.selected(); !ok || sessionName(s.Info) != "webapp" {
+		t.Fatalf("no digit reaches webapp")
+	}
+	if !blockCounts(m.trail) || !strings.Contains(trailDay(m.trail, m.now, false), " red") {
+		t.Fatalf("webapp should count a block with a red: %q", trailDay(m.trail, m.now, false))
 	}
 	pressKey(m, "r")
 	poll(m, sc)
+	m.View()
 	if !m.replyBox.on {
-		t.Skip("r did not open the reply box here")
+		t.Fatalf("r did not open the reply box on webapp:\n%s", ansi.Strip(m.View()))
 	}
 	v := ansi.Strip(m.View())
 	if !strings.Contains(v, " legs") && !strings.Contains(v, " red") {
 		t.Errorf("the box covers the block and the title gave its reds away: nothing on the frame counts them (#377):\n%s", v)
+	}
+	if !strings.Contains(v, "TRAIL · webapp · 1h · 2 red") {
+		t.Errorf("the title should carry the reds the covered block cannot (#377):\n%s", v)
 	}
 	pressKey(m, "esc")
 }
@@ -521,3 +723,32 @@ func (m *Model) viewOrderKeys() []string {
 
 // legRowPattern is the shape of a leg row on a board column.
 var legRowPattern = regexp.MustCompile(`^[◆●◍▲│]▸? ?(scout|design|build|fix|test|ship|docs) `)
+
+// The panel's second pass, alarm-storm, folded (#378).
+
+func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
+	forceASCII(t)
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		m, sc := longSession(t, size[0], size[1])
+		pressKey(m, "r") // the offer's box, over the trail column
+		poll(m, sc)
+		cells := trailCells(m) // drawn: the box's place is the frame's
+		if !m.replying || !m.replyBox.on {
+			t.Fatalf("%dx%d: r did not open the reply box: replying %v, box %v", size[0], size[1], m.replying, m.replyBox.on)
+		}
+		cells = trailCells(m)
+		// Under the box the block stands down, and the trail takes the
+		// rows back: no blank tail under the column (#378).
+		blank := 0
+		for i := len(cells) - 2; i >= 0 && strings.TrimSpace(cells[i]) == ""; i-- {
+			blank++
+		}
+		if blank > 0 {
+			t.Errorf("%dx%d: the column ends on %d blank rows while the block stands down:\n%s", size[0], size[1], blank, strings.Join(cells, "\n"))
+		}
+		// The block stands where a row of it is uncovered, and stands
+		// down where the box covers all of it: either way the title and
+		// the column agree (#377), and the rows are never blank.
+		pressKey(m, "esc")
+	}
+}

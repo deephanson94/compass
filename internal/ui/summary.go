@@ -380,7 +380,13 @@ func summaryFigureRow(head, count string, badge []string, age string, w int) str
 	if room < len([]rune(text)) {
 		age, room = "", body
 	}
-	row := head + " " + dimStyle.Render(pad(clip(text, room), room))
+	t := clip(text, room)
+	row := head + " " + dimStyle.Render(t)
+	// The pad is blanks: drawn unstyled, so a row that ends on them ends
+	// on the same cells with colour on and off.
+	if n := room - len([]rune(t)); n > 0 {
+		row += strings.Repeat(" ", n)
+	}
 	if age != "" {
 		row += " " + dimStyle.Render(age)
 	}
@@ -518,9 +524,18 @@ func blockSaysOut(tr journey.Trail, now time.Time, lines ...string) bool {
 	if age == "" {
 		return false
 	}
-	clock := strings.Fields(age)[0]
+	clock, word := strings.Fields(age)[0], strings.Fields(age)[1]
 	for _, l := range lines {
 		t := ansi.Strip(l)
+		if word == "ago" {
+			// The lane that came back last wears `✓ 1h ago` on its own
+			// row, and the fold and the seam rows say it too: one clock,
+			// said once (#22, #64, #376).
+			if strings.Contains(t, clock+" ago") {
+				return true
+			}
+			continue
+		}
 		if strings.Contains(t, clock+" out") || strings.Contains(t, "out "+clock) {
 			return true
 		}

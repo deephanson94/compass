@@ -280,7 +280,59 @@ func (m *Model) boardLines(w, h int) []string {
 	} else {
 		m.blockInTrail = false
 	}
+	// And both spends at once: where either alone still costs a session
+	// its column, the lane heads and the block are given up together
+	// (#377, #380).
+	if !m.noLaneHeads || !m.blockInTrail {
+		heads, inTrail := m.noLaneHeads, m.blockInTrail
+		m.noLaneHeads, m.blockInTrail = true, true
+		if both, bothH := m.boardPack(n, cw, body); len(both) > len(keys) {
+			keys, heights = both, bothH
+		} else {
+			m.noLaneHeads, m.blockInTrail = heads, inTrail
+		}
+	}
 	defer func() { m.blockInTrail = false }()
+	// A tight pack decides the columns; it does not decide the rows. Rows
+	// the board has not spent are a session's (#43, #47), so each band
+	// grows back toward the block over its whole trail while the rows are
+	// there — the smallest debt first, so the rows that are there buy
+	// back as many asks as they can — rather than folding a column's ask
+	// over blank rows (#381).
+	if m.blockInTrail {
+		spare := body
+		for _, bh := range heights {
+			spare -= bh + 1
+		}
+		if spare > 0 {
+			m.blockInTrail = false
+			need := make([]int, len(heights))
+			for b := range heights {
+				band := keys[b*n : min((b+1)*n, len(keys))]
+				bw := bandWidth(m.width-2*edgePad, len(band), cw)
+				want := 0
+				for _, key := range band {
+					want = max(want, m.boardColumnRows(key, bw))
+				}
+				need[b] = max(0, want-heights[b])
+			}
+			for range need {
+				pick, best := -1, 0
+				for b, nd := range need {
+					if nd > 0 && nd <= spare && (pick < 0 || nd < best) {
+						pick, best = b, nd
+					}
+				}
+				if pick < 0 {
+					break
+				}
+				heights[pick] += best
+				spare -= best
+				need[pick] = 0
+			}
+			m.blockInTrail = true
+		}
+	}
 	if len(keys) == 0 && m.fleetQuery != "" {
 		// A search nothing answers keeps the board and says so, rather
 		// than silently turning into the deck. Under the note, the band
@@ -304,6 +356,14 @@ func (m *Model) boardLines(w, h int) []string {
 		}
 		return fit(miss, h)
 	}
+	// The reply box stands on its own band's trail rows, or under the
+	// head rows of the band below; where the deck is too short for either
+	// it paints over a band's head rows and leaves trails standing with
+	// no session named on them (#108, #379). The band below stands off
+	// the box's floor instead where it still fits whole, and where it
+	// does not it is the strip's on this frame — and the strip stands off
+	// the floor too, so the session it names is on the frame.
+	floor := m.boxFloor()
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
@@ -312,6 +372,23 @@ func (m *Model) boardLines(w, h int) []string {
 		bandTop := len(lines)
 		if b > 0 {
 			bandTop++
+			if bx := m.replyBox; bx.on && bandTop < floor && bandTop+3 > bx.top {
+				// Off the floor by its row of air, as off the band above;
+				// cut short where the rows left hold a band worth reading
+				// (boardBandFloor, as the pack cuts a band it owes), and
+				// the strip's where they do not.
+				if left := body - (floor + 1); left < bh {
+					if left < boardBandFloor {
+						keys, heights = keys[:min(b*n, len(keys))], heights[:b]
+						break
+					}
+					bh, heights[b] = left, left
+				}
+				for len(lines) < floor {
+					lines = append(lines, "")
+				}
+				bandTop = floor + 1
+			}
 		}
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
@@ -370,7 +447,13 @@ func (m *Model) boardLines(w, h int) []string {
 	}
 	// The strip sits under the last band, not on the screen's floor: a
 	// calm board is a short board, and the strip is where the eye is.
-	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
+	lines = append(lines, "")
+	if bx := m.replyBox; bx.on && len(lines) >= bx.top {
+		for len(lines) <= floor {
+			lines = append(lines, "")
+		}
+	}
+	lines = append(lines, m.boardStrip(keys, rowOf, w))
 	// The rows the board leaves blank belong to sessions, not to air
 	// (#43, #47): where every live session already has a column, no
 	// further column can ever fill them, and the same band the list
@@ -1098,6 +1181,12 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 			full = summaryDay(full) // the ships, the reds and the wait are the block's rows (#374)
 		}
 		lines[0] = dimStyle.Render(shedClauses(full, w))
+	} else if len(lines) > 0 && len(tr.Prompts) > 0 && strings.TrimSpace(ansi.Strip(lines[0])) == "╷" {
+		// The fold took only the ask, and left the rail stub that stood
+		// under it: the stub is the fold's row, in the same idiom with
+		// the leg clause shed, rather than a bare stroke under the seam
+		// that announces the trail, or under the card (#381).
+		lines[0] = dimStyle.Render(clip("↑ began "+relAge(m.now, tr.Prompts[0].At)+" ago", w))
 	}
 	lines = append(block, lines...)
 	if len(lines) > h-3 {

@@ -1879,7 +1879,10 @@ func (m *Model) trailColumn(w, h int) []string {
 	// trail in the rows that are left; the block is drawn last, since a
 	// class row yields its clause to HEAD's row where the trail draws it
 	// (#351, #374).
-	bh := blockHeight(m.trail)
+	bh := 0
+	if m.blockShown() {
+		bh = blockHeight(m.trail) // the rows the block draws on this frame, not the rows it would (#378)
+	}
 	draw := func(h int) []string {
 		if bh >= h {
 			return fit(m.trailBlock(w, nil), h)
@@ -1911,7 +1914,15 @@ func (m *Model) trailColumn(w, h int) []string {
 			// trail takes it.
 			probe := append(append([]string{}, rows...), body...)
 			cardKeepsOnlyItsTag(probe)
-			if left, said := m.tagTheHeaderSays(probe[1]); said && left == "" {
+			if strings.TrimSpace(ansi.Strip(probe[1])) == "" {
+				// Nothing is left of the row — the rung the header says
+				// was dropped before the verdict was fitted (#377) and no
+				// clause stood beside it: the row goes and the trail
+				// takes it, as it did before (#117, #144, #379).
+				rows = append(rows[:1:1], rows[2:]...)
+				body = draw(h - len(rows))
+				droppedTag = true
+			} else if left, said := m.tagTheHeaderSays(probe[1]); said && left == "" {
 				rows = append(rows[:1:1], rows[2:]...)
 				body = draw(h - len(rows))
 				droppedTag = true
