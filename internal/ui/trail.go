@@ -812,6 +812,17 @@ func seamRule(width int) string {
 	return ruleStyle.Render(clip(row, width))
 }
 
+// seamBeganRule is the block's seam where the board's fold took the ask:
+// the rule names what follows and when it began, "│ the trail · began 3d
+// ago ────" (#385).
+func seamBeganRule(age string, width int) string {
+	row := railStroke + " the trail · began " + age + " ago "
+	if rest := width - len([]rune(row)); rest > 0 {
+		row += strings.Repeat("─", rest)
+	}
+	return ruleStyle.Render(clip(row, width))
+}
+
 // compactRule is the rail row a compaction falls on: "│ ⟲ context compacted 14:02 ────".
 func compactRule(at time.Time, width int) string {
 	row := railStroke + " " + glyphCompact + " context compacted " + at.Local().Format("15:04") + " "

@@ -296,41 +296,32 @@ func (m *Model) boardLines(w, h int) []string {
 	// A tight pack decides the columns; it does not decide the rows. Rows
 	// the board has not spent are a session's (#43, #47), so each band
 	// grows back toward the block over its whole trail while the rows are
-	// there — the smallest debt first, so the rows that are there buy
-	// back as many asks as they can — rather than folding a column's ask
-	// over blank rows (#384).
-	if m.blockInTrail {
-		spare := body
+	// there — measured as the column is drawn, since the pack's measure
+	// is a row short on a column dead on the quota (#385) — as many bands
+	// whole as the rows allow, leaving the fewest blank, rather than
+	// folding a column's ask over blank rows (#384).
+	if spare := body - func() int {
+		n := 0
 		for _, bh := range heights {
-			spare -= bh + 1
+			n += bh + 1
 		}
-		if spare > 0 {
-			m.blockInTrail = false
-			need := make([]int, len(heights))
-			for b := range heights {
-				band := keys[b*n : min((b+1)*n, len(keys))]
-				bw := bandWidth(m.width-2*edgePad, len(band), cw)
-				want := 0
-				for _, key := range band {
-					want = max(want, m.boardColumnRows(key, bw))
-				}
-				need[b] = max(0, want-heights[b])
+		return n
+	}(); spare > 0 && len(heights) > 0 {
+		inTrail := m.blockInTrail
+		m.blockInTrail = false
+		need := make([]int, len(heights))
+		for b := range heights {
+			band := keys[b*n : min((b+1)*n, len(keys))]
+			bw := bandWidth(m.width-2*edgePad, len(band), cw)
+			want := 0
+			for _, key := range band {
+				want = max(want, m.boardColumnDrawRows(key, bw))
 			}
-			for range need {
-				pick, best := -1, 0
-				for b, nd := range need {
-					if nd > 0 && nd <= spare && (pick < 0 || nd < best) {
-						pick, best = b, nd
-					}
-				}
-				if pick < 0 {
-					break
-				}
-				heights[pick] += best
-				spare -= best
-				need[pick] = 0
-			}
-			m.blockInTrail = true
+			need[b] = max(0, want-heights[b])
+		}
+		m.blockInTrail = inTrail
+		for b, paid := range payDebts(spare, need) {
+			heights[b] += paid
 		}
 	}
 	if len(keys) == 0 && m.fleetQuery != "" {
@@ -716,6 +707,96 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		return 3 + max(len(doc), blockHeight(tr)+2)
 	}
 	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the whole trail (#377)
+}
+
+// boardColumnOpts is how a board column draws its trail: the options
+// `boardColumn` renders with, and the options the column is measured by
+// where the measure has to match the drawing (#385).
+func (m *Model) boardColumnOpts(key string, s fleet.Session, tr journey.Trail, w, h int) TrailOpts {
+	working := s.Snap.State == state.Working && !m.archiveView
+	headClass := ""
+	if s.HasClass {
+		headClass = s.Class.String()
+	}
+	return TrailOpts{
+		HeadClass:    headClass,
+		HeadDead:     s.Snap.APIError,
+		HeadActivity: s.Snap.Activity,
+		Todos:        planItems(tr.Tasks),
+		Labels:       m.boardLabels[key],
+		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
+		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
+		Head:         m.headFor(s),
+		HeadState:    s.Snap.State,
+		HeadSince:    headSince(s),
+		HeadAllowed:  s.Snap.Allowed,
+		Agents:       m.agentsFor(key),
+		SessionKey:   key,
+		Now:          m.now,
+		Width:        w,
+		Height:       h,
+		Level:        levelTrail,
+		Cursor:       -1,
+		Pulse:        m.pulse && working,
+		Pinned:       true,
+		Dense:        true, // the board always packs: a rail row between every leg halved what fit
+		NoLaneHeads:  m.noLaneHeads,
+		Looked:       m.looked(key),
+	}
+}
+
+// boardColumnDrawRows is the rows a column draws whole — its three head
+// rows, its block over its whole trail — measured with the options it is
+// drawn with. `boardColumnRows` is the pack's measure, which decides the
+// columns; this one decides the rows the bands are paid back, so a column
+// dead on the quota is owed the `dead` row it draws (#385).
+func (m *Model) boardColumnDrawRows(key string, w int) int {
+	tr, ok := m.trails[key]
+	if !ok {
+		return 4
+	}
+	r, ok := m.boardRows()[key]
+	if !ok {
+		return 4
+	}
+	o := m.boardColumnOpts(key, m.sessions[r.sess], tr, w, 1000)
+	o.Pulse = false
+	return 3 + blockHeight(tr) + len(TrailLines(tr, o))
+}
+
+// payDebts spends the rows a board has not spent on the bands' debts —
+// each band's rows short of its whole trail — and returns what each band
+// is paid: as many bands whole as the rows allow, and among those picks
+// the one that leaves the fewest rows blank, smallest debts first among
+// equals (#384, #385). A band is paid whole or not at all: a row short
+// of the whole trail is still a fold, and a fold that says so.
+func payDebts(spare int, need []int) []int {
+	paid := make([]int, len(need))
+	if spare <= 0 || len(need) == 0 || len(need) > 8 {
+		return paid
+	}
+	bestMask, bestBands, bestRows := 0, 0, 0
+	for mask := 1; mask < 1<<len(need); mask++ {
+		bands, rows := 0, 0
+		for b, nd := range need {
+			if nd > 0 && mask&(1<<b) != 0 {
+				bands++
+				rows += nd
+			}
+		}
+		if rows > spare || bands == 0 {
+			continue
+		}
+		if bands > bestBands || (bands == bestBands && rows > bestRows) {
+			bestMask, bestBands, bestRows = mask, bands, rows
+		}
+	}
+	for b, nd := range need {
+		if nd > 0 && bestMask&(1<<b) != 0 {
+			paid[b] = nd
+		}
+	}
+	return paid
 }
 
 // boardRows numbers the board's sessions in the board's own order — the
@@ -1116,36 +1197,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		// second before its first poll lands.
 		return append(rows, dimStyle.Render(clip(glyphGhost+" reading its transcript…", w)))
 	}
-	working := s.Snap.State == state.Working && !m.archiveView
-	headClass := ""
-	if s.HasClass {
-		headClass = s.Class.String()
-	}
-	opts := TrailOpts{
-		HeadClass:    headClass,
-		HeadDead:     s.Snap.APIError,
-		HeadActivity: s.Snap.Activity,
-		Todos:        planItems(tr.Tasks),
-		Labels:       m.boardLabels[key],
-		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
-		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
-		Head:         m.headFor(s),
-		HeadState:    s.Snap.State,
-		HeadSince:    headSince(s),
-		HeadAllowed:  s.Snap.Allowed,
-		Agents:       m.agentsFor(key),
-		SessionKey:   key,
-		Now:          m.now,
-		Width:        w,
-		Height:       h - 3,
-		Level:        levelTrail,
-		Cursor:       -1,
-		Pulse:        m.pulse && working,
-		Pinned:       true,
-		Dense:        true, // the board always packs: a rail row between every leg halved what fit
-		NoLaneHeads:  m.noLaneHeads,
-		Looked:       m.looked(key),
-	}
+	opts := m.boardColumnOpts(key, s, tr, w, h-3)
 	// The block above the trail: the legs counted by class, and the
 	// trail in the rows that are left; the block is drawn after the
 	// trail, whose HEAD row may carry the running leg's clause (#377).
@@ -1187,6 +1239,13 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		// the leg clause shed, rather than a bare stroke under the seam
 		// that announces the trail, or under the card (#384).
 		lines[0] = dimStyle.Render(clip("↑ began "+relAge(m.now, tr.Prompts[0].At)+" ago", w))
+	} else if len(block) > 0 && len(tr.Prompts) > 0 && !strings.Contains(ansi.Strip(strings.Join(lines, "\n")), glyphPrompt) {
+		// The fold took the ask and the rail stub under it both, and no
+		// leg is hidden, so no row of the column says the trail began
+		// before its first drawn leg: the seam the block already ends on
+		// says it, in its own labelled-rule idiom, for no row at all
+		// (#375, #385).
+		block[len(block)-1] = seamBeganRule(relAge(m.now, tr.Prompts[0].At), w)
 	}
 	lines = append(block, lines...)
 	if len(lines) > h-3 {

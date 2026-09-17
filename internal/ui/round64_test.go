@@ -726,6 +726,21 @@ var legRowPattern = regexp.MustCompile(`^[◆●◍▲│]▸? ?(scout|design|bu
 
 // The panel's second pass, alarm-storm, folded (#381).
 
+// blankTail counts the blank rows a trail column ends on, above the
+// footer's rule (#385: the pin once counted from the rule itself, and
+// so counted nothing).
+func blankTail(cells []string) int {
+	rule := len(cells) - 1
+	for rule >= 0 && !strings.HasPrefix(strings.TrimSpace(cells[rule]), "─") {
+		rule--
+	}
+	blank := 0
+	for i := rule - 1; i >= 0 && strings.TrimSpace(cells[i]) == ""; i-- {
+		blank++
+	}
+	return blank
+}
+
 func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
 	forceASCII(t)
 	for _, size := range [][2]int{{80, 24}, {100, 30}} {
@@ -739,11 +754,7 @@ func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
 		cells = trailCells(m)
 		// Under the box the block stands down, and the trail takes the
 		// rows back: no blank tail under the column (#381).
-		blank := 0
-		for i := len(cells) - 2; i >= 0 && strings.TrimSpace(cells[i]) == ""; i-- {
-			blank++
-		}
-		if blank > 0 {
+		if blank := blankTail(cells); blank > 0 {
 			t.Errorf("%dx%d: the column ends on %d blank rows while the block stands down:\n%s", size[0], size[1], blank, strings.Join(cells, "\n"))
 		}
 		// The block stands where a row of it is uncovered, and stands
@@ -751,4 +762,103 @@ func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
 		// the column agree (#380), and the rows are never blank.
 		pressKey(m, "esc")
 	}
+	// The frames the fold was written for are the list's trail column at
+	// Lv1 — `r` on the opening selection and on etl — not the session
+	// view the walk above ends on (alarm-storm 3, #385).
+	sc := sceneVeryLong()
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		for _, pick := range []string{"", "etl"} {
+			m := sceneModel(sc, size[0], size[1])
+			if pick != "" {
+				for _, d := range []string{"1", "2", "3", "4", "5"} {
+					pressKey(m, d)
+					poll(m, sc)
+					if s, ok := m.selected(); ok && sessionName(s.Info) == pick {
+						break
+					}
+				}
+			}
+			if m.level != levelTrail {
+				t.Fatalf("%dx%d: the deck should open on the list and its trail, level %d", size[0], size[1], m.level)
+			}
+			pressKey(m, "r")
+			poll(m, sc)
+			m.View()
+			if !m.replyBox.on {
+				t.Fatalf("%dx%d %q: r did not open the reply box at Lv1", size[0], size[1], pick)
+			}
+			cells := trailCells(m)
+			if blank := blankTail(cells); blank > 0 {
+				t.Errorf("%dx%d %q at Lv1: the column ends on %d blank rows while the block stands down (#381):\n%s", size[0], size[1], pick, blank, strings.Join(cells, "\n"))
+			}
+		}
+	}
+}
+
+// The panel's third pass — alarm-storm and fleet-hygiene — folded (#385).
+
+// The bands are paid out of the unspent rows: as many bands whole as the
+// rows allow, and among those the pick that leaves the fewest rows blank.
+func TestTheBandsArePaidAsManyAsTheRowsAllow(t *testing.T) {
+	for _, c := range []struct {
+		spare int
+		need  []int
+		want  []int
+	}{
+		{4, []int{3, 2, 1}, []int{3, 0, 1}}, // two bands either way: the pick that spends all four (fleet-hygiene 2)
+		{3, []int{3, 2, 1}, []int{0, 2, 1}}, // two bands beat one
+		{1, []int{3, 2}, []int{0, 0}},       // a band is paid whole or not at all
+		{0, []int{1}, []int{0}},
+		{5, []int{0, 2}, []int{0, 2}},
+	} {
+		got := payDebts(c.spare, c.need)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("payDebts(%d, %v) = %v, want %v", c.spare, c.need, got, c.want)
+		}
+	}
+}
+
+// A column dead on the quota is measured with the `dead` row it draws, so
+// the rows it is owed are paid back and its ask stands: alarm-storm's
+// mobile at 152x40 says what it was doing, with its column count unchanged.
+func TestADeadColumnIsMeasuredAsItIsDrawn(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneAlarmStorm(), 152, 40)
+	v := ansi.Strip(m.View())
+	if got := boardColumnsDrawn(v); got != 7 {
+		t.Fatalf("alarm-storm at 152x40 should draw seven columns, drew %d:\n%s", got, v)
+	}
+	if !strings.Contains(v, `◉ "fix the login crash`) {
+		t.Errorf("mobile's ask is folded while the board has the rows (#385):\n%s", v)
+	}
+	if strings.Contains(v, "↑ began 49m ago") {
+		t.Errorf("mobile still pays its missing row with its ask (#385):\n%s", v)
+	}
+	if !strings.Contains(v, "dead 9m") {
+		t.Errorf("mobile's dead row should be on the frame:\n%s", v)
+	}
+}
+
+// Where the fold took the ask and its stub both, the seam says when the
+// trail began: `│ the trail · began 3d ago ────`, for no row at all.
+func TestTheSeamSaysWhenTheTrailBeganWhereTheFoldTookTheAsk(t *testing.T) {
+	forceASCII(t)
+	sc := sceneManyIdle()
+	m := sceneModel(sc, 120, 34)
+	for _, k := range canonicalKeys {
+		pressKey(m, k)
+		poll(m, sc)
+		if k != "x" {
+			continue
+		}
+		v := ansi.Strip(m.View())
+		if !strings.Contains(v, "│ the trail · began 3d ago ─") {
+			t.Errorf("notebooks' column folds its ask and its stub and no row says when the trail began (#385):\n%s", v)
+		}
+		if !strings.Contains(v, "notebooks") {
+			t.Errorf("the frame should draw notebooks' column:\n%s", v)
+		}
+		return
+	}
+	t.Fatal("the walk has no x")
 }
