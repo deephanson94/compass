@@ -277,7 +277,9 @@ fourth level. From the board the trail is one `Tab`, the legs two, the reader th
   `r=g=b` axis, because a tinted one drifts when termenv degrades it (`#6b7280`
   lands on bright blue). `Faint` is never stacked on a grey — terminals that
   implement SGR 2 as a blend toward the background erase it. `dim` in config.toml
-  is the escape hatch for a theme or a room the default does not suit.
+  is the escape hatch for a theme or a room the default does not suit. The deck
+  and the board under four real themes, before and after:
+  [deck](img/dim-contrast-deck.png), [board](img/dim-contrast-board.png).
 - **Motion**: exactly one animation — the HEAD node breathes (500ms ease, glyph
   alternation `●`/`◐`). Everything else moves only when data moves.
 - **Density**: every line answers a question; anything that doesn't is dimmed or
