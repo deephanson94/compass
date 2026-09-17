@@ -27,11 +27,17 @@ func TestTheBoardSpendsItsSpareRowsOnTheLanesHeads(t *testing.T) {
 			t.Errorf("at %d the board draws →1 on a lane whose own silence it never says, over %d blank rows:\n%s", w, blank, view)
 		}
 	}
-	// At eighty the rows are not there: the heads go, not the trail's head.
+	// At eighty the rows are not there: the heads go, not the trail's
+	// head. The block over the trail takes the first prompt's row at 24
+	// (#377); at 30 the prompt is back.
 	m := sceneModel(sc, 80, 24)
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "◉ 1/2") || strings.Contains(view, "silent 12m") {
-		t.Errorf("at 80 the heads cost the trail its first prompt:\n%s", view)
+	if strings.Contains(view, "silent 12m") {
+		t.Errorf("at 80 the heads should go first:\n%s", view)
+	}
+	tall := sceneModel(sc, 80, 27) // the block's two rows and its seam over the 24 the rule was measured at
+	if v := ansi.Strip(tall.View()); !strings.Contains(v, "◉ 1/2") || strings.Contains(v, "silent 12m") {
+		t.Errorf("at 80x27 the heads cost the trail its first prompt:\n%s", v)
 	}
 }
 

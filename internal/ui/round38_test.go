@@ -40,10 +40,16 @@ func TestTheCardsRowIsTheColumnsWidthAtEveryLevel(t *testing.T) {
 // subagents board draws its fourth column rather than naming it in a strip
 // over six blank rows (#62, #63).
 func TestTheLastBandTakesTheEmptyStripsRow(t *testing.T) {
+	// The block above every column made porter's band the height of the
+	// body at 120x34, so cli is the strip's there and a column at 152 (#377).
 	m := sceneModel(sceneSubagents(), 120, 34)
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "4 ○ cli") || strings.Contains(view, "+1 more") {
-		t.Errorf("the 120 board should draw the cli column, not a strip:\n%s", view)
+	if !strings.Contains(view, "4 ○ cli") {
+		t.Errorf("the 120 board should name the cli session, in a column or the strip:\n%s", view)
+	}
+	wide := sceneModel(sceneSubagents(), 152, 40)
+	if v := ansi.Strip(wide.View()); !strings.Contains(v, "4 ○ cli") || strings.Contains(v, "+1 more") {
+		t.Errorf("the 152 board should draw the cli column, not a strip:\n%s", v)
 	}
 }
 
@@ -208,7 +214,10 @@ func TestTheOverlayDrawsNoMarkForAnEmptyPeek(t *testing.T) {
 // surviving row wears the mark at its head (#64).
 func TestTheFoldMarksTheLineItPaintedOver(t *testing.T) {
 	forceASCII(t)
-	m := sceneModel(sceneSubagents(), 80, 24)
+	// Twenty-seven rows tall: the block over the trail takes two at 80
+	// and its seam a third, so the fold stands where it stood at 24
+	// before them (#377, #378).
+	m := sceneModel(sceneSubagents(), 80, 27)
 	press(m, "2")
 	pressTab(m)
 	view := ansi.Strip(m.View())

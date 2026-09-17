@@ -75,6 +75,11 @@ all back.
 
 The trail reads like the conversation does — oldest at the top, the newest work
 at the bottom, and it stays pinned there so the latest is always on screen.
+Above it the day is added up: its legs counted by class — `◆ build 32 legs
+3h45m`, `◆ test 32 legs · 10 red`, the subagent lanes, the wait on you — one row
+per class with more than one leg, and the trail takes the rows that are left. Every
+column of the board wears the same block over its trail; a short trail of one
+of each wears none.
 `Tab` opens one session: the trail on the left with a cursor on the present,
 and to its right the conversation itself, anchored to whatever trail row the
 cursor is on — the trail is a minimap, the transcript is the code. `Tab` again
@@ -223,7 +228,6 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
-| `s` | on a session's legs, the summary: the legs counted by class with the time each took (`build 32 legs 3h45m`, `test 32 legs · 10 red`, `◈ agent 4 lanes 20m out` last), a class of one as its leg's own row. `space` opens a class into its legs, oldest first, one line each; `tab` on a leg is the trail with the cursor there; `s` or `esc` is the trail again. A trail with nothing to count says so: `one of each`, `no leg yet` |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `/` | on the board, the list or the archive: search the fleet — name, opening prompt, branch, any prompt, a leg, a file a leg touched. The header says `/query · 3 of 40`; `esc` clears it |

@@ -270,6 +270,71 @@ func (m *Model) boardLines(w, h int) []string {
 		m.noLaneHeads = false
 	}
 	defer func() { m.noLaneHeads = false }()
+	// The block is the same kind of spare-row spend: over a trail that
+	// keeps every row, where the board has the rows, and out of the
+	// trail's own rows where it would cost a session its column — the
+	// counts stand either way (#377, #380).
+	m.blockInTrail = true
+	if tight, tightH := m.boardPack(n, cw, body); len(tight) > len(keys) {
+		keys, heights = tight, tightH
+	} else {
+		m.blockInTrail = false
+	}
+	// And both spends at once: where either alone still costs a session
+	// its column, the lane heads and the block are given up together
+	// (#380, #383).
+	if !m.noLaneHeads || !m.blockInTrail {
+		heads, inTrail := m.noLaneHeads, m.blockInTrail
+		m.noLaneHeads, m.blockInTrail = true, true
+		if both, bothH := m.boardPack(n, cw, body); len(both) > len(keys) {
+			keys, heights = both, bothH
+		} else {
+			m.noLaneHeads, m.blockInTrail = heads, inTrail
+		}
+	}
+	defer func() { m.blockInTrail = false }()
+	// A tight pack decides the columns; it does not decide the rows. Rows
+	// the board has not spent are a session's (#43, #47), so each band
+	// grows back toward the block over its whole trail while the rows are
+	// there — measured as the column is drawn, since the pack's measure
+	// is a row short on a column dead on the quota (#385) — as many bands
+	// whole as the rows allow, leaving the fewest blank, rather than
+	// folding a column's ask over blank rows (#384).
+	// Where every session has a column the strip is empty, and the two
+	// rows the body holds back for it and its air are unspent rows too
+	// (#389): the last band's own row of air still stands off the rule.
+	noStrip := strings.TrimSpace(ansi.Strip(m.boardStrip(keys, rowOf, w))) == ""
+	if spare := body - func() int {
+		n := 0
+		for _, bh := range heights {
+			n += bh + 1
+		}
+		if noStrip {
+			n -= 2
+		}
+		return n
+	}(); spare > 0 && len(heights) > 0 {
+		inTrail := m.blockInTrail
+		m.blockInTrail = false
+		need, idle := make([]int, len(heights)), make([]int, len(heights))
+		for b := range heights {
+			band := keys[b*n : min((b+1)*n, len(keys))]
+			bw := bandWidth(m.width-2*edgePad, len(band), cw)
+			want := 0
+			for _, key := range band {
+				rows := m.boardColumnDrawRows(key, bw)
+				want = max(want, rows)
+				if r, ok := rowOf[key]; ok && rows > heights[b] && m.boardMuted(m.sessions[r.sess]) {
+					idle[b]++ // an idle column whose ask the payment buys back (#388)
+				}
+			}
+			need[b] = max(0, want-heights[b])
+		}
+		m.blockInTrail = inTrail
+		for b, paid := range payDebts(spare, need, idle) {
+			heights[b] += paid
+		}
+	}
 	if len(keys) == 0 && m.fleetQuery != "" {
 		// A search nothing answers keeps the board and says so, rather
 		// than silently turning into the deck. Under the note, the band
@@ -293,6 +358,18 @@ func (m *Model) boardLines(w, h int) []string {
 		}
 		return fit(miss, h)
 	}
+	// The reply box stands on its own band's trail rows, or under the
+	// head rows of the band below; where the deck is too short for either
+	// it paints over a band's head rows and leaves trails standing with
+	// no session named on them (#108, #382). The band below stands off
+	// the box's floor instead where it still fits whole, and where it
+	// does not it is the strip's on this frame — and the strip stands off
+	// the floor too, so the session it names is on the frame.
+	floor := m.boxFloor()
+	// The two rows the body holds back are the strip's and its air; where
+	// every session has a column there is no strip to keep them for, so
+	// the last band may stand in them rather than be cut short or dropped
+	// onto a strip of its own making (#43, #47, #386).
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
@@ -301,6 +378,27 @@ func (m *Model) boardLines(w, h int) []string {
 		bandTop := len(lines)
 		if b > 0 {
 			bandTop++
+			if bx := m.replyBox; bx.on && bandTop < floor && bandTop+3 > bx.top {
+				// Off the floor by its row of air, as off the band above;
+				// cut short where the rows left hold a band worth reading
+				// (boardBandFloor, as the pack cuts a band it owes), and
+				// the strip's where they do not.
+				left := body - (floor + 1)
+				if b == len(heights)-1 && noStrip {
+					left = h - (floor + 1)
+				}
+				if left < bh {
+					if left < boardBandFloor {
+						keys, heights = keys[:min(b*n, len(keys))], heights[:b]
+						break
+					}
+					bh, heights[b] = left, left
+				}
+				for len(lines) < floor {
+					lines = append(lines, "")
+				}
+				bandTop = floor + 1
+			}
 		}
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
@@ -359,7 +457,27 @@ func (m *Model) boardLines(w, h int) []string {
 	}
 	// The strip sits under the last band, not on the screen's floor: a
 	// calm board is a short board, and the strip is where the eye is.
-	lines = append(lines, "", m.boardStrip(keys, rowOf, w))
+	lines = append(lines, "")
+	if bx := m.replyBox; bx.on && len(lines) >= bx.top {
+		// Off the floor by its row of air where the body has the row,
+		// and on the floor where it has only that: a strip past the
+		// body names nobody (#386).
+		want := floor + 1
+		if want >= body {
+			want = floor
+		}
+		for len(lines) < want && len(lines) < body {
+			lines = append(lines, "")
+		}
+		// A strip the box paints over whole names nobody: where every
+		// cell of it would stand under the box, it takes the first row
+		// clear of the box instead, even past the body (#17, #391).
+		st := m.boardStrip(keys, rowOf, w)
+		for len(lines) < min(floor, h-1) && edgePad+lipgloss.Width(ansi.Strip(st)) <= bx.left+bx.w {
+			lines = append(lines, "")
+		}
+	}
+	lines = append(lines, m.boardStrip(keys, rowOf, w))
 	// The rows the board leaves blank belong to sessions, not to air
 	// (#43, #47): where every live session already has a column, no
 	// further column can ever fill them, and the same band the list
@@ -615,7 +733,112 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 		Dense: true, Looked: m.looked(key), NoLaneHeads: m.noLaneHeads,
 	})
-	return 3 + len(doc)
+	if m.blockInTrail {
+		// The block out of the trail's own rows: the column measures what
+		// its trail needs, or its block over two rows of trail, whichever
+		// is taller, so the bands pack as they packed before it (#380).
+		return 3 + max(len(doc), blockHeight(tr)+2)
+	}
+	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the whole trail (#377)
+}
+
+// boardColumnOpts is how a board column draws its trail: the options
+// `boardColumn` renders with, and the options the column is measured by
+// where the measure has to match the drawing (#385).
+func (m *Model) boardColumnOpts(key string, s fleet.Session, tr journey.Trail, w, h int) TrailOpts {
+	working := s.Snap.State == state.Working && !m.archiveView
+	headClass := ""
+	if s.HasClass {
+		headClass = s.Class.String()
+	}
+	return TrailOpts{
+		HeadClass:    headClass,
+		HeadDead:     s.Snap.APIError,
+		HeadActivity: s.Snap.Activity,
+		Todos:        planItems(tr.Tasks),
+		Labels:       m.boardLabels[key],
+		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
+		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
+		Head:         m.headFor(s),
+		HeadState:    s.Snap.State,
+		HeadSince:    headSince(s),
+		HeadAllowed:  s.Snap.Allowed,
+		Agents:       m.agentsFor(key),
+		SessionKey:   key,
+		Now:          m.now,
+		Width:        w,
+		Height:       h,
+		Level:        levelTrail,
+		Cursor:       -1,
+		Pulse:        m.pulse && working,
+		Pinned:       true,
+		Dense:        true, // the board always packs: a rail row between every leg halved what fit
+		NoLaneHeads:  m.noLaneHeads,
+		Looked:       m.looked(key),
+	}
+}
+
+// boardColumnDrawRows is the rows a column draws whole — its three head
+// rows, its block over its whole trail — measured with the options it is
+// drawn with. `boardColumnRows` is the pack's measure, which decides the
+// columns; this one decides the rows the bands are paid back, so a column
+// dead on the quota is owed the `dead` row it draws (#385).
+func (m *Model) boardColumnDrawRows(key string, w int) int {
+	tr, ok := m.trails[key]
+	if !ok {
+		return 4
+	}
+	r, ok := m.boardRows()[key]
+	if !ok {
+		return 4
+	}
+	o := m.boardColumnOpts(key, m.sessions[r.sess], tr, w, 1000)
+	o.Pulse = false
+	return 3 + blockHeight(tr) + len(TrailLines(tr, o))
+}
+
+// payDebts spends the rows a board has not spent on the bands' debts —
+// each band's rows short of its whole trail, and `idle` the idle columns
+// in each whose ask the payment buys back — and returns what each band
+// is paid: as many bands whole as the rows allow, among those the pick
+// that buys back the most idle asks, and then the one that leaves the
+// fewest rows blank (#384, #385, #388). A band is paid whole or not at
+// all: a row short of the whole trail is still a fold, and a fold that
+// says so.
+func payDebts(spare int, need, idle []int) []int {
+	paid := make([]int, len(need))
+	if spare <= 0 || len(need) == 0 || len(need) > 8 {
+		return paid
+	}
+	bestMask, bestBands, bestIdle, bestRows := 0, 0, 0, 0
+	for mask := 1; mask < 1<<len(need); mask++ {
+		bands, rows, quiet := 0, 0, 0
+		for b, nd := range need {
+			if nd > 0 && mask&(1<<b) != 0 {
+				bands++
+				rows += nd
+				if b < len(idle) {
+					quiet += idle[b]
+				}
+			}
+		}
+		if rows > spare || bands == 0 {
+			continue
+		}
+		// Among picks paying the same bands, the one that buys back the
+		// most idle columns' asks: an idle session's ask is the one row
+		// that says what it was for, where a live one's fold row says
+		// what it took (#388); then the fewest rows left blank.
+		if bands > bestBands || (bands == bestBands && (quiet > bestIdle || (quiet == bestIdle && rows > bestRows))) {
+			bestMask, bestBands, bestIdle, bestRows = mask, bands, quiet, rows
+		}
+	}
+	for b, nd := range need {
+		if nd > 0 && bestMask&(1<<b) != 0 {
+			paid[b] = nd
+		}
+	}
+	return paid
 }
 
 // boardRows numbers the board's sessions in the board's own order — the
@@ -1016,38 +1239,18 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		// second before its first poll lands.
 		return append(rows, dimStyle.Render(clip(glyphGhost+" reading its transcript…", w)))
 	}
-	working := s.Snap.State == state.Working && !m.archiveView
-	headClass := ""
-	if s.HasClass {
-		headClass = s.Class.String()
-	}
-	opts := TrailOpts{
-		HeadClass:    headClass,
-		HeadDead:     s.Snap.APIError,
-		HeadActivity: s.Snap.Activity,
-		Todos:        planItems(tr.Tasks),
-		Labels:       m.boardLabels[key],
-		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
-		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
-		Head:         m.headFor(s),
-		HeadState:    s.Snap.State,
-		HeadSince:    headSince(s),
-		HeadAllowed:  s.Snap.Allowed,
-		Agents:       m.agentsFor(key),
-		SessionKey:   key,
-		Now:          m.now,
-		Width:        w,
-		Height:       h - 3,
-		Level:        levelTrail,
-		Cursor:       -1,
-		Pulse:        m.pulse && working,
-		Pinned:       true,
-		Dense:        true, // the board always packs: a rail row between every leg halved what fit
-		NoLaneHeads:  m.noLaneHeads,
-		Looked:       m.looked(key),
+	opts := m.boardColumnOpts(key, s, tr, w, h-3)
+	// The block above the trail: the legs counted by class, and the
+	// trail in the rows that are left; the block is drawn after the
+	// trail, whose HEAD row may carry the running leg's clause (#377).
+	bh := blockHeight(tr)
+	opts.Height = h - 3 - bh
+	if opts.Height < 1 {
+		opts.Height = 1
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
+	block := m.columnBlock(key, tr, s, opts, rows, lines, w)
 	// A column pinned to the present with a day above it says so on its
 	// first row — the rail row that would otherwise be a bare stroke — so a
 	// column that begins with ◉ and one that begins ten hours in are not
@@ -1064,11 +1267,62 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		}
 		if len(lines) > 1 && isDetailRow(lines[1]) {
 			// The fold took the row the parent stood on: the parent
-			// takes the child's, so the column does not open on a child
-			// with no name.
+			// takes a child's row, so the column does not open on a
+			// child with no name — the last of the group's, not the
+			// first: a finding is read from its opening words, and a
+			// group cut off its head read `oracle; two are the same root
+			// cause` as the whole of a report (#387). The group closes
+			// on the cut, its last row wearing the group's last mark and
+			// an ellipsis, in the trail's own idiom.
+			end := 1
+			for end+1 < len(lines) && isDetailRow(lines[end+1]) {
+				end++
+			}
+			for i := end; i > 1; i-- {
+				lines[i] = lines[i-1]
+			}
+			child := lines[1]
 			lines[1] = lines[0]
+			if end > 1 {
+				lines[end] = detailCut(lines[end], w)
+			} else {
+				// A group of one row has no second row to close on: the
+				// report's opening words ride the lane's own row, in the
+				// trail's clause idiom, so a finding is never taken
+				// without a word (#390).
+				if c := ansi.Strip(child); strings.Contains(c, "…") {
+					// The trail's own viewport opened on the finding and
+					// cut its head (#64's mark): the clause reads the
+					// finding from the trail, not from the row already
+					// cut, so it is the opening words either way (#392).
+					if head := m.findingHead(tr, opts, lines[1]); head != "" {
+						child = head
+					}
+				}
+				lines[1] = foldFindingOnto(lines[1], child, w)
+			}
+		}
+		if len(block) > 0 {
+			full = summaryDay(full) // the ships, the reds and the wait are the block's rows (#377)
 		}
 		lines[0] = dimStyle.Render(shedClauses(full, w))
+	} else if len(lines) > 0 && len(tr.Prompts) > 0 && strings.TrimSpace(ansi.Strip(lines[0])) == "╷" {
+		// The fold took only the ask, and left the rail stub that stood
+		// under it: the stub is the fold's row, in the same idiom with
+		// the leg clause shed, rather than a bare stroke under the seam
+		// that announces the trail, or under the card (#384).
+		lines[0] = dimStyle.Render(clip("↑ began "+relAge(m.now, tr.Prompts[0].At)+" ago", w))
+	} else if len(block) > 0 && len(tr.Prompts) > 0 && !strings.Contains(ansi.Strip(strings.Join(lines, "\n")), glyphPrompt) {
+		// The fold took the ask and the rail stub under it both, and no
+		// leg is hidden, so no row of the column says the trail began
+		// before its first drawn leg: the seam the block already ends on
+		// says it, in its own labelled-rule idiom, for no row at all
+		// (#375, #385).
+		block[len(block)-1] = seamBeganRule(relAge(m.now, tr.Prompts[0].At), w)
+	}
+	lines = append(block, lines...)
+	if len(lines) > h-3 {
+		lines = lines[:h-3]
 	}
 	if m.boardMuted(s) {
 		for i, line := range lines {
@@ -1932,10 +2186,117 @@ func headSince(s fleet.Session) time.Time {
 	return s.Snap.Since
 }
 
+// detailCut closes a child group the fold shortened: the row wears the
+// group's last mark and says it was cut, so a finding read from the top
+// is never taken for the whole of it (#387).
+func detailCut(line string, w int) string {
+	r := []rune(ansi.Strip(line))
+	for i, c := range r {
+		if c == '├' {
+			r[i] = '└'
+			break
+		}
+		if c == '└' {
+			break
+		}
+	}
+	out := strings.TrimRight(string(r), " ")
+	if len([]rune(out)) > w-1 {
+		out = string([]rune(out)[:w-1])
+	}
+	return dimStyle.Render(out + "…")
+}
+
+// findingHead is the first row of the group hung under a lane, read from
+// the whole trail rather than the viewport that may have cut it: the lane's
+// row is found by its own text, and the detail row beneath it is the
+// finding's head (#392).
+func (m *Model) findingHead(tr journey.Trail, o TrailOpts, parent string) string {
+	o.Height = 1000
+	o.Cursor = -1
+	want := strings.TrimRight(ansi.Strip(parent), " ")
+	rows := TrailLines(tr, o)
+	for i, r := range rows {
+		if strings.TrimRight(ansi.Strip(r), " ") != want || i+1 >= len(rows) || !isDetailRow(rows[i+1]) {
+			continue
+		}
+		return rows[i+1]
+	}
+	return ""
+}
+
+// foldFindingOnto puts the opening words of a one-row group onto the lane's
+// own row — `├─◈ Score encoder gates · 3 defects found…  ✓ 2h ago` — where
+// the fold took the row the lane stood on and there is no second row of
+// the group left to close on. The clause takes what it wants up to half
+// the row, the name the rest, each cut with an ellipsis; where not even a
+// word of the clause fits, the row stands as it was (#390).
+func foldFindingOnto(parent, child string, w int) string {
+	p := strings.TrimRight(ansi.Strip(parent), " ")
+	c := strings.TrimSpace(ansi.Strip(child))
+	for _, m := range []string{"└ ", "├ "} {
+		if i := strings.Index(c, m); i >= 0 {
+			c = c[i+len(m):]
+			break
+		}
+	}
+	if c == "" {
+		return parent
+	}
+	left, right := p, ""
+	if i := strings.LastIndex(p, "  "); i > 0 {
+		left = strings.TrimRight(p[:i], " ")
+		right = strings.TrimSpace(p[i:])
+	}
+	cut := func(s string, n int) string {
+		r := []rune(s)
+		if len(r) <= n {
+			return s
+		}
+		if n < 1 {
+			return ""
+		}
+		return string(r[:n-1]) + "…"
+	}
+	room := w - len([]rune(right)) - 2 // the clock and the gap before it
+	if right == "" {
+		room = w
+	}
+	clause := " · " + c
+	if len([]rune(left))+len([]rune(clause)) > room {
+		// The clause takes what it wants up to half the row, the name
+		// the rest: a short clause costs the name no cell it does not
+		// use (#390, #392).
+		share := min(len([]rune(clause)), max(12, room/2))
+		nameRoom := max(8, min(len([]rune(left)), room-share))
+		left = cut(left, nameRoom)
+		clause = cut(clause, room-len([]rune(left)))
+	}
+	if len([]rune(clause)) < 6 {
+		return parent
+	}
+	left += clause
+	if right == "" {
+		return dimStyle.Render(left)
+	}
+	return dimStyle.Render(left + strings.Repeat(" ", max(2, w-len([]rune(left))-len([]rune(right)))) + right)
+}
+
 // hiddenAbove counts the legs a pinned column keeps above its first row.
 func hiddenAbove(tr journey.Trail, o TrailOpts) int {
 	doc, sel := trailDoc(tr, o)
-	return legsHiddenAbove(tr, o.Level, sel, trailTop(len(doc), o))
+	top := trailTop(len(doc), o)
+	n := legsHiddenAbove(tr, o.Level, sel, top)
+	// The fold row is drawn over the viewport's first row: where that row
+	// is a leg, it is hidden too, and the count says so — the trail
+	// column's title counts the same trail at the same scroll one higher
+	// otherwise, and since #377 the block above sums the legs (#380).
+	if rows := TrailRows(tr, o.Level); n > 0 && top < len(sel) {
+		if j := sel[top]; j >= 0 && j < len(rows) && rows[j].Kind == "leg" {
+			n++
+		}
+	}
+	return n
 }
 
 // boardMuted says whether a column is drawn dim. Bright means there is
