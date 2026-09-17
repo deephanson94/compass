@@ -469,6 +469,13 @@ func (m *Model) boardLines(w, h int) []string {
 		for len(lines) < want && len(lines) < body {
 			lines = append(lines, "")
 		}
+		// A strip the box paints over whole names nobody: where every
+		// cell of it would stand under the box, it takes the first row
+		// clear of the box instead, even past the body (#17, #391).
+		st := m.boardStrip(keys, rowOf, w)
+		for len(lines) < min(floor, h-1) && edgePad+lipgloss.Width(ansi.Strip(st)) <= bx.left+bx.w {
+			lines = append(lines, "")
+		}
 	}
 	lines = append(lines, m.boardStrip(keys, rowOf, w))
 	// The rows the board leaves blank belong to sessions, not to air
@@ -1274,9 +1281,16 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 			for i := end; i > 1; i-- {
 				lines[i] = lines[i-1]
 			}
+			child := lines[1]
 			lines[1] = lines[0]
 			if end > 1 {
 				lines[end] = detailCut(lines[end], w)
+			} else {
+				// A group of one row has no second row to close on: the
+				// report's opening words ride the lane's own row, in the
+				// trail's clause idiom, so a finding is never taken
+				// without a word (#390).
+				lines[1] = foldFindingOnto(lines[1], child, w)
 			}
 		}
 		if len(block) > 0 {
@@ -2182,6 +2196,59 @@ func detailCut(line string, w int) string {
 		out = string([]rune(out)[:w-1])
 	}
 	return dimStyle.Render(out + "…")
+}
+
+// foldFindingOnto puts the opening words of a one-row group onto the lane's
+// own row — `├─◈ Score encoder gates · 3 defects found…  ✓ 2h ago` — where
+// the fold took the row the lane stood on and there is no second row of
+// the group left to close on. The clause takes at least half of the
+// row, the name the rest, each cut with an ellipsis; where not even a
+// word of the clause fits, the row stands as it was (#390).
+func foldFindingOnto(parent, child string, w int) string {
+	p := strings.TrimRight(ansi.Strip(parent), " ")
+	c := strings.TrimSpace(ansi.Strip(child))
+	for _, m := range []string{"└ ", "├ "} {
+		if i := strings.Index(c, m); i >= 0 {
+			c = c[i+len(m):]
+			break
+		}
+	}
+	if c == "" {
+		return parent
+	}
+	left, right := p, ""
+	if i := strings.LastIndex(p, "  "); i > 0 {
+		left = strings.TrimRight(p[:i], " ")
+		right = strings.TrimSpace(p[i:])
+	}
+	cut := func(s string, n int) string {
+		r := []rune(s)
+		if len(r) <= n {
+			return s
+		}
+		if n < 1 {
+			return ""
+		}
+		return string(r[:n-1]) + "…"
+	}
+	room := w - len([]rune(right)) - 2 // the clock and the gap before it
+	if right == "" {
+		room = w
+	}
+	clause := " · " + c
+	if len([]rune(left))+len([]rune(clause)) > room {
+		nameRoom := max(8, min(len([]rune(left)), room-max(12, room/2)))
+		left = cut(left, nameRoom)
+		clause = cut(clause, room-len([]rune(left)))
+	}
+	if len([]rune(clause)) < 6 {
+		return parent
+	}
+	left += clause
+	if right == "" {
+		return dimStyle.Render(left)
+	}
+	return dimStyle.Render(left + strings.Repeat(" ", max(2, w-len([]rune(left))-len([]rune(right)))) + right)
 }
 
 // hiddenAbove counts the legs a pinned column keeps above its first row.

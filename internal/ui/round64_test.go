@@ -945,3 +945,80 @@ func TestTheStripsRowsAreSpentWhereNoStripIsDrawn(t *testing.T) {
 		t.Errorf("mobile's ask folds into the two rows held for a strip the board does not draw (#389):\n%s", v)
 	}
 }
+
+// A one-row group the fold takes leaves nothing of the finding: the lane's
+// own row carries its opening words, so a report is never taken without a
+// word (#390, subagents' fourth pass).
+func TestTheFoldNeverSwallowsAOneRowFinding(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, size := range [][2]int{{152, 40}, {220, 48}} {
+		m := sceneModel(sc, size[0], size[1])
+		keys := append(append(append([]string(nil), canonicalKeys...), "esc"), sc.extra...)
+		seen := false
+		for _, k := range keys {
+			pressKey(m, k)
+			poll(m, sc)
+			if m.level != levelBoard {
+				continue
+			}
+			lines := strings.Split(ansi.Strip(m.View()), "\n")
+			for i, l := range lines {
+				at := strings.Index(l, "├─◈ Score encoder")
+				if at < 0 || i == 0 {
+					continue
+				}
+				col := len([]rune(l[:at]))
+				above := []rune(lines[i-1])
+				if col >= len(above) || !strings.HasPrefix(strings.TrimSpace(string(above[col:min(col+40, len(above))])), "↑ ") {
+					continue
+				}
+				seen = true
+				next := ""
+				if i+1 < len(lines) {
+					next = lines[i+1]
+				}
+				if !strings.Contains(l, "3 defects") && !strings.Contains(next, "3 defects") {
+					t.Errorf("%dx%d after %q: the lane's whole report is gone and no row says so (#390):\n%s", size[0], size[1], k, strings.Join(lines[i-1:min(i+2, len(lines))], "\n"))
+				}
+			}
+		}
+		if !seen {
+			t.Errorf("%dx%d: no frame of the walk stands porter's lane under a fold row", size[0], size[1])
+		}
+	}
+}
+
+// A strip the box paints over whole takes the first row clear of the box:
+// two-tools at 120x22 and 120x25 after `r` names docs on the board's last
+// row rather than under the box (#391).
+func TestAStripTheBoxWouldCoverStandsClearOfIt(t *testing.T) {
+	forceASCII(t)
+	sc := sceneTwoTools()
+	for _, h := range []int{22, 25} {
+		m := sceneModel(sc, 120, h)
+		m.View()
+		pressKey(m, "r")
+		poll(m, sc)
+		v := ansi.Strip(m.View())
+		if !m.replyBox.on {
+			t.Fatalf("120x%d: r opens no box:\n%s", h, v)
+		}
+		lines := strings.Split(v, "\n")
+		bottom, strip := -1, -1
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "└") {
+				bottom = i
+			}
+			if strings.Contains(line, "+1 more · 4 ○ docs") {
+				strip = i
+			}
+		}
+		if strip < 0 {
+			t.Errorf("120x%d: the docs session is named nowhere, the strip painted out by the box (#391):\n%s", h, v)
+		} else if strip <= bottom {
+			t.Errorf("120x%d: the strip stands under the box (row %d, box bottom %d):\n%s", h, strip, bottom, v)
+		}
+		pressKey(m, "esc")
+	}
+}
