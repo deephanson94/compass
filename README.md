@@ -198,6 +198,13 @@ hook = "tmux display-message \"compass: $COMPASS_SESSION $COMPASS_EVENT\""
                         # every ten minutes per session and event; agents_back fires
                         # once per set of lanes and names the empties. The first
                         # refresh is a baseline and fires nothing.
+dim = "#9a9a9a"         # the grey the quiet rows are drawn in — ages, leg counts,
+                        # the work line, the rails. compass's own default clears
+                        # 4.4:1 against the darkest popular dark theme; raise it
+                        # for a low-contrast theme or a bright room, lower it to
+                        # push the quiet rows further back. A `#rrggbb`, a `#rgb`
+                        # or a palette index 0–255; anything else is ignored.
+                        # $COMPASS_DIM and -dim override it.
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:

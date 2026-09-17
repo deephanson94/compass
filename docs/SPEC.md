@@ -267,6 +267,17 @@ fourth level. From the board the trail is one `Tab`, the legs two, the reader th
   calm" from across the room.
 - **Typography**: box-drawing rails, Nerd-Font-optional (pure-unicode fallback glyphs
   built in). Right-aligned relative timestamps (`3m`, `40s`) in dim text.
+- **The greys are ours, not the theme's**: dim text and the rails are neutral hex
+  greys (`#9a9a9a` / `#808080` on dark), never palette index 8. Index 8 is whatever
+  the user's theme decided, and several popular ones put it within a hair of their
+  own background — Solarized Dark 1.15:1, Nord 1.69:1 — which took the quiet half
+  of the deck with it. A *neutral* grey degrades back to index 8 on a 16-colour
+  terminal (where index 8 was the only honest option) and pins a known contrast
+  everywhere else: ≥4.4:1 for dim text, ≥3:1 for the rails. Greys stay on the
+  `r=g=b` axis, because a tinted one drifts when termenv degrades it (`#6b7280`
+  lands on bright blue). `Faint` is never stacked on a grey — terminals that
+  implement SGR 2 as a blend toward the background erase it. `dim` in config.toml
+  is the escape hatch for a theme or a room the default does not suit.
 - **Motion**: exactly one animation — the HEAD node breathes (500ms ease, glyph
   alternation `●`/`◐`). Everything else moves only when data moves.
 - **Density**: every line answers a question; anything that doesn't is dimmed or

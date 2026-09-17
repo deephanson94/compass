@@ -16,6 +16,7 @@ root = "~/claude-home"
 narrator = 'off'
 readonly = true
 live_within = "90s"
+dim = "#c0c0c0"
 mystery = "ignored"
 this line is not a setting
 `
@@ -23,6 +24,7 @@ this line is not a setting
 		t.Fatal(err)
 	}
 	t.Setenv("COMPASS_CONFIG", path)
+	t.Setenv("COMPASS_DIM", "")
 
 	c := loadConfig()
 	if c.Root != "~/claude-home" {
@@ -37,10 +39,39 @@ this line is not a setting
 	if c.LiveWithin != "90s" {
 		t.Errorf("LiveWithin = %q", c.LiveWithin)
 	}
+	if c.Dim != "#c0c0c0" {
+		t.Errorf("Dim = %q", c.Dim)
+	}
+}
+
+// The grey is the one setting you reach for because you cannot read the
+// screen, so it is reachable without first finding out where the config file
+// lives — and it wins over the file when both say something.
+func TestDimComesFromTheEnvironmentWithOrWithoutAFile(t *testing.T) {
+	t.Setenv("COMPASS_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+	t.Setenv("COMPASS_DIM", "#d0d0d0")
+	if c := loadConfig(); c.Dim != "#d0d0d0" {
+		t.Errorf("with no config file, Dim = %q, want #d0d0d0", c.Dim)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("dim = \"#404040\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COMPASS_CONFIG", path)
+	if c := loadConfig(); c.Dim != "#d0d0d0" {
+		t.Errorf("the environment did not win over the file: Dim = %q", c.Dim)
+	}
+	t.Setenv("COMPASS_DIM", "")
+	if c := loadConfig(); c.Dim != "#404040" {
+		t.Errorf("with the environment empty the file should stand: Dim = %q", c.Dim)
+	}
 }
 
 func TestLoadConfigMissingFileIsNothing(t *testing.T) {
 	t.Setenv("COMPASS_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+	t.Setenv("COMPASS_DIM", "")
 	if c := loadConfig(); !reflect.DeepEqual(c, config{}) {
 		t.Errorf("loadConfig() on a missing file = %+v, want zero", c)
 	}
@@ -58,6 +89,7 @@ func TestConfigLine(t *testing.T) {
 		{`# a comment`, "", "", false},
 		{``, "", "", false},
 		{`bare words`, "", "", false},
+		{`dim = "#9a9a9a"`, "dim", "#9a9a9a", true},
 		{`= "orphan"`, "", "", false},
 		{`empty = ""`, "", "", false},
 	}
