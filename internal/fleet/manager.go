@@ -73,6 +73,11 @@ type Manager struct {
 	paneMapped map[string]bool
 	liveWindow time.Duration
 
+	// running is the session ids Claude Code's own registry says still have
+	// a process, refreshed once per Refresh. nil means the registry could
+	// not be read at all, which is not the same as "none" (#374, asking).
+	running map[string]bool
+
 	// resume, when set, lets a live session be picked up where an earlier
 	// process stopped reading rather than replayed from byte zero.
 	resume *ResumeCache
@@ -158,7 +163,31 @@ func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
 	if m.liveWindow <= 0 {
 		return false
 	}
-	return info.Asked || m.inWindow(info, now)
+	return m.asking(info) || m.inWindow(info, now)
+}
+
+// asking is the ask door itself: a question nobody has answered, in a
+// session that is still there to answer it.
+//
+// A question survives the pane closing and compass restarting — that is the
+// whole point of reading it off the file — but it does not survive the
+// session ending. `/exit` writes nothing to the transcript, so the model's
+// question stays the last word in it forever, and without this the row it
+// draws could never be put down except by hand. Quitting a session is an
+// answer of a kind: you are done with it (#374).
+//
+// Where the registry cannot be read at all, this is the door as it was —
+// `readRunning` returns nil rather than an empty set for exactly that, so
+// an older Claude Code, or a tree copied from another machine, keeps every
+// question it had.
+func (m *Manager) asking(info SessionInfo) bool {
+	if !info.Asked {
+		return false
+	}
+	if m.running == nil {
+		return true // no registry to read: the question stands, as it always did
+	}
+	return m.running[info.ID]
 }
 
 // inWindow is the recency door alone: the transcript moved this recently.
@@ -176,7 +205,7 @@ func (m *Manager) inWindow(info SessionInfo, now time.Time) bool {
 // are not today's fleet, and the board ranks them accordingly (#344). Caller
 // holds the mutex.
 func (m *Manager) isWaiting(info SessionInfo, now time.Time) bool {
-	return info.Asked && m.liveWindow > 0 && !m.paneMapped[info.Key()] && !m.inWindow(info, now)
+	return m.asking(info) && m.liveWindow > 0 && !m.paneMapped[info.Key()] && !m.inWindow(info, now)
 }
 
 // UseResumeCache tells the Manager to pick live sessions up where an earlier
@@ -250,6 +279,9 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	// for the question that would keep it live; a file still moving gets one
 	// window, since the recency door already has it (#344, round 59).
 	infos, cache, err := scanProjects(m.root, m.cache, now.Add(-m.liveWindow))
+	// Which sessions still have a process. Read once per refresh, because
+	// the ask door asks it of every row (#374).
+	m.running = readRunning(m.root)
 	if err != nil {
 		return nil, err
 	}

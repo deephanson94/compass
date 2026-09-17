@@ -295,7 +295,7 @@ type Model struct {
 	before       map[string]hookState
 	pulse        bool // HEAD's breath is on its off-beat
 	noLaneHeads  bool // the board packed tighter than its lanes' heads (round 47)
-	blockInTrail bool // the board packed its blocks out of their trails' rows, not the board's (#377)
+	blockInTrail bool // the board packed its blocks out of their trails' rows, not the board's (#380)
 	askBelow     bool // the card below this row draws its ask on its own ◉ row (#107)
 	readonly     bool
 
@@ -1683,7 +1683,7 @@ func (m *Model) trailBox() (int, int) {
 	if h <= 0 {
 		h = 24
 	}
-	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#374, #378)
+	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#377, #381)
 	if m.blockShown() {
 		height -= blockHeight(m.trail)
 	}
@@ -2128,7 +2128,10 @@ func (m *Model) sweepWaiting() {
 		}
 	}
 	if len(keys) == 0 {
-		m.note = "nothing is unanswered"
+		// Not "nothing is unanswered": a session asking you right now is
+		// unanswered too, and it may be the row under the cursor while
+		// this sentence is drawn. What is empty is the pile (round 62).
+		m.note = "nothing is left behind"
 		return
 	}
 	stayed := ""
@@ -4218,7 +4221,7 @@ func noPaneClauseGone(row string) string {
 // refusal — the note that already says it — or "" anywhere else. The attach
 // refusal's clause is taken one layer in (attachRefusalSaid, #299). Every
 // other stuck key stays under its own note, because its note does not say
-// what the clause says: `infra stays · it is asking` never mentions the
+// what the clause says: `infra stays · asked 4m ago` never mentions the
 // pane, so the row refusing `x` must (#24, #57).
 func (m *Model) replyRefusalSaid(whole string) string {
 	if m.note != "reply needs a pane" {
@@ -5796,8 +5799,8 @@ func (m *Model) stuckKeysOnce(whole string) []string {
 
 // attachRefusalSaid is the row's own `enter · no pane` under the note that
 // already says it — or "" anywhere else. Every other stuck key stays under
-// its own note because the note does not name it: `infra stays · it is
-// asking` never says `x`, so the row refusing `x` must (#24, #57). The
+// its own note because the note does not name it: `infra stays · asked
+// 4m ago` never says `x`, so the row refusing `x` must (#24, #57). The
 // attach refusal is the one whose note does name it — #165 gave it the
 // form `mirror needs 110 columns` already used, `attach needs a pane`,
 // precisely so that naming the key would buy a key back — and beside that
@@ -5838,7 +5841,7 @@ func (m *Model) hideKeymap() string {
 // hideKeyStuck is the board's or the list's `x hide` on a selection it
 // cannot take off the board — or "" when the row does not offer it or the
 // key acts. `toggleHidden` refuses what owes you an alarm (`infra stays ·
-// it is asking`, `· it hangs`, `· it is looping`, `· dead on the API`),
+// asked 6m ago`, `· it hangs`, `· it is looping`, `· dead on the API`),
 // the same answer at every width and however many times it is pressed,
 // and the keymap already drops the key outright where the fleet is one
 // session — "the keys that move between sessions answer no question" —

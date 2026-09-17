@@ -16,6 +16,8 @@ package fleet_test
 // and the question is gone by the time you think to look for it.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,11 +27,14 @@ import (
 )
 
 const (
-	idWaitingDay  = "6f00000c-0000-4000-8000-00000000f60c" // asked a day ago, no pane
-	idWaitingWeek = "70000000-0000-4000-8000-000000000d70" // asked a week ago, no pane
-	idAskedTool   = "8100000e-0000-4000-8000-00000000e181" // AskUserQuestion still out
-	idResumed     = "9200000f-0000-4000-8000-00000000f292" // asked, then the harness resumed it
-	idRefused     = "a3000010-0000-4000-8000-000000001a03" // asked nothing: the API refused the call
+	idWaitingDay   = "6f00000c-0000-4000-8000-00000000f60c" // asked a day ago, no pane
+	idWaitingWeek  = "70000000-0000-4000-8000-000000000d70" // asked a week ago, no pane
+	idAskedTool    = "8100000e-0000-4000-8000-00000000e181" // AskUserQuestion still out
+	idResumed      = "9200000f-0000-4000-8000-00000000f292" // asked, then the harness resumed it
+	idRefused      = "a3000010-0000-4000-8000-000000001a03" // asked nothing: the API refused the call
+	idStatedOnly   = "b4000011-0000-4000-8000-000000001b04" // ended on a report, not a question
+	idInterleaved  = "c5000012-0000-4000-8000-000000001c05" // one turn, results written inside it
+	idSettledBatch = "d6000013-0000-4000-8000-000000001d06" // a batch whose calls all came back
 )
 
 // meta is a user line the harness wrote, not the person: the resume prompt,
@@ -81,6 +86,34 @@ func (b *transcriptBuilder) sidechainText(ts time.Time, text string) *transcript
 		"stop_reason": "end_turn",
 	}
 	return b.add(o)
+}
+
+// turn is one assistant message as Claude Code actually writes it: one
+// content block per line, every line carrying the same `message.id`. A
+// block is `{kind, id, name}` — kind "text" uses `id` as its words, kind
+// "tool" is a call. Measured on this machine's own transcripts: of 656
+// assistant lines, none carried two tool_use blocks, and 188 message ids
+// spanned more than one line (#348).
+func (b *transcriptBuilder) turn(ts time.Time, msgID string, blocks ...[3]string) *transcriptBuilder {
+	for _, bl := range blocks {
+		o := b.common(ts)
+		o["type"] = "assistant"
+		var content any
+		switch bl[0] {
+		case "text":
+			content = []any{map[string]any{"type": "text", "text": bl[1]}}
+		default:
+			content = []any{map[string]any{
+				"type": "tool_use", "id": bl[1], "name": bl[2], "input": map[string]any{},
+			}}
+		}
+		o["message"] = map[string]any{
+			"role": "assistant", "id": msgID, "model": "claude-fable-5", "type": "message",
+			"content": content, "stop_reason": "tool_use",
+		}
+		b = b.add(o)
+	}
+	return b
 }
 
 // calls is one assistant message carrying several tool_use blocks, the way
@@ -234,8 +267,19 @@ func TestTheDoorIsForQuestionsOnly(t *testing.T) {
 		apiError(refusedAt, 403, "authentication_failed", "API Error: 403 · Please run /login").
 		write(root, slugAlpha)
 
+	// The third shape is the one the other two never reach: a turn that
+	// called nothing and was refused by nobody, whose last words are a
+	// report. Both cases above settle before rule 4 is ever asked — the
+	// stalled call on `out > 0`, the refusal on APIError — so with
+	// `EndsWithQuestion` forced true this test still passed, and the rule
+	// the door is named for was observed by nothing (round 62).
+	newTranscript(t, idStatedOnly, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "summarise the backfill").
+		text(ago(26*time.Hour), "The backfill is done. 212 rows moved and the index is rebuilt.").
+		write(root, slugAlpha)
+
 	sessions := mustRefresh(t, fleet.NewManager(root), fleetNow)
-	for _, id := range []string{idArchQuestion, idRefused} {
+	for _, id := range []string{idArchQuestion, idRefused, idStatedOnly} {
 		s := pick(t, sessions, id)
 		if s.Info.Asked {
 			t.Errorf("%s: Info.Asked = true — only a question opens the door", id)
@@ -625,5 +669,341 @@ func TestAnAgentInFlightStillClosesTheDoorOnPlainWords(t *testing.T) {
 	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingWeek)
 	if s.Info.Asked || s.Waiting {
 		t.Errorf("Asked/Waiting = %v/%v with an agent still writing", s.Info.Asked, s.Waiting)
+	}
+}
+
+// The either-order rule, on the shape the harness writes. A turn is one
+// line per content block with the id repeated, so the question and the
+// agent it was dispatched with are two lines and the walk meets one of
+// them first. Round 59's rule was pinned on a fixture that put both blocks
+// on one line — a shape this machine's own transcripts never contain — so
+// the guarantee held only in the test (#348).
+func TestTheEitherOrderRuleHoldsOnTheShapeTheHarnessWrites(t *testing.T) {
+	ask := [3]string{"tool", "toolu_ask8", state.AskUserQuestion}
+	task := [3]string{"tool", "toolu_task8", "Task"}
+	words := [3]string{"text", "Two designs fit.", ""}
+
+	for _, c := range []struct {
+		name   string
+		blocks [][3]string
+	}{
+		{"the question written first", [][3]string{ask, task}},
+		{"the agent written first", [][3]string{task, ask}},
+		{"words, then the agent, then the question", [][3]string{words, task, ask}},
+		{"a plain batch with no agent at all", [][3]string{{"tool", "toolu_b8", "Bash"}, ask}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			at := ago(26 * time.Hour)
+			b := newTranscript(t, idAskedTool, "/home/user/alpha", "main").
+				prompt(ago(27*time.Hour), "map the payments module")
+			b.turn(at, "msg_batch_1", c.blocks...)
+			b.write(root, slugAlpha)
+
+			assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idAskedTool), at)
+		})
+	}
+}
+
+// And the other side of the same grouping: a turn whose lines carry no
+// question of its own is work in flight whatever else it said. (What
+// bounds the hold on the older side has its own pin below — this fixture
+// settles on the prompt either way, so it never measured that.)
+func TestATurnWithNoQuestionIsStillWorkInFlight(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module").
+		text(ago(26*time.Hour+time.Minute), "Shall I start with the ledger?")
+	b.turn(at, "msg_batch_2",
+		[3]string{"text", "Looking at both.", ""},
+		[3]string{"tool", "toolu_task9", "Task"},
+		[3]string{"tool", "toolu_b9", "Bash"})
+	b.write(root, slugAlpha)
+
+	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idWaitingWeek)
+	if s.Info.Asked || s.Waiting {
+		t.Errorf("Asked/Waiting = %v/%v: a turn with two calls out and no question of its own",
+			s.Info.Asked, s.Waiting)
+	}
+}
+
+// What `compass status` costs, pinned. That process is a fresh one every
+// few seconds out of tmux, so every byte it re-reads it re-reads forever.
+// Round 61 fixed two ways this feature had quietly taken its resume away
+// and shipped all of it unpinned; the panel found that by reverting each
+// line and watching the package stay green (#348).
+func TestTheAskDoorKeepsTheStatusLinesResume(t *testing.T) {
+	t.Run("a quiet file peeked wide is not peeked again by the next process", func(t *testing.T) {
+		root := t.TempDir()
+		askedQuestionAt(t, root, slugAlpha, idWaitingDay, 26*time.Hour)
+		path := filepath.Join(root, "projects", slugAlpha, idWaitingDay+".jsonl")
+		cache := filepath.Join(t.TempDir(), "resume.json")
+
+		warm := fleet.NewManager(root)
+		c := fleet.OpenResumeCache(cache)
+		warm.UseResumeCache(c)
+		mustRefresh(t, warm, fleetNow)
+		c.Save()
+
+		// The second process is handed the same bytes, with the question
+		// taken out of them — same length, same mtime, so the entry's
+		// `(size, mtime)` key is untouched and only the cache's own memory
+		// of having read wide decides. A process that forgot it re-reads
+		// the file, finds no question and archives the session; on a real
+		// home directory that is every quiet transcript, every few seconds.
+		//
+		// The replacement has to be the same size: doctoring it longer
+		// invalidated the entry either way, so both the fold and its
+		// revert re-read and both still answered `Asked=true` — the pin
+		// held nothing for a round (round 62).
+		doctored := strings.Replace(string(readFile(t, path)), "Shall I proceed?", "Shall I proceed.", 1)
+		if len(doctored) != len(string(readFile(t, path))) {
+			t.Fatalf("the doctored file is %d bytes against %d: the size key decides it and the cache is never asked", len(doctored), len(string(readFile(t, path))))
+		}
+		writeFile(t, path, doctored, fileTime(t, path))
+
+		next := fleet.NewManager(root)
+		next.UseResumeCache(fleet.OpenResumeCache(cache))
+		s := pick(t, mustRefresh(t, next, fleetNow), idWaitingDay)
+		if !s.Info.Asked {
+			t.Fatalf("Info.Asked = false: the scan re-read a file it had already read wide, and the question it had is not in these bytes")
+		}
+	})
+
+	t.Run("a door the fold refused still records its mark", func(t *testing.T) {
+		root := t.TempDir()
+		// A question over a call that never came back: the walk says
+		// asked, the machine says hung, so the door is refused.
+		newTranscript(t, idWaitingWeek, "/home/user/alpha", "main").
+			prompt(ago(30*time.Hour), "build the release binary").
+			tool(ago(29*time.Hour), "toolu_r1", "Bash", map[string]any{"command": "go build ./..."}).
+			meta(ago(28*time.Hour), "Continue from where you left off.").
+			text(ago(27*time.Hour), "The build never finished. Shall I retry it?").
+			write(root, slugAlpha)
+		cache := filepath.Join(t.TempDir(), "resume.json")
+
+		warm := fleet.NewManager(root)
+		c := fleet.OpenResumeCache(cache)
+		warm.UseResumeCache(c)
+		mustRefresh(t, warm, fleetNow)
+		c.Save()
+
+		raw := string(readFile(t, cache))
+		if !strings.Contains(raw, "points") {
+			t.Errorf("the refused session left no mark in %s: every status run replays its whole transcript", raw)
+		}
+	})
+
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return raw
+}
+
+func writeFile(t *testing.T, path, content string, at time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatalf("chtimes %s: %v", path, err)
+	}
+}
+
+func fileTime(t *testing.T, path string) time.Time {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return fi.ModTime()
+}
+
+// TestTheHeldTurnSurvivesTheResultsWrittenInsideIt is the shape the fold
+// for #348 did not reach. Grouping a turn by `message.id` reassembles the
+// lines that are *adjacent*, and this harness does not always write them
+// that way: on a turn that calls several times it writes each call's
+// result between the calls, so one assistant message is three or four
+// lines with `user` lines in the gaps. Measured on this machine: of 527
+// assistant message ids, 249 span several lines and the two that are not
+// consecutive are exactly the multi-call turns — the only shape this rule
+// is about.
+//
+// The walk reads backwards, so it met a result first and read it as the
+// end of the held turn, one line short of the question. A bare result line
+// says nothing about whose turn it is: it records the call it answers and
+// the hold stands (round 62).
+func TestTheHeldTurnSurvivesTheResultsWrittenInsideIt(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idInterleaved, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module")
+	// The measured shape, with a batched question where one would sit.
+	b.turn(at, "msg_gap",
+		[3]string{"text", "Three of these are independent.", ""},
+		[3]string{"tool", "toolu_askg", state.AskUserQuestion},
+		[3]string{"tool", "toolu_g1", "Task"})
+	b.result(at.Add(time.Second), "toolu_g1", "agent done")
+	b.turn(at.Add(2*time.Second), "msg_gap", [3]string{"tool", "toolu_g2", "Task"})
+	b.result(at.Add(3*time.Second), "toolu_g2", "agent done")
+	b.turn(at.Add(4*time.Second), "msg_gap", [3]string{"tool", "toolu_g3", "Task"})
+	b.write(root, slugAlpha)
+
+	assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idInterleaved), at)
+}
+
+// And the other door into the same turn: a batch whose calls have all come
+// back settled the walk on the spot, without reading the rest of the turn.
+// A question in an earlier line of that same message was never seen, so a
+// batch that asked you something and ran one Bash call archived itself the
+// moment the Bash result landed. The turn is held to its start instead,
+// and the hold settles false of its own accord if no question is in it.
+func TestABatchThatCameBackIsStillReadToItsStart(t *testing.T) {
+	root := t.TempDir()
+	at := ago(26 * time.Hour)
+	b := newTranscript(t, idSettledBatch, "/home/user/alpha", "main").
+		prompt(ago(27*time.Hour), "map the payments module")
+	b.turn(at,
+		"msg_done",
+		[3]string{"tool", "toolu_askd", state.AskUserQuestion},
+		[3]string{"tool", "toolu_bd", "Bash"})
+	b.result(at.Add(time.Second), "toolu_bd", "212 passed")
+	b.write(root, slugAlpha)
+
+	assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idSettledBatch), at)
+}
+
+// TestTheHeldTurnOutlivesTheWindowItStartedIn is the hold's other end. The
+// walk reads the file backwards in 64KB windows and widens while it is
+// still undecided, and it closed a held turn after every window rather
+// than at the start of the file — after which the walk is settled and each
+// later window is a no-op, so the widening the loop exists for never
+// reached the question.
+//
+// One tool result written between a turn's lines was enough to cross the
+// boundary, and 64KB is the ordinary size of that shape: a subagent's
+// report is what sits between the calls of the turn the hold is for. The
+// question does not move; only the bytes under it do (round 62).
+func TestTheHeldTurnOutlivesTheWindowItStartedIn(t *testing.T) {
+	for _, n := range []int{1024, 70 * 1024, 200 * 1024} {
+		root := t.TempDir()
+		at := ago(26 * time.Hour)
+		b := newTranscript(t, idInterleaved, "/home/user/alpha", "main").
+			prompt(ago(27*time.Hour), "map the payments module")
+		b.turn(at,
+			"msg_wide",
+			[3]string{"tool", "toolu_askw", state.AskUserQuestion},
+			[3]string{"tool", "toolu_w1", "Task"})
+		b.result(at.Add(time.Second), "toolu_w1", strings.Repeat("x", n))
+		b.turn(at.Add(2*time.Second), "msg_wide", [3]string{"tool", "toolu_w2", "Task"})
+		b.write(root, slugAlpha)
+
+		s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idInterleaved)
+		if !s.Info.Asked || !s.Waiting {
+			t.Errorf("a %dKB result inside the turn: Asked/Waiting = %v/%v — the question is the same distance from the end of the file, and only the bytes between its lines changed",
+				n/1024, s.Info.Asked, s.Waiting)
+		}
+	}
+}
+
+// And the settle that the hold is bounded by on the other side: a turn
+// whose calls are still out is work in flight, and a question from an
+// *earlier* turn is not its last word. Without the different-id settle the
+// walk reads straight past the boundary into the older turn and answers
+// with a question the newer turn already superseded.
+func TestAQuestionFromAnEarlierTurnIsNotThisTurnsLastWord(t *testing.T) {
+	root := t.TempDir()
+	b := newTranscript(t, idSettledBatch, "/home/user/alpha", "main").
+		prompt(ago(30*time.Hour), "map the payments module")
+	b.turn(ago(29*time.Hour), "msg_old", [3]string{"tool", "toolu_asko", state.AskUserQuestion})
+	b.turn(ago(26*time.Hour), "msg_new", [3]string{"tool", "toolu_bn", "Bash"})
+	b.write(root, slugAlpha)
+
+	s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idSettledBatch)
+	if s.Info.Asked || s.Waiting {
+		t.Errorf("Asked/Waiting = %v/%v: the newest turn has a call still out, and the question above it belongs to a turn that ended",
+			s.Info.Asked, s.Waiting)
+	}
+}
+
+// TestTheVerdictDoesNotDependOnWhereTheWindowFalls is the hold's third
+// size rule, and the one that outlived the first fix. The walk widens by
+// re-reading from the new window's start to the end of the file, so every
+// line of the previous window was fed to it a second time — with the state
+// the first pass left behind. That is not the no-op it looks like: a line
+// the first pass skipped because nothing was held is, on the second pass
+// with a turn held, "written below a held turn and not one of its results",
+// and it settles the walk false. A hook's own user line and a thinking-only
+// line of another turn both do it.
+//
+// So the verdict depended on where the 64KB boundary happened to fall
+// against the question — the same lines, the same question, 700 bytes of
+// tool output apart, waiting at 64000 and archived at 64700. Each line is
+// walked exactly once now; the sizes below sit either side of that band
+// (round 62).
+func TestTheVerdictDoesNotDependOnWhereTheWindowFalls(t *testing.T) {
+	for _, tail := range []string{"a hook's line under the turn", "a thinking-only line of another turn"} {
+		for _, n := range []int{64000, 64700} {
+			root := t.TempDir()
+			at := ago(26 * time.Hour)
+			b := newTranscript(t, idInterleaved, "/home/user/alpha", "main").
+				prompt(ago(27*time.Hour), "map the payments module")
+			b.turn(at, "msg_edge",
+				[3]string{"tool", "toolu_aske", state.AskUserQuestion},
+				[3]string{"tool", "toolu_te", "Task"})
+			b.result(at.Add(time.Second), "toolu_te", strings.Repeat("x", n))
+			if strings.HasPrefix(tail, "a hook") {
+				b.meta(at.Add(2*time.Second), "<hook>stop hook ran</hook>")
+			} else {
+				b.turn(at.Add(2*time.Second), "msg_other", [3]string{"text", "", ""})
+			}
+			b.write(root, slugAlpha)
+
+			s := pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idInterleaved)
+			if !s.Info.Asked || !s.Waiting {
+				t.Errorf("%s, %d-byte result: Asked/Waiting = %v/%v — the question did not move, only the bytes under it",
+					tail, n, s.Info.Asked, s.Waiting)
+			}
+		}
+	}
+}
+
+// TestTheHeldQuestionOutranksAnAgentOnEitherOrder is round 61's guarantee
+// on the shape the harness writes. A question the harness is holding open
+// outranks an agent in flight — the machine's rule 2 before its rule 3 —
+// and a one-line fixture pinned that. Split over two lines, `busy` refused
+// the hold, so the guarantee depended on which block the harness wrote
+// first: `[Ask, Task]` with an agent running archived the session, where
+// `[Task, Ask]` kept it waiting. Same turn, same agent, same question
+// (round 62).
+func TestTheHeldQuestionOutranksAnAgentOnEitherOrder(t *testing.T) {
+	ask := [3]string{"tool", "toolu_aska", state.AskUserQuestion}
+	task := [3]string{"tool", "toolu_taska", "Task"}
+
+	for _, c := range []struct {
+		name   string
+		blocks [][3]string
+	}{
+		{"the question written first", [][3]string{ask, task}},
+		{"the agent written first", [][3]string{task, ask}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			at := ago(26 * time.Hour)
+			b := newTranscript(t, idAskedTool, "/home/user/alpha", "main").
+				prompt(ago(27*time.Hour), "map the payments module")
+			b.turn(at, "msg_agent", c.blocks...)
+			// The agent it dispatched, writing in the lead's own file.
+			b.sidechainPrompt(at.Add(time.Second), "look at the ledger tables")
+			b.write(root, slugAlpha)
+
+			assertWaiting(t, pick(t, mustRefresh(t, fleet.NewManager(root), fleetNow), idAskedTool), at)
+		})
 	}
 }

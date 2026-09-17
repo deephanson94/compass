@@ -64,8 +64,10 @@ windows, or panes.
 A session that ended its turn on a question — *which of these should I do next?*
 — keeps its place on the board until you answer it, however long that takes and
 whether or not its pane is still open: the question is read off the transcript
-itself, so closing the pane, quitting compass or rebooting does not lose it, and
-replying is what clears it. Questions from before today sit under the alarms of
+itself, so closing the pane or quitting compass does not lose it, and replying is
+what clears it. So does ending the session — `/exit`, a closed terminal, a reboot —
+because a question in a session nobody is running is one you already answered by
+leaving. Questions from before today sit under the alarms of
 the moment, `asks you · waiting 2d` under the name, and `g` takes today's first.
 When the pile is one you are not going to work through, `x` puts one down for
 good and `X` takes every one of them off the board — `A`, then `X`, brings them
@@ -185,7 +187,7 @@ narrator = "haiku"      # narration model; "off" disables
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live
-                        #  whatever this says, unless it says "0")
+                        #  whatever this says while it is running, unless it says "0")
 reply = "please continue"   # the stock lines `r` offers, one per line, up to nine
 reply = "report status"
 hook = "tmux display-message \"compass: $COMPASS_SESSION $COMPASS_EVENT\""

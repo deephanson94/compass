@@ -41,7 +41,7 @@ func TestTheCardsRowIsTheColumnsWidthAtEveryLevel(t *testing.T) {
 // over six blank rows (#62, #63).
 func TestTheLastBandTakesTheEmptyStripsRow(t *testing.T) {
 	// The block above every column made porter's band the height of the
-	// body at 120x34, so cli is the strip's there and a column at 152 (#374).
+	// body at 120x34, so cli is the strip's there and a column at 152 (#377).
 	m := sceneModel(sceneSubagents(), 120, 34)
 	view := ansi.Strip(m.View())
 	if !strings.Contains(view, "4 ○ cli") {
@@ -216,7 +216,7 @@ func TestTheFoldMarksTheLineItPaintedOver(t *testing.T) {
 	forceASCII(t)
 	// Twenty-seven rows tall: the block over the trail takes two at 80
 	// and its seam a third, so the fold stands where it stood at 24
-	// before them (#374, #375).
+	// before them (#377, #378).
 	m := sceneModel(sceneSubagents(), 80, 27)
 	press(m, "2")
 	pressTab(m)

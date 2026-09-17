@@ -273,7 +273,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// The block is the same kind of spare-row spend: over a trail that
 	// keeps every row, where the board has the rows, and out of the
 	// trail's own rows where it would cost a session its column — the
-	// counts stand either way (#374, #377).
+	// counts stand either way (#377, #380).
 	m.blockInTrail = true
 	if tight, tightH := m.boardPack(n, cw, body); len(tight) > len(keys) {
 		keys, heights = tight, tightH
@@ -282,7 +282,7 @@ func (m *Model) boardLines(w, h int) []string {
 	}
 	// And both spends at once: where either alone still costs a session
 	// its column, the lane heads and the block are given up together
-	// (#377, #380).
+	// (#380, #383).
 	if !m.noLaneHeads || !m.blockInTrail {
 		heads, inTrail := m.noLaneHeads, m.blockInTrail
 		m.noLaneHeads, m.blockInTrail = true, true
@@ -298,7 +298,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// grows back toward the block over its whole trail while the rows are
 	// there — the smallest debt first, so the rows that are there buy
 	// back as many asks as they can — rather than folding a column's ask
-	// over blank rows (#381).
+	// over blank rows (#384).
 	if m.blockInTrail {
 		spare := body
 		for _, bh := range heights {
@@ -359,7 +359,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// The reply box stands on its own band's trail rows, or under the
 	// head rows of the band below; where the deck is too short for either
 	// it paints over a band's head rows and leaves trails standing with
-	// no session named on them (#108, #379). The band below stands off
+	// no session named on them (#108, #382). The band below stands off
 	// the box's floor instead where it still fits whole, and where it
 	// does not it is the strip's on this frame — and the strip stands off
 	// the floor too, so the session it names is on the frame.
@@ -712,10 +712,10 @@ func (m *Model) boardColumnRows(key string, w int) int {
 	if m.blockInTrail {
 		// The block out of the trail's own rows: the column measures what
 		// its trail needs, or its block over two rows of trail, whichever
-		// is taller, so the bands pack as they packed before it (#377).
+		// is taller, so the bands pack as they packed before it (#380).
 		return 3 + max(len(doc), blockHeight(tr)+2)
 	}
-	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the whole trail (#374)
+	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the whole trail (#377)
 }
 
 // boardRows numbers the board's sessions in the board's own order — the
@@ -1148,7 +1148,7 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	}
 	// The block above the trail: the legs counted by class, and the
 	// trail in the rows that are left; the block is drawn after the
-	// trail, whose HEAD row may carry the running leg's clause (#374).
+	// trail, whose HEAD row may carry the running leg's clause (#377).
 	bh := blockHeight(tr)
 	opts.Height = h - 3 - bh
 	if opts.Height < 1 {
@@ -1178,14 +1178,14 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 			lines[1] = lines[0]
 		}
 		if len(block) > 0 {
-			full = summaryDay(full) // the ships, the reds and the wait are the block's rows (#374)
+			full = summaryDay(full) // the ships, the reds and the wait are the block's rows (#377)
 		}
 		lines[0] = dimStyle.Render(shedClauses(full, w))
 	} else if len(lines) > 0 && len(tr.Prompts) > 0 && strings.TrimSpace(ansi.Strip(lines[0])) == "╷" {
 		// The fold took only the ask, and left the rail stub that stood
 		// under it: the stub is the fold's row, in the same idiom with
 		// the leg clause shed, rather than a bare stroke under the seam
-		// that announces the trail, or under the card (#381).
+		// that announces the trail, or under the card (#384).
 		lines[0] = dimStyle.Render(clip("↑ began "+relAge(m.now, tr.Prompts[0].At)+" ago", w))
 	}
 	lines = append(block, lines...)
@@ -2062,7 +2062,7 @@ func hiddenAbove(tr journey.Trail, o TrailOpts) int {
 	// The fold row is drawn over the viewport's first row: where that row
 	// is a leg, it is hidden too, and the count says so — the trail
 	// column's title counts the same trail at the same scroll one higher
-	// otherwise, and since #374 the block above sums the legs (#377).
+	// otherwise, and since #377 the block above sums the legs (#380).
 	if rows := TrailRows(tr, o.Level); n > 0 && top < len(sel) {
 		if j := sel[top]; j >= 0 && j < len(rows) && rows[j].Kind == "leg" {
 			n++

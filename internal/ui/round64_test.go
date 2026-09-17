@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Round sixty-four: the summary stands (#374). The legs counted by class
+// Round sixty-four: the summary stands (#377). The legs counted by class
 // are drawn above every trail — the trail column at every level and every
 // column of the board — and the trail takes the rows that are left. No
 // key opens or closes it; a trail with nothing to count draws none.
@@ -191,7 +191,7 @@ func TestNoKeyOpensOrClosesTheSummary(t *testing.T) {
 	press(m, "s")
 	after := ansi.Strip(m.View())
 	if before != after {
-		t.Errorf("s should do nothing now (#374)")
+		t.Errorf("s should do nothing now (#377)")
 	}
 	press(m, "?")
 	h := ansi.Strip(m.View())
@@ -235,7 +235,7 @@ func TestTheParkedLeadsBlockOnTheBoardAndItsLegs(t *testing.T) {
 	}
 }
 
-// The panel's first pass on #374, second-day, folded (#375).
+// The panel's first pass on #377, second-day, folded (#378).
 
 func TestTheBlockEndsOnItsSeam(t *testing.T) {
 	forceASCII(t)
@@ -274,7 +274,7 @@ func TestTheBlockEndsOnItsSeam(t *testing.T) {
 	}
 }
 
-// The panel's first pass on #374, subagents, folded (#376).
+// The panel's first pass on #377, subagents, folded (#379).
 
 func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 	forceASCII(t)
@@ -301,7 +301,7 @@ func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 			}
 			// The oldest lane's clock is on the frame once: on the fleet
 			// row beside, the card, the column header or HEAD's own row —
-			// and then not on the lanes row (#376).
+			// and then not on the lanes row (#379).
 			said := strings.Contains(v, "◈3 out 20m") || strings.Contains(v, "20m out")
 			onRow := strings.Contains(lanes, "20m out")
 			if !said {
@@ -320,7 +320,7 @@ func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 	}
 	// The clock's other idiom: harness:0.0's lanes are all back, so its
 	// row's clock is `1h ago`, and the lane that came back last wears the
-	// same clock on its own row beneath (#376, #380).
+	// same clock on its own row beneath (#379, #383).
 	m := sceneModel(sc, 120, 34)
 	v := ansi.Strip(m.View())
 	lanes := ""
@@ -342,13 +342,13 @@ func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 	}
 }
 
-// The panel's second pass on #377 — two-tools, subagents, fleet-hygiene —
-// folded (#379, #380, #381).
+// The panel's second pass on #380 — two-tools, subagents, fleet-hygiene —
+// folded (#382, #383, #384).
 
 // The reply box's floor and the band below: where the box would paint over a
 // band's head rows, the band stands off the box's floor, or, where it no
 // longer fits, it is the strip's, and the strip stands off the floor too —
-// so the session is named on the frame either way (#379).
+// so the session is named on the frame either way (#382).
 func TestABandTheBoxWouldBeheadStandsOffItsFloor(t *testing.T) {
 	forceASCII(t)
 	sc := sceneTwoTools()
@@ -378,7 +378,7 @@ func TestABandTheBoxWouldBeheadStandsOffItsFloor(t *testing.T) {
 			t.Fatalf("120x%d: no box bottom on the frame:\n%s", c.h, v)
 		}
 		if docs < 0 {
-			t.Errorf("120x%d: the docs session is named nowhere under the box (#379):\n%s", c.h, v)
+			t.Errorf("120x%d: the docs session is named nowhere under the box (#382):\n%s", c.h, v)
 		} else if docs != bottom+2 {
 			t.Errorf("120x%d: the docs row should stand one row of air off the box's floor (row %d), stands at %d:\n%s", c.h, bottom+2, docs, v)
 		}
@@ -390,8 +390,8 @@ func TestABandTheBoxWouldBeheadStandsOffItsFloor(t *testing.T) {
 }
 
 // A card row nothing is left of goes: the rung the header says was dropped
-// (#377) and no clause stood beside it, so the card is head and delta, as
-// it was before the rung was dropped (#379).
+// (#380) and no clause stood beside it, so the card is head and delta, as
+// it was before the rung was dropped (#382).
 func TestACardRowNothingIsLeftOfGoes(t *testing.T) {
 	forceASCII(t)
 	sc := sceneTwoTools()
@@ -414,7 +414,7 @@ func TestACardRowNothingIsLeftOfGoes(t *testing.T) {
 				continue
 			}
 			if i+2 < len(cells) && strings.TrimSpace(cells[i+2]) == "" && strings.Contains(cells[i+1], "↪ sent") {
-				t.Errorf("%dx34: the card keeps a blank row under its delta (#379):\n%s", w, strings.Join(cells[i:i+3], "\n"))
+				t.Errorf("%dx34: the card keeps a blank row under its delta (#382):\n%s", w, strings.Join(cells[i:i+3], "\n"))
 			}
 		}
 	}
@@ -422,7 +422,7 @@ func TestACardRowNothingIsLeftOfGoes(t *testing.T) {
 
 // The board spends its unspent rows on the bands' debt: a tight pack decides
 // the columns, and the rows it did not spend go back to the bands, smallest
-// debt first, so a column's ask is not folded over blank rows (#381).
+// debt first, so a column's ask is not folded over blank rows (#384).
 func TestTheBoardSpendsItsSpareRowsOnTheBandsDebt(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneManyIdle(), 220, 48)
@@ -432,7 +432,7 @@ func TestTheBoardSpendsItsSpareRowsOnTheBandsDebt(t *testing.T) {
 	}
 	for _, ask := range []string{`◉ "clean the exploration notebooks"`, `◉ "profile the hot loop"`} {
 		if !strings.Contains(v, ask) {
-			t.Errorf("the rows are there and the ask is folded anyway (#381): %q missing\n%s", ask, v)
+			t.Errorf("the rows are there and the ask is folded anyway (#384): %q missing\n%s", ask, v)
 		}
 	}
 	lines := strings.Split(v, "\n")
@@ -441,12 +441,12 @@ func TestTheBoardSpendsItsSpareRowsOnTheBandsDebt(t *testing.T) {
 		blank++
 	}
 	if blank > 1 {
-		t.Errorf("%d blank rows stand under the strip while a column folds (#381):\n%s", blank, v)
+		t.Errorf("%d blank rows stand under the strip while a column folds (#384):\n%s", blank, v)
 	}
 }
 
 // Where the fold takes only the ask, the rail stub under it is the fold's
-// row — `↑ began …` — and never a bare stroke under the seam (#381).
+// row — `↑ began …` — and never a bare stroke under the seam (#384).
 func TestAFoldThatTakesOnlyTheAskSaysSo(t *testing.T) {
 	forceASCII(t)
 	for _, sc := range []scene{sceneManyIdle(), sceneAlarmStorm()} {
@@ -461,15 +461,15 @@ func TestAFoldThatTakesOnlyTheAskSaysSo(t *testing.T) {
 					if r != '╷' || j >= len(above) || !strings.HasPrefix(string(above[j:]), "│ the trail ─") {
 						continue
 					}
-					t.Errorf("%s at 220x%d: a bare rail stub under the seam, its ask folded silently (#381):\n%s", sc.name, h, strings.Join(lines[i-1:i+1], "\n"))
+					t.Errorf("%s at 220x%d: a bare rail stub under the seam, its ask folded silently (#384):\n%s", sc.name, h, strings.Join(lines[i-1:i+1], "\n"))
 				}
 			}
 		}
 	}
 }
 
-// The panel's first pass on #374 — alarm-storm, fleet-hygiene, two-tools
-// and second-day's second — folded (#377).
+// The panel's first pass on #377 — alarm-storm, fleet-hygiene, two-tools
+// and second-day's second — folded (#380).
 
 // boardColumnsDrawn counts the columns a board frame draws, by the digit
 // and glyph that head each.
@@ -493,7 +493,7 @@ func boardColumnsDrawn(v string) int {
 func TestTheBlockNeverCostsASessionItsColumn(t *testing.T) {
 	forceASCII(t)
 	// The columns of before the block, at the widths the block cost them:
-	// counted from the pre-block corpus (#377, #380).
+	// counted from the pre-block corpus (#380, #383).
 	for _, c := range []struct {
 		sc   scene
 		w, h int
@@ -565,7 +565,7 @@ func TestTheBoardsFoldRowAndTheBlockClose(t *testing.T) {
 				t.Fatalf("%dx%d at %d rows: no fold row on the column:\n%s", size[0], size[1], h, strings.Join(col, "\n"))
 			}
 			if hidden+drawn != len(tr.Legs) {
-				t.Errorf("%dx%d at %d rows: the fold row (%d) and the legs beneath it (%d) do not close on the block's %d (#377):\n%s", size[0], size[1], h, hidden, drawn, len(tr.Legs), strings.Join(col, "\n"))
+				t.Errorf("%dx%d at %d rows: the fold row (%d) and the legs beneath it (%d) do not close on the block's %d (#380):\n%s", size[0], size[1], h, hidden, drawn, len(tr.Legs), strings.Join(col, "\n"))
 			}
 		}
 	}
@@ -576,7 +576,7 @@ func TestAWaitWorthARowCountsAlone(t *testing.T) {
 	m, _ := twoToolsWaiting(t, 80, 24)
 	v := ansi.Strip(m.View())
 	if !strings.Contains(v, "◉ waited on you · 4 prompts") || !strings.Contains(v, "│ the trail ─") {
-		t.Errorf("a trail of one of each with a wait worth a row should draw the wait row and its seam (#357, #377):\n%s", v)
+		t.Errorf("a trail of one of each with a wait worth a row should draw the wait row and its seam (#357, #380):\n%s", v)
 	}
 	if strings.Contains(v, " legs ") {
 		t.Errorf("a trail of one of each should draw no class row:\n%s", v)
@@ -588,11 +588,11 @@ func TestTheCardKeepsTheClauseItShedForATagItDropped(t *testing.T) {
 	m, _ := twoToolsWaiting(t, 120, 34)
 	v := ansi.Strip(m.View())
 	if !strings.Contains(v, "on you 12m today") && !strings.Contains(v, "◉ waited on you") {
-		t.Errorf("at 120 the api session's wait should be on the card or the block (#377):\n%s", v)
+		t.Errorf("at 120 the api session's wait should be on the card or the block (#380):\n%s", v)
 	}
 	// The card row itself, on a session the block covers nowhere: the
 	// harness card at 120 keeps its running clause on the row the tmux
-	// rung left, and the card is two rows, not three (#377, #379).
+	// rung left, and the card is two rows, not three (#380, #382).
 	sc := sceneSubagents()
 	m = sceneModel(sc, 120, 34)
 	for _, d := range []string{"1", "2", "3", "4", "5"} {
@@ -618,10 +618,10 @@ func TestTheCardKeepsTheClauseItShedForATagItDropped(t *testing.T) {
 		t.Fatalf("no session card on the frame:\n%s", ansi.Strip(m.View()))
 	}
 	if !strings.Contains(cells[head+1], "for ") || !strings.Contains(cells[head+1], "scout") {
-		t.Errorf("the card's second row should carry the running clause the rung gave way to (#377): %q", cells[head+1])
+		t.Errorf("the card's second row should carry the running clause the rung gave way to (#380): %q", cells[head+1])
 	}
 	if strings.TrimSpace(cells[head+2]) == "" {
-		t.Errorf("the card is head and delta, not a blank third row (#379):\n%s", strings.Join(cells[head:head+4], "\n"))
+		t.Errorf("the card is head and delta, not a blank third row (#382):\n%s", strings.Join(cells[head:head+4], "\n"))
 	}
 }
 
@@ -652,10 +652,10 @@ func TestTheTitleKeepsItsRedsWhereTheReplyBoxCoversTheBlock(t *testing.T) {
 	}
 	v := ansi.Strip(m.View())
 	if !strings.Contains(v, " legs") && !strings.Contains(v, " red") {
-		t.Errorf("the box covers the block and the title gave its reds away: nothing on the frame counts them (#377):\n%s", v)
+		t.Errorf("the box covers the block and the title gave its reds away: nothing on the frame counts them (#380):\n%s", v)
 	}
 	if !strings.Contains(v, "TRAIL · webapp · 1h · 2 red") {
-		t.Errorf("the title should carry the reds the covered block cannot (#377):\n%s", v)
+		t.Errorf("the title should carry the reds the covered block cannot (#380):\n%s", v)
 	}
 	pressKey(m, "esc")
 }
@@ -679,7 +679,7 @@ func TestAStuckHeadsFigureIsSaidOnceAcrossTheSeam(t *testing.T) {
 	cells := trailCells(m)
 	col := strings.Join(cells, "\n")
 	if strings.Count(col, "silent 4m") > 1 {
-		t.Errorf("the class row repeats the stuck figure HEAD's own row says beneath the seam (#377):\n%s", col)
+		t.Errorf("the class row repeats the stuck figure HEAD's own row says beneath the seam (#380):\n%s", col)
 	}
 }
 
@@ -724,7 +724,7 @@ func (m *Model) viewOrderKeys() []string {
 // legRowPattern is the shape of a leg row on a board column.
 var legRowPattern = regexp.MustCompile(`^[◆●◍▲│]▸? ?(scout|design|build|fix|test|ship|docs) `)
 
-// The panel's second pass, alarm-storm, folded (#378).
+// The panel's second pass, alarm-storm, folded (#381).
 
 func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
 	forceASCII(t)
@@ -738,7 +738,7 @@ func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
 		}
 		cells = trailCells(m)
 		// Under the box the block stands down, and the trail takes the
-		// rows back: no blank tail under the column (#378).
+		// rows back: no blank tail under the column (#381).
 		blank := 0
 		for i := len(cells) - 2; i >= 0 && strings.TrimSpace(cells[i]) == ""; i-- {
 			blank++
@@ -748,7 +748,7 @@ func TestTheColumnReservesOnlyTheRowsTheBlockDraws(t *testing.T) {
 		}
 		// The block stands where a row of it is uncovered, and stands
 		// down where the box covers all of it: either way the title and
-		// the column agree (#377), and the rows are never blank.
+		// the column agree (#380), and the rows are never blank.
 		pressKey(m, "esc")
 	}
 }

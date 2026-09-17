@@ -803,7 +803,7 @@ func lookRule(looked, now time.Time, width int) string {
 
 // seamRule is the rail row between a trail's block and the trail itself:
 // "│ the trail ────", in the rail's own labelled-rule idiom, so the counts
-// above and the rows beneath are never read as one column (#375).
+// above and the rows beneath are never read as one column (#378).
 func seamRule(width int) string {
 	row := railStroke + " the trail "
 	if rest := width - len([]rune(row)); rest > 0 {
@@ -1878,10 +1878,10 @@ func (m *Model) trailColumn(w, h int) []string {
 	// The block above the trail: the legs counted by class, then the
 	// trail in the rows that are left; the block is drawn last, since a
 	// class row yields its clause to HEAD's row where the trail draws it
-	// (#351, #374).
+	// (#351, #377).
 	bh := 0
 	if m.blockShown() {
-		bh = blockHeight(m.trail) // the rows the block draws on this frame, not the rows it would (#378)
+		bh = blockHeight(m.trail) // the rows the block draws on this frame, not the rows it would (#381)
 	}
 	draw := func(h int) []string {
 		if bh >= h {
@@ -1916,9 +1916,9 @@ func (m *Model) trailColumn(w, h int) []string {
 			cardKeepsOnlyItsTag(probe)
 			if strings.TrimSpace(ansi.Strip(probe[1])) == "" {
 				// Nothing is left of the row — the rung the header says
-				// was dropped before the verdict was fitted (#377) and no
+				// was dropped before the verdict was fitted (#380) and no
 				// clause stood beside it: the row goes and the trail
-				// takes it, as it did before (#117, #144, #379).
+				// takes it, as it did before (#117, #144, #382).
 				rows = append(rows[:1:1], rows[2:]...)
 				body = draw(h - len(rows))
 				droppedTag = true
@@ -2088,7 +2088,7 @@ func (m *Model) cardSecond(w int) string {
 	if tmux != "" && m.headerSaysTag(tmux) {
 		// The header two rows up says every clause of the rung, and the
 		// row is stripped of it anyway (cardKeepsOnlyItsTag): a verdict
-		// clause shed to make room for it was shed for nothing (#377).
+		// clause shed to make room for it was shed for nothing (#380).
 		tmux = ""
 	}
 	// The tmux session is always kept — `enter` attaches from here — and
@@ -2106,7 +2106,7 @@ func (m *Model) cardSecond(w int) string {
 		if m.blockShown() {
 			// The card gives up the wait, the ships and the red count,
 			// which the block's rows carry — the reds class by class,
-			// which one total on the card could not (#353, #371, #374).
+			// which one total on the card could not (#353, #371, #377).
 			day = strings.Split(strings.TrimPrefix(summaryDay(" · "+strings.Join(day, " · ")), " · "), " · ")
 			if len(day) == 1 && day[0] == "" {
 				day = nil
@@ -2241,7 +2241,7 @@ func (m *Model) trailDayHere(compact bool) string {
 	if m.blockShown() {
 		// The block's own rows carry the wait on you to the minute, the
 		// ships on the ship row and the red runs on the class that ran
-		// them; the span stays the title's (#351, #352, #353, #374).
+		// them; the span stays the title's (#351, #352, #353, #377).
 		d = summaryDay(d)
 	}
 	if d == "" || len(m.trail.Prompts) == 0 || m.replyBox.on {

@@ -1123,7 +1123,7 @@ func TestTheLiveRowSaysWhatTheHeaderDoesNot(t *testing.T) {
 // TestTheHideKeyYieldsWhereItCannotHide pins round eighty-three's one
 // thing: `x hide` on a selection the key refuses to take off the board.
 // `toggleHidden` keeps what owes you an alarm and says so — `infra stays ·
-// it is asking`, `· it hangs`, `· it is looping`, `· dead on the API` —
+// asked 6m ago`, `· it hangs`, `· it is looping`, `· dead on the API` —
 // the same answer at every width and however many times it is pressed, so
 // the nine cells the key spends buy a promise the next keypress refuses.
 // The keymap already drops the key outright where the fleet is one

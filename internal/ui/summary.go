@@ -12,7 +12,7 @@ import (
 	"github.com/deephanson94/compass/internal/state"
 )
 
-// The summary (#348–#374). A trail a day long is two hundred rows, and the
+// The summary (#348–#377). A trail a day long is two hundred rows, and the
 // question a person brings back to it — how many times did it ship, what
 // did it build — is answered by walking them. The summary answers it
 // standing: the trail's legs counted by class, one row per class the
@@ -24,7 +24,7 @@ import (
 // trail below gets the rows that are left, scrolled and walked as it
 // always was. A trail with nothing to count — no leg, or one of each —
 // draws no block: the trail says all there is. It was a view `s` opened
-// (#348) and a toggle on the board (#373); #374 made it the trail's own,
+// (#348) and a toggle on the board (#376); #377 made it the trail's own,
 // always, and the key went.
 
 // summaryRow is one row of the summary: a class with its count, a leg
@@ -395,7 +395,7 @@ func summaryFigureRow(head, count string, badge []string, age string, w int) str
 
 // blockCounts says whether a trail draws the block: some class with
 // more than one leg. A class of one is its leg's own row on the trail
-// beneath, so the block never repeats a row the trail draws (#349, #374).
+// beneath, so the block never repeats a row the trail draws (#349, #377).
 func blockCounts(tr journey.Trail) bool {
 	for _, n := range classCounts(tr) {
 		if n >= 2 {
@@ -405,7 +405,7 @@ func blockCounts(tr journey.Trail) bool {
 	// Two lanes, or a wait on you worth a row, count too: the lanes row
 	// and the wait row are counts the leg rows do not hold, and a trail
 	// of one of each with a notable wait counted for `s` as well (#357,
-	// #377).
+	// #380).
 	return len(tr.Branches) >= 2 || promptWaits(tr) >= waitNotable
 }
 
@@ -421,7 +421,7 @@ func classCounts(tr journey.Trail) map[journey.Class]int {
 // blockRows is the block's rows for a trail: a row per class with more
 // than one leg, the lanes where there are two or more, and the wait on
 // you where it is worth a row — the counts, never a row the trail beneath
-// already draws (#374).
+// already draws (#377).
 func blockRows(tr journey.Trail) []summaryRow {
 	if !blockCounts(tr) {
 		return nil
@@ -444,7 +444,7 @@ func blockRows(tr journey.Trail) []summaryRow {
 }
 
 // blockHeight is how many rows the block spends above a trail: its rows
-// and the seam under them (#374, #375).
+// and the seam under them (#377, #378).
 func blockHeight(tr journey.Trail) int {
 	if n := len(blockRows(tr)); n > 0 {
 		return n + 1
@@ -462,7 +462,7 @@ type blockSaid struct {
 // blockLines draws a trail's block w cells wide on its own head options:
 // the rows the legs' summary draws, the running class's clause standing
 // down where HEAD's own row is drawn beneath or the frame says it, the
-// loop and the lanes' tally likewise (#347, #351, #356, #357, #374).
+// loop and the lanes' tally likewise (#347, #351, #356, #357, #377).
 func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said blockSaid) []string {
 	var lines []string
 	rows := blockRows(tr)
@@ -486,7 +486,7 @@ func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said block
 			lines = append(lines, legRow(l, label, narrated, lo))
 		}
 	}
-	return append(lines, seamRule(w)) // the block ends on its seam (#375)
+	return append(lines, seamRule(w)) // the block ends on its seam (#378)
 }
 
 // lanesClock is the clock the lanes row would wear: the oldest lane
@@ -530,7 +530,7 @@ func blockSaysOut(tr journey.Trail, now time.Time, lines ...string) bool {
 		if word == "ago" {
 			// The lane that came back last wears `✓ 1h ago` on its own
 			// row, and the fold and the seam rows say it too: one clock,
-			// said once (#22, #64, #376).
+			// said once (#22, #64, #379).
 			if strings.Contains(t, clock+" ago") {
 				return true
 			}
@@ -546,7 +546,7 @@ func blockSaysOut(tr journey.Trail, now time.Time, lines ...string) bool {
 // blockShown says whether the trail column draws a block for the
 // selected trail on this frame: the trail counts, and the reply box does
 // not cover every row of it — the title and the card stand down for
-// rows the frame draws, not rows it paints over (#17, #63, #377).
+// rows the frame draws, not rows it paints over (#17, #63, #380).
 func (m *Model) blockShown() bool {
 	if !blockCounts(m.trail) {
 		return false
@@ -570,7 +570,7 @@ func (m *Model) blockShown() bool {
 // the trail rows drawn beneath it: the card above or the fleet row
 // beside may already say the loop, the running leg's clause and the
 // lanes' tally (#356, #357), and HEAD's own row says the clause where the
-// viewport draws it (#351, #374).
+// viewport draws it (#351, #377).
 func (m *Model) trailBlock(w int, below []string) []string {
 	if !m.blockShown() {
 		return nil
@@ -590,7 +590,7 @@ func (m *Model) trailBlock(w int, below []string) []string {
 // headSaysLive reports whether the rows drawn beneath a block carry the
 // running leg's own clause — `for 39m`, or the figure HEAD wears when it
 // is stuck or waiting, `silent 4m`, `waiting 7m` — so the class row yields
-// it, as it yields to the card (#351, #356, #374, #377).
+// it, as it yields to the card (#351, #356, #377, #380).
 func headSaysLive(tr journey.Trail, now time.Time, o TrailOpts, below []string) bool {
 	for _, l := range tr.Legs {
 		if !l.Current {
@@ -613,7 +613,7 @@ func headSaysLive(tr journey.Trail, now time.Time, o TrailOpts, below []string) 
 
 // columnBlock is a board column's block: the column's header says the
 // loop and the lanes' tally where it does, and HEAD's own row beneath
-// says the running leg's clause where the column draws it (#373, #374).
+// says the running leg's clause where the column draws it (#376, #377).
 func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o TrailOpts, header, below []string, w int) []string {
 	if !blockCounts(tr) {
 		return nil

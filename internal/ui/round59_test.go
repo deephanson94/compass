@@ -147,8 +147,8 @@ func TestTheSweepTakesEveryWaitingSessionAndGivesThemBack(t *testing.T) {
 
 	// A second press has nothing to take, and says so rather than acting.
 	pressKey(m, "X")
-	if !strings.Contains(m.note, "nothing is unanswered") {
-		t.Errorf("note = %q, want the refusal", m.note)
+	if !strings.Contains(m.note, "nothing is left behind") {
+		t.Errorf("note = %q, want a refusal that does not deny the question the board is drawing", m.note)
 	}
 
 	// The archive is where they went, and `X` there brings every one back.
@@ -498,4 +498,173 @@ func TestTheSweepTakesOnlyWhatTheHideWouldTake(t *testing.T) {
 	if !m.hidden[sessionKey("s-docs")] {
 		t.Errorf("X left the question it is for: note %q", m.note)
 	}
+}
+
+// r62FirstGroup is the first group header the archive's list pane draws:
+// the first non-empty row left of the divider that is not the panel's
+// title, the header line or the rule, read off the frame rather than off
+// the slice the ordering sorts.
+func r62FirstGroup(m *Model) string {
+	for _, r := range strings.Split(ansi.Strip(m.View()), "\n") {
+		t := strings.TrimSpace(strings.SplitN(r, "│", 2)[0])
+		if t == "" || strings.HasPrefix(t, "▌") || strings.HasPrefix(t, "⌂") || strings.HasPrefix(t, "─") ||
+			strings.HasPrefix(t, "FLEET") || strings.HasPrefix(t, "BOARD") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// TestTheArchivesHiddenGroupStandsFirst is the archive's own name, on the
+// frame: what `x` and `X` took off the board is the first thing `A` shows.
+// The group sorted by its newest row like any other, so a swept pile of
+// old questions sank under the recent archive and the note that sends the
+// person there — `A, then x` — sent them looking for it (#347, round 61).
+// Every route of r105ttArchiveRoutes that fills the group is a stand.
+func TestTheArchivesHiddenGroupStandsFirst(t *testing.T) {
+	forceASCII(t)
+	stands := 0
+	for _, sc := range allScenes() {
+		for _, size := range r105ttArchiveSizes {
+			w, h := size[0], size[1]
+			for _, route := range r105ttArchiveRoutes {
+				m := sceneModel(sc, w, h)
+				for _, k := range route {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				if !m.archiveView || m.level >= levelReader {
+					continue
+				}
+				hidden := 0
+				for _, g := range m.archiveGroups() {
+					if g.name == hiddenGroup {
+						hidden = len(g.entries)
+					}
+				}
+				if hidden == 0 {
+					continue
+				}
+				stands++
+				first := r62FirstGroup(m)
+				if !strings.HasPrefix(first, hiddenGroupWord) {
+					t.Errorf("%s %v %dx%d: %d row(s) `x` took off the board are in the archive, and the first group `A` draws is %q — the pile the key just made is not where the key that made it says it is",
+						sc.name, route, w, h, hidden, first)
+				}
+			}
+		}
+	}
+	if stands < 20 {
+		t.Fatalf("the pin reached the hidden group on only %d stands — its routes no longer fill it", stands)
+	}
+	t.Logf("archive frames with a hidden group: %d", stands)
+}
+
+// TestTheLegendNamesTheMarkThisFeatureAdded is the help's side of #344. The
+// fleet legend is a glyph-to-word list — six marks, six words — and the row
+// this feature draws wears `▲` for a reason no line on the page gave: the
+// board's `▲ needs you` is a session that wants you now, the archive's is a
+// question you walked away from, and the legend named the first and not the
+// second.
+//
+// It is a clause on the glyph line, not a row of its own, because a row of
+// its own sheds `(3h+ = away)` at 152 — round 57's pin, which is why this
+// went two rounds as a hold (#347, round 61). The trade is width by width
+// and is the assertion: named at 100, 120 and 220; at 152, where the legend
+// is two columns and the line is reflowed, round 57's definition is what
+// stands; at 80 neither fits and the `?` row that teaches `X` carries the
+// word instead.
+func TestTheLegendNamesTheMarkThisFeatureAdded(t *testing.T) {
+	forceASCII(t)
+	named := map[int]bool{100: true, 120: true, 220: true, 152: false, 80: false}
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 34}, {152, 40}, {220, 48}} {
+		w, h := size[0], size[1]
+		m := sceneModel(sceneFleetHygiene(), w, h)
+		press(m, "?")
+		view := ansi.Strip(m.View())
+		if got := strings.Contains(view, "▲ unanswered"); got != named[w] {
+			if named[w] {
+				t.Errorf("%dx%d: the legend names eighteen marks and not the one this feature draws — a ▲ in the archive is a question you walked away from, and the page says only `needs you`", w, h)
+			} else {
+				t.Errorf("%dx%d: the clause took a width it was measured not to fit", w, h)
+			}
+		}
+		if w >= 152 && !strings.Contains(view, "(3h+ = away)") {
+			t.Errorf("%dx%d: the clause was bought with round 57's own definition", w, h)
+		}
+		// Whatever the legend can afford, the key that clears the pile is
+		// taught at every width — the sentence the two help rows share.
+		if !strings.Contains(view, "X, every unanswered one") {
+			t.Errorf("%dx%d: the help does not say what `X` takes", w, h)
+		}
+		// The rows differ in their other half, and exactly one of the two
+		// is drawn at any width: the narrow row sends you to the archive,
+		// the full one names the key that brings a row back from it. Both
+		// rendered whole and neither was held by anything (round 62).
+		back := "x there brings it back"
+		if w < 120 {
+			back = "A browses the archive"
+		}
+		if !strings.Contains(view, back) {
+			t.Errorf("%dx%d: the help row that teaches `x` lost its other half — it says what `X` takes and not what `x` does", w, h)
+		}
+	}
+}
+
+// TestTheHiddenGroupsNameLeavesRoomForItsEcho is the weld, on the one
+// header this feature added. `groupHeaderLine` clips the label to
+// `w-1-right` and pads to `w-right`, so a label that fills its column is
+// written right up against the echo glyph and `hidden · x one back, X all▲`
+// reads as one word ending in a mark. The shipped name is short enough; a
+// name four cells longer is not, and nothing in the module would have said
+// so — the archive's header pin refuses the ellipsis, never the weld
+// (round 62). The rule is the frame's, not the constant's: whatever the
+// header says, the cell left of its echo is air.
+func TestTheHiddenGroupsNameLeavesRoomForItsEcho(t *testing.T) {
+	forceASCII(t)
+	stands, narrow := 0, 0
+	for _, sc := range allScenes() {
+		for _, size := range r105ttArchiveSizes {
+			w, h := size[0], size[1]
+			for _, route := range r105ttArchiveRoutes {
+				m := sceneModel(sc, w, h)
+				for _, k := range route {
+					pressKey(m, k)
+					poll(m, sc)
+				}
+				if !m.archiveView || m.level >= levelReader {
+					continue
+				}
+				for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+					left := strings.SplitN(line, "│", 2)[0]
+					if !strings.Contains(left, hiddenGroupWord+" ·") && !strings.HasSuffix(strings.TrimSpace(left), hiddenGroupWord) {
+						continue
+					}
+					r := []rune(strings.TrimRight(left, " "))
+					if len(r) < 2 || !strings.ContainsRune("●▲◍○↻⊘", r[len(r)-1]) {
+						continue
+					}
+					stands++
+					if w == 80 {
+						narrow++
+					}
+					if r[len(r)-2] != ' ' {
+						t.Errorf("%s %v %dx%d: the archive's hidden group welds its echo to its name — %q",
+							sc.name, route, w, h, string(r))
+					}
+				}
+			}
+		}
+	}
+	// The floor is the narrow stands, not the total: the weld is a
+	// narrow-column phenomenon — at 100 and up the label has twelve cells
+	// of air or more — so every tooth this pin has is at eighty. A bare
+	// `stands == 0` passed the four-cell bait with the hidden group's
+	// ordering reverted, which drops the eighty stands and leaves the pin
+	// measuring nothing while still reporting stands.
+	if narrow < 2 {
+		t.Fatalf("the pin reached %d hidden-group header(s) at eighty, where the weld lives — its routes no longer fill the group with a row that wants you", narrow)
+	}
+	t.Logf("hidden-group headers wearing an echo: %d (%d at eighty)", stands, narrow)
 }

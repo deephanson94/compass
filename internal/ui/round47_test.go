@@ -29,7 +29,7 @@ func TestTheBoardSpendsItsSpareRowsOnTheLanesHeads(t *testing.T) {
 	}
 	// At eighty the rows are not there: the heads go, not the trail's
 	// head. The block over the trail takes the first prompt's row at 24
-	// (#374); at 30 the prompt is back.
+	// (#377); at 30 the prompt is back.
 	m := sceneModel(sc, 80, 24)
 	view := ansi.Strip(m.View())
 	if strings.Contains(view, "silent 12m") {
