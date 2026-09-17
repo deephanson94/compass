@@ -1290,6 +1290,15 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 				// report's opening words ride the lane's own row, in the
 				// trail's clause idiom, so a finding is never taken
 				// without a word (#390).
+				if c := ansi.Strip(child); strings.Contains(c, "…") {
+					// The trail's own viewport opened on the finding and
+					// cut its head (#64's mark): the clause reads the
+					// finding from the trail, not from the row already
+					// cut, so it is the opening words either way (#392).
+					if head := m.findingHead(tr, opts, lines[1]); head != "" {
+						child = head
+					}
+				}
 				lines[1] = foldFindingOnto(lines[1], child, w)
 			}
 		}
@@ -2198,11 +2207,29 @@ func detailCut(line string, w int) string {
 	return dimStyle.Render(out + "…")
 }
 
+// findingHead is the first row of the group hung under a lane, read from
+// the whole trail rather than the viewport that may have cut it: the lane's
+// row is found by its own text, and the detail row beneath it is the
+// finding's head (#392).
+func (m *Model) findingHead(tr journey.Trail, o TrailOpts, parent string) string {
+	o.Height = 1000
+	o.Cursor = -1
+	want := strings.TrimRight(ansi.Strip(parent), " ")
+	rows := TrailLines(tr, o)
+	for i, r := range rows {
+		if strings.TrimRight(ansi.Strip(r), " ") != want || i+1 >= len(rows) || !isDetailRow(rows[i+1]) {
+			continue
+		}
+		return rows[i+1]
+	}
+	return ""
+}
+
 // foldFindingOnto puts the opening words of a one-row group onto the lane's
 // own row — `├─◈ Score encoder gates · 3 defects found…  ✓ 2h ago` — where
 // the fold took the row the lane stood on and there is no second row of
-// the group left to close on. The clause takes at least half of the
-// row, the name the rest, each cut with an ellipsis; where not even a
+// the group left to close on. The clause takes what it wants up to half
+// the row, the name the rest, each cut with an ellipsis; where not even a
 // word of the clause fits, the row stands as it was (#390).
 func foldFindingOnto(parent, child string, w int) string {
 	p := strings.TrimRight(ansi.Strip(parent), " ")
@@ -2237,7 +2264,11 @@ func foldFindingOnto(parent, child string, w int) string {
 	}
 	clause := " · " + c
 	if len([]rune(left))+len([]rune(clause)) > room {
-		nameRoom := max(8, min(len([]rune(left)), room-max(12, room/2)))
+		// The clause takes what it wants up to half the row, the name
+		// the rest: a short clause costs the name no cell it does not
+		// use (#390, #392).
+		share := min(len([]rune(clause)), max(12, room/2))
+		nameRoom := max(8, min(len([]rune(left)), room-share))
 		left = cut(left, nameRoom)
 		clause = cut(clause, room-len([]rune(left)))
 	}

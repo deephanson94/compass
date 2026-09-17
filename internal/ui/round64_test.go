@@ -1022,3 +1022,36 @@ func TestAStripTheBoxWouldCoverStandsClearOfIt(t *testing.T) {
 		pressKey(m, "esc")
 	}
 }
+
+// The clause reads the finding from the trail: where the trail's own
+// viewport opened on the finding and cut its head, the lane's row still
+// carries the opening words, not the closing ones (#392).
+func TestTheClauseReadsTheFindingsHead(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	for _, c := range []struct {
+		w, h       int
+		lane, head string
+	}{{194, 26, "├─◈ Score encoder", "· 3 defects found"}, {120, 23, "├─◈ Read every kic", "· Seven of nine"}} {
+		m := sceneModel(sc, c.w, c.h)
+		v := ansi.Strip(m.View())
+		found := false
+		for _, line := range strings.Split(v, "\n") {
+			at := strings.Index(line, c.lane)
+			if at < 0 {
+				continue
+			}
+			found = true
+			rest := line[at:]
+			if !strings.Contains(rest, c.head) {
+				t.Errorf("%dx%d: the lane's clause should read the finding's head %q (#392): %q", c.w, c.h, c.head, strings.TrimRight(rest, " "))
+			}
+			if strings.Contains(rest, "· …") {
+				t.Errorf("%dx%d: the clause reads the finding's closing words: %q", c.w, c.h, strings.TrimRight(rest, " "))
+			}
+		}
+		if !found {
+			t.Errorf("%dx%d: the lane %q is not on the frame:\n%s", c.w, c.h, c.lane, v)
+		}
+	}
+}
