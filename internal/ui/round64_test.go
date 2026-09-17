@@ -927,3 +927,21 @@ func TestTheFoldKeepsTheHeadOfAFinding(t *testing.T) {
 		t.Errorf("the cut group should close on `└` and an ellipsis (#387):\n%s", v)
 	}
 }
+
+// Where no strip is drawn, the two rows the board held back for it are
+// unspent rows too: alarm-storm at 120x41 draws seven columns, no strip,
+// and mobile's ask instead of `↑ began 49m ago` (#389).
+func TestTheStripsRowsAreSpentWhereNoStripIsDrawn(t *testing.T) {
+	forceASCII(t)
+	m := sceneModel(sceneAlarmStorm(), 120, 41)
+	v := ansi.Strip(m.View())
+	if got := boardColumnsDrawn(v); got != 7 {
+		t.Fatalf("alarm-storm at 120x41 should draw seven columns, drew %d:\n%s", got, v)
+	}
+	if strings.Contains(v, "+1 more") {
+		t.Fatalf("alarm-storm at 120x41 should draw no strip:\n%s", v)
+	}
+	if !strings.Contains(v, `◉ "fix the login crash`) || strings.Contains(v, "↑ began 49m ago") {
+		t.Errorf("mobile's ask folds into the two rows held for a strip the board does not draw (#389):\n%s", v)
+	}
+}

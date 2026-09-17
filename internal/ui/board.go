@@ -300,10 +300,17 @@ func (m *Model) boardLines(w, h int) []string {
 	// is a row short on a column dead on the quota (#385) — as many bands
 	// whole as the rows allow, leaving the fewest blank, rather than
 	// folding a column's ask over blank rows (#384).
+	// Where every session has a column the strip is empty, and the two
+	// rows the body holds back for it and its air are unspent rows too
+	// (#389): the last band's own row of air still stands off the rule.
+	noStrip := strings.TrimSpace(ansi.Strip(m.boardStrip(keys, rowOf, w))) == ""
 	if spare := body - func() int {
 		n := 0
 		for _, bh := range heights {
 			n += bh + 1
+		}
+		if noStrip {
+			n -= 2
 		}
 		return n
 	}(); spare > 0 && len(heights) > 0 {
@@ -363,7 +370,6 @@ func (m *Model) boardLines(w, h int) []string {
 	// every session has a column there is no strip to keep them for, so
 	// the last band may stand in them rather than be cut short or dropped
 	// onto a strip of its own making (#43, #47, #386).
-	noStrip := strings.TrimSpace(ansi.Strip(m.boardStrip(keys, rowOf, w))) == ""
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
