@@ -352,10 +352,14 @@ func TestTheLanesRowShedsTheClockTheFrameSays(t *testing.T) {
 func TestABandTheBoxWouldBeheadStandsOffItsFloor(t *testing.T) {
 	forceASCII(t)
 	sc := sceneTwoTools()
+	// At 28 rows the six rows the band needs are the strip's and its air
+	// plus four: nothing is hidden, so there is no strip to keep them for
+	// and the band stands whole; at 26 four rows are left under the
+	// floor, under a band's floor, and the strip names docs (#386).
 	for _, c := range []struct {
 		h    int
 		want string
-	}{{34, " 4 ○ docs "}, {28, "+1 more · 4 ○ docs"}} {
+	}{{34, " 4 ○ docs "}, {28, " 4 ○ docs "}, {26, "+1 more · 4 ○ docs"}} {
 		m := sceneModel(sc, 120, c.h)
 		m.View()
 		pressKey(m, "r")
@@ -385,6 +389,9 @@ func TestABandTheBoxWouldBeheadStandsOffItsFloor(t *testing.T) {
 		if strings.Contains(v, "opencode · gpt-5") && docs < 0 {
 			t.Errorf("120x%d: the docs trail stands with no row naming it:\n%s", c.h, v)
 		}
+		if c.h == 28 && !strings.Contains(v, "install.md") {
+			t.Errorf("120x28: the band should stand whole in the rows the strip was keeping (#386):\n%s", v)
+		}
 		pressKey(m, "esc")
 	}
 }
@@ -413,8 +420,12 @@ func TestACardRowNothingIsLeftOfGoes(t *testing.T) {
 			if !strings.Contains(c, "[session]") {
 				continue
 			}
-			if i+2 < len(cells) && strings.TrimSpace(cells[i+2]) == "" && strings.Contains(cells[i+1], "↪ sent") {
-				t.Errorf("%dx34: the card keeps a blank row under its delta (#382):\n%s", w, strings.Join(cells[i:i+3], "\n"))
+			// The row after the head is never blank: the delta where
+			// there is one, the trail's first row where there is not —
+			// false the moment the emptied rung row returns (#382,
+			// two-tools 3 of the third pass).
+			if i+1 >= len(cells) || strings.TrimSpace(cells[i+1]) == "" {
+				t.Errorf("%dx34: the card keeps a blank row under its head (#382):\n%s", w, strings.Join(cells[i:min(i+3, len(cells))], "\n"))
 			}
 		}
 	}

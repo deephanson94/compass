@@ -355,6 +355,11 @@ func (m *Model) boardLines(w, h int) []string {
 	// does not it is the strip's on this frame — and the strip stands off
 	// the floor too, so the session it names is on the frame.
 	floor := m.boxFloor()
+	// The two rows the body holds back are the strip's and its air; where
+	// every session has a column there is no strip to keep them for, so
+	// the last band may stand in them rather than be cut short or dropped
+	// onto a strip of its own making (#43, #47, #386).
+	noStrip := strings.TrimSpace(ansi.Strip(m.boardStrip(keys, rowOf, w))) == ""
 	var lines []string
 	for b, bh := range heights {
 		var cols []column
@@ -368,7 +373,11 @@ func (m *Model) boardLines(w, h int) []string {
 				// cut short where the rows left hold a band worth reading
 				// (boardBandFloor, as the pack cuts a band it owes), and
 				// the strip's where they do not.
-				if left := body - (floor + 1); left < bh {
+				left := body - (floor + 1)
+				if b == len(heights)-1 && noStrip {
+					left = h - (floor + 1)
+				}
+				if left < bh {
 					if left < boardBandFloor {
 						keys, heights = keys[:min(b*n, len(keys))], heights[:b]
 						break
@@ -440,7 +449,14 @@ func (m *Model) boardLines(w, h int) []string {
 	// calm board is a short board, and the strip is where the eye is.
 	lines = append(lines, "")
 	if bx := m.replyBox; bx.on && len(lines) >= bx.top {
-		for len(lines) <= floor {
+		// Off the floor by its row of air where the body has the row,
+		// and on the floor where it has only that: a strip past the
+		// body names nobody (#386).
+		want := floor + 1
+		if want >= body {
+			want = floor
+		}
+		for len(lines) < want && len(lines) < body {
 			lines = append(lines, "")
 		}
 	}
