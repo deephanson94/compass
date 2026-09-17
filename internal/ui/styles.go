@@ -54,15 +54,81 @@ const (
 // foreground, which is the one colour the user already chose. Only the quiet
 // greys and the three state accents are ours.
 var (
-	// Grey comes from the terminal's own palette (colour 8) rather than a hex
-	// value: it stays grey on 16-colour terminals, where a hex approximation
-	// would drift into blue.
-	colDim = lipgloss.Color("8")
+	// Grey used to come from the terminal's own palette (colour 8, "bright
+	// black") rather than a hex value, so that it would stay grey on
+	// 16-colour terminals where a hex approximation drifts into blue. It does
+	// stay grey — at whatever contrast the theme happened to pick for index
+	// 8, which for several popular ones is no contrast at all. Measured
+	// against each theme's own background: Solarized Dark 1.15:1, Nord
+	// 1.69:1, VS Code Dark+ 2.90:1, Dracula 3.03:1. Only a plain xterm
+	// palette (5.24:1) is readable. Every dim thing on the deck went with it
+	// — the work line, the leg counts, the ages, the rails.
+	//
+	// A *neutral* grey (r=g=b) fixes it without the drift the palette index
+	// was guarding against. termenv degrades #9a9a9a to colour 8 on a
+	// 16-colour terminal, which is exactly the old behaviour where the old
+	// reasoning applied, and pins a known contrast on the 256-colour and
+	// truecolour terminals where it did not: ≥4.4:1 on the darkest popular
+	// dark theme, ≥6.7:1 on the common ones. A blue-tinted grey does drift —
+	// #6b7280 degrades to bright blue (94) — so these stay on the axis.
+	colDim = lipgloss.AdaptiveColor{Light: "#6e6e6e", Dark: "#9a9a9a"}
+
+	// The rails are chrome, so they sit one step quieter than dim text — but
+	// by colour, not by Faint. Faint on top of an already-dim foreground is
+	// what made the hairlines vanish outright: terminals that implement SGR 2
+	// as an alpha blend toward the background (kitty, foot, alacritty,
+	// WezTerm, iTerm2) were blending a near-background grey into the
+	// background. One explicit colour keeps the hierarchy and stays on
+	// screen, at roughly the 3:1 WCAG asks of a non-text UI element.
+	colRule = lipgloss.AdaptiveColor{Light: "#8a8a8a", Dark: "#808080"}
 
 	colWorking  = lipgloss.AdaptiveColor{Light: "#15803d", Dark: "#4ade80"}
 	colNeedsYou = lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"}
 	colStuck    = lipgloss.AdaptiveColor{Light: "#b91c1c", Dark: "#f87171"}
 )
+
+// SetDim overrides the grey, for a terminal or a pair of eyes the default
+// still does not suit: `dim = "#c0c0c0"` in config.toml, or COMPASS_DIM in the
+// environment. A `#rrggbb`, a `#rgb` or a palette index 0–255 is honoured and
+// anything else is ignored — a typo leaves the deck readable rather than
+// blanking it. The rails follow the override rather than staying one step
+// behind it: a dim you asked for is a dim you get, rails included.
+func SetDim(spec string) {
+	if !validColor(spec) {
+		return
+	}
+	colDim = lipgloss.AdaptiveColor{Light: spec, Dark: spec}
+	colRule = colDim
+	dimStyle = lipgloss.NewStyle().Foreground(colDim)
+	ruleStyle = lipgloss.NewStyle().Foreground(colRule)
+}
+
+// validColor reports whether spec is a hex colour or an ANSI palette index,
+// the two forms lipgloss reads from a string.
+func validColor(spec string) bool {
+	if h, ok := strings.CutPrefix(spec, "#"); ok {
+		if len(h) != 3 && len(h) != 6 {
+			return false
+		}
+		for _, r := range h {
+			if !isDigit(r) && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				return false
+			}
+		}
+		return true
+	}
+	if spec == "" || len(spec) > 3 {
+		return false
+	}
+	n := 0
+	for _, r := range spec {
+		if !isDigit(r) {
+			return false
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n <= 255
+}
 
 // One muted hue per leg class (SPEC §4). They are cool by construction: the
 // warm end of the wheel belongs to needs-you and stuck alone, so a trail full
@@ -91,7 +157,7 @@ func classStyle(c journey.Class) lipgloss.Style {
 var (
 	textStyle  = lipgloss.NewStyle()
 	dimStyle   = lipgloss.NewStyle().Foreground(colDim)
-	ruleStyle  = lipgloss.NewStyle().Foreground(colDim).Faint(true)
+	ruleStyle  = lipgloss.NewStyle().Foreground(colRule)
 	titleStyle = lipgloss.NewStyle().Bold(true)
 
 	// The human's own turns lead the reader's document: bold, never coloured —

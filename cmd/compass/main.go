@@ -55,6 +55,7 @@ func main() {
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
 	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: enter no longer attaches")
 	mirror := fs.Bool("mirror", cfg.Mirror, "open the live mirror of the selected pane at Lv1 (m toggles it)")
+	dim := fs.String("dim", cfg.Dim, `grey for the quiet rows: "#c0c0c0" or a palette index (empty = compass's own)`)
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
 		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only, questions included)`)
@@ -100,6 +101,9 @@ func main() {
 	case "help":
 		fs.Usage()
 	default:
+		// The palette is set before the first frame is drawn: an unreadable
+		// value is ignored inside SetDim, so a typo costs nothing.
+		ui.SetDim(*dim)
 		if err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build); err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)

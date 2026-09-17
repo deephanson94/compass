@@ -19,6 +19,12 @@ type config struct {
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
 
+	// Dim is the grey the quiet rows are drawn in: `dim = "#c0c0c0"`, or a
+	// palette index. compass picks a neutral grey that clears 4.4:1 against
+	// the darkest popular dark theme; this is for the terminal, the theme or
+	// the pair of eyes that wants more. $COMPASS_DIM overrides the file.
+	Dim string
+
 	// Replies are the quick replies `r` offers, one `reply = "…"` line each,
 	// in order; up to nine. None configured means compass's own three.
 	Replies []string
@@ -31,24 +37,34 @@ type config struct {
 }
 
 // loadConfig reads the config file if there is one. $COMPASS_CONFIG overrides
-// the location (and makes the file testable).
-func loadConfig() config {
+// the location (and makes the file testable). The return is named so that the
+// deferred block below has the last word on every path out of the function,
+// including the two that give up before reading anything.
+func loadConfig() (c config) {
+	// The environment is read whether or not there is a file to read: a grey
+	// you cannot see is the one setting you want to try without first finding
+	// out where the config file goes.
+	defer func() {
+		if env := os.Getenv("COMPASS_DIM"); env != "" {
+			c.Dim = env
+		}
+	}()
+
 	path := os.Getenv("COMPASS_CONFIG")
 	if path == "" {
 		base, err := os.UserConfigDir()
 		if err != nil {
-			return config{}
+			return
 		}
 		path = filepath.Join(base, "compass", "config.toml")
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return config{}
+		return
 	}
 	defer f.Close()
 
-	var c config
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		key, value, ok := configLine(sc.Text())
@@ -72,9 +88,11 @@ func loadConfig() config {
 			}
 		case "hook":
 			c.Hook = value
+		case "dim":
+			c.Dim = value
 		}
 	}
-	return c
+	return
 }
 
 // configLine parses one `key = "value"` row; comments and blanks are nothing.
