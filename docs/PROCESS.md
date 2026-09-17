@@ -79,6 +79,30 @@ Personas, and the question each asks of a frame:
 | two-tools operator | `two-tools` | Two Claude Code and two OpenCode sessions, two in one directory. Which row is which tool, on which model? |
 | alarm-storm operator | `alarm-storm`, `very-long` | Three dead on quota, one asking, one hung, one looping, one fine. Which first? |
 | fleet-hygiene operator | `fleet-hygiene`, `many-idle` | Namesakes, a session with no pane, a pane that closed, forty archived sessions wearing four names. |
+| left-behind operator | `left-behind`, `few-ongoing` | The operator who forgets: a session asked me something two days ago and I never came back. Is it still on the board, ranked under today, and can I put it down? |
+
+### What the panel cannot see
+
+The panel judges frames. Every scene varies the terminal's width across five
+sizes and nothing else: no transcript in the corpus is large, none is written
+the way the harness actually writes a multi-call turn, and none has a 64KB
+tool result between two lines of one message. So a defect that only appears
+as a function of *bytes* or of *the harness's real line shapes* is invisible
+to every persona, however many rounds they run — and #373 records two of
+them, each found after six unanimous `good to go`, each on the feature's own
+target shape.
+
+The panel's verdict is therefore necessary and not sufficient for a change
+that reads transcripts. After it, and before the PR, run **one read-only
+pass by a reader who is not a persona**, briefed on the single axis the
+corpus does not vary — payload size and transcript volume for anything in
+the tail walk; the harness's measured line shapes (`message.id` repeated
+across lines, results interleaved inside a turn, `<id>/subagents/` never
+opened) for anything that groups events. Give it the code, not the frames;
+ask for reproductions with the failing input and the measured wrong answer;
+and require that a size sweep vary the bytes *inside* the tail, because
+padding a file in front of a fixed tail cannot move a window boundary and
+measures nothing (#373, method note).
 
 ## 4. The fold
 
@@ -95,6 +119,13 @@ For each report, in this order:
    proxy for it: three folds in this history shipped with pins that stayed
    green on the revert, and each cost a round. Prefer walking the walkthrough's
    own keys with `poll` after each, at every width the fold touches.
+   **Then revert the thing the pin names, in a copy, and watch it fail** —
+   before the commit, not after a reviewer does it for you. Round 62's audit
+   reverted each of the previous round's folds one at a time with the package
+   run whole and found five pins that held nothing (#373); one had doctored
+   its fixture two bytes longer than the original, so the cache key it was
+   meant to exercise invalidated either way. A pin that does not fail on the
+   revert is not a pin, whatever it asserts.
 4. Run the suite, update goldens if a frame moved on purpose, vet, and the
    sensitive-word grep.
 5. Append the decision row to `docs/SPEC.md`: what was folded and why, what
@@ -121,6 +152,9 @@ said it is not re-spawned unless a later fold touches its scene.
 - The help owes a row to every mark a frame draws, at the width that draws it.
 - Every held item names the frame that would refute it. A hold with no reason
   is a defect the next round will raise again.
+- A test that varies width but not bytes measures the frame, not the walk.
+  Anything that reads a transcript is pinned at more than one payload size,
+  and the sizes sit either side of a window boundary.
 
 ## 6. Releasing
 
