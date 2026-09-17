@@ -814,15 +814,18 @@ func TestTheBandsArePaidAsManyAsTheRowsAllow(t *testing.T) {
 	for _, c := range []struct {
 		spare int
 		need  []int
+		idle  []int
 		want  []int
 	}{
-		{4, []int{3, 2, 1}, []int{3, 0, 1}}, // two bands either way: the pick that spends all four (fleet-hygiene 2)
-		{3, []int{3, 2, 1}, []int{0, 2, 1}}, // two bands beat one
-		{1, []int{3, 2}, []int{0, 0}},       // a band is paid whole or not at all
-		{0, []int{1}, []int{0}},
-		{5, []int{0, 2}, []int{0, 2}},
+		{4, []int{3, 2, 1}, nil, []int{3, 0, 1}}, // two bands either way: the pick that spends all four (fleet-hygiene 2)
+		{3, []int{3, 2, 1}, nil, []int{0, 2, 1}}, // two bands beat one
+		{1, []int{3, 2}, nil, []int{0, 0}},       // a band is paid whole or not at all
+		{0, []int{1}, nil, []int{0}},
+		{5, []int{0, 2}, nil, []int{0, 2}},
+		{4, []int{3, 2, 1}, []int{0, 1, 0}, []int{0, 2, 1}}, // the idle column's ask before the fewest blank rows (#388)
+		{4, []int{3, 2, 1}, []int{1, 1, 0}, []int{3, 0, 1}}, // idle asks equal: the fewest blank rows again
 	} {
-		got := payDebts(c.spare, c.need)
+		got := payDebts(c.spare, c.need, c.idle)
 		if fmt.Sprint(got) != fmt.Sprint(c.want) {
 			t.Errorf("payDebts(%d, %v) = %v, want %v", c.spare, c.need, got, c.want)
 		}
@@ -872,4 +875,55 @@ func TestTheSeamSaysWhenTheTrailBeganWhereTheFoldTookTheAsk(t *testing.T) {
 		return
 	}
 	t.Fatal("the walk has no x")
+}
+
+// The panel's third pass, subagents — folded (#387).
+
+// The board's fold keeps the head of a lane's finding: where the fold row
+// takes the row a parent stood on, the parent takes the last row of its
+// children's group, not the first, and the group closes on the cut with
+// an ellipsis — so porter's one report is read from its opening words.
+func TestTheFoldKeepsTheHeadOfAFinding(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	m := sceneModel(sc, 120, 34)
+	check := func(when string) {
+		v := ansi.Strip(m.View())
+		if m.level != levelBoard {
+			return
+		}
+		lines := strings.Split(v, "\n")
+		for i, line := range lines {
+			at := strings.Index(line, "├─◈ Score encoder gates")
+			if at >= 0 && i+2 < len(lines) {
+				// The row beneath, in the same column's cells.
+				col := len([]rune(line[:at]))
+				next := []rune(lines[i+1])
+				if col < len(next) {
+					next = next[col:min(col+40, len(next))]
+				}
+				if !strings.Contains(string(next), "3 defects found") {
+					t.Errorf("%s: the finding's head is cut, the group opens mid-sentence (#387):\n%s", when, strings.Join(lines[i:i+3], "\n"))
+				}
+			}
+			for _, bad := range []string{"│  └ root cause", "│  ├ oracle; two are"} {
+				if strings.HasPrefix(strings.TrimSpace(line), bad) {
+					t.Errorf("%s: a finding read from mid-sentence: %q (#387)", when, line)
+				}
+			}
+		}
+	}
+	check("opening")
+	for _, k := range canonicalKeys {
+		pressKey(m, k)
+		poll(m, sc)
+		check("after " + k)
+	}
+	// The group closes on the cut: the last row it keeps wears the
+	// group's last mark and an ellipsis.
+	m = sceneModel(sc, 120, 34)
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "│  └ oracle; two are the same root…") {
+		t.Errorf("the cut group should close on `└` and an ellipsis (#387):\n%s", v)
+	}
 }

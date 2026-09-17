@@ -309,18 +309,22 @@ func (m *Model) boardLines(w, h int) []string {
 	}(); spare > 0 && len(heights) > 0 {
 		inTrail := m.blockInTrail
 		m.blockInTrail = false
-		need := make([]int, len(heights))
+		need, idle := make([]int, len(heights)), make([]int, len(heights))
 		for b := range heights {
 			band := keys[b*n : min((b+1)*n, len(keys))]
 			bw := bandWidth(m.width-2*edgePad, len(band), cw)
 			want := 0
 			for _, key := range band {
-				want = max(want, m.boardColumnDrawRows(key, bw))
+				rows := m.boardColumnDrawRows(key, bw)
+				want = max(want, rows)
+				if r, ok := rowOf[key]; ok && rows > heights[b] && m.boardMuted(m.sessions[r.sess]) {
+					idle[b]++ // an idle column whose ask the payment buys back (#388)
+				}
 			}
 			need[b] = max(0, want-heights[b])
 		}
 		m.blockInTrail = inTrail
-		for b, paid := range payDebts(spare, need) {
+		for b, paid := range payDebts(spare, need, idle) {
 			heights[b] += paid
 		}
 	}
@@ -781,30 +785,39 @@ func (m *Model) boardColumnDrawRows(key string, w int) int {
 }
 
 // payDebts spends the rows a board has not spent on the bands' debts —
-// each band's rows short of its whole trail — and returns what each band
-// is paid: as many bands whole as the rows allow, and among those picks
-// the one that leaves the fewest rows blank, smallest debts first among
-// equals (#384, #385). A band is paid whole or not at all: a row short
-// of the whole trail is still a fold, and a fold that says so.
-func payDebts(spare int, need []int) []int {
+// each band's rows short of its whole trail, and `idle` the idle columns
+// in each whose ask the payment buys back — and returns what each band
+// is paid: as many bands whole as the rows allow, among those the pick
+// that buys back the most idle asks, and then the one that leaves the
+// fewest rows blank (#384, #385, #388). A band is paid whole or not at
+// all: a row short of the whole trail is still a fold, and a fold that
+// says so.
+func payDebts(spare int, need, idle []int) []int {
 	paid := make([]int, len(need))
 	if spare <= 0 || len(need) == 0 || len(need) > 8 {
 		return paid
 	}
-	bestMask, bestBands, bestRows := 0, 0, 0
+	bestMask, bestBands, bestIdle, bestRows := 0, 0, 0, 0
 	for mask := 1; mask < 1<<len(need); mask++ {
-		bands, rows := 0, 0
+		bands, rows, quiet := 0, 0, 0
 		for b, nd := range need {
 			if nd > 0 && mask&(1<<b) != 0 {
 				bands++
 				rows += nd
+				if b < len(idle) {
+					quiet += idle[b]
+				}
 			}
 		}
 		if rows > spare || bands == 0 {
 			continue
 		}
-		if bands > bestBands || (bands == bestBands && rows > bestRows) {
-			bestMask, bestBands, bestRows = mask, bands, rows
+		// Among picks paying the same bands, the one that buys back the
+		// most idle columns' asks: an idle session's ask is the one row
+		// that says what it was for, where a live one's fold row says
+		// what it took (#388); then the fewest rows left blank.
+		if bands > bestBands || (bands == bestBands && (quiet > bestIdle || (quiet == bestIdle && rows > bestRows))) {
+			bestMask, bestBands, bestIdle, bestRows = mask, bands, quiet, rows
 		}
 	}
 	for b, nd := range need {
@@ -1241,9 +1254,24 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		}
 		if len(lines) > 1 && isDetailRow(lines[1]) {
 			// The fold took the row the parent stood on: the parent
-			// takes the child's, so the column does not open on a child
-			// with no name.
+			// takes a child's row, so the column does not open on a
+			// child with no name — the last of the group's, not the
+			// first: a finding is read from its opening words, and a
+			// group cut off its head read `oracle; two are the same root
+			// cause` as the whole of a report (#387). The group closes
+			// on the cut, its last row wearing the group's last mark and
+			// an ellipsis, in the trail's own idiom.
+			end := 1
+			for end+1 < len(lines) && isDetailRow(lines[end+1]) {
+				end++
+			}
+			for i := end; i > 1; i-- {
+				lines[i] = lines[i-1]
+			}
 			lines[1] = lines[0]
+			if end > 1 {
+				lines[end] = detailCut(lines[end], w)
+			}
 		}
 		if len(block) > 0 {
 			full = summaryDay(full) // the ships, the reds and the wait are the block's rows (#377)
@@ -2127,6 +2155,27 @@ func headSince(s fleet.Session) time.Time {
 		return s.Info.LastEventAt
 	}
 	return s.Snap.Since
+}
+
+// detailCut closes a child group the fold shortened: the row wears the
+// group's last mark and says it was cut, so a finding read from the top
+// is never taken for the whole of it (#387).
+func detailCut(line string, w int) string {
+	r := []rune(ansi.Strip(line))
+	for i, c := range r {
+		if c == '├' {
+			r[i] = '└'
+			break
+		}
+		if c == '└' {
+			break
+		}
+	}
+	out := strings.TrimRight(string(r), " ")
+	if len([]rune(out)) > w-1 {
+		out = string([]rune(out)[:w-1])
+	}
+	return dimStyle.Render(out + "…")
 }
 
 // hiddenAbove counts the legs a pinned column keeps above its first row.
