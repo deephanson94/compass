@@ -55,14 +55,19 @@ git:
     - edge
 
 changelog:
-  # The notes are the commit subjects since the previous version, oldest first.
-  # Test and documentation commits are housekeeping, not news.
+  # The notes are the commit subjects since the previous version. Test,
+  # documentation and chore commits are housekeeping, not news: a settings file
+  # nobody downloading a binary can see is not a change to that binary.
+  # `sort: asc` sorts the subjects, not the history — goreleaser orders the
+  # lines it printed — so the notes arrive grouped by the area each subject
+  # names rather than as a timeline. There is no oldest-first to ask for here.
   use: git
   sort: asc
   filters:
     exclude:
       - '^tests:'
       - '^docs:'
+      - '^chore:'
 
 release:
   # A 0.x tag is an ordinary release: the major version, not a flag, is what

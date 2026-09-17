@@ -184,9 +184,12 @@ tag before it builds. A tag that cannot pass
 
 Then goreleaser (`.goreleaser.yaml`) builds four binaries (linux and darwin,
 amd64 and arm64), a `checksums.txt`, and the release itself. The notes are the
-commit subjects since the previous tag, oldest first, with `tests:` and `docs:`
+commit subjects since the previous tag, with `tests:`, `docs:` and `chore:`
 subjects left out: the log is the round-by-round record, the notes are what
-changed for someone running the deck. The `edge` tag is ignored when the notes
+changed for someone running the deck. They are not a timeline — `sort: asc`
+sorts the subjects goreleaser printed, not the history behind them, so the
+lines arrive grouped by the area each one names (`fleet:` beside `fleet:`,
+`trail:` beside `trail:`). The `edge` tag is ignored when the notes
 look for that previous version (`git.ignore_tags` in `.goreleaser.yaml`): it
 names the latest build of main, not a version, so it is no boundary for a
 release's notes.
