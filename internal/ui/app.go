@@ -1582,6 +1582,22 @@ func (m *Model) chapter(key string) {
 			return
 		}
 	}
+	m.chapterLand(rows, prompts, docRow, target)
+}
+
+// chapterFirst is the trail's first chapter: `]` off the block's last
+// group lands on it, the counts being the chapter before it (#393).
+func (m *Model) chapterFirst() {
+	rows, prompts, docRow, _ := m.chapterStand()
+	if len(prompts) == 0 {
+		return
+	}
+	m.chapterLand(rows, prompts, docRow, prompts[0])
+}
+
+// chapterLand lands on the prompt row target: the cursor at Lv2, the
+// viewport at Lv1, and the note saying which chapter this is and when.
+func (m *Model) chapterLand(rows []TrailRow, prompts []int, docRow map[int]int, target int) {
 	nth := 0
 	for i, p := range prompts {
 		if p == target {

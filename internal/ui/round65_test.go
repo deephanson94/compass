@@ -422,3 +422,55 @@ func TestTheFooterTradesSCountsForSpareRoom(t *testing.T) {
 		t.Errorf("at eighty the clause takes no cell from a key that acts: %q", foot())
 	}
 }
+
+func TestTheChapterKeysWalkTheBlocksGroups(t *testing.T) {
+	forceASCII(t)
+	m, _ := longSession(t, 152, 40)
+	press(m, "s")
+	press(m, "[")
+	press(m, "[") // ship, test
+	row := cursorRow(trailCells(m))
+	if !strings.Contains(row, "test") || !strings.Contains(row, "32 legs") {
+		t.Fatalf("[ in the block is the previous group: %q", row)
+	}
+	press(m, " ") // open the thirty-two
+	press(m, "j")
+	press(m, "j")
+	if !strings.Contains(cursorRow(trailCells(m)), "├ ◆ test") {
+		t.Fatalf("j under the open class walks its legs: %q", cursorRow(trailCells(m)))
+	}
+	press(m, "]")
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "ship") || !strings.Contains(row, "16 legs") {
+		t.Errorf("] from a leg skips the rest of the class to the next group: %q", row)
+	}
+	press(m, "[")
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "test") || !strings.Contains(row, "32 legs") {
+		t.Errorf("[ is the previous group, past the open class's legs: %q", row)
+	}
+	press(m, "j")
+	press(m, "[")
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "32 legs") {
+		t.Errorf("[ from a leg is the group it is under: %q", row)
+	}
+	for i := 0; i < 8; i++ {
+		press(m, "[")
+	}
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "scout") || m.note != "at the start" {
+		t.Errorf("[ on the first group stays and says so: %q, %q", row, m.note)
+	}
+	for i := 0; i < 6; i++ {
+		press(m, "]")
+	}
+	if row := cursorRow(trailCells(m)); !m.inBlock() || !strings.Contains(row, "docs") {
+		t.Fatalf("six ] walk from the first group to the seventh: %q", row)
+	}
+	press(m, "]")
+	rows := TrailRows(m.trail, m.level)
+	if m.inBlock() || m.cursor < 0 || rows[m.cursor].Kind != "prompt" || !strings.HasPrefix(m.note, "◉ 1/12") {
+		t.Errorf("] off the last group is the trail's first chapter: in block %v, cursor %d, note %q", m.inBlock(), m.cursor, m.note)
+	}
+	press(m, "[")
+	if m.note != "no earlier prompt" || m.inBlock() {
+		t.Errorf("the trail's [ keeps its refusal at the first prompt (#161): %q", m.note)
+	}
+}

@@ -1059,13 +1059,15 @@ func (m *Model) blockJump() bool {
 }
 
 // blockKey is the Lv2 keys while the cursor is in the block, and the
-// three that take it there: `k` (and `ctrl+u`) off the trail's first
-// row, `s` from any row of the trail, and `space`, which on the trail
-// says where it acts. True when the key was the block's.
+// three that take it there: `k` off the trail's first row, `s` from any
+// row of the trail, and `space`, which on the trail says where it acts.
+// The page key stops at the trail's first row as it always did — the
+// walkthrough's `at the start` — and `k`, the step, is the way up. True
+// when the key was the block's.
 func (m *Model) blockKey(key string) bool {
 	if !m.inBlock() {
 		switch key {
-		case "k", "up", "ctrl+u":
+		case "k", "up":
 			if m.cursor == 0 && m.blockShown() && m.blockEnter(m.blockRowsHere()) {
 				return true
 			}
@@ -1143,10 +1145,33 @@ func (m *Model) blockKey(key string) bool {
 		// first row came from the first row, `s` from wherever it was.
 		m.cursorMove(0)
 		return true
-	case "[", "]":
-		// The chapters are the trail's: the key acts from its first row.
+	case "]":
+		// The block's chapters are its groups: the next class or the
+		// lanes, past an open group's rows. Off the last group the next
+		// chapter is the trail's first prompt (#393).
+		for j := m.blockCursor + 1; j < len(rows); j++ {
+			if rows[j].group() {
+				m.blockCursor = j
+				m.anchorReader()
+				return true
+			}
+		}
 		m.blockLeave()
-		return false
+		m.chapterFirst()
+		return true
+	case "[":
+		// The previous group; from a row under an open group, the group
+		// it is under. The trail's own `[` keeps its refusal at the first
+		// prompt: the chapter key's question is prompts (#161).
+		for j := m.blockCursor - 1; j >= 0; j-- {
+			if rows[j].group() {
+				m.blockCursor = j
+				m.anchorReader()
+				return true
+			}
+		}
+		m.note = "at the start"
+		return true
 	case " ", "space":
 		switch {
 		case row.group():

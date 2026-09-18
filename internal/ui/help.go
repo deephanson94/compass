@@ -20,7 +20,7 @@ var helpKeys = [][2]string{
 	{"⇧ tab", "zoom out, back to the board"},
 	{"ctrl+d/u", "half a page (PgDn / PgUp too): the trail, or the reader once the keys are in it"},
 	{"G", "back to the present: the newest row"},
-	{"[ ]", "previous / next prompt — the chapters of a trail"},
+	{"[ ]", "previous / next prompt — the chapters of a trail; in the counts, its groups"},
 	{"m", "the live tmux pane beside the trail, instead of the conversation"},
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
