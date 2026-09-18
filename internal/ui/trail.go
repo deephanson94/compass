@@ -802,9 +802,9 @@ func lookRule(looked, now time.Time, width int) string {
 	return ruleStyle.Render(clip(row, width))
 }
 
-// countsRule is the rail row over the block in the session view, where
-// the card leaves no air above it: "│ the counts ────", so the rows are
-// never read as more card (#393).
+// countsRule is the rail row over a block: "│ the counts ────", so the
+// rows are never read as more of the card, header or title over them
+// (#393).
 func countsRule(width int) string {
 	row := railStroke + " the counts "
 	if rest := width - len([]rune(row)); rest > 0 {

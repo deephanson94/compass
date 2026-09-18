@@ -454,9 +454,24 @@ func blockRowsOpen(tr journey.Trail, open map[string]bool, lanes map[int]laneLin
 	return out
 }
 
+// blockSeamRows is the rows a block spends on its seams: the one over it
+// and the one under it (#378, #393).
+const blockSeamRows = 2
+
 // blockHeight is how many rows the block spends above a trail: its rows
-// and the seam under them (#377, #378).
+// and the seams over and under them (#377, #378, #393).
 func blockHeight(tr journey.Trail) int {
+	if n := len(blockRows(tr)); n > 0 {
+		return n + blockSeamRows
+	}
+	return 0
+}
+
+// blockHeightBare is the block without the seam over it: the board's
+// measure. The board packs its columns as it packed them before the seam
+// and draws the seam only where a band has the row to spare, so a label
+// never costs a session a row of its own trail (#380, #393).
+func blockHeightBare(tr journey.Trail) int {
 	if n := len(blockRows(tr)); n > 0 {
 		return n + 1
 	}
@@ -489,6 +504,7 @@ type blockView struct {
 	cursor int
 	top    int
 	cap    int
+	bare   bool // no seam over the block: a board band with no row to spare on it (#393)
 }
 
 // blockLinesIn draws the block through a view: an open class's legs and
@@ -567,7 +583,16 @@ func blockLinesIn(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said blo
 	if tail {
 		lines[len(lines)-1] = dimStyle.Render(clip(fmt.Sprintf("▾ %d more below", len(rows)-end+1), w))
 	}
-	return append(lines, seamRule(w)) // the block ends on its seam (#378)
+	// The block opens on its seam and ends on the trail's: wherever it
+	// is drawn — under the session card, under a board column's header,
+	// under the trail's title — the rows are never read as more of what
+	// stands over them (#378, #393). A board band with no row to spare
+	// keeps the trail's rows and goes without the seam over the block.
+	lines = append(lines, seamRule(w))
+	if v.bare {
+		return lines
+	}
+	return append([]string{countsRule(w)}, lines...)
 }
 
 // summaryHang is the rail a row under a group hangs on: `│  ├ ` for a leg
@@ -791,25 +816,7 @@ func (m *Model) trailBlock(w int, below []string) []string {
 	v := blockView{rows: rows, cursor: m.blockCursorRow(rows), cap: m.blockCap()}
 	v.top, _, _ = summaryWindow(len(rows), v.cap, v.cursor, m.blockScroll)
 	m.blockScroll = v.top // the window is where the cursor left it
-	lines := blockLinesIn(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said, v)
-	if m.sessionView() && len(lines) > 0 {
-		// Under the card the block opens on its own seam: the card's last
-		// row leaves no air, and `◆ scout  11 legs` read as more card.
-		// At Lv1 the title's air row stands above it, and on the board
-		// the column header ends on its rung, so the seam is this
-		// frame's alone (#393).
-		lines = append([]string{countsRule(w)}, lines...)
-	}
-	return lines
-}
-
-// blockSeams is how many rows the block spends on seams: the one under it
-// (#378), and the one over it in the session view (#393).
-func (m *Model) blockSeams() int {
-	if m.sessionView() {
-		return 2
-	}
-	return 1
+	return blockLinesIn(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said, v)
 }
 
 // headSaysLive reports whether the rows drawn beneath a block carry the
@@ -839,7 +846,7 @@ func headSaysLive(tr journey.Trail, now time.Time, o TrailOpts, below []string) 
 // columnBlock is a board column's block: the column's header says the
 // loop and the lanes' tally where it does, and HEAD's own row beneath
 // says the running leg's clause where the column draws it (#376, #377).
-func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o TrailOpts, header, below []string, w int) []string {
+func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o TrailOpts, header, below []string, w int, bare bool) []string {
 	if !blockCounts(tr) {
 		return nil
 	}
@@ -857,7 +864,7 @@ func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o Tra
 			said.live = strings.Contains(text, "for "+relAge(m.now, l.Start))
 		}
 	}
-	return blockLines(tr, so, w, headSaysLive(tr, m.now, so, below), said)
+	return blockLinesIn(tr, so, w, headSaysLive(tr, m.now, so, below), said, blockView{cursor: -1, bare: bare})
 }
 
 // The block's cursor (#393). The counts above a trail open into the rows
@@ -936,7 +943,7 @@ func (m *Model) blockCap() int {
 	if h <= 0 {
 		h = 24
 	}
-	cap := h - 5 - trailChrome - m.blockSeams() - blockTrailFloor
+	cap := h - 5 - trailChrome - blockSeamRows - blockTrailFloor
 	if closed := len(blockRows(m.trail)); cap < closed {
 		cap = closed
 	}
@@ -951,7 +958,7 @@ func (m *Model) blockHeightHere() int {
 	if n == 0 {
 		return 0
 	}
-	return min(n, m.blockCap()) + m.blockSeams()
+	return min(n, m.blockCap()) + blockSeamRows
 }
 
 // inBlock says whether the cursor is in the block: on the legs, on the

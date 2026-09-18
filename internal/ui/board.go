@@ -304,6 +304,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// rows the body holds back for it and its air are unspent rows too
 	// (#389): the last band's own row of air still stands off the rule.
 	noStrip := strings.TrimSpace(ansi.Strip(m.boardStrip(keys, rowOf, w))) == ""
+	seams := make([]bool, len(heights)) // the bands that took a row for the seam over their counts (#393)
 	if spare := body - func() int {
 		n := 0
 		for _, bh := range heights {
@@ -330,10 +331,38 @@ func (m *Model) boardLines(w, h int) []string {
 			}
 			need[b] = max(0, want-heights[b])
 		}
-		m.blockInTrail = inTrail
 		for b, paid := range payDebts(spare, need, idle) {
 			heights[b] += paid
+			spare -= paid
 		}
+		// The seam over the counts is paid last, out of the rows left
+		// after the asks: a band whose columns all stand whole takes one
+		// row and every block in it opens on `│ the counts ────`, as the
+		// session view's does; a band still in debt takes none — a label
+		// never costs a session a row of its own trail, and a band pays
+		// as one so its columns read as one (#393).
+		for b := range heights {
+			if spare <= 0 {
+				break
+			}
+			band := keys[b*n : min((b+1)*n, len(keys))]
+			bw := bandWidth(m.width-2*edgePad, len(band), cw)
+			blocks, whole := false, true
+			for _, key := range band {
+				if tr, ok := m.trails[key]; ok && blockCounts(tr) {
+					blocks = true
+				}
+				if m.boardColumnDrawRows(key, bw) > heights[b] {
+					whole = false
+				}
+			}
+			if blocks && whole {
+				heights[b]++
+				seams[b] = true
+				spare--
+			}
+		}
+		m.blockInTrail = inTrail
 	}
 	if len(keys) == 0 && m.fleetQuery != "" {
 		// A search nothing answers keeps the board and says so, rather
@@ -378,7 +407,11 @@ func (m *Model) boardLines(w, h int) []string {
 		bandTop := len(lines)
 		if b > 0 {
 			bandTop++
-			if bx := m.replyBox; bx.on && bandTop < floor && bandTop+3 > bx.top {
+			// At the floor exactly — the band above took a row for the
+			// seam over its counts (#393) — the band's row of air would
+			// fall on the box's own last row: it stands off the floor
+			// like a band the box would behead.
+			if bx := m.replyBox; bx.on && bandTop <= floor && bandTop+3 > bx.top {
 				// Off the floor by its row of air, as off the band above;
 				// cut short where the rows left hold a band worth reading
 				// (boardBandFloor, as the pack cuts a band it owes), and
@@ -400,6 +433,12 @@ func (m *Model) boardLines(w, h int) []string {
 				bandTop = floor + 1
 			}
 		}
+		type bandCol struct {
+			key string
+			r   fleetRow
+			cw  int
+		}
+		var band []bandCol
 		for i := b * n; i < len(keys) && i < (b+1)*n; i++ {
 			if r, ok := rowOf[keys[i]]; ok {
 				cw := bw
@@ -412,9 +451,23 @@ func (m *Model) boardLines(w, h int) []string {
 					// right-aligned age and left a mark over blanks (#126).
 					cw = bx.left - x - 1
 				}
-				cols = append(cols, column{cw, m.boardColumn(keys[i], r, cw, bh)})
-				colKeys = append(colKeys, keys[i])
+				band = append(band, bandCol{keys[i], r, cw})
 			}
+		}
+		// The seam over the counts is the band's: the row the pack paid
+		// it (above), and still spare on every column at the height and
+		// width the band is drawn — the reply box may have cut it since
+		// (#382) — so a label never costs a session a row of its own
+		// trail, and a band reads as one (#380, #393).
+		seam := b < len(seams) && seams[b]
+		for _, c := range band {
+			if seam && !m.columnSparesRow(c.key, c.r, c.cw, bh) {
+				seam = false
+			}
+		}
+		for _, c := range band {
+			cols = append(cols, column{c.cw, m.boardColumnIn(c.key, c.r, c.cw, bh, seam)})
+			colKeys = append(colKeys, c.key)
 		}
 		if len(cols) == 0 {
 			break
@@ -737,9 +790,9 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		// The block out of the trail's own rows: the column measures what
 		// its trail needs, or its block over two rows of trail, whichever
 		// is taller, so the bands pack as they packed before it (#380).
-		return 3 + max(len(doc), blockHeight(tr)+2)
+		return 3 + max(len(doc), blockHeightBare(tr)+2)
 	}
-	return 3 + blockHeight(tr) + len(doc) // the block above the trail, then the whole trail (#377)
+	return 3 + blockHeightBare(tr) + len(doc) // the block above the trail, then the whole trail (#377); the seam over it is a band's spare-row spend (#393)
 }
 
 // boardColumnOpts is how a board column draws its trail: the options
@@ -794,7 +847,7 @@ func (m *Model) boardColumnDrawRows(key string, w int) int {
 	}
 	o := m.boardColumnOpts(key, m.sessions[r.sess], tr, w, 1000)
 	o.Pulse = false
-	return 3 + blockHeight(tr) + len(TrailLines(tr, o))
+	return 3 + blockHeightBare(tr) + len(TrailLines(tr, o))
 }
 
 // payDebts spends the rows a board has not spent on the bands' debts —
@@ -1226,6 +1279,12 @@ func (m *Model) hoistTag(rows []string, key string, w int) {
 // is drawn dim, glyphs and all: the shapes still carry the classes (SPEC §4),
 // and the eye goes to the columns with something in them to read.
 func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
+	return m.boardColumnIn(key, r, w, h, m.columnSparesRow(key, r, w, h))
+}
+
+// boardColumnIn is boardColumn with the band's word on the seam over the
+// counts: drawn where every column of the band has the row to spare (#393).
+func (m *Model) boardColumnIn(key string, r fleetRow, w, h int, seam bool) []string {
 	s := m.sessions[r.sess]
 	rows := m.columnHeader(key, r, w)
 	if h <= 3 {
@@ -1243,14 +1302,17 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 	// The block above the trail: the legs counted by class, and the
 	// trail in the rows that are left; the block is drawn after the
 	// trail, whose HEAD row may carry the running leg's clause (#377).
-	bh := blockHeight(tr)
+	bh := blockHeightBare(tr)
+	if seam && bh > 0 {
+		bh++ // the band has the row: the block opens on `│ the counts ────` as the session view's does (#393)
+	}
 	opts.Height = h - 3 - bh
 	if opts.Height < 1 {
 		opts.Height = 1
 	}
 	frame := RenderTrail(tr, opts)
 	lines := strings.Split(frame, "\n")
-	block := m.columnBlock(key, tr, s, opts, rows, lines, w)
+	block := m.columnBlock(key, tr, s, opts, rows, lines, w, !seam)
 	// A column pinned to the present with a day above it says so on its
 	// first row — the rail row that would otherwise be a bare stroke — so a
 	// column that begins with ◉ and one that begins ten hours in are not
@@ -1330,6 +1392,26 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 		}
 	}
 	return append(rows, lines...)
+}
+
+// columnSparesRow says whether a board column drawn w×h has a row to
+// spare for the seam over its counts: its whole trail stands under its
+// block with a row left over. A column with no block, or none loaded,
+// spares the row by having no seam to draw (#393).
+func (m *Model) columnSparesRow(key string, r fleetRow, w, h int) bool {
+	tr, ok := m.trails[key]
+	if !ok || h <= 3 {
+		return true
+	}
+	bh := blockHeightBare(tr)
+	if bh == 0 {
+		return true
+	}
+	opts := m.boardColumnOpts(key, m.sessions[r.sess], tr, w, h-3-bh)
+	if opts.Height < 1 {
+		return false
+	}
+	return hiddenAbove(tr, opts) == 0 && len(TrailLines(tr, opts)) <= opts.Height-1
 }
 
 // columnHeader is a session's three-row card: the fleet row, the verdict

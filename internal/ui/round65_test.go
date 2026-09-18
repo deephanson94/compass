@@ -478,7 +478,7 @@ func TestTheChapterKeysWalkTheBlocksGroups(t *testing.T) {
 	}
 }
 
-func TestTheCountsSeamIsTheSessionViews(t *testing.T) {
+func TestEveryBlockOpensOnTheCountsSeam(t *testing.T) {
 	forceASCII(t)
 	m, _ := longSession(t, 152, 40)
 	cells := trailCells(m)
@@ -494,27 +494,43 @@ func TestTheCountsSeamIsTheSessionViews(t *testing.T) {
 	if seam < 0 || first != seam+1 {
 		t.Errorf("the session view opens its block on `│ the counts ────`, the first class row under it: seam %d, scout %d\n%s", seam, first, strings.Join(cells, "\n"))
 	}
-	if strings.TrimSpace(cells[seam-1]) == "" {
-		t.Errorf("the seam stands where the card leaves no air; there was air:\n%s", strings.Join(cells, "\n"))
-	}
 	w, h := m.trailBox()
 	if h+m.blockHeightHere()+trailChrome != 40-5 {
 		t.Errorf("the trail's viewport should be the column less the chrome and the block with both seams: %d rows at width %d, block %d", h, w, m.blockHeightHere())
 	}
-	// Lv1 has the title's air row above the block, and the board's
-	// columns their headers: neither draws the seam.
-	sc := sceneVeryLong()
-	m = sceneModel(sc, 152, 40)
-	pressKey(m, "1")
-	poll(m, sc)
-	if v := ansi.Strip(m.View()); strings.Contains(v, "the counts ─") {
-		t.Errorf("the board draws no counts seam:\n%s", v)
+	// On the board the seam is a band's spare-row spend: a band whose
+	// columns all have the row to spare draws it on every column with a
+	// block, a band where any column would fold a trail row for it on
+	// none — a label never costs a session a row of its trail, and a
+	// band reads as one. Subagents at 152x40 packs porter's band whole
+	// with no row over, so it draws none; taller, the band has the rows
+	// and every block in it opens on the seam.
+	drawn := 0
+	for _, size := range [][2]int{{120, 34}, {152, 40}, {152, 48}, {220, 48}, {220, 60}} {
+		m := sceneModel(sceneSubagents(), size[0], size[1])
+		v := ansi.Strip(m.View())
+		if strings.Contains(v, "├─◈ Score encoder gates") && !strings.Contains(v, "◉ 1/2") && strings.Contains(v, "the counts ─") {
+			t.Errorf("%dx%d: porter's column folds its ask and its band draws the seam:\n%s", size[0], size[1], v)
+		}
+		// Band by band: the bands are the runs of rows between the
+		// blank rows under the header, and a band's columns agree.
+		for _, band := range strings.Split(strings.Join(strings.Split(v, "\n")[3:], "\n"), "\n\n") {
+			counts, trails := strings.Count(band, "the counts ─"), strings.Count(band, "the trail ─")
+			if counts != 0 && counts != trails {
+				t.Errorf("%dx%d: a band draws the seam on some of its blocks and not others (%d of %d):\n%s", size[0], size[1], counts, trails, band)
+			}
+			drawn += counts
+		}
 	}
+	if drawn == 0 {
+		t.Errorf("no board in the sweep had a band with the row to spare: the seam should be drawn somewhere")
+	}
+	sc := sceneVeryLong()
 	m = sceneModel(sc, 80, 24)
 	pressKey(m, "1")
 	poll(m, sc)
-	if v := ansi.Strip(m.View()); m.level != levelTrail || strings.Contains(v, "the counts ─") {
-		t.Errorf("Lv1 draws no counts seam (level %d):\n%s", m.level, v)
+	if v := ansi.Strip(m.View()); m.level != levelTrail || strings.Count(v, "the counts ─") != 1 {
+		t.Errorf("Lv1 opens its block on the counts seam (level %d):\n%s", m.level, v)
 	}
 }
 
