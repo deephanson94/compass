@@ -237,6 +237,7 @@ type Model struct {
 	blockOn     string
 	blockOpen   map[string]map[string]bool
 	blockScroll int
+	blockRest   int // the block row the cursor last stood on, for `s` to come back to
 
 	// The reader's own state, all of it Lv3: where the document is scrolled,
 	// which results are unfolded, and the search.
@@ -388,6 +389,7 @@ func New(mgr *fleet.Manager) *Model {
 		level:       levelBoard,
 		cursor:      -1,
 		blockCursor: -1,
+		blockRest:   -1,
 		trailPinned: true,
 		anchor:      -1,
 		unfolded:    map[int]bool{},
@@ -1616,6 +1618,9 @@ func (m *Model) firstRowInView() int {
 
 // cursorMove walks the Lv2 selection over the trail's selectable rows.
 func (m *Model) cursorMove(delta int) {
+	if m.blockCursor >= 0 {
+		m.blockRest = m.blockCursor // where `s` comes back to (#393)
+	}
 	m.blockCursor = -1 // a cursor moved on the trail is the trail's (#393)
 	rows := TrailRows(m.trail, m.level)
 	if len(rows) == 0 {
@@ -4292,7 +4297,26 @@ func (m *Model) replyRefusalSaid(whole string) string {
 // the deck below the board's width — there is no trade: the clause is the
 // frame's only naming of the archive, not a second one (#328).
 func (m *Model) footerTraded(keys string, w int) string {
-	return m.footerDrawn("traded", keys, w, m.footerTradedOnce)
+	return m.footerDrawn("traded", keys, w, m.footerCountsTraded)
+}
+
+// footerCountsTraded is the legs' row with `s counts` — `s trail` in the
+// block — where the row has spare room for it: it is the first key the
+// row gives up, ahead of the page key and the door, so every row pinned
+// at 80 through 152 stands as it stood, and the goldens do not move
+// (#348's trade, #393). The clause stands before `? help`.
+func (m *Model) footerCountsTraded(keys string, w int) string {
+	word := m.blockJumpWord()
+	if word == "" || !strings.Contains(keys, " · ? help") || strings.Contains(keys, " · s ") {
+		return m.footerTradedOnce(keys, w)
+	}
+	clause := " · s " + word
+	with := m.footerTradedOnce(strings.Replace(keys, " · ? help", clause+" · ? help", 1), w)
+	without := m.footerTradedOnce(keys, w)
+	if footerNamesAll(without, with) {
+		return with // the clause cost the row no key
+	}
+	return without
 }
 
 // footerTradedOnce is the draw itself: the memo above is what keeps
@@ -5406,6 +5430,9 @@ func (m *Model) refusedKeys() []string {
 	var refused []string
 	if m.liveCount() == 1 && !m.archiveView {
 		refused = append(refused, "g", "x") // nothing to grab, and hiding the only session is refused
+	}
+	if m.level != levelWaypoints || !blockCounts(m.trail) {
+		refused = append(refused, "s") // the counts are the legs' (#393), and a trail with nothing to count draws none (#377)
 	}
 	return refused
 }

@@ -1008,9 +1008,22 @@ func (m *Model) blockEnter(rows []summaryRow) bool {
 // blockLeave puts the cursor back on the trail, at its first row: `j`
 // off the block's last row.
 func (m *Model) blockLeave() {
-	m.blockCursor = -1
 	m.cursor = 0
-	m.cursorMove(0)
+	m.cursorMove(0) // records the block row left, and clears the block cursor
+}
+
+// blockJumpWord is what `s` does here: `counts` on a trail that draws a
+// block, `trail` in the block, "" where the key refuses.
+func (m *Model) blockJumpWord() string {
+	switch {
+	case m.level != levelWaypoints || m.showHelp || m.searching || m.replying:
+		return ""
+	case m.inBlock():
+		return "trail"
+	case m.blockShown():
+		return "counts"
+	}
+	return ""
 }
 
 // blockFoldWord is what `space` does on the cursor's block row: `open` a
@@ -1028,10 +1041,27 @@ func (m *Model) blockFoldWord() string {
 	return "close"
 }
 
+// blockJump is `s` on the trail: the cursor to the counts, on the row it
+// last stood on there, else the block's last row. False where the trail
+// draws no block.
+func (m *Model) blockJump() bool {
+	if !m.blockShown() {
+		return false
+	}
+	rows := m.blockRowsHere()
+	if m.blockOn == m.selectedKey && m.blockRest >= 0 && m.blockRest < len(rows) {
+		m.blockCursor = m.blockRest
+		m.blockClamp(rows)
+		m.anchorReader()
+		return true
+	}
+	return m.blockEnter(rows)
+}
+
 // blockKey is the Lv2 keys while the cursor is in the block, and the
-// two that take it there: `k` (and `ctrl+u`) off the trail's first row,
-// and `space`, which on the trail says where it acts. True when the key
-// was the block's.
+// three that take it there: `k` (and `ctrl+u`) off the trail's first
+// row, `s` from any row of the trail, and `space`, which on the trail
+// says where it acts. True when the key was the block's.
 func (m *Model) blockKey(key string) bool {
 	if !m.inBlock() {
 		switch key {
@@ -1039,6 +1069,11 @@ func (m *Model) blockKey(key string) bool {
 			if m.cursor == 0 && m.blockShown() && m.blockEnter(m.blockRowsHere()) {
 				return true
 			}
+		case "s":
+			if !m.blockJump() {
+				m.note = "nothing to count" // no class with two legs: the trail says all there is (#349)
+			}
+			return true
 		case " ", "space":
 			if m.blockShown() {
 				m.note = "the counts open · k up to them"
@@ -1101,8 +1136,12 @@ func (m *Model) blockKey(key string) bool {
 	case "G":
 		// The present is the trail's newest row, from the block as from
 		// anywhere on the trail.
-		m.blockCursor = -1
 		m.cursorToPresent()
+		return true
+	case "s":
+		// Back to the trail, on the row the cursor left: `k` off the
+		// first row came from the first row, `s` from wherever it was.
+		m.cursorMove(0)
 		return true
 	case "[", "]":
 		// The chapters are the trail's: the key acts from its first row.

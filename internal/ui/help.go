@@ -25,6 +25,7 @@ var helpKeys = [][2]string{
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
 	{"a", "ask: a claude grounded in this session's transcript"},
+	{"s", "the counts above the trail, and back — each side keeps the row you left"},
 	{"space", "reader: fold / unfold a tool output · legs: open a count into its rows (k off the first row climbs to them)"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
 	{"esc", "one level out · on the board or a list, a standing search clears first"},
@@ -77,6 +78,7 @@ func helpOffered(key, keymap string) bool {
 		"G": {"G is the present"}, "? / q": {"? help"}, "x X A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
 		"a": {"a ask"}, "space": {"space unfold", "space open", "space close"}, "/ n N": {"/ search", "n/N"},
+		"s": {"s counts", "s trail"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
 	}[key] {
 		if strings.Contains(keymap, f) {
@@ -184,7 +186,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "[ ]", "space")
+		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "s", "[ ]", "space")
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -467,6 +469,9 @@ func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 				// "mirror" is nowhere else on a narrow screen.
 				what = "the live pane beside the trail — needs 110 columns"
 			}
+		}
+		if key == "s" && refuses(refused, "s") {
+			what = "" // the counts are the legs': the row is drawn where the key works (#393)
 		}
 		if what == "" {
 			continue // not a key on this terminal

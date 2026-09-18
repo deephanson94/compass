@@ -328,3 +328,97 @@ func TestTheLanesOpenIntoTheirLanes(t *testing.T) {
 		t.Errorf("tab on a lane row in the block reads that lane's own conversation: level %d, lane %q, wanted %q", m.level, m.readerLane, lane.ToolUseID)
 	}
 }
+
+func TestSJumpsBetweenTheCountsAndTheTrail(t *testing.T) {
+	forceASCII(t)
+	m, _ := longSession(t, 152, 40)
+	present := m.cursor
+	press(m, "s")
+	if !m.inBlock() {
+		t.Fatalf("s on the trail should put the cursor on the counts")
+	}
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "docs") {
+		t.Errorf("the first s lands on the block's last row: %q", row)
+	}
+	press(m, "k")
+	press(m, "k") // test
+	press(m, "s")
+	if m.inBlock() || m.cursor != present {
+		t.Errorf("s in the block should come back to the trail row it left: in block %v, cursor %d, was %d", m.inBlock(), m.cursor, present)
+	}
+	press(m, "s")
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "test") || !strings.Contains(row, "32 legs") {
+		t.Errorf("s again should come back to the block row it left: %q", row)
+	}
+	press(m, "j")
+	press(m, "j")
+	press(m, "j") // docs, then off the block onto the trail's first row
+	if m.inBlock() || m.cursor != 0 {
+		t.Fatalf("j off the block is the trail's first row: in block %v, cursor %d", m.inBlock(), m.cursor)
+	}
+	press(m, "G")
+	press(m, "s")
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "docs") {
+		t.Errorf("having left by j from docs, s comes back to docs: %q", row)
+	}
+	press(m, "l") // another session: its counts have no row remembered
+	press(m, "s")
+	if !m.inBlock() {
+		t.Fatalf("s on another session's trail should still reach its counts")
+	}
+	if row := cursorRow(trailCells(m)); !strings.Contains(row, "docs") {
+		t.Errorf("on a session not yet climbed, s lands on the block's last row: %q", row)
+	}
+}
+
+func TestSIsRefusedWhereNothingCounts(t *testing.T) {
+	forceASCII(t)
+	sc := sceneSubagents()
+	m := sceneModel(sc, 152, 40)
+	pressKey(m, "tab")
+	poll(m, sc)
+	for i := 0; i < 5 && blockCounts(m.trail); i++ {
+		press(m, "l")
+	}
+	if blockCounts(m.trail) {
+		t.Skip("every session in the scene draws a block")
+	}
+	press(m, "s")
+	if m.note != "nothing to count" || m.inBlock() {
+		t.Errorf("s on a trail with no block refuses with the fact: %q, in block %v", m.note, m.inBlock())
+	}
+	press(m, "?")
+	h := ansi.Strip(m.View())
+	for _, line := range strings.Split(h, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "s ") && strings.Contains(line, "the counts") {
+			t.Errorf("the help draws no row for a key the deck refuses here: %q", line)
+		}
+	}
+}
+
+func TestTheFooterTradesSCountsForSpareRoom(t *testing.T) {
+	forceASCII(t)
+	m, _ := longSession(t, 220, 48)
+	foot := func() string {
+		rows := strings.Split(ansi.Strip(m.View()), "\n")
+		return rows[len(rows)-1]
+	}
+	if !strings.Contains(foot(), " · s counts · ? help") {
+		t.Errorf("at 220 the row has the room, and names the jump before the help: %q", foot())
+	}
+	press(m, "s")
+	if !strings.Contains(foot(), " · s trail · ? help") {
+		t.Errorf("in the block the clause is the way back: %q", foot())
+	}
+	press(m, "?")
+	h := ansi.Strip(m.View())
+	if !strings.Contains(h, "the counts above the trail") {
+		t.Errorf("the help owes the key a row where it works:\n%s", h)
+	}
+	// At eighty the row has no spare cells: the clause is the first to
+	// go, and the row is as it was before the key existed.
+	m, _ = longSession(t, 80, 24)
+	if strings.Contains(foot(), " · s ") {
+		t.Errorf("at eighty the clause takes no cell from a key that acts: %q", foot())
+	}
+}

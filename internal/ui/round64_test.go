@@ -185,18 +185,21 @@ func TestEveryBoardColumnWearsItsBlock(t *testing.T) {
 }
 
 func TestNoKeyOpensOrClosesTheSummary(t *testing.T) {
+	// #377 took the summary view and its key; #393 gave `s` back as a
+	// jump between the counts and the trail — never a view: the trail
+	// stands under the block on both sides of the press.
 	forceASCII(t)
 	m, _ := longSession(t, 152, 40)
 	before := ansi.Strip(m.View())
 	press(m, "s")
 	after := ansi.Strip(m.View())
-	if before != after {
-		t.Errorf("s should do nothing now (#377)")
+	if !strings.Contains(after, "the trail ─") || strings.Contains(after, "[summary]") {
+		t.Errorf("s should move the cursor, not swap the view (#377, #393):\n%s", after)
 	}
 	press(m, "?")
 	h := ansi.Strip(m.View())
-	if strings.Contains(h, "summary:") || strings.Contains(h, " s  ") {
-		t.Errorf("the help should have no row for a key that went:\n%s", h)
+	if strings.Contains(h, "summary:") {
+		t.Errorf("the help should have no row for a view that went:\n%s", h)
 	}
 	foot := strings.Split(before, "\n")
 	if strings.Contains(foot[len(foot)-1], "s summary") || strings.Contains(foot[len(foot)-1], "s/esc") {
