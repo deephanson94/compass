@@ -15,6 +15,11 @@ type Prompt struct {
 	Text    string // first line, max 60 runes, "…" if cut
 	At      time.Time
 	Relayed bool // another session's message, relayed by the harness (#97)
+	// Teammate names the teammate a relayed message came from: a report
+	// to the session that sent it out, which the trail draws but never
+	// numbers or steps to as a chapter (#394). "" for a person's prompt
+	// and for a plain relay.
+	Teammate string
 }
 
 // Leg is a contiguous span of one class of work: the unit the trail draws.
@@ -185,7 +190,14 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
 	// that never reached three stays with the leg it interrupted.
 	if substantivePrompt(ev) {
-		s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()})
+		p := Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()}
+		if id, _, ok := ev.Teammate(); ok {
+			p.Teammate = id
+			if p.Teammate == "" {
+				p.Teammate = "teammate" // an envelope with no id is still a teammate's
+			}
+		}
+		s.prompts = append(s.prompts, p)
 		s.flushPress()
 		s.closeLeg()
 	}
@@ -434,6 +446,15 @@ func promptText(ev transcript.Event) string {
 		return cmd
 	}
 	if ev.Relayed() {
+		if id, body, ok := ev.Teammate(); ok {
+			// The teammate and its words, not the tag they came in: the
+			// envelope's first line was `<teammate-message teammate_id=…`
+			// on every row that quoted it (#394).
+			if id != "" {
+				return id + ": " + firstLine(body)
+			}
+			return firstLine(body)
+		}
 		return firstLine(ev.RelayBody()) // the message, not its envelope (#97)
 	}
 	return firstLine(ev.Text)

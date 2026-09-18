@@ -525,7 +525,7 @@ func blockLinesIn(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said blo
 			}
 			line = summaryClassRow(tr, r.class, o, said.loop, under, said.live, w)
 		case "wait":
-			line = summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(tr.Prompts), "prompt"), nil, r.text, w)
+			line = summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(ownPrompts(tr), "prompt"), nil, r.text, w)
 		case "lanes":
 			line = summaryLanesRow(tr, o, w, said.back, said.out)
 		case "leg":
@@ -791,7 +791,25 @@ func (m *Model) trailBlock(w int, below []string) []string {
 	v := blockView{rows: rows, cursor: m.blockCursorRow(rows), cap: m.blockCap()}
 	v.top, _, _ = summaryWindow(len(rows), v.cap, v.cursor, m.blockScroll)
 	m.blockScroll = v.top // the window is where the cursor left it
-	return blockLinesIn(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said, v)
+	lines := blockLinesIn(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said, v)
+	if m.sessionView() && len(lines) > 0 {
+		// Under the card the block opens on its own seam: the card's last
+		// row leaves no air, and `◆ scout  11 legs` read as more card.
+		// At Lv1 the title's air row stands above it, and on the board
+		// the column header ends on its rung, so the seam is this
+		// frame's alone (#393).
+		lines = append([]string{countsRule(w)}, lines...)
+	}
+	return lines
+}
+
+// blockSeams is how many rows the block spends on seams: the one under it
+// (#378), and the one over it in the session view (#393).
+func (m *Model) blockSeams() int {
+	if m.sessionView() {
+		return 2
+	}
+	return 1
 }
 
 // headSaysLive reports whether the rows drawn beneath a block carry the
@@ -918,7 +936,7 @@ func (m *Model) blockCap() int {
 	if h <= 0 {
 		h = 24
 	}
-	cap := h - 5 - trailChrome - 1 - blockTrailFloor
+	cap := h - 5 - trailChrome - m.blockSeams() - blockTrailFloor
 	if closed := len(blockRows(m.trail)); cap < closed {
 		cap = closed
 	}
@@ -933,7 +951,7 @@ func (m *Model) blockHeightHere() int {
 	if n == 0 {
 		return 0
 	}
-	return min(n, m.blockCap()) + 1
+	return min(n, m.blockCap()) + m.blockSeams()
 }
 
 // inBlock says whether the cursor is in the block: on the legs, on the

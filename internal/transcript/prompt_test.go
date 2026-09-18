@@ -166,3 +166,20 @@ func TestAToolResultCarriesItsStructuredAccount(t *testing.T) {
 		t.Errorf("Meta = %s, want the structured toolUseResult", r.Meta)
 	}
 }
+
+// A teammate's message comes in an envelope: the teammate's id and the
+// message are read out of it, and a plain relay is not one (#394).
+func TestATeammatesMessageIsReadOutOfItsEnvelope(t *testing.T) {
+	ev := transcript.Event{Type: transcript.EventUser, Text: "Another Claude session sent a message:\n\n<teammate-message teammate_id=\"panel-theorist\" color=\"purple\">\nThe plan holds; two gates are the same root cause.\nSecond line.\n</teammate-message>"}
+	id, body, ok := ev.Teammate()
+	if !ok || id != "panel-theorist" || body != "The plan holds; two gates are the same root cause.\nSecond line." {
+		t.Errorf("Teammate() = %q, %q, %v", id, body, ok)
+	}
+	plain := transcript.Event{Type: transcript.EventUser, Text: "Another Claude session sent a message: the encoder is in, run the gates"}
+	if _, _, ok := plain.Teammate(); ok {
+		t.Errorf("a plain relay is not a teammate's")
+	}
+	if _, _, ok := (transcript.Event{Type: transcript.EventUser, Text: "<teammate-message teammate_id=\"x\">hi</teammate-message>"}).Teammate(); ok {
+		t.Errorf("an envelope the harness did not relay is machinery, not a teammate's message")
+	}
+}

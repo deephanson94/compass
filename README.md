@@ -234,7 +234,7 @@ run and nothing else.
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
-| `[` / `]` | previous / next prompt — the chapters of a trail; in the counts, the previous / next group; in the reader, your turns, marked and named as it lands on them |
+| `[` / `]` | previous / next prompt — the chapters of a trail (your prompts; a teammate's relayed report is drawn but is no chapter); in the counts, the previous / next group; in the reader, your turns, marked and named as it lands on them |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `Space` | in a session: the counts above the trail (`◆ build  6 legs`) open into their legs — `k` off the trail's first row climbs onto them, `Space` opens the class or the lanes under the cursor and folds it again. A leg there is that leg: the conversation follows it, `Tab` reads it, `Enter` attaches |

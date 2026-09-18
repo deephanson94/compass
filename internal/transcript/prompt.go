@@ -55,6 +55,41 @@ func (e Event) RelayBody() string {
 	return strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(t, relayPrefix), ":"))
 }
 
+// teammateOpen opens the envelope a teammate's message is relayed in:
+// `<teammate-message teammate_id="panel-theorist" color="purple">…`.
+const teammateOpen = "<teammate-message"
+
+// Teammate is the teammate a relayed message came from and the message
+// itself, out of the envelope the harness wraps it in; ok is false for a
+// relay that is not a teammate's. A teammate's message is a report to
+// the session that sent it out, not an ask: it is no chapter of the
+// trail (#394).
+func (e Event) Teammate() (id, body string, ok bool) {
+	if !e.Relayed() {
+		return "", "", false // an envelope the harness did not relay is machinery (the tag rule above)
+	}
+	t := e.RelayBody()
+	if !strings.HasPrefix(t, teammateOpen) {
+		return "", "", false
+	}
+	end := strings.Index(t, ">")
+	if end < 0 {
+		return "", "", false
+	}
+	head := t[len(teammateOpen):end]
+	if i := strings.Index(head, `teammate_id="`); i >= 0 {
+		rest := head[i+len(`teammate_id="`):]
+		if j := strings.Index(rest, `"`); j >= 0 {
+			id = rest[:j]
+		}
+	}
+	body = t[end+1:]
+	if i := strings.LastIndex(body, "</teammate-message>"); i >= 0 {
+		body = body[:i]
+	}
+	return id, strings.TrimSpace(body), true
+}
+
 // compactionPreamble opens the turn that carries a summary of a conversation
 // that ran out of context. It is machinery wearing a prompt's clothes: no tag,
 // no flag, and eight thousand words of it.

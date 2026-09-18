@@ -4,8 +4,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/deephanson94/compass/internal/journey"
 )
 
 // Round sixty-five: the counts open (#393). The block above a trail is
@@ -472,5 +475,99 @@ func TestTheChapterKeysWalkTheBlocksGroups(t *testing.T) {
 	press(m, "[")
 	if m.note != "no earlier prompt" || m.inBlock() {
 		t.Errorf("the trail's [ keeps its refusal at the first prompt (#161): %q", m.note)
+	}
+}
+
+func TestTheCountsSeamIsTheSessionViews(t *testing.T) {
+	forceASCII(t)
+	m, _ := longSession(t, 152, 40)
+	cells := trailCells(m)
+	seam, first := -1, -1
+	for i, c := range cells {
+		if strings.Contains(c, "│ the counts ─") && seam < 0 {
+			seam = i
+		}
+		if strings.Contains(c, "◆ scout  32 legs") && first < 0 {
+			first = i
+		}
+	}
+	if seam < 0 || first != seam+1 {
+		t.Errorf("the session view opens its block on `│ the counts ────`, the first class row under it: seam %d, scout %d\n%s", seam, first, strings.Join(cells, "\n"))
+	}
+	if strings.TrimSpace(cells[seam-1]) == "" {
+		t.Errorf("the seam stands where the card leaves no air; there was air:\n%s", strings.Join(cells, "\n"))
+	}
+	w, h := m.trailBox()
+	if h+m.blockHeightHere()+trailChrome != 40-5 {
+		t.Errorf("the trail's viewport should be the column less the chrome and the block with both seams: %d rows at width %d, block %d", h, w, m.blockHeightHere())
+	}
+	// Lv1 has the title's air row above the block, and the board's
+	// columns their headers: neither draws the seam.
+	sc := sceneVeryLong()
+	m = sceneModel(sc, 152, 40)
+	pressKey(m, "1")
+	poll(m, sc)
+	if v := ansi.Strip(m.View()); strings.Contains(v, "the counts ─") {
+		t.Errorf("the board draws no counts seam:\n%s", v)
+	}
+	m = sceneModel(sc, 80, 24)
+	pressKey(m, "1")
+	poll(m, sc)
+	if v := ansi.Strip(m.View()); m.level != levelTrail || strings.Contains(v, "the counts ─") {
+		t.Errorf("Lv1 draws no counts seam (level %d):\n%s", m.level, v)
+	}
+}
+
+func TestATeammatesReportIsNoChapter(t *testing.T) {
+	forceASCII(t)
+	sc := sceneVeryLong()
+	key := sessionKey("auth")
+	tr := sc.trails[key]
+	// A teammate reports back between the second and third prompt.
+	report := journey.Prompt{Text: "panel-theorist: the plan holds; two gates share a root cause", At: tr.Prompts[2].At.Add(-time.Minute), Relayed: true, Teammate: "panel-theorist"}
+	tr.Prompts = append(tr.Prompts[:2], append([]journey.Prompt{report}, tr.Prompts[2:]...)...)
+	sc.trails[key] = tr
+	m := sceneModel(sc, 152, 40)
+	pressKey(m, "1")
+	poll(m, sc)
+	pressKey(m, "tab")
+	poll(m, sc)
+	if m.level != levelWaypoints {
+		t.Fatalf("the legs")
+	}
+	if n := ownPrompts(m.trail); n != 12 || len(m.trail.Prompts) != 13 {
+		t.Fatalf("twelve of the thirteen prompts are yours: %d", n)
+	}
+	col := strings.Join(trailCells(m), "\n")
+	if !strings.Contains(col, "waited on you · 12 prompts") {
+		t.Errorf("the wait row counts your prompts, not the report:\n%s", col)
+	}
+	// Walk the chapters from the start: the report is stepped over.
+	climb(t, m)
+	press(m, "]") // the trail's first chapter
+	press(m, "]")
+	press(m, "]")
+	rows := TrailRows(m.trail, m.level)
+	if r := rows[m.cursor]; r.Kind != "prompt" || r.Teammate || !strings.HasPrefix(m.note, "◉ 3/12") {
+		t.Errorf("three ] land on the third of your prompts, past the report: %+v, note %q", r, m.note)
+	}
+	press(m, "[")
+	if r := rows[m.cursor]; r.Teammate || !strings.HasPrefix(m.note, "◉ 2/12") {
+		t.Errorf("[ steps back over the report too: %+v, note %q", r, m.note)
+	}
+	// The report's own row: drawn, relayed, unnumbered, and no wait on it.
+	for i := range rows {
+		if rows[i].Teammate {
+			m.cursor = i
+			m.cursorMove(0)
+			break
+		}
+	}
+	row := cursorRow(trailCells(m))
+	if !strings.Contains(row, "relayed \"panel-theorist: the plan holds") || strings.Contains(row, "/12") || strings.Contains(row, "waited") {
+		t.Errorf("the report's row is relayed and unnumbered, with no wait: %q", row)
+	}
+	if strings.Contains(col, "◉ 13/13") || !strings.Contains(col, "12/12") {
+		t.Errorf("the chapters number your prompts alone:\n%s", col)
 	}
 }

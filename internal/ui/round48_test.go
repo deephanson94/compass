@@ -20,7 +20,10 @@ func TestALateResultIsNamedByItsOwnCall(t *testing.T) {
 		}
 		lines := strings.Split(ansi.Strip(m.View()), "\n")
 		for i, l := range lines {
-			if !strings.Contains(l, "The SDK renamed teammate") || !strings.Contains(l, "⎿") {
+			// The reader's result line, not the trail's finding row beside
+			// a result of the reader's own: the two share a frame row
+			// once the counts seam stands over the trail (#393).
+			if !strings.Contains(l, "⎿ The SDK renamed teammate") {
 				continue
 			}
 			above := ""

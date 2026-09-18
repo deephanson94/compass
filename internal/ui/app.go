@@ -1498,7 +1498,7 @@ func (m *Model) chapterStand() ([]TrailRow, []int, map[int]int, int) {
 	rows := TrailRows(m.trail, m.level)
 	var prompts []int // indices into rows
 	for i, r := range rows {
-		if r.Kind == "prompt" {
+		if r.Kind == "prompt" && !r.Teammate { // a teammate's report is no chapter (#394)
 			prompts = append(prompts, i)
 		}
 	}
