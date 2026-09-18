@@ -143,6 +143,14 @@ func (m *Model) laneWanted() string {
 	if m.readerLane != "" {
 		return m.readerLane
 	}
+	if m.level == levelWaypoints && m.inBlock() {
+		// A lane's row in the block is that lane (#393).
+		rows := m.blockRowsHere()
+		if c := m.blockCursorRow(rows); c >= 0 && rows[c].kind == "lane" {
+			return m.trail.Branches[rows[c].lane].ToolUseID
+		}
+		return ""
+	}
 	if m.level == levelWaypoints && m.cursor >= 0 {
 		if rows := TrailRows(m.trail, m.level); m.cursor < len(rows) && rows[m.cursor].Kind == "branch" {
 			return rows[m.cursor].Lane

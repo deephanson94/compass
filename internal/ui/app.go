@@ -226,6 +226,18 @@ type Model struct {
 	cursor   int
 	narrated string
 
+	// The block's cursor (#393): the counts above the trail, entered by
+	// `k` off the trail's first row. blockCursor indexes the block's rows
+	// while the cursor is there, -1 while it is the trail's; blockOn is
+	// the session it was put there on, so a stale one is no cursor;
+	// blockOpen is each session's groups opened into their rows; and
+	// blockScroll is where the block's window stood where the open rows
+	// outrun the room.
+	blockCursor int
+	blockOn     string
+	blockOpen   map[string]map[string]bool
+	blockScroll int
+
 	// The reader's own state, all of it Lv3: where the document is scrolled,
 	// which results are unfolded, and the search.
 	scroll   int
@@ -375,6 +387,7 @@ func New(mgr *fleet.Manager) *Model {
 		now:         time.Now(),
 		level:       levelBoard,
 		cursor:      -1,
+		blockCursor: -1,
 		trailPinned: true,
 		anchor:      -1,
 		unfolded:    map[int]bool{},
@@ -1177,6 +1190,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case levelReader:
 		return m.readerKey(key)
 	case levelWaypoints:
+		if m.blockKey(key) {
+			return m, nil // the cursor is in the block, or the key took it there (#393)
+		}
 		switch key {
 		case "h", "left", "l", "right":
 			if m.sessionView() {
@@ -1600,6 +1616,7 @@ func (m *Model) firstRowInView() int {
 
 // cursorMove walks the Lv2 selection over the trail's selectable rows.
 func (m *Model) cursorMove(delta int) {
+	m.blockCursor = -1 // a cursor moved on the trail is the trail's (#393)
 	rows := TrailRows(m.trail, m.level)
 	if len(rows) == 0 {
 		m.cursor = -1
@@ -1669,6 +1686,24 @@ func (m *Model) cursorToPresent() {
 // that is actually on screen. Width first, then the rows the graph itself gets
 // — the column spends two on its title and its line of air.
 func (m *Model) trailBox() (int, int) {
+	width := m.trailBoxWidth()
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#377, #381)
+	if m.blockShown() {
+		height -= m.blockHeightHere()
+	}
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+// trailBoxWidth is the trail column's width alone: what the block's own
+// rows are measured against before the block's height is known.
+func (m *Model) trailBoxWidth() int {
 	w := m.width
 	if w <= 0 {
 		w = 80
@@ -1678,19 +1713,7 @@ func (m *Model) trailBox() (int, int) {
 		inner = w
 	}
 	_, _, width := m.layout(inner)
-
-	h := m.height
-	if h <= 0 {
-		h = 24
-	}
-	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#377, #381)
-	if m.blockShown() {
-		height -= blockHeight(m.trail)
-	}
-	if height < 1 {
-		height = 1
-	}
-	return width, height
+	return width
 }
 
 // trailHalfPage is what ctrl+d and ctrl+u move: half the trail's screenful.
@@ -4674,6 +4697,13 @@ func (m *Model) keymapOnce() string {
 			keys = strings.Replace(keys, " · ? help", " · g grab · ? help", 1)
 		}
 	}
+	if m.inBlock() && !m.showHelp && !m.searching && !m.replying {
+		// The cursor is in the block: `space` opens or closes the group
+		// its row belongs to, and the row names it beside the keys that
+		// walk the rows (#393). It stands where the reader stands its own
+		// `space unfold`, and sheds at that rank.
+		keys = strings.Replace(keys, "ctrl+d/u half page · ", "ctrl+d/u half page · space "+m.blockFoldWord()+" · ", 1)
+	}
 	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
 		// At Lv1 the page keys drive the trail beside the list (§3); on a
 		// frame whose trail fits, they do nothing, and a footer naming
@@ -6271,7 +6301,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 		own = []string{" · g grab",
 			// The refusal goes before the key that acts here too (#52).
 			" · enter · no pane", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns",
-			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
+			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters",
+			// The block's fold key is the key the row exists for while the
+			// cursor is in the block: last of the level's own keys to go
+			// (#393).
+			" · space open", " · space close"}
 	default:
 		// A row whose movement key has yielded (#213, #216, #259) leads
 		// with the attach key, and the separator-led fragment above then

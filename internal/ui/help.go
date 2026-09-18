@@ -25,7 +25,7 @@ var helpKeys = [][2]string{
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
 	{"a", "ask: a claude grounded in this session's transcript"},
-	{"space", "reader: fold / unfold a tool output"},
+	{"space", "reader: fold / unfold a tool output · legs: open a count into its rows (k off the first row climbs to them)"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
 	{"esc", "one level out · on the board or a list, a standing search clears first"},
 	{"?", "this help"},

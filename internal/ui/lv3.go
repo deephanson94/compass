@@ -907,6 +907,22 @@ func scrollShowing(doc []readerLine, row, h int) int {
 // cursor move (M7 contract). A row the document does not reach yet leaves the
 // reader where it is rather than jumping it somewhere arbitrary.
 func (m *Model) anchorReader() {
+	if m.inBlock() {
+		// A leg or lane row in the block is that leg or lane: the reader
+		// follows it as it follows the trail's row for it. A class or
+		// the lanes row is a count, and the reader stays where it was
+		// (#393).
+		rows := m.blockRowsHere()
+		if c := m.blockCursorRow(rows); c >= 0 {
+			switch r := rows[c]; r.kind {
+			case "leg":
+				m.anchorOn(m.trail.Legs[r.leg].Start, m.trail.Legs[r.leg].Label, r.leg)
+			case "lane":
+				m.anchorOn(m.trail.Branches[r.lane].Start, branchName(m.trail.Branches[r.lane].Label), -1)
+			}
+		}
+		return
+	}
 	m.anchor = -1
 	if m.cursor < 0 {
 		return
@@ -915,20 +931,33 @@ func (m *Model) anchorReader() {
 	if m.cursor >= len(rows) {
 		return
 	}
+	row := rows[m.cursor]
+	leg := -1
+	if row.Kind == "leg" {
+		leg = row.Leg
+	}
+	m.anchorOn(row.Time, row.Text, leg)
+}
+
+// anchorOn points the reader at a moment: the row's time, what the row
+// said, and the leg it is where it is one, whose label as drawn names
+// the anchor.
+func (m *Model) anchorOn(at time.Time, text string, leg int) {
+	m.anchor = -1
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD(), Now: m.now, Lanes: m.laneClauses()}
-	if line := ReaderAnchor(m.events, opts, rows[m.cursor].Time); line >= 0 {
+	if line := ReaderAnchor(m.events, opts, at); line >= 0 {
 		// The scroll is clamped to the last screenful at once: an offset
 		// past it drew the same frame, and the first j after it moved the
 		// number and nothing else.
 		doc := m.doc(opts.Width)
-		m.scroll, m.anchor, m.anchorAt = clampScroll(line, len(doc), m.readerHeight()), line, rows[m.cursor].Time
-		m.anchorText = rows[m.cursor].Text
-		if row := rows[m.cursor]; row.Kind == "leg" && row.Leg >= 0 && row.Leg < len(m.trail.Legs) {
+		m.scroll, m.anchor, m.anchorAt = clampScroll(line, len(doc), m.readerHeight()), line, at
+		m.anchorText = text
+		if leg >= 0 && leg < len(m.trail.Legs) {
 			// The row as drawn — the commit a ship leg is named by, the
 			// plan's name for HEAD — not the heuristic label beneath it.
 			w, h := m.trailBox()
-			m.anchorText, _ = legLabel(m.trail.Legs[row.Leg], m.trailOpts(w, h))
-			if o := m.trailOpts(w, h); m.trail.Legs[row.Leg].Current && o.HeadState == state.NeedsYou && o.Head != "" {
+			m.anchorText, _ = legLabel(m.trail.Legs[leg], m.trailOpts(w, h))
+			if o := m.trailOpts(w, h); m.trail.Legs[leg].Current && o.HeadState == state.NeedsYou && o.Head != "" {
 				// HEAD's row carries the first clause of the question and
 				// spells the rest beneath it; the title gets the whole
 				// question and clips it with a mark, not the row's cut.

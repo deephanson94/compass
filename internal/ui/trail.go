@@ -1892,7 +1892,7 @@ func (m *Model) trailColumn(w, h int) []string {
 	// (#351, #377).
 	bh := 0
 	if m.blockShown() {
-		bh = blockHeight(m.trail) // the rows the block draws on this frame, not the rows it would (#381)
+		bh = m.blockHeightHere() // the rows the block draws on this frame, not the rows it would (#381)
 	}
 	draw := func(h int) []string {
 		if bh >= h {
@@ -2214,11 +2214,20 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Width:        w,
 		Height:       h,
 		Level:        m.level,
-		Cursor:       m.cursor,
+		Cursor:       m.trailCursor(),
 		Pulse:        m.pulse,
 		Scroll:       m.trailScroll,
 		Pinned:       m.trailPinned,
 	}
+}
+
+// trailCursor is the cursor the trail draws: none while the cursor is in
+// the block above it (#393).
+func (m *Model) trailCursor() int {
+	if m.inBlock() {
+		return -1
+	}
+	return m.cursor
 }
 
 // legsAbove counts the legs the trail's viewport currently hides above its
