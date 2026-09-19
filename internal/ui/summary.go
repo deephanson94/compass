@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deephanson94/compass/internal/fleet"
@@ -421,8 +422,18 @@ func classCounts(tr journey.Trail) map[journey.Class]int {
 // blockRows is the block's rows for a trail: a row per class with more
 // than one leg, the lanes where there are two or more, and the wait on
 // you where it is worth a row — the counts, never a row the trail beneath
-// already draws (#377).
+// already draws (#377). The board's columns draw this, closed.
 func blockRows(tr journey.Trail) []summaryRow {
+	return blockRowsOpen(tr, nil, nil, 0)
+}
+
+// blockRowsOpen is the block with the groups in open opened into the
+// rows they count (#393): a class's legs hung beneath it, oldest first,
+// the lanes beneath the lanes row with what each came back with, or
+// what a lane still out says of itself. A class of one and a lone lane
+// stay the trail's own rows, open or not; the question HEAD is asking
+// is the trail's too.
+func blockRowsOpen(tr journey.Trail, open map[string]bool, lanes map[int]laneLine, findings int) []summaryRow {
 	if !blockCounts(tr) {
 		return nil
 	}
@@ -431,11 +442,11 @@ func blockRows(tr journey.Trail) []summaryRow {
 		wait = spanText(d)
 	}
 	var out []summaryRow
-	for _, r := range summaryRows(tr, nil, nil, nil, wait, 0) {
+	for _, r := range summaryRows(tr, open, nil, lanes, wait, findings) {
 		switch {
-		case r.kind == "leg", r.kind == "ask":
+		case r.kind == "ask", r.kind == "leg" && r.solo:
 			continue // a class of one: the trail's own row
-		case r.kind == "lanes" && len(tr.Branches) < 2:
+		case r.key == summaryLanes && len(tr.Branches) < 2:
 			continue // one lane: the trail's own lane row
 		}
 		out = append(out, r)
@@ -443,9 +454,24 @@ func blockRows(tr journey.Trail) []summaryRow {
 	return out
 }
 
+// blockSeamRows is the rows a block spends on its seams: the one over it
+// and the one under it (#378, #393).
+const blockSeamRows = 2
+
 // blockHeight is how many rows the block spends above a trail: its rows
-// and the seam under them (#377, #378).
+// and the seams over and under them (#377, #378, #393).
 func blockHeight(tr journey.Trail) int {
+	if n := len(blockRows(tr)); n > 0 {
+		return n + blockSeamRows
+	}
+	return 0
+}
+
+// blockHeightBare is the block without the seam over it: the board's
+// measure. The board packs its columns as it packed them before the seam
+// and draws the seam only where a band has the row to spare, so a label
+// never costs a session a row of its own trail (#380, #393).
+func blockHeightBare(tr journey.Trail) int {
 	if n := len(blockRows(tr)); n > 0 {
 		return n + 1
 	}
@@ -464,29 +490,231 @@ type blockSaid struct {
 // down where HEAD's own row is drawn beneath or the frame says it, the
 // loop and the lanes' tally likewise (#347, #351, #356, #357, #377).
 func blockLines(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said blockSaid) []string {
-	var lines []string
-	rows := blockRows(tr)
+	return blockLinesIn(tr, o, w, headDrawn, said, blockView{cursor: -1})
+}
+
+// blockView is what the trail column adds to the block the cursor can
+// enter (#393): its rows with the open groups opened, the row the cursor
+// stands on, and the window where the opened rows outrun the room — top
+// is the first row drawn and cap how many the block may spend, the seam
+// aside. A zero view is the board's: the closed rows, no cursor, all of
+// them drawn.
+type blockView struct {
+	rows   []summaryRow
+	cursor int
+	top    int
+	cap    int
+	bare   bool // no seam over the block: a board band with no row to spare on it (#393)
+}
+
+// blockLinesIn draws the block through a view: an open class's legs and
+// the lanes' lanes hang on the waypoint rail beneath their row, as #348
+// hung them, so the group reads as one; the cursor's row is marked as the
+// trail marks its own; a window that hides rows says so on its edges.
+func blockLinesIn(tr journey.Trail, o TrailOpts, w int, headDrawn bool, said blockSaid, v blockView) []string {
+	rows := v.rows
+	if rows == nil {
+		rows = blockRows(tr)
+	}
 	if len(rows) == 0 {
 		return nil
 	}
-	for _, r := range rows {
+	top, end := 0, len(rows)
+	head, tail := false, false
+	if v.cap > 0 && len(rows) > v.cap {
+		top = clampScroll(v.top, len(rows), v.cap)
+		end = top + v.cap
+		head, tail = top > 0, end < len(rows)
+	}
+	var lines []string
+	for i := top; i < end; i++ {
+		r := rows[i]
+		var line string
 		switch r.kind {
 		case "class":
-			lines = append(lines, summaryClassRow(tr, r.class, o, said.loop, headDrawn, said.live, w))
+			// An open class whose running leg is drawn beneath it yields
+			// its clause to that row, as it yields to HEAD's row on the
+			// trail (#355, #377).
+			under := headDrawn
+			for j := i + 1; !under && j < end && rows[j].key == r.key && rows[j].kind == "leg"; j++ {
+				under = tr.Legs[rows[j].leg].Current
+			}
+			line = summaryClassRow(tr, r.class, o, said.loop, under, said.live, w)
 		case "wait":
-			lines = append(lines, summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(len(tr.Prompts), "prompt"), nil, r.text, w))
+			line = summaryFigureRow(dimStyle.Render("◉ waited"), "on you · "+plural(ownPrompts(tr), "prompt"), nil, r.text, w)
 		case "lanes":
-			lines = append(lines, summaryLanesRow(tr, o, w, said.back, said.out))
+			line = summaryLanesRow(tr, o, w, said.back, said.out)
 		case "leg":
 			l := tr.Legs[r.leg]
 			lo := o
-			lo.Width = w
+			lo.Width = w - trailWayWidth
+			// The trail sets the ask before it draws a leg, and a ship
+			// row reads it (#189, #192, #350).
 			lo.Ask = askBefore(tr, l.Start)
 			label, narrated := legLabel(l, lo)
-			lines = append(lines, legRow(l, label, narrated, lo))
+			line = summaryHang(rows, i) + legRow(l, label, narrated, lo)
+		case "lane":
+			lo := o
+			lo.Width = w - trailWayWidth
+			line = summaryHang(rows, i) + summaryLaneRow(tr.Branches[r.lane], lo, w-trailWayWidth)
+		case "report":
+			// The cut is the width of the rail the row draws, and a
+			// clock keeps the edge, as the trail keeps it (#352, #353).
+			hang := summaryHang(rows, i)
+			body := w - lipgloss.Width(hang)
+			text := r.text
+			if r.clock != "" {
+				if keep := body - len([]rune(r.clock)) - 2; keep >= trailMinLabel {
+					text = pad(clip(text, keep), keep) + "  " + r.clock
+				}
+			}
+			line = hang + dimStyle.Render(clip(text, body))
+		}
+		if i == v.cursor {
+			line = summaryCursored(line, w)
+		}
+		lines = append(lines, line)
+	}
+	if head {
+		// The edge takes the window's first row, never the cursor's:
+		// the window is placed with the cursor inside its edges.
+		lines[0] = dimStyle.Render(clip(fmt.Sprintf("↑ %d more above", top+1), w))
+	}
+	if tail {
+		lines[len(lines)-1] = dimStyle.Render(clip(fmt.Sprintf("▾ %d more below", len(rows)-end+1), w))
+	}
+	// The block opens on its seam and ends on the trail's: wherever it
+	// is drawn — under the session card, under a board column's header,
+	// under the trail's title — the rows are never read as more of what
+	// stands over them (#378, #393). A board band with no row to spare
+	// keeps the trail's rows and goes without the seam over the block.
+	lines = append(lines, seamRule(w))
+	if v.bare {
+		return lines
+	}
+	return append([]string{countsRule(w)}, lines...)
+}
+
+// summaryHang is the rail a row under a group hangs on: `│  ├ ` for a leg
+// or a lane with another beneath it, `│  └ ` for the last; a finding's
+// line hangs one rail further in, under its lane.
+func summaryHang(rows []summaryRow, i int) string {
+	r := rows[i]
+	mark := wayTee
+	if i+1 >= len(rows) || rows[i+1].group() || rows[i+1].kind == "wait" {
+		mark = wayEnd
+	}
+	if r.kind == "report" {
+		if i+1 >= len(rows) || rows[i+1].kind != "report" {
+			mark = wayEnd
+		}
+		return ruleStyle.Render(railStroke+"  "+railStroke+" "+mark) + " "
+	}
+	return ruleStyle.Render(railStroke+"  "+mark) + " "
+}
+
+// summaryGroupRow is the index of the class or lanes row the row at i
+// belongs to: itself when it is one.
+func summaryGroupRow(rows []summaryRow, i int) int {
+	for j := i; j >= 0; j-- {
+		if rows[j].group() {
+			return j
 		}
 	}
-	return append(lines, seamRule(w)) // the block ends on its seam (#378)
+	return 0
+}
+
+// summaryLaneRow is a lane's row under the lanes row: its name, its
+// link count, and its clock in the trail's own words — `⋯ 20m out`, `✓
+// 7m ago`, `⌀ 1h ago` for one back with nothing to say (#348).
+func summaryLaneRow(br journey.Branch, o TrailOpts, w int) string {
+	mark := branchOpen
+	tail := mark + " " + relAge(o.Now, br.Start) + " out"
+	if !br.Done && o.HeadState == state.Idle {
+		tail = branchEmpty + " lost " + relAge(o.Now, br.Start) + " ago"
+	}
+	if br.Done {
+		mark = branchDone
+		if strings.TrimSpace(br.Report) == "" {
+			mark = branchEmpty
+		}
+		back := br.End
+		if back.IsZero() {
+			back = br.Start
+		}
+		tail = mark + " " + relAge(o.Now, back) + " ago"
+	}
+	glyph := textStyle.Render(glyphBranch)
+	live, known := o.Agents[br.ToolUseID]
+	if _, hung := laneSilence(live, br, o.Now); !br.Done && known && hung {
+		glyph = stuckStyle.Render(fleet.Glyph(state.Stuck)) // the trail's mark, said here too (#49)
+	}
+	labelWidth := w - 2 - 1 - len([]rune(tail))
+	if labelWidth < trailMinLabel {
+		return glyph + " " + dimStyle.Render(clip(tail, w-2))
+	}
+	name := clip(branchName(br.Label), labelWidth)
+	if n, ok := o.LaneLinks[br.Label]; ok && n > 0 {
+		link := fmt.Sprintf(" →%d", n)
+		name = clip(branchName(br.Label), labelWidth-len([]rune(link))) + link
+	}
+	return glyph + " " + dimStyle.Render(pad(name, labelWidth)) + " " + dimStyle.Render(tail)
+}
+
+// summaryCursored marks the cursor's row as the trail marks its own: the
+// cell after the glyph turns ▸ and the row is reversed to the edge.
+func summaryCursored(text string, w int) string {
+	plain := strings.TrimRight(ansi.Strip(text), " ")
+	r := []rune(plain)
+	switch {
+	case len(r) > 4 && strings.HasPrefix(plain, railStroke):
+		// A hung row: the mark goes where the rail's air is, `│▸ ├ ◆…`,
+		// so the rail and the glyph both keep their cells.
+		r[1] = '▸'
+	case len(r) > 1 && r[1] == ' ':
+		r[1] = '▸'
+	case len(r) > 0:
+		r[0] = '▸'
+	}
+	plain = string(r)
+	if n := w - lipgloss.Width(plain); n > 0 {
+		plain += strings.Repeat(" ", n)
+	}
+	return cursorStyle.Render(plain)
+}
+
+// summaryWindow places a window of h rows over total so the cursor's row
+// is inside it, edges and all: a cut window spends its first row on `↑
+// N more above` and its last on `▾ N more below`, and the cursor never
+// stands on an edge's words. scroll is where the window stood.
+func summaryWindow(total, h, cursor, scroll int) (top int, head, tail bool) {
+	if total <= h {
+		return 0, false, false
+	}
+	top = clampScroll(scroll, total, h)
+	for range 4 {
+		head = top > 0
+		tail = top+h < total
+		lo, hi := top, top+h-1
+		if head {
+			lo++
+		}
+		if tail {
+			hi--
+		}
+		switch {
+		case cursor < 0:
+			return top, head, tail
+		case cursor < lo:
+			top -= lo - cursor
+		case cursor > hi:
+			top += cursor - hi
+		default:
+			return top, head, tail
+		}
+		top = clampScroll(top, total, h)
+	}
+	return top, head, tail
 }
 
 // lanesClock is the clock the lanes row would wear: the oldest lane
@@ -556,7 +784,7 @@ func (m *Model) blockShown() bool {
 		if m.sessionView() {
 			top = 3
 		}
-		for i := top; i < top+blockHeight(m.trail); i++ {
+		for i := top; i < top+m.blockHeightHere(); i++ {
 			if !m.boxCoversRow(i) {
 				return true
 			}
@@ -584,7 +812,11 @@ func (m *Model) trailBlock(w int, below []string) []string {
 		}
 	}
 	said.out = blockSaysOut(m.trail, m.now, append(beside, below...)...)
-	return blockLines(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said)
+	rows := m.blockRowsHere()
+	v := blockView{rows: rows, cursor: m.blockCursorRow(rows), cap: m.blockCap()}
+	v.top, _, _ = summaryWindow(len(rows), v.cap, v.cursor, m.blockScroll)
+	m.blockScroll = v.top // the window is where the cursor left it
+	return blockLinesIn(m.trail, o, w, headSaysLive(m.trail, m.now, o, below), said, v)
 }
 
 // headSaysLive reports whether the rows drawn beneath a block carry the
@@ -614,7 +846,7 @@ func headSaysLive(tr journey.Trail, now time.Time, o TrailOpts, below []string) 
 // columnBlock is a board column's block: the column's header says the
 // loop and the lanes' tally where it does, and HEAD's own row beneath
 // says the running leg's clause where the column draws it (#376, #377).
-func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o TrailOpts, header, below []string, w int) []string {
+func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o TrailOpts, header, below []string, w int, bare bool) []string {
 	if !blockCounts(tr) {
 		return nil
 	}
@@ -632,5 +864,354 @@ func (m *Model) columnBlock(key string, tr journey.Trail, s fleet.Session, o Tra
 			said.live = strings.Contains(text, "for "+relAge(m.now, l.Start))
 		}
 	}
-	return blockLines(tr, so, w, headSaysLive(tr, m.now, so, below), said)
+	return blockLinesIn(tr, so, w, headSaysLive(tr, m.now, so, below), said, blockView{cursor: -1, bare: bare})
+}
+
+// The block's cursor (#393). The counts above a trail open into the rows
+// they count: `k` off the trail's first row climbs into the block, `j`
+// off its last row is the trail's first, `space` on a class or the lanes
+// opens it into its legs or lanes and on a row under it folds the group.
+// A leg or lane row in the block is that leg or lane — the reader
+// follows it, `tab` reads it, `enter` attaches — so every key does at a
+// block row what it does at a trail row. The board's columns keep the
+// counts closed: the open set is the session view's, per session.
+
+// blockTrailFloor is the fewest trail rows an open block leaves beneath
+// the seam: past it the block's own rows are windowed instead.
+const blockTrailFloor = 4
+
+// openHere is the selected session's open set: nil while nothing is.
+func (m *Model) openHere() map[string]bool {
+	return m.blockOpen[m.selectedKey]
+}
+
+// setOpen opens or closes a group of the selected session's block.
+func (m *Model) setOpen(key string, on bool) {
+	if m.blockOpen == nil {
+		m.blockOpen = map[string]map[string]bool{}
+	}
+	set := m.blockOpen[m.selectedKey]
+	if set == nil {
+		set = map[string]bool{}
+		m.blockOpen[m.selectedKey] = set
+	}
+	if on {
+		set[key] = true
+	} else {
+		delete(set, key)
+	}
+}
+
+// blockRowsHere is the selected trail's block as the trail column draws
+// it: the open groups opened, a lane still out saying what its own file
+// says, a finding wrapped to the rail it hangs on.
+func (m *Model) blockRowsHere() []summaryRow {
+	open := m.openHere()
+	if len(open) == 0 {
+		return blockRows(m.trail)
+	}
+	w := m.trailBoxWidth()
+	return blockRowsOpen(m.trail, open, m.blockLaneLines(), w-trailWayWidth-2)
+}
+
+// blockLaneLines is what each lane still out says of itself — its own
+// file's last line and clock, as the trail hangs it under the lane — by
+// index into the trail's branches (#352).
+func (m *Model) blockLaneLines() map[int]laneLine {
+	out := map[int]laneLine{}
+	if s, ok := m.selected(); !ok || !s.Live || s.Snap.State == state.Idle {
+		return out
+	}
+	agents := m.agentsFor(m.selectedKey)
+	for i, br := range m.trail.Branches {
+		if br.Done {
+			continue
+		}
+		live, known := agents[br.ToolUseID]
+		if g, text, clock := laneHead(live, br, known, m.now); text != "" {
+			out[i] = laneLine{text: g + " " + text, clock: clock}
+		}
+	}
+	return out
+}
+
+// blockCap is how many rows the block may spend on this frame, the seam
+// aside: the trail keeps its floor beneath, and the closed block, which
+// the frame always drew whole, is never cut shorter than it stood.
+func (m *Model) blockCap() int {
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	cap := h - 5 - trailChrome - blockSeamRows - blockTrailFloor
+	if closed := len(blockRows(m.trail)); cap < closed {
+		cap = closed
+	}
+	return cap
+}
+
+// blockHeightHere is how many rows the block spends above the selected
+// trail: its rows, windowed where the open groups outrun the room, and
+// the seam under them (#377, #378, #393).
+func (m *Model) blockHeightHere() int {
+	n := len(m.blockRowsHere())
+	if n == 0 {
+		return 0
+	}
+	return min(n, m.blockCap()) + blockSeamRows
+}
+
+// inBlock says whether the cursor is in the block: on the legs, on the
+// session the cursor was put there on, over a trail that counts.
+func (m *Model) inBlock() bool {
+	return m.level >= levelWaypoints && m.blockCursor >= 0 && m.blockOn == m.selectedKey && blockCounts(m.trail)
+}
+
+// blockCursorRow is the block row the cursor stands on, held to a row it
+// can stand on: -1 while the cursor is the trail's.
+func (m *Model) blockCursorRow(rows []summaryRow) int {
+	if !m.inBlock() {
+		return -1
+	}
+	m.blockClamp(rows)
+	return m.blockCursor
+}
+
+// blockClamp holds the block cursor to a standing row: a trail that grew
+// a class or lost one moves the rows under it.
+func (m *Model) blockClamp(rows []summaryRow) {
+	if len(rows) == 0 {
+		m.blockCursor = -1
+		return
+	}
+	c := min(max(m.blockCursor, 0), len(rows)-1)
+	if !rows[c].stands() {
+		if up := blockStep(rows, c, -1); up >= 0 {
+			c = up
+		} else if down := blockStep(rows, c, 1); down >= 0 {
+			c = down
+		}
+	}
+	m.blockCursor = c
+}
+
+// blockStep is the next standing row from i in the direction of delta's
+// sign, |delta| standing rows on, or as far as the block goes; -1 where
+// no standing row lies that way at all.
+func blockStep(rows []summaryRow, i, delta int) int {
+	step, n := 1, delta
+	if delta < 0 {
+		step, n = -1, -delta
+	}
+	at := -1
+	for j := i + step; j >= 0 && j < len(rows) && n > 0; j += step {
+		if rows[j].stands() {
+			at, n = j, n-1
+		}
+	}
+	return at
+}
+
+// blockEnter puts the cursor on the block's last standing row: the way
+// in is `k` off the trail's first row, so the first row it lands on is
+// the one nearest the trail.
+func (m *Model) blockEnter(rows []summaryRow) bool {
+	last := -1
+	for i := range rows {
+		if rows[i].stands() {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	m.blockCursor, m.blockOn = last, m.selectedKey
+	m.anchorReader()
+	return true
+}
+
+// blockLeave puts the cursor back on the trail, at its first row: `j`
+// off the block's last row.
+func (m *Model) blockLeave() {
+	m.cursor = 0
+	m.cursorMove(0) // records the block row left, and clears the block cursor
+}
+
+// blockJumpWord is what `s` does here: `counts` on a trail that draws a
+// block, `trail` in the block, "" where the key refuses.
+func (m *Model) blockJumpWord() string {
+	switch {
+	case m.level != levelWaypoints || m.showHelp || m.searching || m.replying:
+		return ""
+	case m.inBlock():
+		return "trail"
+	case m.blockShown():
+		return "counts"
+	}
+	return ""
+}
+
+// blockFoldWord is what `space` does on the cursor's block row: `open` a
+// closed group, `close` an open one or the group a row under it belongs
+// to.
+func (m *Model) blockFoldWord() string {
+	rows := m.blockRowsHere()
+	c := m.blockCursorRow(rows)
+	if c < 0 {
+		return ""
+	}
+	if rows[c].group() && !m.openHere()[rows[c].key] {
+		return "open"
+	}
+	return "close"
+}
+
+// blockJump is `s` on the trail: the cursor to the counts, on the row it
+// last stood on there, else the block's last row. False where the trail
+// draws no block.
+func (m *Model) blockJump() bool {
+	if !m.blockShown() {
+		return false
+	}
+	rows := m.blockRowsHere()
+	if m.blockOn == m.selectedKey && m.blockRest >= 0 && m.blockRest < len(rows) {
+		m.blockCursor = m.blockRest
+		m.blockClamp(rows)
+		m.anchorReader()
+		return true
+	}
+	return m.blockEnter(rows)
+}
+
+// blockKey is the Lv2 keys while the cursor is in the block, and the
+// three that take it there: `k` off the trail's first row, `s` from any
+// row of the trail, and `space`, which on the trail says where it acts.
+// The page key stops at the trail's first row as it always did — the
+// walkthrough's `at the start` — and `k`, the step, is the way up. True
+// when the key was the block's.
+func (m *Model) blockKey(key string) bool {
+	if !m.inBlock() {
+		switch key {
+		case "k", "up":
+			if m.cursor == 0 && m.blockShown() && m.blockEnter(m.blockRowsHere()) {
+				return true
+			}
+		case "s":
+			if !m.blockJump() {
+				m.note = "nothing to count" // no class with two legs: the trail says all there is (#349)
+			}
+			return true
+		case " ", "space":
+			if m.blockShown() {
+				m.note = "the counts open · k up to them"
+			} else {
+				m.note = "nothing to open" // a trail with nothing to count draws no block
+			}
+			return true
+		}
+		return false
+	}
+	rows := m.blockRowsHere()
+	m.blockClamp(rows)
+	if m.blockCursor < 0 {
+		return false
+	}
+	row := rows[m.blockCursor]
+	switch key {
+	case "j", "down":
+		if next := blockStep(rows, m.blockCursor, 1); next >= 0 {
+			m.blockCursor = next
+			m.anchorReader()
+		} else {
+			m.blockLeave()
+		}
+		return true
+	case "k", "up":
+		if prev := blockStep(rows, m.blockCursor, -1); prev >= 0 {
+			m.blockCursor = prev
+			m.anchorReader()
+		} else {
+			m.note = "at the start"
+		}
+		return true
+	case "ctrl+d":
+		// Half a page of rows, as on the trail; off the block's end it
+		// is the trail's first row, as `j` is.
+		if blockStep(rows, m.blockCursor, 1) < 0 {
+			m.blockLeave()
+			return true
+		}
+		next := blockStep(rows, m.blockCursor, m.trailHalfPage())
+		for n := m.trailHalfPage() - 1; next < 0 && n > 0; n-- {
+			next = blockStep(rows, m.blockCursor, n)
+		}
+		m.blockCursor = next
+		m.anchorReader()
+		return true
+	case "ctrl+u":
+		prev := -1
+		for n := m.trailHalfPage(); prev < 0 && n > 0; n-- {
+			prev = blockStep(rows, m.blockCursor, -n)
+		}
+		if prev < 0 {
+			m.note = "at the start"
+			return true
+		}
+		m.blockCursor = prev
+		m.anchorReader()
+		return true
+	case "G":
+		// The present is the trail's newest row, from the block as from
+		// anywhere on the trail.
+		m.cursorToPresent()
+		return true
+	case "s":
+		// Back to the trail, on the row the cursor left: `k` off the
+		// first row came from the first row, `s` from wherever it was.
+		m.cursorMove(0)
+		return true
+	case "]":
+		// The block's chapters are its groups: the next class or the
+		// lanes, past an open group's rows. Off the last group the next
+		// chapter is the trail's first prompt (#393).
+		for j := m.blockCursor + 1; j < len(rows); j++ {
+			if rows[j].group() {
+				m.blockCursor = j
+				m.anchorReader()
+				return true
+			}
+		}
+		m.blockLeave()
+		m.chapterFirst()
+		return true
+	case "[":
+		// The previous group; from a row under an open group, the group
+		// it is under. The trail's own `[` keeps its refusal at the first
+		// prompt: the chapter key's question is prompts (#161).
+		for j := m.blockCursor - 1; j >= 0; j-- {
+			if rows[j].group() {
+				m.blockCursor = j
+				m.anchorReader()
+				return true
+			}
+		}
+		m.note = "at the start"
+		return true
+	case " ", "space":
+		switch {
+		case row.group():
+			on := !m.openHere()[row.key]
+			m.setOpen(row.key, on)
+			if on {
+				m.blockScroll = m.blockCursor // the group opens framed: its row first, its rows filling the window
+			}
+		default:
+			// A row under a group folds the group and stands on it.
+			m.setOpen(row.key, false)
+			m.blockCursor = summaryGroupRow(rows, m.blockCursor)
+		}
+		m.anchorReader()
+		return true
+	}
+	return false
 }

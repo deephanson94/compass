@@ -234,9 +234,11 @@ run and nothing else.
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
-| `[` / `]` | previous / next prompt — the chapters of a trail; in the reader, your turns, marked and named as it lands on them |
+| `[` / `]` | previous / next prompt — the chapters of a trail (your prompts; a teammate's relayed report is drawn but is no chapter); in the counts, the previous / next group; in the reader, your turns, marked and named as it lands on them |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
+| `Space` | in a session: the counts above the trail (`◆ build  6 legs`) open into their legs — `k` off the trail's first row climbs onto them, `Space` opens the class or the lanes under the cursor and folds it again. A leg there is that leg: the conversation follows it, `Tab` reads it, `Enter` attaches |
+| `s` | in a session: jump to the counts, and back to the trail — each side keeps the row you left |
 | `/` | on the board, the list or the archive: search the fleet — name, opening prompt, branch, any prompt, a leg, a file a leg touched. The header says `/query · 3 of 40`; `esc` clears it |
 | `r` | reply: a panel beside the selected session names it, says what it is doing, and offers — the options of the question it is sitting on (sent as the CLI menu's own digit), the stock lines ("please continue", "report status"; the quota one only where a quota was hit; `reply = "…"` in the config replaces them), and **stop** (escape, which interrupts the turn). A session dead on the API is offered the remedy its refusal names (`/login`, typed as those bytes) under its own head, and the quota line named as what it is — a turn, for once the quota is back. A digit acts; `t` opens a line to type. The board carries `↪ sent "…" · 2m ago` (or `↪ answered 1 · "…"`) until the transcript shows the prompt landed. Off under `-readonly` |
 | `?` | help |

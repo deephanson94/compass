@@ -160,7 +160,9 @@ func TestPinnedColumnSaysWhatIsAbove(t *testing.T) {
 	if !strings.Contains(joined, "legs above · began 1d ago") {
 		t.Errorf("a cut column does not say what is above it:\n%s", joined)
 	}
-	if first := 3 + blockHeight(m.trails[api]); !strings.Contains(got[first], "↑") {
+	// A column that folds draws no seam over its counts (#393): the
+	// block is its rows and the seam under them.
+	if first := 3 + blockHeightBare(m.trails[api]); !strings.Contains(got[first], "↑") {
 		t.Errorf("the notice is not the column's first trail row under its block (#377):\n%s", joined)
 	}
 	// Short enough to fit: no notice.

@@ -226,6 +226,19 @@ type Model struct {
 	cursor   int
 	narrated string
 
+	// The block's cursor (#393): the counts above the trail, entered by
+	// `k` off the trail's first row. blockCursor indexes the block's rows
+	// while the cursor is there, -1 while it is the trail's; blockOn is
+	// the session it was put there on, so a stale one is no cursor;
+	// blockOpen is each session's groups opened into their rows; and
+	// blockScroll is where the block's window stood where the open rows
+	// outrun the room.
+	blockCursor int
+	blockOn     string
+	blockOpen   map[string]map[string]bool
+	blockScroll int
+	blockRest   int // the block row the cursor last stood on, for `s` to come back to
+
 	// The reader's own state, all of it Lv3: where the document is scrolled,
 	// which results are unfolded, and the search.
 	scroll   int
@@ -375,6 +388,8 @@ func New(mgr *fleet.Manager) *Model {
 		now:         time.Now(),
 		level:       levelBoard,
 		cursor:      -1,
+		blockCursor: -1,
+		blockRest:   -1,
 		trailPinned: true,
 		anchor:      -1,
 		unfolded:    map[int]bool{},
@@ -1177,6 +1192,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case levelReader:
 		return m.readerKey(key)
 	case levelWaypoints:
+		if m.blockKey(key) {
+			return m, nil // the cursor is in the block, or the key took it there (#393)
+		}
 		switch key {
 		case "h", "left", "l", "right":
 			if m.sessionView() {
@@ -1480,7 +1498,7 @@ func (m *Model) chapterStand() ([]TrailRow, []int, map[int]int, int) {
 	rows := TrailRows(m.trail, m.level)
 	var prompts []int // indices into rows
 	for i, r := range rows {
-		if r.Kind == "prompt" {
+		if r.Kind == "prompt" && !r.Teammate { // a teammate's report is no chapter (#394)
 			prompts = append(prompts, i)
 		}
 	}
@@ -1564,6 +1582,22 @@ func (m *Model) chapter(key string) {
 			return
 		}
 	}
+	m.chapterLand(rows, prompts, docRow, target)
+}
+
+// chapterFirst is the trail's first chapter: `]` off the block's last
+// group lands on it, the counts being the chapter before it (#393).
+func (m *Model) chapterFirst() {
+	rows, prompts, docRow, _ := m.chapterStand()
+	if len(prompts) == 0 {
+		return
+	}
+	m.chapterLand(rows, prompts, docRow, prompts[0])
+}
+
+// chapterLand lands on the prompt row target: the cursor at Lv2, the
+// viewport at Lv1, and the note saying which chapter this is and when.
+func (m *Model) chapterLand(rows []TrailRow, prompts []int, docRow map[int]int, target int) {
 	nth := 0
 	for i, p := range prompts {
 		if p == target {
@@ -1600,6 +1634,10 @@ func (m *Model) firstRowInView() int {
 
 // cursorMove walks the Lv2 selection over the trail's selectable rows.
 func (m *Model) cursorMove(delta int) {
+	if m.blockCursor >= 0 {
+		m.blockRest = m.blockCursor // where `s` comes back to (#393)
+	}
+	m.blockCursor = -1 // a cursor moved on the trail is the trail's (#393)
 	rows := TrailRows(m.trail, m.level)
 	if len(rows) == 0 {
 		m.cursor = -1
@@ -1669,6 +1707,24 @@ func (m *Model) cursorToPresent() {
 // that is actually on screen. Width first, then the rows the graph itself gets
 // — the column spends two on its title and its line of air.
 func (m *Model) trailBox() (int, int) {
+	width := m.trailBoxWidth()
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#377, #381)
+	if m.blockShown() {
+		height -= m.blockHeightHere()
+	}
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+// trailBoxWidth is the trail column's width alone: what the block's own
+// rows are measured against before the block's height is known.
+func (m *Model) trailBoxWidth() int {
 	w := m.width
 	if w <= 0 {
 		w = 80
@@ -1678,19 +1734,7 @@ func (m *Model) trailBox() (int, int) {
 		inner = w
 	}
 	_, _, width := m.layout(inner)
-
-	h := m.height
-	if h <= 0 {
-		h = 24
-	}
-	height := h - 5 - trailChrome // the block above the trail takes its rows first, where it is drawn (#377, #381)
-	if m.blockShown() {
-		height -= blockHeight(m.trail)
-	}
-	if height < 1 {
-		height = 1
-	}
-	return width, height
+	return width
 }
 
 // trailHalfPage is what ctrl+d and ctrl+u move: half the trail's screenful.
@@ -4269,7 +4313,26 @@ func (m *Model) replyRefusalSaid(whole string) string {
 // the deck below the board's width — there is no trade: the clause is the
 // frame's only naming of the archive, not a second one (#328).
 func (m *Model) footerTraded(keys string, w int) string {
-	return m.footerDrawn("traded", keys, w, m.footerTradedOnce)
+	return m.footerDrawn("traded", keys, w, m.footerCountsTraded)
+}
+
+// footerCountsTraded is the legs' row with `s counts` — `s trail` in the
+// block — where the row has spare room for it: it is the first key the
+// row gives up, ahead of the page key and the door, so every row pinned
+// at 80 through 152 stands as it stood, and the goldens do not move
+// (#348's trade, #393). The clause stands before `? help`.
+func (m *Model) footerCountsTraded(keys string, w int) string {
+	word := m.blockJumpWord()
+	if word == "" || !strings.Contains(keys, " · ? help") || strings.Contains(keys, " · s ") {
+		return m.footerTradedOnce(keys, w)
+	}
+	clause := " · s " + word
+	with := m.footerTradedOnce(strings.Replace(keys, " · ? help", clause+" · ? help", 1), w)
+	without := m.footerTradedOnce(keys, w)
+	if footerNamesAll(without, with) {
+		return with // the clause cost the row no key
+	}
+	return without
 }
 
 // footerTradedOnce is the draw itself: the memo above is what keeps
@@ -4673,6 +4736,13 @@ func (m *Model) keymapOnce() string {
 		} else {
 			keys = strings.Replace(keys, " · ? help", " · g grab · ? help", 1)
 		}
+	}
+	if m.inBlock() && !m.showHelp && !m.searching && !m.replying {
+		// The cursor is in the block: `space` opens or closes the group
+		// its row belongs to, and the row names it beside the keys that
+		// walk the rows (#393). It stands where the reader stands its own
+		// `space unfold`, and sheds at that rank.
+		keys = strings.Replace(keys, "ctrl+d/u half page · ", "ctrl+d/u half page · space "+m.blockFoldWord()+" · ", 1)
 	}
 	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
 		// At Lv1 the page keys drive the trail beside the list (§3); on a
@@ -5376,6 +5446,9 @@ func (m *Model) refusedKeys() []string {
 	var refused []string
 	if m.liveCount() == 1 && !m.archiveView {
 		refused = append(refused, "g", "x") // nothing to grab, and hiding the only session is refused
+	}
+	if m.level != levelWaypoints || !blockCounts(m.trail) {
+		refused = append(refused, "s") // the counts are the legs' (#393), and a trail with nothing to count draws none (#377)
 	}
 	return refused
 }
@@ -6271,7 +6344,11 @@ func (m *Model) shedOrder(chapter bool) []string {
 		own = []string{" · g grab",
 			// The refusal goes before the key that acts here too (#52).
 			" · enter · no pane", " · n/N", " · / search", " · x hide", " · x unhide", " · space unfold", " · [ ] turns",
-			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters"}
+			" · a ask", " · enter attach", " · esc back", " · esc board", " · r reply", " · tab deeper", " · tab reader", " · [ ] chapters",
+			// The block's fold key is the key the row exists for while the
+			// cursor is in the block: last of the level's own keys to go
+			// (#393).
+			" · space open", " · space close"}
 	default:
 		// A row whose movement key has yielded (#213, #216, #259) leads
 		// with the attach key, and the separator-led fragment above then

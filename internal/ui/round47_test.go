@@ -35,9 +35,9 @@ func TestTheBoardSpendsItsSpareRowsOnTheLanesHeads(t *testing.T) {
 	if strings.Contains(view, "silent 12m") {
 		t.Errorf("at 80 the heads should go first:\n%s", view)
 	}
-	tall := sceneModel(sc, 80, 27) // the block's two rows and its seam over the 24 the rule was measured at
+	tall := sceneModel(sc, 80, 28) // the block's two rows and its two seams over the 24 the rule was measured at (#378, #393)
 	if v := ansi.Strip(tall.View()); !strings.Contains(v, "◉ 1/2") || strings.Contains(v, "silent 12m") {
-		t.Errorf("at 80x27 the heads cost the trail its first prompt:\n%s", v)
+		t.Errorf("at 80x28 the heads cost the trail its first prompt:\n%s", v)
 	}
 }
 

@@ -1096,3 +1096,24 @@ func TestARelayedMessageOpensAChapter(t *testing.T) {
 		t.Errorf("a background agent's echo opened a chapter: %+v", echo.Prompts)
 	}
 }
+
+// A teammate's report is recorded as a relayed prompt that names the
+// teammate, with the message as its text and never the envelope's tag;
+// the trail draws it unnumbered and the chapter keys step over it (#394).
+func TestATeammatesReportNamesTheTeammate(t *testing.T) {
+	tr := segment(
+		transcript.Event{Type: transcript.EventUser, Text: "build the sidecar", Timestamp: base},
+		transcript.Event{Type: transcript.EventAssistant, Text: "On it.", Timestamp: base.Add(time.Second)},
+		transcript.Event{Type: transcript.EventUser, Text: "Another Claude session sent a message:\n\n<teammate-message teammate_id=\"panel-theorist\" color=\"purple\">\nThe plan holds.\n</teammate-message>", Timestamp: base.Add(time.Minute)},
+		transcript.Event{Type: transcript.EventAssistant, Text: "Noted.", Timestamp: base.Add(61 * time.Second)},
+	)
+	if len(tr.Prompts) != 2 {
+		t.Fatalf("Prompts = %+v; want the ask and the report", tr.Prompts)
+	}
+	if p := tr.Prompts[1]; !p.Relayed || p.Teammate != "panel-theorist" || p.Text != "panel-theorist: The plan holds." {
+		t.Errorf("the report = %+v; want it relayed, named for its teammate, with the message as its text", p)
+	}
+	if p := tr.Prompts[0]; p.Teammate != "" || p.Relayed {
+		t.Errorf("the ask = %+v; a person's prompt names no teammate", p)
+	}
+}

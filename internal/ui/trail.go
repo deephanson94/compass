@@ -731,7 +731,8 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 		} else {
 			// Selectable from Lv2, like a leg: it is the row you wrote, and the
 			// reader anchors to it as readily as to any leg's first line.
-			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, n.prompt+1, len(tr.Prompts), promptWait(tr, n.prompt)))
+			nth, total := promptNumber(tr, n.prompt)
+			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, nth, total, promptWait(tr, n.prompt)))
 			forked = false
 		}
 	}
@@ -801,6 +802,17 @@ func lookRule(looked, now time.Time, width int) string {
 	return ruleStyle.Render(clip(row, width))
 }
 
+// countsRule is the rail row over a block: "│ the counts ────", so the
+// rows are never read as more of the card, header or title over them
+// (#393).
+func countsRule(width int) string {
+	row := railStroke + " the counts "
+	if rest := width - len([]rune(row)); rest > 0 {
+		row += strings.Repeat("─", rest)
+	}
+	return ruleStyle.Render(clip(row, width))
+}
+
 // seamRule is the rail row between a trail's block and the trail itself:
 // "│ the trail ────", in the rail's own labelled-rule idiom, so the counts
 // above and the rows beneath are never read as one column (#378).
@@ -839,11 +851,12 @@ const glyphCompact = "⟲"
 // the moment it stands for. Enter at Lv2 opens the reader at that moment
 // (SPEC §3), so every selectable row has to name one.
 type TrailRow struct {
-	Time time.Time // the moment the row stands for
-	Kind string    // "leg", "waypoint" or "branch"
-	Text string    // what the row says, undecorated
-	Leg  int       // index into Trail.Legs the row belongs to, or -1
-	Lane string    // a branch row: the Agent call's id, which its own transcript is paired by
+	Time     time.Time // the moment the row stands for
+	Kind     string    // "leg", "waypoint" or "branch"
+	Text     string    // what the row says, undecorated
+	Leg      int       // index into Trail.Legs the row belongs to, or -1
+	Lane     string    // a branch row: the Agent call's id, which its own transcript is paired by
+	Teammate bool      // a prompt row that is a teammate's report: drawn, never a chapter (#394)
 }
 
 // TrailRows enumerates the trail's selectable rows in the order RenderTrail
@@ -871,7 +884,7 @@ func TrailRows(tr journey.Trail, level int) []TrailRow {
 			// after I asked this" is the most natural way into a session — so
 			// the cursor stops on it. Leg -1 says it belongs to no leg.
 			out = append(out, TrailRow{Time: tr.Prompts[n.prompt].At, Kind: "prompt",
-				Text: tr.Prompts[n.prompt].Text, Leg: -1})
+				Text: tr.Prompts[n.prompt].Text, Leg: -1, Teammate: tr.Prompts[n.prompt].Teammate != ""})
 			continue
 		}
 		leg := tr.Legs[n.leg]
@@ -1449,8 +1462,8 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited ti
 	// The chapter: "◉ 9/13" is what `[` and `]` step through, and on a
 	// trail with a dozen prompts it is the readout to steer by.
 	lead := glyphPrompt
-	if total > 1 {
-		lead += fmt.Sprintf(" %d/%d", nth, total)
+	if total > 1 && nth > 0 {
+		lead += fmt.Sprintf(" %d/%d", nth, total) // a teammate's report has no number: it is no chapter (#394)
 	}
 	textWidth := width - len([]rune(lead)) - 1 - 1 - len([]rune(age))
 	if textWidth < trailMinLabel {
@@ -1892,7 +1905,7 @@ func (m *Model) trailColumn(w, h int) []string {
 	// (#351, #377).
 	bh := 0
 	if m.blockShown() {
-		bh = blockHeight(m.trail) // the rows the block draws on this frame, not the rows it would (#381)
+		bh = m.blockHeightHere() // the rows the block draws on this frame, not the rows it would (#381)
 	}
 	draw := func(h int) []string {
 		if bh >= h {
@@ -2214,11 +2227,20 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Width:        w,
 		Height:       h,
 		Level:        m.level,
-		Cursor:       m.cursor,
+		Cursor:       m.trailCursor(),
 		Pulse:        m.pulse,
 		Scroll:       m.trailScroll,
 		Pinned:       m.trailPinned,
 	}
+}
+
+// trailCursor is the cursor the trail draws: none while the cursor is in
+// the block above it (#393).
+func (m *Model) trailCursor() int {
+	if m.inBlock() {
+		return -1
+	}
+	return m.cursor
 }
 
 // legsAbove counts the legs the trail's viewport currently hides above its
@@ -2405,8 +2427,8 @@ const (
 // prompt before — to the prompt. Zero for the first prompt, for a gap the
 // trail cannot see, and for one longer than waitAway.
 func promptWait(tr journey.Trail, i int) time.Duration {
-	if i < 0 || i >= len(tr.Prompts) {
-		return 0
+	if i < 0 || i >= len(tr.Prompts) || tr.Prompts[i].Teammate != "" {
+		return 0 // a teammate reporting back is not you arriving (#394)
 	}
 	at := tr.Prompts[i].At
 	var last time.Time
@@ -2430,6 +2452,27 @@ func promptWait(tr journey.Trail, i int) time.Duration {
 		return d
 	}
 	return 0
+}
+
+// promptNumber is a prompt's chapter number and the chapter count: your
+// own prompts, counted in order; a teammate's report is 0 of them (#394).
+func promptNumber(tr journey.Trail, i int) (nth, total int) {
+	for j, p := range tr.Prompts {
+		if p.Teammate != "" {
+			continue
+		}
+		total++
+		if j == i {
+			nth = total
+		}
+	}
+	return nth, total
+}
+
+// ownPrompts is how many of the trail's prompts are yours: the chapters.
+func ownPrompts(tr journey.Trail) int {
+	_, total := promptNumber(tr, -1)
+	return total
 }
 
 // promptWaits is the trail's waits on you added up: every prompt's.
