@@ -781,7 +781,7 @@ func (m *Model) boardColumnRows(key string, w int) int {
 		return 4
 	}
 	s := m.sessions[r.sess]
-	doc := TrailLines(tr, TrailOpts{
+	doc := m.trailLinesOf(tr, TrailOpts{
 		Todos: planItems(tr.Tasks), Head: m.headFor(s), HeadState: s.Snap.State, HeadSince: headSince(s), HeadAllowed: s.Snap.Allowed, Agents: m.agentsFor(key),
 		SessionKey: key, Now: m.now, Width: w, Height: 1000, Level: levelTrail, Cursor: -1, Pinned: true,
 		Dense: true, Looked: m.looked(key), NoLaneHeads: m.noLaneHeads,
@@ -848,7 +848,7 @@ func (m *Model) boardColumnDrawRows(key string, w int) int {
 	}
 	o := m.boardColumnOpts(key, m.sessions[r.sess], tr, w, 1000)
 	o.Pulse = false
-	return 3 + blockHeightBare(tr) + len(TrailLines(tr, o))
+	return 3 + blockHeightBare(tr) + len(m.trailLinesOf(tr, o))
 }
 
 // payDebts spends the rows a board has not spent on the bands' debts —
@@ -1324,14 +1324,14 @@ func (m *Model) boardColumnIn(key string, r fleetRow, w, h int, seam bool) []str
 	if opts.Height < 1 {
 		opts.Height = 1
 	}
-	frame := RenderTrail(tr, opts)
+	frame := m.renderTrailOf(tr, opts)
 	lines := strings.Split(frame, "\n")
 	block := m.columnBlock(key, tr, s, opts, rows, lines, w, !seam)
 	// A column pinned to the present with a day above it says so on its
 	// first row — the rail row that would otherwise be a bare stroke — so a
 	// column that begins with ◉ and one that begins ten hours in are not
 	// one character apart.
-	if hidden := hiddenAbove(tr, opts); hidden > 0 && len(lines) > 0 {
+	if hidden := m.hiddenAboveOf(tr, opts); hidden > 0 && len(lines) > 0 {
 		began := ""
 		if len(tr.Prompts) > 0 {
 			began = " · began " + relAge(m.now, tr.Prompts[0].At) + " ago"
@@ -1425,7 +1425,7 @@ func (m *Model) columnSparesRow(key string, r fleetRow, w, h int) bool {
 	if opts.Height < 1 {
 		return false
 	}
-	return hiddenAbove(tr, opts) == 0 && len(TrailLines(tr, opts)) <= opts.Height-1
+	return m.hiddenAboveOf(tr, opts) == 0 && len(m.trailLinesOf(tr, opts)) <= opts.Height-1
 }
 
 // columnHeader is a session's three-row card: the fleet row, the verdict
@@ -2311,7 +2311,7 @@ func (m *Model) findingHead(tr journey.Trail, o TrailOpts, parent string) string
 	o.Height = 1000
 	o.Cursor = -1
 	want := strings.TrimRight(ansi.Strip(parent), " ")
-	rows := TrailLines(tr, o)
+	rows := m.trailLinesOf(tr, o)
 	for i, r := range rows {
 		if strings.TrimRight(ansi.Strip(r), " ") != want || i+1 >= len(rows) || !isDetailRow(rows[i+1]) {
 			continue
@@ -2381,6 +2381,11 @@ func foldFindingOnto(parent, child string, w int) string {
 // hiddenAbove counts the legs a pinned column keeps above its first row.
 func hiddenAbove(tr journey.Trail, o TrailOpts) int {
 	doc, sel := trailDoc(tr, o)
+	return hiddenAboveIn(tr, o, doc, sel)
+}
+
+// hiddenAboveIn is hiddenAbove over a document already built.
+func hiddenAboveIn(tr journey.Trail, o TrailOpts, doc []string, sel []int) int {
 	top := trailTop(len(doc), o)
 	n := legsHiddenAbove(tr, o.Level, sel, top)
 	// The fold row is drawn over the viewport's first row: where that row

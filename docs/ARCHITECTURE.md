@@ -247,6 +247,8 @@ a plain JSONL file; config at `~/.config/compass/config.toml` (zero-config defau
 - Render at most 15fps; idle panel draws only on data/tick (battery-polite).
 - Read-only everywhere except its own cache dir. No network calls except through
   the user's `claude` binary. No telemetry, ever.
+- What a keypress costs on a long journey, and the memos that keep it under a
+  frame, are measured and recorded in [PERFORMANCE.md](PERFORMANCE.md).
 
 ## 7. Milestones
 

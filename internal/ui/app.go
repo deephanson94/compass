@@ -255,10 +255,11 @@ type Model struct {
 	// last screenful, so a walk that asks the page where it stands cannot
 	// step between the matches that share that screenful, and can never
 	// reach the wrap `walkTo` says it has.
-	walkRow  int
-	draft    string // the query being typed; searching is true while it is
-	docVer   int    // bumped whenever a fold changes, to retire the cache
-	docCache readerCache
+	walkRow   int
+	draft     string // the query being typed; searching is true while it is
+	docVer    int    // bumped whenever a fold changes, to retire the cache
+	docCache  readerCache
+	trailMemo trailMemo // the trail's bare document, kept for one message (see trailmemo.go)
 
 	// The trail's own viewport, and only the trail's: how far the panel is
 	// scrolled into the trail's document, and whether it is pinned to the
@@ -466,12 +467,14 @@ func planItems(tasks []journey.Task) []todo.Item {
 
 // SetNarrator hands the deck its narrator (a harness passes a fake one).
 func (m *Model) SetNarrator(n Narrator) {
+	m.retireTrailMemo()
 	m.narrator = n
 }
 
 // SetEvents installs the selected session's transcript — what the Lv3 reader
 // renders (exported so a harness can render a fixed document).
 func (m *Model) SetEvents(events []transcript.Event) {
+	m.retireTrailMemo()
 	m.events = events
 	m.docCache.valid = false
 	if m.level >= levelWaypoints && m.cursor >= 0 && m.anchor < 0 && m.readerLane == "" && len(events) > 0 {
@@ -490,6 +493,7 @@ func (m *Model) SetEvents(events []transcript.Event) {
 // SetSize sets the render dimensions (bubbletea does this via WindowSizeMsg;
 // exported so a harness can render a fixed-size view).
 func (m *Model) SetSize(width, height int) {
+	m.retireTrailMemo()
 	// Where the reader's cursor stands, said in terms the next width will
 	// still understand: the transcript event its row belongs to and how far
 	// down that event's rows it is. A row number belongs to one wrapping,
@@ -518,6 +522,7 @@ func (m *Model) SetSize(width, height int) {
 
 // SetSessions installs a fleet snapshot as of now, without polling.
 func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
+	m.retireTrailMemo()
 	m.sessions = sessions
 	m.now = now
 	m.loaded = true
@@ -528,6 +533,7 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 // SetPanes gives the model the key → pane mapping: the location line in the
 // fleet, the source of the mirror, and the pane Enter attaches to.
 func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
+	m.retireTrailMemo()
 	m.panes = panes
 }
 
@@ -535,23 +541,27 @@ func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
 // returns, session by session, in index order. The live view groups itself in
 // the order this list first mentions each tmux session.
 func (m *Model) SetPaneOrder(list []tmuxop.Pane) {
+	m.retireTrailMemo()
 	m.paneList = list
 }
 
 // SetTrail hands the model the selected session's trail for the right panel.
 func (m *Model) SetTrail(tr journey.Trail) {
+	m.retireTrailMemo()
 	m.trail = tr
 }
 
 // SetTodos hands the model the selected session's own task list — the plan the
 // trail draws ahead of HEAD as ghosts.
 func (m *Model) SetTodos(items []todo.Item) {
+	m.retireTrailMemo()
 	m.todos = items
 }
 
 // SetMirror hands the model the latest captured frame for the selected session
 // ("" = nothing to mirror; the panel then falls back to the transcript).
 func (m *Model) SetMirror(frame string) {
+	m.retireTrailMemo()
 	m.mirror = frame
 }
 
@@ -745,6 +755,14 @@ func (m *Model) capture() tea.Cmd {
 
 // Update handles the cadences, snapshots, resizes and keys.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, key := msg.(tea.KeyMsg); !key {
+		// A poll, a tick, a narrated label, a new size: the state the
+		// trail is drawn from changes here, so the memo goes. A key keeps
+		// it: the cursor is laid over the document, not built into it,
+		// and a key that swaps the trail in (a session selected, the
+		// board's Tab) misses on the trail's own identity in the key.
+		m.retireTrailMemo()
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height)
@@ -1261,7 +1279,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorMove(1)
 			if m.cursor == was {
 				m.note = "at the present · k goes back"
-				if len(TrailRows(m.trail, m.level)) <= 1 {
+				if len(m.selRows()) <= 1 {
 					m.note = "no leg to move to" // no key goes anywhere
 				}
 			}
@@ -1269,7 +1287,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			if m.cursor == 0 {
 				m.note = "at the start"
-				if len(TrailRows(m.trail, m.level)) <= 1 {
+				if len(m.selRows()) <= 1 {
 					m.note = "no leg to move to"
 				}
 				return m, nil
@@ -1283,7 +1301,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorMove(m.trailHalfPage())
 			if m.cursor == was {
 				m.note = "at the present · k goes back"
-				if len(TrailRows(m.trail, m.level)) <= 1 {
+				if len(m.selRows()) <= 1 {
 					// A trail of one row: `k` goes nowhere either, and
 					// pressed on this very frame it answers `no leg to
 					// move to`. `j`, `k` and `ctrl+u` each ask this
@@ -1302,7 +1320,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorMove(-m.trailHalfPage())
 			if m.cursor == was {
 				m.note = "at the start"
-				if len(TrailRows(m.trail, m.level)) <= 1 {
+				if len(m.selRows()) <= 1 {
 					m.note = "no leg to move to"
 				}
 			}
@@ -1317,7 +1335,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorToPresent()
 			if m.cursor == was && pinned {
 				m.note = "at the present"
-				if len(TrailRows(m.trail, m.level)) <= 1 {
+				if len(m.selRows()) <= 1 {
 					m.note = "no leg to move to"
 				}
 			}
@@ -1533,7 +1551,7 @@ func (m *Model) readerKey(key string) (tea.Model, tea.Cmd) {
 // it and `chapterKeysMove` asks whether there is anywhere to move to, so
 // the key the footer offers and the answer the press gives are one thing.
 func (m *Model) chapterStand() ([]TrailRow, []int, map[int]int, int) {
-	rows := TrailRows(m.trail, m.level)
+	rows := m.selRows()
 	var prompts []int // indices into rows
 	for i, r := range rows {
 		if r.Kind == "prompt" && !r.Teammate { // a teammate's report is no chapter (#394)
@@ -1545,7 +1563,7 @@ func (m *Model) chapterStand() ([]TrailRow, []int, map[int]int, int) {
 	}
 	w, h := m.trailBox()
 	o := m.trailOpts(w, h)
-	doc, sel := trailDoc(m.trail, o)
+	doc, sel := m.trailDoc(o)
 	docRow := map[int]int{} // row index → document line
 	for line, r := range sel {
 		if r >= 0 {
@@ -1647,7 +1665,7 @@ func (m *Model) chapterLand(rows []TrailRow, prompts []int, docRow map[int]int, 
 		m.cursorMove(0)
 	} else {
 		w, h := m.trailBox()
-		doc, _ := trailDoc(m.trail, m.trailOpts(w, h))
+		doc, _ := m.trailDoc(m.trailOpts(w, h))
 		line := docRow[target]
 		m.trailScroll = clampScroll(line, len(doc), h)
 		m.trailPinned = m.trailScroll >= lastScreenful(len(doc), h)
@@ -1660,7 +1678,7 @@ func (m *Model) chapterLand(rows []TrailRow, prompts []int, docRow map[int]int, 
 func (m *Model) firstRowInView() int {
 	w, h := m.trailBox()
 	o := m.trailOpts(w, h)
-	doc, sel := trailDoc(m.trail, o)
+	doc, sel := m.trailDoc(o)
 	top := trailTop(len(doc), o)
 	for i := top; i < len(sel); i++ {
 		if sel[i] >= 0 {
@@ -1676,7 +1694,7 @@ func (m *Model) cursorMove(delta int) {
 		m.blockRest = m.blockCursor // where `s` comes back to (#393)
 	}
 	m.blockCursor = -1 // a cursor moved on the trail is the trail's (#393)
-	rows := TrailRows(m.trail, m.level)
+	rows := m.selRows()
 	if len(rows) == 0 {
 		m.cursor = -1
 		return
@@ -1731,13 +1749,13 @@ func (m *Model) cursorMove(delta int) {
 // cursorDrawn reports whether the trail draws a row for the cursor.
 func (m *Model) cursorDrawn() bool {
 	w, h := m.trailBox()
-	return TrailCursorRow(m.trail, m.trailOpts(w, h)) >= 0
+	return m.trailCursorRow(m.trailOpts(w, h)) >= 0
 }
 
 // cursorToPresent puts the Lv2 cursor on the newest row, wherever it stood.
 // cursorMove clamps, so the whole journey in one delta is simply the end of it.
 func (m *Model) cursorToPresent() {
-	m.cursorMove(len(TrailRows(m.trail, m.level)))
+	m.cursorMove(len(m.selRows()))
 }
 
 // trailBox is the block the trail column is currently drawn into: the same
@@ -1789,7 +1807,7 @@ func (m *Model) trailHalfPage() int {
 // showing the last screenful, whatever Scroll says.
 func (m *Model) trailView() (total, height, top int) {
 	w, h := m.trailBox()
-	total = len(TrailLines(m.trail, m.trailOpts(w, h)))
+	total = len(m.trailLines(m.trailOpts(w, h)))
 	top = m.trailScroll
 	if m.trailPinned {
 		top = lastScreenful(total, h)
@@ -1820,7 +1838,7 @@ func (m *Model) keepCursorVisible() {
 		return
 	}
 	w, h := m.trailBox()
-	row := TrailCursorRow(m.trail, m.trailOpts(w, h))
+	row := m.trailCursorRow(m.trailOpts(w, h))
 	if row < 0 {
 		return
 	}
@@ -4914,7 +4932,7 @@ func (m *Model) keymapOnce() string {
 		// (`no leg to move to`), which is the movement key's own test
 		// (#213, #219); anywhere else the key acts and stays (#215, #218:
 		// the frame is what a person sees).
-		if len(TrailRows(m.trail, m.level)) <= 1 {
+		if len(m.selRows()) <= 1 {
 			keys = pageKeyGone(keys)
 		}
 	}
@@ -6281,7 +6299,7 @@ func (m *Model) moveKeysMove() bool {
 	case m.level >= levelReader:
 		return true
 	case m.level >= levelWaypoints:
-		return len(TrailRows(m.trail, m.level)) > 1
+		return len(m.selRows()) > 1
 	default:
 		return len(m.viewOrder()) > 1
 	}

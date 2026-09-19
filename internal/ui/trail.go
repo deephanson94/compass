@@ -193,7 +193,16 @@ func TrailCursorRow(tr journey.Trail, o TrailOpts) int {
 	if cursor < 0 {
 		return -1
 	}
-	_, sel := trailDoc(tr, o)
+	_, sel := trailDocBare(tr, o)
+	return cursorRowIn(sel, cursor)
+}
+
+// cursorRowIn is the document line whose selectable row is cursor; -1 when
+// none is.
+func cursorRowIn(sel []int, cursor int) int {
+	if cursor < 0 {
+		return -1
+	}
 	for i, s := range sel {
 		if s == cursor {
 			return i
@@ -206,6 +215,12 @@ func TrailCursorRow(tr journey.Trail, o TrailOpts) int {
 // column that wants to know where its content stops can ask.
 func trailRows(tr journey.Trail, o TrailOpts) []string {
 	doc, _ := trailDoc(tr, o)
+	return trailRowsOf(doc, o)
+}
+
+// trailRowsOf is trailRows over a document already built: the viewport
+// the options choose, without the bottom padding.
+func trailRowsOf(doc []string, o TrailOpts) []string {
 	top := trailTop(len(doc), o)
 	end := top + o.Height
 	if end > len(doc) {
@@ -305,9 +320,45 @@ func trailCursor(o TrailOpts) int {
 // each line carries (-1 where a line is not one) — the two things every
 // question about the viewport needs.
 func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
+	doc, sel := trailDocBare(tr, o)
+	return withTrailCursor(doc, sel, trailCursor(o), o.Width), sel
+}
+
+// withTrailCursor is the one thing the cursor changes about a document:
+// the row it stands on, inverted. Every other row is the same whatever the
+// cursor, which is what lets the Model keep the bare document between
+// keypresses (trailMemo) and pay only for this on a `j`.
+func withTrailCursor(doc []string, sel []int, cursor, width int) []string {
+	if cursor < 0 {
+		return doc
+	}
+	for i, s := range sel {
+		if s == cursor {
+			out := make([]string, len(doc))
+			copy(out, doc)
+			out[i] = cursorBar(doc[i], width)
+			return out
+		}
+	}
+	return doc
+}
+
+// trailDocBare is the document without its cursor: trailDoc's whole build,
+// which the memo caches, minus the one row the cursor inverts.
+func trailDocBare(tr journey.Trail, o TrailOpts) ([]string, []int) {
 	width := o.Width
 	if width < trailPrefixWidth {
 		return nil, nil
+	}
+	nodes := trailNodes(tr)
+	if o.Height > 0 && len(nodes) > o.Height && !o.Dense && !o.laneHeadsFixed && !o.NoLaneHeads {
+		// Every node is at least one row in every mode — the heads and
+		// the air only ever add rows — so a journey with more nodes than
+		// the panel has rows cannot fit with either, and the two retries
+		// below would each build the whole document only to throw it
+		// away: three builds of a 3,000-leg trail for one frame. Go
+		// straight to the shape they would end on.
+		o.laneHeadsFixed, o.laneHeads, o.Dense = true, false, true
 	}
 	if o.Level < levelWaypoints && !o.laneHeadsFixed && o.Height > 0 && !o.NoLaneHeads {
 		// Below Lv2 the lane's head is the first thing the column gives
@@ -315,13 +366,12 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		// to the glyph alone only where they cost the trail a row (#49).
 		o.laneHeadsFixed = true
 		o.laneHeads = true
-		if doc, sel := trailDoc(tr, o); len(doc) <= o.Height {
+		if doc, sel := trailDocBare(tr, o); len(doc) <= o.Height {
 			return doc, sel
 		}
 		o.laneHeads = false
-		return trailDoc(tr, o)
+		return trailDocBare(tr, o)
 	}
-	nodes := trailNodes(tr)
 	if len(nodes) == 0 {
 		rows := trailEmptyRows(width)
 		if row := bareHeadRow(o, width); row != "" {
@@ -332,7 +382,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 
 	o.HeadWaits = headWaits(tr)
 	o.HeadTail = headTail(tr, o.Now, o.HeadState != state.Idle, o.Agents)
-	b := trailBuilder{cursor: trailCursor(o), width: width, dense: o.Dense}
+	b := trailBuilder{cursor: -1, width: width, dense: o.Dense}
 	b.journey(tr, nodes, o)
 	if o.HeadDead && len(tr.Legs) > 0 && !tr.Legs[len(tr.Legs)-1].Current {
 		// The API refused after the last leg closed: the trail ends on
@@ -358,7 +408,7 @@ func trailDoc(tr journey.Trail, o TrailOpts) ([]string, []int) {
 		// Too long for the panel: draw it again without the air, so the
 		// viewport holds twice the journey.
 		o.Dense = true
-		return trailDoc(tr, o)
+		return trailDocBare(tr, o)
 	}
 	return doc, sel
 }
@@ -516,6 +566,12 @@ func (b *trailBuilder) cursored(l trailLine, text string) string {
 	if b.cursor < 0 || l.sel != b.cursor {
 		return text
 	}
+	return cursorBar(text, b.width)
+}
+
+// cursorBar is the inversion itself, over a finished row of the given
+// panel width — what cursored does once it knows the row is the cursor's.
+func cursorBar(text string, width int) string {
 	plain := strings.TrimRight(ansi.Strip(text), " ")
 	// A shape as well as the inversion: the first cell of the row becomes
 	// the cursor mark, so the cursor exists in a capture, over NO_COLOR, and
@@ -529,7 +585,7 @@ func (b *trailBuilder) cursored(l trailLine, text string) string {
 		r[0] = '▸' // a rail stroke has nothing to keep
 		plain = string(r)
 	}
-	if pad := b.width - lipgloss.Width(plain); pad > 0 {
+	if pad := width - lipgloss.Width(plain); pad > 0 {
 		plain += strings.Repeat(" ", pad)
 	}
 	return cursorStyle.Render(plain)
@@ -626,6 +682,7 @@ func ghostCost(show, total int, dense bool) int {
 // belongs under the journey's first node — the one row that says "this is where
 // it started" now that the start is at the top.
 func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts) {
+	waits := promptWaitsEach(tr) // once, not once per prompt over every leg
 	forked := false
 	ticked := false
 	long := len(nodes) > 1 && nodes[len(nodes)-1].at.Sub(nodes[0].at) > longTrailSpan
@@ -736,7 +793,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// Selectable from Lv2, like a leg: it is the row you wrote, and the
 			// reader anchors to it as readily as to any leg's first line.
 			nth, total := promptNumber(tr, n.prompt)
-			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, nth, total, promptWait(tr, n.prompt), o.PromptLinks[n.prompt]))
+			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, nth, total, waits[n.prompt], o.PromptLinks[n.prompt]))
 			forked = false
 		}
 	}
@@ -1926,7 +1983,7 @@ func (m *Model) trailColumn(w, h int) []string {
 		if bh >= h {
 			return fit(m.trailBlock(w, nil), h)
 		}
-		below := trailRows(m.trail, m.trailOpts(w, h-bh))
+		below := m.trailRowsAt(m.trailOpts(w, h-bh))
 		return append(m.trailBlock(w, below), below...)
 	}
 	if h > len(rows) {
@@ -2264,7 +2321,7 @@ func (m *Model) trailCursor() int {
 func (m *Model) legsAbove() int {
 	w, h := m.trailBox()
 	o := m.trailOpts(w, h)
-	doc, sel := trailDoc(m.trail, o)
+	doc, sel := m.trailDoc(o)
 	top := trailTop(len(doc), o)
 	return legsHiddenAbove(m.trail, o.Level, sel, top)
 }
@@ -2298,7 +2355,7 @@ func (m *Model) trailDayHere(compact bool) string {
 	}
 	w, h := m.trailBox()
 	o := m.trailOpts(w, h)
-	doc, _ := trailDoc(m.trail, o)
+	doc, _ := m.trailDoc(o)
 	if trailTop(len(doc), o) > 0 {
 		return d // scrolled past its first row, which is where the span was drawn
 	}
@@ -2494,10 +2551,55 @@ func ownPrompts(tr journey.Trail) int {
 // promptWaits is the trail's waits on you added up: every prompt's.
 func promptWaits(tr journey.Trail) time.Duration {
 	var total time.Duration
-	for i := range tr.Prompts {
-		total += promptWait(tr, i)
+	for _, d := range promptWaitsEach(tr) {
+		total += d
 	}
 	return total
+}
+
+// promptWaitsEach is promptWait for every prompt at once, by index. One
+// sorted pass over the legs' and lanes' ends and a binary search per
+// prompt, where promptWait walks every leg for every prompt: on a
+// day-long trail — 3,000 legs, 200 prompts — the summary row, the board's
+// verdict and the footer each asked the quadratic sum several times a
+// frame, and it was two thirds of a keypress once the trail itself was
+// cached (trailMemo).
+func promptWaitsEach(tr journey.Trail) []time.Duration {
+	ends := make([]time.Time, 0, len(tr.Legs)+len(tr.Branches))
+	for _, l := range tr.Legs {
+		if !l.End.IsZero() {
+			ends = append(ends, l.End)
+		}
+	}
+	for _, b := range tr.Branches {
+		if b.Done {
+			ends = append(ends, b.End)
+		}
+	}
+	sort.Slice(ends, func(i, j int) bool { return ends[i].Before(ends[j]) })
+	out := make([]time.Duration, len(tr.Prompts))
+	for i, p := range tr.Prompts {
+		if p.Teammate != "" {
+			continue // a teammate reporting back is not you arriving (#394)
+		}
+		at := p.At
+		var last time.Time
+		if i > 0 {
+			last = tr.Prompts[i-1].At
+		}
+		// The latest end at or before the prompt, if it is later than the
+		// prompt before: the same `last` promptWait's loop arrives at.
+		if k := sort.Search(len(ends), func(k int) bool { return ends[k].After(at) }); k > 0 && ends[k-1].After(last) {
+			last = ends[k-1]
+		}
+		if last.IsZero() {
+			continue
+		}
+		if d := at.Sub(last); d > 0 && d <= waitAway {
+			out[i] = d
+		}
+	}
+	return out
 }
 
 // youWaited is promptWaits with the wait still open on top: a live session
