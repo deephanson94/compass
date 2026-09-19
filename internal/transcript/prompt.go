@@ -59,6 +59,51 @@ func (e Event) RelayBody() string {
 	return strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(t, relayPrefix), ":"))
 }
 
+// agentOpen opens the envelope another session's message is relayed in
+// when it was sent by name — `SendMessage` from a session, a subagent's
+// hand-back: `<agent-message from="planner">…</agent-message>`. The `from`
+// is the sender as the harness names it: a session's name, or its id.
+const (
+	agentOpen  = "<agent-message"
+	agentClose = "</agent-message>"
+)
+
+// AgentMessage reads a relayed turn's `<agent-message from="…">` envelope:
+// who sent it and what it said. ok is false for a turn that is not such a
+// relay — a teammate's envelope, a bare relay, a person's words.
+func (e Event) AgentMessage() (from, body string, ok bool) {
+	if !e.Relayed() {
+		return "", "", false
+	}
+	t := e.RelayBody()
+	if !strings.HasPrefix(t, agentOpen) {
+		return "", "", false
+	}
+	t = t[len(agentOpen):]
+	end := strings.Index(t, ">")
+	if end < 0 {
+		return "", "", false
+	}
+	from = attr(t[:end], "from")
+	body = t[end+1:]
+	if j := strings.Index(body, agentClose); j >= 0 {
+		body = body[:j]
+	}
+	return from, strings.TrimSpace(body), true
+}
+
+// RelayFrom is who a relayed turn came from, as the envelope names them:
+// the agent-message's `from`, else the teammate's id, else "".
+func (e Event) RelayFrom() string {
+	if from, _, ok := e.AgentMessage(); ok {
+		return from
+	}
+	if id, _, ok := e.Teammate(); ok {
+		return id
+	}
+	return ""
+}
+
 // teammateOpen opens the envelope a teammate's message is relayed in:
 // `<teammate-message teammate_id="panel-theorist" color="purple">…`.
 const (
@@ -207,11 +252,15 @@ func (e Event) Machinery() bool {
 	if e.Type != EventUser {
 		return false
 	}
+	if e.Relayed() {
+		// The harness writes a relayed message as a meta turn
+		// (`isMeta: true, userType: external`), and it is still another
+		// session talking: read before the flag, or every message one
+		// session sends another vanished from the trail (#399).
+		return false
+	}
 	if e.IsMeta {
 		return true
-	}
-	if e.Relayed() {
-		return false
 	}
 	return EnvelopeText(e.Text)
 }

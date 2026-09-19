@@ -35,7 +35,7 @@ func TestALinkedLaneOpensThePair(t *testing.T) {
 		}
 		view := ansi.Strip(m.View())
 		fits := wh[0] >= 152
-		if got := strings.Contains(view, "READER · 1 builder · follows"); got != fits {
+		if got := strings.Contains(view, "READER · →1 builder · follows"); got != fits {
 			t.Errorf("%dx%d: the pair drawn %v, want %v:\n%s", wh[0], wh[1], got, fits, view)
 		}
 		if !fits {
@@ -116,6 +116,8 @@ func TestTheFollowerFollowsTheMark(t *testing.T) {
 }
 
 // Leaving the lane's reader closes the pair; coming back by h/l brings it.
+// `l` is the next session in the board's order, not the follower: the
+// digit on the follower's title is the key that goes there.
 func TestThePairClosesWithTheLane(t *testing.T) {
 	forceASCII(t)
 	m, sc := pairStand(152, 40)
@@ -142,7 +144,7 @@ func TestThePairClosesWithTheLane(t *testing.T) {
 	if m.pairKey == "" || m.readerLane == "" {
 		t.Errorf("h back did not bring the lane and its pair: lane %q pair %q", m.readerLane, m.pairKey)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "READER · 1 builder · follows") {
+	if !strings.Contains(ansi.Strip(m.View()), "READER · →1 builder · follows") {
 		t.Errorf("h back drew no follower")
 	}
 }

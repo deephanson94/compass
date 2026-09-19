@@ -172,10 +172,16 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 	}
 	for _, p := range tr.Prompts {
 		text := p.Text
-		if p.Relayed {
+		meta := false
+		if p.Relayed && p.From != "" {
+			// The line the harness writes for a message sent by name: a
+			// meta turn carrying the envelope (#399).
+			text = "Another Claude session sent a message:\n<agent-message from=\"" + p.From + "\">\n" + p.Text + "\n</agent-message>"
+			meta = true
+		} else if p.Relayed {
 			text = "Another Claude session sent a message: " + p.Text // the line the transcript holds (#106)
 		}
-		add(transcript.Event{Type: transcript.EventUser, Timestamp: p.At, Text: text})
+		add(transcript.Event{Type: transcript.EventUser, Timestamp: p.At, Text: text, IsMeta: meta})
 	}
 	for i, l := range tr.Legs {
 		id := fmt.Sprintf("toolu_%d", i)
@@ -670,7 +676,60 @@ func scenePair() scene {
 	tr[sessionKey("builder")] = b
 
 	panes, order := paneMap([]string{"planner", "builder"}, []string{"shop:0.0", "shop:1.0"})
-	return scene{name: "pair", extra: []string{"1", "tab", "G", "k", "tab", "k", "k", "j", "esc", "shift+tab"}, story: "A lead that handed a build to a teammate and is waiting on it, beside the teammate's own session in a worktree, still building: the lane's file went quiet fourteen minutes ago, the teammate's own transcript wrote twenty seconds ago. How are things going between them, without attaching to either?", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+	return scene{name: "pair", extra: []string{"A", "X", "esc", "2", "tab", "G", "tab", "k", "k", "k", "j", "esc", "shift+tab"}, story: "A lead that handed a build to a teammate and is waiting on it, beside the teammate's own session in a worktree, still building: the lane's file went quiet fourteen minutes ago, the teammate's own transcript wrote twenty seconds ago. How are things going between them, without attaching to either?", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+}
+
+// Two sessions talking to each other by message: a session shipping a
+// migration that asked its reviewer, in another worktree, to look — each
+// hears the other as a relayed `<agent-message from="…">` turn, the
+// harness's own record of `SendMessage` between sessions. Neither has a
+// lane: the other side is a peer, named by the envelope. The question of
+// every frame: what did the other side say, and what was it doing when
+// this side said this?
+func scenePeers() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+
+	ss = append(ss, sess("ship", "shop", "/home/user/shop", "feat/sessions-table", "ship the sessions-table migration; ask the reviewer before merging", state.Working, n.Add(-2*time.Minute), journey.Fix, "", "tool call in flight", "Edit: db/runner.py"))
+	t := trailOf(n.Add(-50*time.Minute), "ship the sessions-table migration; ask the reviewer before merging", false,
+		legSpec{journey.Build, "db/runner.py", 14 * time.Minute, []string{"db/runner.py"}, "", nil},
+		legSpec{journey.Test, "pytest tests/migrations", 2 * time.Minute, nil, "31✓", nil},
+	)
+	// The reviewer's messages, relayed: a first look, then the finding —
+	// and the fix that answers it, in flight since.
+	t.Prompts = append(t.Prompts,
+		journey.Prompt{Text: "reading db/runner.py now; the cursor bound looks off by one at the last page", At: n.Add(-22 * time.Minute), Relayed: true, From: "reviewer"},
+		journey.Prompt{Text: "confirmed: page N+1 re-reads the last row; fix the bound and re-run the suite", At: n.Add(-12 * time.Minute), Relayed: true, From: "reviewer"},
+	)
+	t.Legs = append(t.Legs, trailOf(n.Add(-11*time.Minute), "x", true,
+		legSpec{journey.Fix, "the cursor bound the reviewer flagged", 9 * time.Minute, []string{"db/runner.py"}, "", nil},
+	).Legs...)
+	tr[sessionKey("ship")] = withTasks(t,
+		journey.Task{ID: "1", Subject: "Ship the migration", Active: "Fixing the cursor bound", Status: "in_progress"},
+		journey.Task{ID: "2", Subject: "Ask the reviewer", Status: "completed"})
+
+	ss = append(ss, sess("review", "reviewer", "/home/user/shop/.worktrees/reviewer", "feat/sessions-table", "review the sessions-table migration when shop asks", state.Working, n.Add(-30*time.Second), journey.Scout, "", "tool call in flight", "Bash: pytest tests/migrations -k cursor"))
+	r := trailOf(n.Add(-45*time.Minute), "review the sessions-table migration when shop asks", false,
+		legSpec{journey.Scout, "db/runner.py", 6 * time.Minute, []string{"db/runner.py"}, "", nil},
+		legSpec{journey.Test, "pytest tests/migrations -k cursor", 3 * time.Minute, nil, "3✓ 1✗", []string{"test_cursor_last_page"}},
+	)
+	// Shop's ask, the look it prompted, shop's fix, and the re-run that
+	// answers it — each side's turns falling between the other's.
+	r.Prompts = append(r.Prompts,
+		journey.Prompt{Text: "the migration is in db/runner.py on feat/sessions-table; please review the backfill cursor", At: n.Add(-26 * time.Minute), Relayed: true, From: "shop"},
+		journey.Prompt{Text: "fixed the bound; re-running the suite now", At: n.Add(-9 * time.Minute), Relayed: true, From: "shop"},
+	)
+	r.Legs = append(r.Legs, trailOf(n.Add(-25*time.Minute), "x", false,
+		legSpec{journey.Scout, "the last page of the backfill", 5 * time.Minute, []string{"db/runner.py"}, "", nil},
+	).Legs...)
+	r.Legs = append(r.Legs, trailOf(n.Add(-8*time.Minute), "x", true,
+		legSpec{journey.Test, "pytest tests/migrations -k cursor", 3 * time.Minute, nil, "", nil},
+	).Legs...)
+	tr[sessionKey("review")] = r
+
+	panes, order := paneMap([]string{"ship", "review"}, []string{"shop:0.0", "shop:1.0"})
+	return scene{name: "peers", extra: []string{"A", "X", "esc", "1", "tab", "G", "tab", "k", "k", "k", "esc", "l", "tab", "esc", "shift+tab"}, story: "Two sessions talking to each other by message — a session shipping a migration and the reviewer it asked, in another worktree — each hearing the other as a relayed turn. What did the other side say, and what was it doing when this side said this?", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
 // Two very long sessions — a day of work each, every class, dozens of prompts
@@ -758,7 +817,7 @@ func sceneVeryLong() scene {
 }
 
 func allScenes() []scene {
-	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools(), sceneLeftBehind(), scenePair()}
+	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools(), sceneLeftBehind(), scenePair(), scenePeers()}
 }
 
 // quota is the refusal a session dead on its daily limit carries, in the

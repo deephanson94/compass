@@ -20,6 +20,10 @@ type Prompt struct {
 	// numbers or steps to as a chapter (#394). "" for a person's prompt
 	// and for a plain relay.
 	Teammate string
+	// From is who a relayed message came from, as its envelope names them
+	// (#399): the agent-message's `from` — a session's name or id, which
+	// the deck joins to a live session — else the teammate's id, else "".
+	From string
 }
 
 // Leg is a contiguous span of one class of work: the unit the trail draws.
@@ -203,7 +207,7 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		if ms := ev.Teammates(); len(ms) > 0 {
 			s.observeTeammateReports(ms, ev.Timestamp)
 		} else {
-			s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()})
+			s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed(), From: ev.RelayFrom()})
 		}
 		s.flushPress()
 		s.closeLeg()
@@ -507,6 +511,9 @@ func launchAck(text string) bool {
 func promptText(ev transcript.Event) string {
 	if cmd, ok := transcript.SlashCommand(ev.Text); ok {
 		return cmd
+	}
+	if _, body, ok := ev.AgentMessage(); ok {
+		return firstLine(body) // the message, not its tag (#399)
 	}
 	if ev.Relayed() {
 		return firstLine(ev.RelayBody()) // the message, not its envelope (#97); a teammate's is read in Observe (#394)

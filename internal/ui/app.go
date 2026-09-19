@@ -341,6 +341,9 @@ type Model struct {
 	pairKey     string
 	pairEvents  []transcript.Event
 	pairCache   readerCache
+	pairPolled  bool   // the follower's first poll has landed: an empty page is empty, not late
+	pairID      string // the follower's session id, which outlives its key when it changes directory
+	pairName    string // and its name, for the note that says it ended
 	boardLabels map[string]map[string]string
 	fleetQuery  string               // the fleet search in force; "" = none
 	searchFleet bool                 // the search being typed is the fleet's, not the reader's

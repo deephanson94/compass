@@ -251,7 +251,7 @@ func (m *Model) readerColumn(w, h int) []string {
 	}
 	if h > 2 {
 		wDoc := m.doc(w)
-		frame := RenderReader(events, ReaderOpts{
+		frame := renderReaderDoc(wDoc, ReaderOpts{
 			Width:       w,
 			Height:      h - 2,
 			Scroll:      readerTopIn(wDoc, m.scroll, h-2), // never a result row without its owner
@@ -646,6 +646,7 @@ func (m *Model) enterReader() {
 		}
 	}
 	m.anchorReader()
+	m.openPair() // the peer this session is talking to, where there is one (#399)
 }
 
 // nonBlankRow walks the document from i in the given direction (+1 or -1),

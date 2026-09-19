@@ -31,9 +31,9 @@ func r112ttEndRoutes() [][]string {
 // the last panel rule, so the trail's own mark is never counted as one.
 func r112ttEndMarkedCells(frame string) []string {
 	var out []string
+	at := r113fhKeysColumn(frame) // the keys' panel: the last, or the pair's left half (#398)
 	for _, l := range strings.Split(ansi.Strip(frame), "\n") {
-		parts := strings.Split(l, "│")
-		cell := strings.TrimRight(parts[len(parts)-1], " ")
+		cell := strings.TrimRight(r113fhColumnAt(l, at), " ")
 		if strings.Contains(cell, "▸") {
 			out = append(out, cell)
 		}
@@ -72,8 +72,9 @@ func r112fhReaderColumn(line string) string {
 // r112fhMarkedRow is the drawn reader line carrying the cursor, if the
 // frame draws one at all.
 func r112fhMarkedRow(frame string) (string, bool) {
+	at := r113fhKeysColumn(frame) // the keys' panel: the last, or the pair's left half (#398)
 	for _, l := range strings.Split(frame, "\n") {
-		if col := r112fhReaderColumn(l); strings.Contains(col, "▸") {
+		if col := r113fhColumnAt(l, at); strings.Contains(col, "▸") {
 			return col, true
 		}
 	}
@@ -254,9 +255,9 @@ var r112fhbTo = [][2]int{{80, 24}, {90, 12}, {120, 20}, {152, 18}, {220, 16}}
 // 120 up, alone below it — so the mark is looked for after the row's last
 // panel rule and never in the trail's own cursor.
 func r112fhbMarked(frame string) (string, bool) {
+	at := r113fhKeysColumn(frame) // the keys' panel: the last, or the pair's left half (#398)
 	for _, l := range strings.Split(frame, "\n") {
-		cells := strings.Split(ansi.Strip(l), "│")
-		if col := cells[len(cells)-1]; strings.Contains(col, "▸") {
+		if col := r113fhColumnAt(l, at); strings.Contains(col, "▸") {
 			return strings.TrimSpace(strings.ReplaceAll(col, "▸", " ")), true
 		}
 	}
@@ -400,15 +401,44 @@ var r113fhWalks = [][]string{{"ctrl+d", "j"}, {"G"}}
 // panel at every width, so the mark is looked for after the row's last panel
 // rule and never in the trail's own cursor.
 func r113fhReaderColumn(line string) string {
-	cells := strings.Split(ansi.Strip(line), "│")
-	return cells[len(cells)-1]
+	return r113fhColumnAt(line, -1)
 }
 
-// r113fhMarkedRows is every drawn reader line carrying the cursor.
+// r113fhColumnAt is a drawn line's panel counted from the right — 0 the
+// last — so a trail's own rail glyph, the same `│` as the panel rule, on
+// the left of the row shifts nothing.
+func r113fhColumnAt(line string, fromEnd int) string {
+	cells := strings.Split(ansi.Strip(line), "│")
+	i := len(cells) - 1 - fromEnd
+	if fromEnd < 0 || i < 0 {
+		i = len(cells) - 1
+	}
+	return cells[i]
+}
+
+// r113fhKeysColumn is the panel the keys are in, counted from the right:
+// the one whose title wears the focus mark before READER. The reader was
+// the last panel until the pair (#398) put the follower to its right; the
+// keys' half is then one in from the end.
+func r113fhKeysColumn(frame string) int {
+	for _, l := range strings.Split(frame, "\n") {
+		cells := strings.Split(ansi.Strip(l), "│")
+		for i, c := range cells {
+			if strings.Contains(c, focusMark+"READER") {
+				return len(cells) - 1 - i
+			}
+		}
+	}
+	return -1
+}
+
+// r113fhMarkedRows is every drawn reader line carrying the cursor, in the
+// panel the keys are in.
 func r113fhMarkedRows(frame string) []string {
 	var out []string
+	at := r113fhKeysColumn(frame)
 	for _, l := range strings.Split(frame, "\n") {
-		if col := r113fhReaderColumn(l); strings.Contains(col, "▸") {
+		if col := r113fhColumnAt(l, at); strings.Contains(col, "▸") {
 			out = append(out, col)
 		}
 	}

@@ -812,6 +812,7 @@ func (m *Model) boardColumnOpts(key string, s fleet.Session, tr journey.Trail, w
 		Labels:       m.boardLabels[key],
 		LaneLinks:    m.laneLinks(tr, m.agentsFor(key)),
 		LaneWrote:    m.laneLinkWrote(tr, m.agentsFor(key)),
+		PromptLinks:  m.peerLinks(key, tr),
 		Head:         m.headFor(s),
 		HeadState:    s.Snap.State,
 		HeadSince:    headSince(s),

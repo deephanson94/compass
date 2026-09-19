@@ -106,6 +106,10 @@ type TrailOpts struct {
 	// LaneWrote is when each linked session last wrote, by label: the
 	// fresher reading's clock beside the lane file's own (#68).
 	LaneWrote map[string]time.Time
+	// PromptLinks maps a relayed prompt's index to the board number of
+	// the live session that sent it, by the envelope's own name: the
+	// peer this session is talking to (#399).
+	PromptLinks map[int]int
 
 	// Ask is the prompt the leg being drawn belongs to — the trail's own
 	// question, which its ◉ row and the archive's identity header draw
@@ -732,7 +736,7 @@ func (b *trailBuilder) journey(tr journey.Trail, nodes []trailNode, o TrailOpts)
 			// Selectable from Lv2, like a leg: it is the row you wrote, and the
 			// reader anchors to it as readily as to any leg's first line.
 			nth, total := promptNumber(tr, n.prompt)
-			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, nth, total, promptWait(tr, n.prompt)))
+			b.selNode(b.pick(), promptRow(tr.Prompts[n.prompt], o.Now, o.Width, nth, total, promptWait(tr, n.prompt), o.PromptLinks[n.prompt]))
 			forked = false
 		}
 	}
@@ -1447,7 +1451,7 @@ func withoutClassVerb(label, class string) string {
 
 // promptRow quotes the human turn — the only words on the trail that are not
 // ours.
-func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited time.Duration) string {
+func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited time.Duration, link int) string {
 	// "2h ago", where a leg says "12m": the prompt is when, the leg is how
 	// long, and without the word a column of figures reads as one kind.
 	age := relAge(now, p.At) + " ago"
@@ -1465,12 +1469,23 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited ti
 	if total > 1 && nth > 0 {
 		lead += fmt.Sprintf(" %d/%d", nth, total) // a teammate's report has no number: it is no chapter (#394)
 	}
-	textWidth := width - len([]rune(lead)) - 1 - 1 - len([]rune(age))
+	// The peer: a relayed message from a session on the board says which
+	// one, in the lane's own form (#67, #399). The mark is shed before the
+	// quote is: it is the row's link, the quote is what was said.
+	mark := ""
+	if link > 0 {
+		mark = fmt.Sprintf(" →%d", link)
+	}
+	textWidth := width - len([]rune(lead)) - 1 - 1 - len([]rune(age)) - len([]rune(mark))
+	if textWidth < trailMinLabel && mark != "" {
+		mark = ""
+		textWidth += len([]rune(fmt.Sprintf(" →%d", link)))
+	}
 	if textWidth < trailMinLabel {
 		return dimStyle.Render(lead) + padLeft(dimStyle.Render(age), width-len([]rune(lead)))
 	}
 	text := textStyle.Render(pad(clip(askQuote(p.Text, p.Relayed), textWidth), textWidth))
-	return dimStyle.Render(lead) + " " + text + " " + dimStyle.Render(age)
+	return dimStyle.Render(lead) + " " + text + dimStyle.Render(mark) + " " + dimStyle.Render(age)
 }
 
 // legDetails is a leg's Lv2 body: its waypoints in the order they happened,
@@ -2217,6 +2232,7 @@ func (m *Model) trailOpts(w, h int) TrailOpts {
 		Labels:       m.labels,
 		LaneLinks:    m.laneLinks(m.trail, m.agentsFor(m.selectedKey)),
 		LaneWrote:    m.laneLinkWrote(m.trail, m.agentsFor(m.selectedKey)),
+		PromptLinks:  m.peerLinks(m.selectedKey, m.trail),
 		Head:         head,
 		HeadState:    headState,
 		HeadSince:    since,
