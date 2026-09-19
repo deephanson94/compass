@@ -267,12 +267,18 @@ func (m *Model) pairColumn(w, h int) []string {
 	above := " the newest line"
 	if row >= 0 && !m.anchorAt.IsZero() && !doc[row].at.IsZero() {
 		above = " " + doc[row].at.Local().Format("15:04") + " · " + pairOffset(doc[row].at, m.anchorAt)
+		clock := doc[row].at.Local().Format("15:04")
 		if first := nonBlankRow(doc, 0, 1); first >= 0 && row <= first && doc[row].at.After(m.anchorAt) {
 			// The mark stands before anything the follower has: its
 			// first line is what is drawn, and the row says so before
 			// the offset, or an offset alone read as a line off-screen
 			// (round 68).
-			above = " " + doc[row].at.Local().Format("15:04") + " · its first line · " + pairOffset(doc[row].at, m.anchorAt)
+			above = " " + clock + " · its first line · " + pairOffset(doc[row].at, m.anchorAt)
+		} else if last := nonBlankRow(doc, len(doc)-1, -1); last >= 0 && row >= last && doc[row].at.Before(m.anchorAt) {
+			// And past everything it has: a follower four hours quiet
+			// read `3h before the mark` as if later lines existed (the
+			// owner's screenshot).
+			above = " " + clock + " · its newest line · " + pairOffset(doc[row].at, m.anchorAt)
 		}
 	}
 	if h <= 2 {

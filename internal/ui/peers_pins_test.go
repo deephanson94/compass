@@ -281,3 +281,23 @@ func TestThePairFollowsItsSessionAcrossANewKey(t *testing.T) {
 		t.Errorf("the ended follower's note is wrong: %q (pair %q)", m.note, m.pairKey)
 	}
 }
+
+// A follower whose newest line is before the mark says so, not only how
+// far before (the owner's screenshot: a peer four hours quiet).
+func TestTheFollowerOnItsNewestLineSaysSo(t *testing.T) {
+	forceASCII(t)
+	m, sc := peersStand(152, 40, "2", "tab", "G", "tab")
+	if m.pairKey == "" {
+		t.Fatal("no pair")
+	}
+	// The peer's every line before the mark: push its events back a day.
+	for i := range m.pairEvents {
+		m.pairEvents[i].Timestamp = m.pairEvents[i].Timestamp.Add(-24 * time.Hour)
+	}
+	m.pairCache.valid = false
+	_ = sc
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "its newest line ·") || !strings.Contains(view, "before the mark") {
+		t.Errorf("the follower past its newest line does not say so:\n%s", view)
+	}
+}
