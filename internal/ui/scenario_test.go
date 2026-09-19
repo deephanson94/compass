@@ -175,8 +175,9 @@ func eventsBehind(tr journey.Trail, activity string) []transcript.Event {
 		meta := false
 		if p.Relayed && p.From != "" {
 			// The line the harness writes for a message sent by name: a
-			// meta turn carrying the envelope (#399).
-			text = "Another Claude session sent a message:\n<agent-message from=\"" + p.From + "\">\n" + p.Text + "\n</agent-message>"
+			// meta turn carrying the envelope (#399) — the cross-session
+			// shape, with the name in `from-name` and a socket in `from`.
+			text = "Another Claude session sent a message:\n<cross-session-message from=\"uds:/run/user/1000/cc-socks/" + p.From + ".sock\" from-name=\"" + p.From + "\" from-mode=\"prompting\">\n" + p.Text + "\n</cross-session-message>"
 			meta = true
 		} else if p.Relayed {
 			text = "Another Claude session sent a message: " + p.Text // the line the transcript holds (#106)

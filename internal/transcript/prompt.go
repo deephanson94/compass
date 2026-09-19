@@ -59,37 +59,47 @@ func (e Event) RelayBody() string {
 	return strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(t, relayPrefix), ":"))
 }
 
-// agentOpen opens the envelope another session's message is relayed in
-// when it was sent by name — `SendMessage` from a session, a subagent's
-// hand-back: `<agent-message from="planner">…</agent-message>`. The `from`
-// is the sender as the harness names it: a session's name, or its id.
-const (
-	agentOpen  = "<agent-message"
-	agentClose = "</agent-message>"
-)
+// The envelopes another session's message is relayed in when it was sent
+// by name. A subagent's hand-back: `<agent-message from="planner">…`. A
+// session's `SendMessage` to another on the machine:
+// `<cross-session-message from="uds:/run/user/…/1044442.sock"
+// from-name="latency-breakdown" from-mode="prompting">…` — there the
+// `from` is the socket, and `from-name` is the sender as the deck names it
+// (#399, the owner's screenshot).
+var agentEnvelopes = []struct{ open, close, name, fallback string }{
+	{"<agent-message", "</agent-message>", "from", ""},
+	{"<cross-session-message", "</cross-session-message>", "from-name", "from"},
+}
 
-// AgentMessage reads a relayed turn's `<agent-message from="…">` envelope:
-// who sent it and what it said. ok is false for a turn that is not such a
-// relay — a teammate's envelope, a bare relay, a person's words.
+// AgentMessage reads a relayed turn's envelope: who sent it and what it
+// said. ok is false for a turn that is not such a relay — a teammate's
+// envelope, a bare relay, a person's words.
 func (e Event) AgentMessage() (from, body string, ok bool) {
 	if !e.Relayed() {
 		return "", "", false
 	}
 	t := e.RelayBody()
-	if !strings.HasPrefix(t, agentOpen) {
-		return "", "", false
+	for _, env := range agentEnvelopes {
+		if !strings.HasPrefix(t, env.open) {
+			continue
+		}
+		rest := t[len(env.open):]
+		end := strings.Index(rest, ">")
+		if end < 0 {
+			return "", "", false
+		}
+		head := rest[:end]
+		from = attr(head, env.name)
+		if from == "" && env.fallback != "" {
+			from = attr(head, env.fallback)
+		}
+		body = rest[end+1:]
+		if j := strings.Index(body, env.close); j >= 0 {
+			body = body[:j]
+		}
+		return from, strings.TrimSpace(body), true
 	}
-	t = t[len(agentOpen):]
-	end := strings.Index(t, ">")
-	if end < 0 {
-		return "", "", false
-	}
-	from = attr(t[:end], "from")
-	body = t[end+1:]
-	if j := strings.Index(body, agentClose); j >= 0 {
-		body = body[:j]
-	}
-	return from, strings.TrimSpace(body), true
+	return "", "", false
 }
 
 // RelayFrom is who a relayed turn came from, as the envelope names them:
