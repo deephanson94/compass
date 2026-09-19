@@ -628,6 +628,51 @@ func sceneSubagents() scene {
 	return scene{name: "subagents", extra: []string{"2", "esc", "esc", "tab", "k", "tab", "esc", "ctrl+u", "ctrl+u", "j", "j", "tab", "esc", "3", "tab", "esc", "shift+tab"}, story: "Sessions that delegate: one with three background agents still out and one back with a finding; one whose agents all reported; one that is itself a teammate working a shared task list.", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
 }
 
+// Two agents talking to each other: a lead that handed a build to a
+// teammate and is waiting on it, and the teammate's own session in a
+// worktree beside it, still building. The lane's file went quiet fourteen
+// minutes ago; the teammate's own transcript wrote twenty seconds ago and
+// holds the test result the lane never received. The question of every
+// frame: how are things going between them, without attaching to either.
+func scenePair() scene {
+	n := sceneNow
+	tr := map[string]journey.Trail{}
+	var ss []fleet.Session
+
+	ss = append(ss, sess("planner", "shop", "/home/user/shop", "feat/sessions-table", "plan the sessions-table migration and hand the build to a teammate", state.Working, n.Add(-3*time.Minute), journey.Build, "", "tool call in flight", "Agent: build the migration runner"))
+	t := trailOf(n.Add(-70*time.Minute), "plan the sessions-table migration and hand the build to a teammate", true,
+		legSpec{journey.Scout, "the sessions table and its readers", 12 * time.Minute, []string{"models/session.py"}, "", nil},
+		legSpec{journey.Design, "a two-phase migration", 15 * time.Minute, []string{"docs/migration.md"}, "", nil},
+		legSpec{journey.Build, "hand the runner to the builder", 30 * time.Minute, []string{"docs/migration.md"}, "", nil},
+	)
+	t = withBranch(t, 2, "Build the migration runner for the sessions table", n.Add(-25*time.Minute), false, "")
+	t.Branches[0].Teammate = "builder"
+	t.Legs[len(t.Legs)-1].End = n.Add(-25 * time.Minute) // its last own word: the handoff, 25m ago
+	tr[sessionKey("planner")] = withTasks(t,
+		journey.Task{ID: "1", Subject: "Plan the migration", Status: "completed"},
+		journey.Task{ID: "2", Subject: "Build the runner", Active: "Building the runner", Status: "in_progress", Owner: "builder"},
+		journey.Task{ID: "3", Subject: "Swap the readers", Status: "pending"})
+	agents := map[string]map[string]agentLive{sessionKey("planner"): {
+		"a1": {Wrote: n.Add(-14 * time.Minute), Snap: state.Snapshot{State: state.Stuck, Reason: "no output for 14m mid-turn", Activity: "Bash: pytest -x tests/migrations"},
+			Events: agentConversation(n.Add(-25*time.Minute), "Build the migration runner for the sessions table; report when the suite is green", "/home/user/shop/db/runner.py", "pytest -x tests/migrations",
+				"I'll read the migration plan and the existing runner, then write the two phases.",
+				"Phase one copies rows behind a backfill cursor; phase two swaps the readers. Running the migration suite:", "")},
+	}}
+
+	ss = append(ss, sess("builder", "builder", "/home/user/shop/.worktrees/builder", "feat/sessions-table", "Build the migration runner for the sessions table", state.Working, n.Add(-20*time.Second), journey.Fix, "30✓ 1✗", "tool call in flight", "Edit: db/runner.py"))
+	b := trailOf(n.Add(-24*time.Minute), "Build the migration runner for the sessions table; report when the suite is green", true,
+		legSpec{journey.Scout, "the migration plan and the old runner", 4 * time.Minute, []string{"docs/migration.md", "db/runner.py"}, "", nil},
+		legSpec{journey.Build, "db/runner.py", 9 * time.Minute, []string{"db/runner.py"}, "", nil},
+		legSpec{journey.Test, "pytest tests/migrations", 2 * time.Minute, nil, "30✓ 1✗", []string{"test_backfill_cursor_resumes"}},
+		legSpec{journey.Fix, "the backfill cursor off by one", 6 * time.Minute, []string{"db/runner.py"}, "", nil},
+	)
+	b.Prompts[0].Teammate = "planner"
+	tr[sessionKey("builder")] = b
+
+	panes, order := paneMap([]string{"planner", "builder"}, []string{"shop:0.0", "shop:1.0"})
+	return scene{name: "pair", extra: []string{"1", "tab", "G", "k", "tab", "k", "k", "j", "esc", "shift+tab"}, story: "A lead that handed a build to a teammate and is waiting on it, beside the teammate's own session in a worktree, still building: the lane's file went quiet fourteen minutes ago, the teammate's own transcript wrote twenty seconds ago. How are things going between them, without attaching to either?", sessions: ss, trails: tr, panes: panes, order: order, agents: agents}
+}
+
 // Two very long sessions — a day of work each, every class, dozens of prompts
 // — beside a short one, so the trail's viewport, the ticks and the density
 // of Lv2 are what is on trial.
@@ -713,7 +758,7 @@ func sceneVeryLong() scene {
 }
 
 func allScenes() []scene {
-	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools(), sceneLeftBehind()}
+	return []scene{sceneManyIdle(), sceneFewOngoing(), sceneSubagents(), sceneVeryLong(), sceneFirstSession(), sceneAlarmStorm(), sceneFleetHygiene(), sceneSecondDay(), sceneTwoTools(), sceneLeftBehind(), scenePair()}
 }
 
 // quota is the refusal a session dead on its daily limit carries, in the
@@ -1115,8 +1160,12 @@ func poll(m *Model, sc scene) {
 	if !ok {
 		return
 	}
-	m.Update(fleetMsg{sessions: m.sessions, at: m.now, trailFor: key, hasTrail: true,
-		trail: tr, events: eventsBehind(tr, sc.activity(key)), trails: sc.trails, agents: sc.agents})
+	msg := fleetMsg{sessions: m.sessions, at: m.now, trailFor: key, hasTrail: true,
+		trail: tr, events: eventsBehind(tr, sc.activity(key)), trails: sc.trails, agents: sc.agents}
+	if ptr, ok := sc.trails[m.pairKey]; ok && m.pairKey != "" {
+		msg.pairFor, msg.pairEvents = m.pairKey, eventsBehind(ptr, sc.activity(m.pairKey)) // the follower's conversation (#397)
+	}
+	m.Update(msg)
 }
 
 func selectedName(m *Model) string {

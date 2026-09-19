@@ -10,7 +10,7 @@ the same way again.
 
 | Piece | Where | What it is |
 |---|---|---|
-| Scenes | `internal/ui/scenario_test.go` | Fixture fleets, one per operator persona: `second-day`, `subagents`, `two-tools`, `alarm-storm`, `fleet-hygiene`, plus `first-session`, `few-ongoing`, `many-idle`, `very-long`. Each has sessions, trails, panes, agents and an `extra` key list for its own case. |
+| Scenes | `internal/ui/scenario_test.go` | Fixture fleets, one per operator persona: `second-day`, `subagents`, `two-tools`, `alarm-storm`, `fleet-hygiene`, plus `first-session`, `few-ongoing`, `many-idle`, `very-long`, `left-behind`, `pair`. Each has sessions, trails, panes, agents and an `extra` key list for its own case. |
 | Walkthrough | `TestScenarioWalkthrough` | Presses `canonicalKeys`, then `esc`, then the scene's `extra` keys, polling after every key as the real deck does, and writes one frame per key at 80x24, 100x30, 120x34, 152x40 and 220x48. |
 | Corpus | `$SCRATCH/scenes/<scene>-<w>x<h>.txt` | The rendered frames. Every review cites `file:line` in it. |
 | Goldens | `testdata/golden/*.txt` | Whole-frame snapshots of fixed views. Regenerated with `-update`; a golden that moves is a change to explain. |
@@ -80,6 +80,7 @@ Personas, and the question each asks of a frame:
 | alarm-storm operator | `alarm-storm`, `very-long` | Three dead on quota, one asking, one hung, one looping, one fine. Which first? |
 | fleet-hygiene operator | `fleet-hygiene`, `many-idle` | Namesakes, a session with no pane, a pane that closed, forty archived sessions wearing four names. |
 | left-behind operator | `left-behind`, `few-ongoing` | The operator who forgets: a session asked me something two days ago and I never came back. Is it still on the board, ranked under today, and can I put it down? |
+| pair operator | `pair`, `subagents` | Two agents talking to each other: a lead waiting on a teammate, the teammate's own session beside it. How are things going between them, without attaching to either? |
 
 ### What the panel cannot see
 

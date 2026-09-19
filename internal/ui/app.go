@@ -68,6 +68,11 @@ type fleetMsg struct {
 	trailFor string                          // the session the payload belongs to; "" if none was polled
 	agents   map[string]map[string]agentLive // what the subagents' own files say, per session, per call
 
+	// pairFor is the session the reader's pair follows, and pairEvents its
+	// conversation; "" when no pair was open at the poll (#397).
+	pairFor    string
+	pairEvents []transcript.Event
+
 	// trails is every board column's journey, keyed by session; nil when the
 	// board was not polled (a narrow terminal). The selected session's is in
 	// here and in trail both.
@@ -328,8 +333,14 @@ type Model struct {
 	// teammate's own session and `h` back lands where it left, not on the
 	// lead's present with the lane gone (#396). Only `h`/`l` restore
 	// one: a digit still lands on the present (#70).
-	places      map[string]readerPlace
-	returning   bool // the selection is moving by h/l, so a place comes back
+	places    map[string]readerPlace
+	returning bool // the selection is moving by h/l, so a place comes back
+	// The pair (#397): the session the reader's lane links to, its
+	// conversation and the document flattened from it, drawn beside the
+	// lane's reader where the width has the room.
+	pairKey     string
+	pairEvents  []transcript.Event
+	pairCache   readerCache
 	boardLabels map[string]map[string]string
 	fleetQuery  string               // the fleet search in force; "" = none
 	searchFleet bool                 // the search being typed is the fleet's, not the reader's
@@ -590,6 +601,10 @@ func (m *Model) refresh() tea.Cmd {
 	}
 	targets := m.boardTargets()
 	laneWanted := m.laneWanted()
+	pair, pairPath := m.pairKey, ""
+	if s, ok := m.session(pair); ok {
+		pairPath = s.Info.TranscriptPath
+	}
 	agentPaths := map[string]string{} // session key → transcript path, for the lanes' files
 	if s, ok := m.selected(); ok {
 		agentPaths[s.Info.Key()] = s.Info.TranscriptPath
@@ -634,6 +649,12 @@ func (m *Model) refresh() tea.Cmd {
 				msg.trail, msg.events = feeds.poll(selected, path, true)
 				msg.hasTrail = true
 				pollAgents(selected, msg.trail)
+			}
+			if pair != "" && pairPath != "" {
+				// The follower's conversation: its feed keeps events from
+				// here on, the cost selecting it would have (#397).
+				_, msg.pairEvents = feeds.poll(pair, pairPath, true)
+				msg.pairFor = pair
 			}
 			// The board's columns. Each feed reads only what its transcript
 			// has grown since the last poll; the first poll of a new column
@@ -768,6 +789,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// live session and `1` opened the band's first archived row.
 		m.assignDigits()
 		m.clampSelection()
+		m.pairPoll(msg.pairFor, msg.pairEvents)
+		m.pairCheck()
 		if first && len(m.sessions) == 0 {
 			// Nothing on disk at all: the launch's choice of level is made,
 			// and a session that appears later never moves the person. The
@@ -1910,6 +1933,7 @@ func (m *Model) zoomOut() tea.Cmd {
 	case m.level > levelWaypoints:
 		m.level = levelWaypoints
 		m.readerLane = "" // the lead's conversation comes back with the cursor
+		m.closePair()
 		// The reader goes back to following the cursor it left behind.
 		m.anchorReader()
 	case m.level > levelTrail:
@@ -3035,6 +3059,7 @@ func (m *Model) pointAs(key string, quiet bool) {
 	// drew "reading the transcript…" under "the agent's own conversation"
 	// for good. The reader comes back to the session it is on (#69).
 	m.readerLane = ""
+	m.closePair()
 	m.docCache.valid = false
 	m.unfolded = map[int]bool{}
 	m.scroll = 0
@@ -3055,6 +3080,7 @@ func (m *Model) pointAs(key string, quiet bool) {
 		// in which case it comes back there (#396).
 		m.restorePlace(key)
 		m.cursorMove(0)
+		m.openPair() // a lane that came back brings its pair (#397)
 	}
 }
 
@@ -6810,6 +6836,16 @@ func (m *Model) deckLines(w, h int) []string {
 		return m.boardLines(w, h)
 	}
 	fw, mw, tw := m.layout(w)
+	if m.pairShown() {
+		// The pair (#397): the lane's reader, keys on it, and the linked
+		// session's own reader following its mark. The trail is one
+		// shift+tab away; two conversations are what the frame is for.
+		lw, rw := m.pairWidths()
+		return joinColumnsBelow(h, []column{
+			{lw, m.readerColumn(lw, h)},
+			{rw, m.pairColumn(rw, h)},
+		}, m.boxFloor())
+	}
 	if fw == 0 && mw > 0 {
 		// Two columns, the trail and its companion: the conversation, or
 		// the live pane while `m` has it and the keys are on the trail. The
