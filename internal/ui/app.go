@@ -6795,13 +6795,6 @@ func sessionSplit(inner int) (companion, trail int) {
 // sessionMove is h/l inside a session: the neighbouring session in the
 // board's order, at the same depth, its cursor on the present.
 func (m *Model) sessionMove(delta int) {
-	if delta > 0 && m.pairShown() {
-		// In the pair, the half to the right is the follower: `l` is the
-		// keys crossing to it (#400), and only off the pair's edge the
-		// next session.
-		m.swapPair()
-		return
-	}
 	was := m.selectedKey
 	m.returning = true // the reader comes back where it left this session (#397)
 	m.boardMove(delta)
