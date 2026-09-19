@@ -1123,7 +1123,8 @@ func TestATeammatesReportNamesTheTeammate(t *testing.T) {
 // on never closed and read `lost` on a lead whose teammates had all
 // reported. The join is the teammate's name, read off the spawn's input
 // and matched against the envelope's teammate_id; the reply is the lane's
-// finding and stands as no prompt (#395).
+// finding and stands as no prompt, and a later reply under the same name
+// is the newer finding (#395).
 func TestATeammatesReplyClosesItsLane(t *testing.T) {
 	spawn := func(offset time.Duration, id, name, description string) transcript.Event {
 		return use(offset, id, "Agent", rawJSON(map[string]string{
@@ -1162,25 +1163,27 @@ func TestATeammatesReplyClosesItsLane(t *testing.T) {
 		t.Errorf("the open leg did not close on the reply: %+v", tr.Legs)
 	}
 
-	// A reply that names no open lane stands as a relayed prompt (#97, #394):
-	// a teammate this trail never forked, an envelope without an id, and a
-	// second reply on a lane already closed.
+	// A teammate writes more than once: a progress note, then the finding,
+	// then a follow-up. Every reply under the name lands on the lane, and
+	// the newest word is the finding; none stands as a prompt. A reply
+	// that names no lane — a teammate this trail never forked, an envelope
+	// without an id — stands as a relayed prompt (#97, #394).
 	tr = segment(
 		prompt(0, "convene the panel"),
 		spawn(1*time.Minute, "a1", "panel-theorist", "Theorist: review the plan"),
 		reply(5*time.Minute, "panel-historian", "No precedent."),
 		reply(6*time.Minute, "", "Unsigned."),
+		reply(8*time.Minute, "panel-theorist", "Halfway through the gates."),
 		reply(9*time.Minute, "panel-theorist", "The plan holds."),
-		reply(10*time.Minute, "panel-theorist", "One more thing."),
+		reply(10*time.Minute, "panel-theorist", "One more thing: gate 4 is gate 7."),
 	)
-	if b := tr.Branches[0]; !b.Done || b.Report != "The plan holds." {
-		t.Errorf("the theorist's lane = %+v; want it closed by the first reply under its name", b)
+	if b := tr.Branches[0]; !b.Done || !b.End.Equal(at(10*time.Minute)) || b.Report != "One more thing: gate 4 is gate 7." {
+		t.Errorf("the theorist's lane = %+v; want it closed at its newest reply, with that reply as its finding", b)
 	}
 	want := []journey.Prompt{
 		{Text: "convene the panel", At: at(0)},
 		{Text: "panel-historian: No precedent.", At: at(5 * time.Minute), Relayed: true, Teammate: "panel-historian"},
 		{Text: "Unsigned.", At: at(6 * time.Minute), Relayed: true, Teammate: "teammate"},
-		{Text: "panel-theorist: One more thing.", At: at(10 * time.Minute), Relayed: true, Teammate: "panel-theorist"},
 	}
 	if len(tr.Prompts) != len(want) {
 		t.Fatalf("Prompts = %+v; want %+v", tr.Prompts, want)

@@ -199,7 +199,7 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		// A teammate's reply to the lane this trail sent it out on is that
 		// lane's finding, not a prompt: the lane closes on it and the
 		// trail says it once, beneath the lane (#395). A reply that
-		// matches no open lane stands as a relayed prompt (#97, #394).
+		// matches no lane stands as a relayed prompt (#97, #394).
 		if !s.observeTeammateReport(ev) {
 			p := Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()}
 			if id, _, ok := ev.Teammate(); ok {
@@ -347,26 +347,29 @@ func (s *Segmenter) observeNotification(n transcript.TaskNotification, at time.T
 	}
 }
 
-// observeTeammateReport closes the lane a teammate's relayed reply belongs
-// to and reports whether it did. A teammate's message comes back as a
-// relayed user turn, not as the Agent call's tool_result or a
+// observeTeammateReport folds a teammate's relayed reply into the lane it
+// belongs to and reports whether it did. A teammate's message comes back
+// as a relayed user turn, not as the Agent call's tool_result or a
 // task-notification, so neither observeResult nor observeNotification ever
 // saw it and every teammate lane read `lost` on a lead whose teammates had
 // all reported (#395). The join is the teammate's id: the name the spawn's
 // input gave it, recorded on the branch at the fork, against the
-// envelope's teammate_id. An envelope without an id, or one naming no open
-// lane, closes nothing: a lane is never closed by guesswork, and the reply
-// stays a relayed prompt as before.
+// envelope's teammate_id. A teammate often writes more than once — a
+// progress note, then the finding, then a follow-up — so every reply
+// under the name lands on the lane, closed or not, and the newest word is
+// the finding. An envelope without an id, or one naming no lane, closes
+// nothing: a lane is never closed by guesswork, and the reply stays a
+// relayed prompt as before.
 func (s *Segmenter) observeTeammateReport(ev transcript.Event) bool {
 	id, body, ok := ev.Teammate()
 	if !ok || id == "" {
 		return false
 	}
-	// The newest open lane under that name: a teammate spawned again
-	// under the same name is the one still out.
+	// The newest lane under that name: a teammate spawned again under
+	// the same name is the one still writing.
 	for i := len(s.branches) - 1; i >= 0; i-- {
 		b := &s.branches[i]
-		if b.Done || b.Teammate != id {
+		if b.Teammate != id {
 			continue
 		}
 		b.Done = true
