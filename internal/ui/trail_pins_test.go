@@ -1667,6 +1667,12 @@ func TestTheSentRowDoesNotKeepAMoveThatCannotMove(t *testing.T) {
 				rows := strings.Split(ansi.Strip(m.View()), "\n")
 				foot := rows[len(rows)-1]
 				lipgloss.SetColorProfile(old)
+				if len(m.viewOrder()) > 1 {
+					// The alarms stay under any query (#397): this
+					// scene's board is drawn, and its footer is the
+					// board's own — not the empty stand this pin holds.
+					continue
+				}
 				if !strings.Contains(foot, "↪ ") {
 					t.Fatalf("%s %dx%d %v: no trace note on the sent row: %q", sc.name, w, h, prof, foot)
 				}

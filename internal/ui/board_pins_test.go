@@ -1221,14 +1221,30 @@ func TestNoDigitDeniesALiveSessionTheFleetNumbers(t *testing.T) {
 			w, h := size[0], size[1]
 
 			// The board under a query that matches nothing: `1` is the
-			// fleet's needs-you session, live, on the board one esc away.
+			// fleet's needs-you session, which stays under any query
+			// (#397), so the digit lands on it and refuses nothing.
 			m := r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "1")
 			foot := r90ttFoot(m)
 			if strings.Contains(foot, "no session 1") {
 				t.Errorf("%dx%d %v: the board denies the digit the fleet numbers: %q", w, h, prof, foot)
 			}
-			if !strings.Contains(foot, "1 infra") {
-				t.Errorf("%dx%d %v: the refusal does not name session 1: %q", w, h, prof, foot)
+			if s, ok := m.selected(); !ok || sessionName(s.Info) != "infra" {
+				t.Errorf("%dx%d %v: `1` did not land on the needs-you session under the query: %q", w, h, prof, foot)
+			}
+			// `3` is a working session the query left out: live, on the
+			// board one esc away, and the digit lands on it — the
+			// selection always has a column (#16) — under a note that
+			// says the search does not (#397).
+			m = r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "3")
+			foot = r90ttFoot(m)
+			if strings.Contains(foot, "no session 3") {
+				t.Errorf("%dx%d %v: the board denies the digit the fleet numbers: %q", w, h, prof, foot)
+			}
+			if s, ok := m.selected(); !ok || sessionName(s.Info) != "api" || m.digits[s.Info.Key()] != 3 {
+				t.Errorf("%dx%d %v: `3` did not land on session 3 under the query", w, h, prof)
+			}
+			if !strings.Contains(foot, "3 api is outside /zzz") {
+				t.Errorf("%dx%d %v: the note does not say the search left session 3 out: %q", w, h, prof, foot)
 			}
 			// A digit no session carries is still refused.
 			m = r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "7")

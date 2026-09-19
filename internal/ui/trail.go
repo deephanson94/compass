@@ -2015,7 +2015,7 @@ func (m *Model) trailColumn(w, h int) []string {
 func (m *Model) sessionCard(w int) []string {
 	r, ok := m.boardRows()[m.selectedKey]
 	if !ok {
-		if s, has := m.selected(); has && m.fleetQuery != "" && !m.matchesQuery(s) {
+		if s, has := m.selected(); has && m.fleetQuery != "" && !m.inSearch(s) {
 			// The one session fails the search: the card says so, where a
 			// blank card and a blank band said nothing (#52). Where the
 			// band beneath holds what the search found (#98), the miss

@@ -104,7 +104,7 @@ func (m *Model) viewOrder() []int {
 func (m *Model) liveOrder(searched bool) []int {
 	var out []int
 	for i, s := range m.sessions {
-		if m.onBoard(s) && (!searched || m.matchesQuery(s)) {
+		if m.onBoard(s) && (!searched || m.inSearch(s)) {
 			out = append(out, i)
 		}
 	}
@@ -972,6 +972,19 @@ func (m *Model) boardSelect(i int) bool {
 		if m.digits[m.sessions[idx].Info.Key()] == i+1 {
 			m.point(m.sessions[idx].Info.Key())
 			return true
+		}
+	}
+	if m.fleetQuery != "" {
+		// The digit is a session's the search left out — the one a lane's
+		// `→N` names, say. The selection always has a column (#16), so
+		// the digit lands on it and the note says the search does not
+		// (#397).
+		for _, s := range m.sessions {
+			if m.onBoard(s) && m.digits[s.Info.Key()] == i+1 {
+				m.point(s.Info.Key())
+				m.note = fmt.Sprintf("%d %s is outside /%s · esc clears it", i+1, sessionName(s.Info), m.fleetQuery)
+				return true
+			}
 		}
 	}
 	return false

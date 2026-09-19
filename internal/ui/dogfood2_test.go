@@ -1118,13 +1118,22 @@ func TestTheFleetSearch(t *testing.T) {
 	if len(got) == 0 || len(got) >= all {
 		t.Errorf("the query should narrow the fleet: %d of %d", len(got), all)
 	}
+	matched, stayed := 0, 0
 	for _, i := range got {
-		if !m.matchesQuery(m.sessions[i]) {
-			t.Errorf("%s does not match /401", sessionName(m.sessions[i].Info))
+		switch s := m.sessions[i]; {
+		case m.matchesQuery(s):
+			matched++
+		case m.alarmed(s):
+			stayed++ // an alarm stays on the board under any query (#397)
+		default:
+			t.Errorf("%s does not match /401", sessionName(s.Info))
 		}
 	}
-	if head := ansi.Strip(m.headerLine(150)); !strings.Contains(head, "/401 · ") || !strings.Contains(head, fmt.Sprintf("%d of %d", len(got), all)) {
-		t.Errorf("the header should carry the query and the count: %q", head)
+	if stayed == 0 {
+		t.Errorf("the fixture's needs-you session did not stay under /401")
+	}
+	if head := ansi.Strip(m.headerLine(150)); !strings.Contains(head, "/401 · ") || !strings.Contains(head, fmt.Sprintf("%d of %d · %d stay", matched, all, stayed)) {
+		t.Errorf("the header should carry the query, the count and what stayed: %q", head)
 	}
 	press(m, "esc")
 	if m.fleetQuery != "" || len(m.viewOrder()) != all {
@@ -1313,8 +1322,12 @@ func TestCalmPanelsAndLiveSearch(t *testing.T) {
 	if foot := ansi.Strip(m.footerLine(150)); !strings.Contains(foot, "/zzz▏") {
 		t.Errorf("the footer should echo the query: %q", foot)
 	}
-	if len(m.viewOrder()) != 0 {
-		t.Errorf("the fleet should narrow as the query is typed: %d shown", len(m.viewOrder()))
+	for _, i := range m.viewOrder() {
+		// Narrowed as typed: what is left owes an alarm, or the query
+		// did not narrow (#397).
+		if !m.alarmed(m.sessions[i]) {
+			t.Errorf("the fleet should narrow as the query is typed: %s shown", sessionName(m.sessions[i].Info))
+		}
 	}
 	press(m, "esc")
 	if m.fleetQuery != "" || m.selectedKey != before {
