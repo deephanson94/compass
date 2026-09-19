@@ -301,3 +301,63 @@ func TestTheFollowerOnItsNewestLineSaysSo(t *testing.T) {
 		t.Errorf("the follower past its newest line does not say so:\n%s", view)
 	}
 }
+
+// `l` in the pair crosses to the follower (#400): it becomes the session
+// being read, the mark lands on the row it was following, and a peer's
+// pair re-opens from its side; `l` again crosses back.
+func TestLCrossesThePair(t *testing.T) {
+	forceASCII(t)
+	m, sc := peersStand(152, 40, "1", "tab", "G", "tab", "k", "k")
+	if m.pairKey == "" || m.readerLane != "" {
+		t.Fatalf("the stand is not a peer pair: pair %q lane %q", m.pairKey, m.readerLane)
+	}
+	_, rw := m.pairWidths()
+	doc := m.pairDoc(rw)
+	row := m.pairRow(rw)
+	followed := doc[row].at
+	pressKey(m, "l")
+	poll(m, sc)
+	if s, _ := m.selected(); sessionName(s.Info) != "shop" {
+		t.Fatalf("l did not cross to the follower: %s", sessionName(s.Info))
+	}
+	if !m.anchorAt.Equal(followed) {
+		t.Errorf("the mark did not land on the followed row: %v, want %v", m.anchorAt, followed)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, focusMark+"READER · shop") || !strings.Contains(view, "READER · →1 reviewer · follows") {
+		t.Errorf("the pair did not re-open from shop's side:\n%s", view)
+	}
+	if !strings.Contains(view, "⌂ compass · 2 shop") {
+		t.Errorf("the header does not name the session the keys are on:\n%s", view)
+	}
+	pressKey(m, "l")
+	poll(m, sc)
+	if s, _ := m.selected(); sessionName(s.Info) != "reviewer" || m.pairKey == "" {
+		t.Errorf("l again did not cross back: %s pair %q", sessionName(s.Info), m.pairKey)
+	}
+}
+
+// On a lane's pair `l` reads the linked session alone, and `h` brings the
+// lane and its pair back (#400, #396).
+func TestLOnALanePairReadsTheLinkedSessionAlone(t *testing.T) {
+	forceASCII(t)
+	m, sc := pairStand(152, 40)
+	if m.pairKey == "" || m.readerLane == "" {
+		t.Fatalf("the stand is not a lane pair")
+	}
+	_, rw := m.pairWidths()
+	followed := m.pairDoc(rw)[m.pairRow(rw)].at
+	pressKey(m, "l")
+	poll(m, sc)
+	if s, _ := m.selected(); sessionName(s.Info) != "builder" || m.pairKey != "" || m.readerLane != "" {
+		t.Errorf("l did not read the linked session alone: %s pair %q lane %q", sessionName(s.Info), m.pairKey, m.readerLane)
+	}
+	if !m.anchorAt.Equal(followed) {
+		t.Errorf("the mark did not land on the followed row: %v, want %v", m.anchorAt, followed)
+	}
+	pressKey(m, "h")
+	poll(m, sc)
+	if s, _ := m.selected(); sessionName(s.Info) != "shop" || m.pairKey == "" || m.readerLane == "" {
+		t.Errorf("h did not bring the lane and its pair back: %s pair %q lane %q", sessionName(s.Info), m.pairKey, m.readerLane)
+	}
+}
