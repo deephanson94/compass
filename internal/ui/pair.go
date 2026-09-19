@@ -11,7 +11,7 @@ import (
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
-// The pair (#397): a lane's reader beside the linked session's own. A lane's
+// The pair (#398): a lane's reader beside the linked session's own. A lane's
 // `→N` says a live session looks like this agent — the same agent, seen
 // through its own transcript, which is fresher than the lane's file when
 // the file has gone quiet. The subagents operator's question of that frame

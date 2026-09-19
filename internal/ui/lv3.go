@@ -67,7 +67,7 @@ func (m *Model) laneSilenceWord() string {
 		// silence stood alone on the whole frame (#66, #68, #69). In the
 		// pair the follower's title carries the session's own clock and
 		// its page is the fresher reading itself, so the stub says its
-		// silence alone (#397).
+		// silence alone (#398).
 		if !m.trailRowSaysWrote(b) && !m.pairShown() {
 			tr := m.trails[m.selectedKey]
 			agents := m.agentsFor(m.selectedKey)
@@ -174,7 +174,7 @@ func (m *Model) readerWidth() int {
 	case inner < minDeckCols:
 		return inner // one column, and at Lv3 it is the reader's
 	case m.pairShown():
-		left, _ := m.pairWidths() // the lane's reader is the pair's left half (#397)
+		left, _ := m.pairWidths() // the lane's reader is the pair's left half (#398)
 		return left
 	case m.boardFits() && !m.archiveView:
 		companion, _ := sessionSplit(inner) // the session view, at Lv2 or Lv3
@@ -637,7 +637,7 @@ func (m *Model) enterReader() {
 			// shows the agent's conversation in place of the lead's, and
 			// opens on its newest line — what it is doing now (#49).
 			m.readerLane = lane
-			m.openPair() // a linked lane reads beside the session it links to (#397)
+			m.openPair() // a linked lane reads beside the session it links to (#398)
 			m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
 			m.scroll = 0
 			m.scrollBy(1 << 30)

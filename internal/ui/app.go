@@ -69,7 +69,7 @@ type fleetMsg struct {
 	agents   map[string]map[string]agentLive // what the subagents' own files say, per session, per call
 
 	// pairFor is the session the reader's pair follows, and pairEvents its
-	// conversation; "" when no pair was open at the poll (#397).
+	// conversation; "" when no pair was open at the poll (#398).
 	pairFor    string
 	pairEvents []transcript.Event
 
@@ -335,7 +335,7 @@ type Model struct {
 	// one: a digit still lands on the present (#70).
 	places    map[string]readerPlace
 	returning bool // the selection is moving by h/l, so a place comes back
-	// The pair (#397): the session the reader's lane links to, its
+	// The pair (#398): the session the reader's lane links to, its
 	// conversation and the document flattened from it, drawn beside the
 	// lane's reader where the width has the room.
 	pairKey     string
@@ -652,7 +652,7 @@ func (m *Model) refresh() tea.Cmd {
 			}
 			if pair != "" && pairPath != "" {
 				// The follower's conversation: its feed keeps events from
-				// here on, the cost selecting it would have (#397).
+				// here on, the cost selecting it would have (#398).
 				_, msg.pairEvents = feeds.poll(pair, pairPath, true)
 				msg.pairFor = pair
 			}
@@ -3080,7 +3080,7 @@ func (m *Model) pointAs(key string, quiet bool) {
 		// in which case it comes back there (#396).
 		m.restorePlace(key)
 		m.cursorMove(0)
-		m.openPair() // a lane that came back brings its pair (#397)
+		m.openPair() // a lane that came back brings its pair (#398)
 	}
 }
 
@@ -6837,7 +6837,7 @@ func (m *Model) deckLines(w, h int) []string {
 	}
 	fw, mw, tw := m.layout(w)
 	if m.pairShown() {
-		// The pair (#397): the lane's reader, keys on it, and the linked
+		// The pair (#398): the lane's reader, keys on it, and the linked
 		// session's own reader following its mark. The trail is one
 		// shift+tab away; two conversations are what the frame is for.
 		lw, rw := m.pairWidths()

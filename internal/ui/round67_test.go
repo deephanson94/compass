@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Round sixty-seven: the pair (#397). `tab` on a lane whose `→N` names a
+// Round sixty-seven: the pair (#398). `tab` on a lane whose `→N` names a
 // live session opens that session's own reader beside the lane's, where
 // the width has room for two; the lane's reader keeps the keys and the
 // other follows its mark by time; leaving the lane's reader closes it, and

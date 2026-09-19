@@ -1163,7 +1163,7 @@ func poll(m *Model, sc scene) {
 	msg := fleetMsg{sessions: m.sessions, at: m.now, trailFor: key, hasTrail: true,
 		trail: tr, events: eventsBehind(tr, sc.activity(key)), trails: sc.trails, agents: sc.agents}
 	if ptr, ok := sc.trails[m.pairKey]; ok && m.pairKey != "" {
-		msg.pairFor, msg.pairEvents = m.pairKey, eventsBehind(ptr, sc.activity(m.pairKey)) // the follower's conversation (#397)
+		msg.pairFor, msg.pairEvents = m.pairKey, eventsBehind(ptr, sc.activity(m.pairKey)) // the follower's conversation (#398)
 	}
 	m.Update(msg)
 }

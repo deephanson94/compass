@@ -204,7 +204,7 @@ func TestTheLinkedLanesSubRowSaysTheFresherClock(t *testing.T) {
 		found := ""
 		// The session view at Lv2: the trail at the width it has beside
 		// the reader too. At Lv3 on the linked lane the pair opens and no
-		// trail is drawn (#397), so the sub-row is read here.
+		// trail is drawn (#398), so the sub-row is read here.
 		for _, k := range []string{"tab"} {
 			pressKey(m, k)
 			poll(m, sc)
@@ -263,7 +263,7 @@ func TestTheLaneReaderAloneSaysTheFresherClock(t *testing.T) {
 		// The stub carries the clause wherever no other row on the frame
 		// does: below the deck's width no trail panel is drawn at all,
 		// and at 120 the trail's sub-row sheds it for want of cells.
-		// In the pair (#397) the follower's title carries the linked
+		// In the pair (#398) the follower's title carries the linked
 		// session's own clock, and no other row on the frame says it.
 		trailSays, stubSays, followerSays := false, false, false
 		for _, line := range strings.Split(seen, "\n") {
