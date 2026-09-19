@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Round sixty-six: the standing search (#396). A search keeps every alarm
+// Round sixty-six: the standing search (#397). A search keeps every alarm
 // on the board and says how many stayed; it lands on what it found, not
 // on what stayed; a lane's `→N` is the session's own digit and survives a
 // search that leaves that session out, and the digit still lands; the

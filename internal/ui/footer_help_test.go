@@ -237,7 +237,7 @@ func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
 	}
 	// #213 still holds where a key that acts comes back: at eighty a
 	// search nothing answers leaves one row — the needs-you session,
-	// which stays under any query (#396) — and the cells buy `g grab`.
+	// which stays under any query (#397) — and the cells buy `g grab`.
 	sc := sceneTwoTools()
 	m := sceneModel(sc, 80, 24)
 	for _, k := range []string{"/", "zzz", "enter"} {

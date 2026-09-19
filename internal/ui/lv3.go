@@ -1558,7 +1558,7 @@ func (m *Model) narrowLive() {
 }
 
 // landSearch puts the selection on what the search found. The alarms a
-// search keeps on the board (inSearch, #396) are not what it found: a
+// search keeps on the board (inSearch, #397) are not what it found: a
 // selection standing on one of them while a row answers the query would
 // land `/flake` on the needs-you session and not on the session with the
 // flake. The first row that answers is the landing; where none does, the

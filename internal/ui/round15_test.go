@@ -172,7 +172,7 @@ func TestAQueryHidingTheOpenSessionClears(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 40)
 	// A fleet with nothing to alarm on: an alarm stays on the board under
-	// any query (#396), and a nothing-query would land on it instead.
+	// any query (#397), and a nothing-query would land on it instead.
 	for i := range m.sessions {
 		if m.sessions[i].Snap.State == state.NeedsYou {
 			m.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: fixtureBase}

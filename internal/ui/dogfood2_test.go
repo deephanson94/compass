@@ -1124,7 +1124,7 @@ func TestTheFleetSearch(t *testing.T) {
 		case m.matchesQuery(s):
 			matched++
 		case m.alarmed(s):
-			stayed++ // an alarm stays on the board under any query (#396)
+			stayed++ // an alarm stays on the board under any query (#397)
 		default:
 			t.Errorf("%s does not match /401", sessionName(s.Info))
 		}
@@ -1324,7 +1324,7 @@ func TestCalmPanelsAndLiveSearch(t *testing.T) {
 	}
 	for _, i := range m.viewOrder() {
 		// Narrowed as typed: what is left owes an alarm, or the query
-		// did not narrow (#396).
+		// did not narrow (#397).
 		if !m.alarmed(m.sessions[i]) {
 			t.Errorf("the fleet should narrow as the query is typed: %s shown", sessionName(m.sessions[i].Info))
 		}

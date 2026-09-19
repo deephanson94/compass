@@ -926,7 +926,7 @@ func TestNoMoveKeyCallsAnEmptyListTheOnlySession(t *testing.T) {
 						if len(m.viewOrder()) != 0 {
 							if !arch && m.stayCount() == len(m.viewOrder()) {
 								// The live list keeps its alarms under any
-								// query (#396): no query empties it.
+								// query (#397): no query empties it.
 								lipgloss.SetColorProfile(old)
 								continue
 							}
@@ -1418,7 +1418,7 @@ func TestTheFleetFoldDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
 					// it stands: the fold is unmoved or gone with the line.
 					// Typed into the search it is the query `/j`, whose
 					// landing may sit under the alarms the search keeps
-					// (#396) — the list then scrolls to the landing, and
+					// (#397) — the list then scrolls to the landing, and
 					// only then may the fold move.
 					after := r100fhWalk(sc, w, h, append(append([]string(nil), route...), "j"))
 					got := r100fhFold(after.View())
