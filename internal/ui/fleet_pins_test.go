@@ -924,6 +924,12 @@ func TestNoMoveKeyCallsAnEmptyListTheOnlySession(t *testing.T) {
 					for _, mv := range []string{"j", "k"} {
 						m := r89sdEmptyList(sc, wh[0], wh[1], arch)
 						if len(m.viewOrder()) != 0 {
+							if !arch && m.stayCount() == len(m.viewOrder()) {
+								// The live list keeps its alarms under any
+								// query (#396): no query empties it.
+								lipgloss.SetColorProfile(old)
+								continue
+							}
 							lipgloss.SetColorProfile(old)
 							t.Fatalf("%s %dx%d arch=%v: the query left rows, so the stand is not the one", sc.name, wh[0], wh[1], arch)
 						}
@@ -1410,8 +1416,15 @@ func TestTheFleetFoldDropsItsKeyWhileALineIsBeingTyped(t *testing.T) {
 					}
 					// Pressed on that very frame, `j` leaves the list where
 					// it stands: the fold is unmoved or gone with the line.
+					// Typed into the search it is the query `/j`, whose
+					// landing may sit under the alarms the search keeps
+					// (#396) — the list then scrolls to the landing, and
+					// only then may the fold move.
 					after := r100fhWalk(sc, w, h, append(append([]string(nil), route...), "j"))
 					got := r100fhFold(after.View())
+					if after.selectedKey != m.selectedKey && after.searching {
+						continue
+					}
 					if got != "" && r100fhCount(got) != r100fhCount(row) {
 						t.Errorf("%s %s %dx%d %v: `j` moved the list, %q -> %q",
 							prof.name, sc.name, w, h, route, row, got)

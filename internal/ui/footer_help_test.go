@@ -235,9 +235,18 @@ func TestAStuckKeyIsNotTheGainThatBuysTheTrade(t *testing.T) {
 			t.Errorf("%dx%d: a yield that buys nothing took the movement key: %q", w, h, f)
 		}
 	}
-	// #213 still holds where a key that acts comes back: at eighty the
-	// search leaves one row and the cells buy `g grab`.
-	m, _ := archive(80, 24, 5)
+	// #213 still holds where a key that acts comes back: at eighty a
+	// search nothing answers leaves one row — the needs-you session,
+	// which stays under any query (#396) — and the cells buy `g grab`.
+	sc := sceneTwoTools()
+	m := sceneModel(sc, 80, 24)
+	for _, k := range []string{"/", "zzz", "enter"} {
+		pressKey(m, k)
+		poll(m, sc)
+	}
+	if n := len(m.viewOrder()); n != 1 {
+		t.Fatalf("80x24: the nothing-search left %d rows, not the alarm alone", n)
+	}
 	if f := foot(m); strings.Contains(f, "j/k move") || !strings.Contains(f, "g grab") {
 		t.Errorf("80x24: the movement key did not yield to a key that acts: %q", f)
 	}

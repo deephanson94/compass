@@ -1511,7 +1511,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) {
 			m.fleetQuery = strings.TrimSpace(m.draft)
 			m.draft, m.searching, m.searchFleet = "", false, false
 			m.fleetScroll = 0
-			m.clampSelection()
+			m.landSearch()
 			if m.fleetQuery == "" {
 				m.clearQuery()
 			}
@@ -1554,7 +1554,29 @@ func (m *Model) narrowLive() {
 	}
 	m.fleetQuery = strings.TrimSpace(m.draft)
 	m.fleetScroll = 0
+	m.landSearch()
+}
+
+// landSearch puts the selection on what the search found. The alarms a
+// search keeps on the board (inSearch, #396) are not what it found: a
+// selection standing on one of them while a row answers the query would
+// land `/flake` on the needs-you session and not on the session with the
+// flake. The first row that answers is the landing; where none does, the
+// board's first column is, as clampSelection has it.
+func (m *Model) landSearch() {
 	m.clampSelection()
+	if m.fleetQuery == "" || m.archiveView {
+		return
+	}
+	if s, ok := m.selected(); ok && m.matchesQuery(s) {
+		return
+	}
+	for _, i := range m.viewOrder() {
+		if m.matchesQuery(m.sessions[i]) {
+			m.pointQuiet(m.sessions[i].Info.Key())
+			return
+		}
+	}
 }
 
 // requestNarration asks the narrator to name the trail's closed legs, at most

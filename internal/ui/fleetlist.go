@@ -584,7 +584,7 @@ func (m *Model) liveGroups() []fleetGroup {
 
 	members := map[string][]int{}
 	for i, s := range m.sessions {
-		if !m.onBoard(s) || !m.matchesQuery(s) {
+		if !m.onBoard(s) || !m.inSearch(s) {
 			continue
 		}
 		name := elsewhereGroup
@@ -1682,7 +1682,18 @@ func (m *Model) laneMatches(tr journey.Trail, agents map[string]agentLive) map[s
 	if len(tr.Branches) == 0 {
 		return nil
 	}
+	// The link is the session's own digit, which it wears for life (#32):
+	// numbering it off the searched view struck the `→1` from every lane
+	// the moment `/pytest` left its session out, and the row beneath
+	// read `silent 12m` as if nobody knew better (#396).
 	rows := m.boardRows()
+	if !m.archiveView {
+		for i, s := range m.sessions {
+			if m.onBoard(s) {
+				rows[s.Info.Key()] = fleetRow{sess: i, num: m.digits[s.Info.Key()]}
+			}
+		}
+	}
 	links := map[string]laneLink{}
 	for _, b := range tr.Branches {
 		label := strings.ToLower(strings.TrimSpace(b.Label))
