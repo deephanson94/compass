@@ -47,6 +47,12 @@ type Branch struct {
 	Done      bool      // its tool_result has been observed
 	AfterLeg  int       // index into Legs of the leg open when the fork happened; -1 if none yet
 	Report    string    // first non-empty line of the agent's result, ≤60 runes; "" until Done
+
+	// Teammate is the teammate the Agent call spawned, by the name its
+	// input gave it: the id its report comes back under, so the relayed
+	// reply closes this lane by id and never by label (#395). "" for a
+	// subagent that is not a teammate.
+	Teammate string
 }
 
 // Task is one entry of the plan Claude keeps for itself, read from the
@@ -190,14 +196,20 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
 	// that never reached three stays with the leg it interrupted.
 	if substantivePrompt(ev) {
-		p := Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()}
-		if id, _, ok := ev.Teammate(); ok {
-			p.Teammate = id
-			if p.Teammate == "" {
-				p.Teammate = "teammate" // an envelope with no id is still a teammate's
+		// A teammate's reply to the lane this trail sent it out on is that
+		// lane's finding, not a prompt: the lane closes on it and the
+		// trail says it once, beneath the lane (#395). A reply that
+		// matches no open lane stands as a relayed prompt (#97, #394).
+		if !s.observeTeammateReport(ev) {
+			p := Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()}
+			if id, _, ok := ev.Teammate(); ok {
+				p.Teammate = id
+				if p.Teammate == "" {
+					p.Teammate = "teammate" // an envelope with no id is still a teammate's
+				}
 			}
+			s.prompts = append(s.prompts, p)
 		}
-		s.prompts = append(s.prompts, p)
 		s.flushPress()
 		s.closeLeg()
 	}
@@ -333,6 +345,38 @@ func (s *Segmenter) observeNotification(n transcript.TaskNotification, at time.T
 	} else if line := firstNonEmptyLine(n.Summary); line != "" {
 		b.Report = clip(line, waypointText)
 	}
+}
+
+// observeTeammateReport closes the lane a teammate's relayed reply belongs
+// to and reports whether it did. A teammate's message comes back as a
+// relayed user turn, not as the Agent call's tool_result or a
+// task-notification, so neither observeResult nor observeNotification ever
+// saw it and every teammate lane read `lost` on a lead whose teammates had
+// all reported (#395). The join is the teammate's id: the name the spawn's
+// input gave it, recorded on the branch at the fork, against the
+// envelope's teammate_id. An envelope without an id, or one naming no open
+// lane, closes nothing: a lane is never closed by guesswork, and the reply
+// stays a relayed prompt as before.
+func (s *Segmenter) observeTeammateReport(ev transcript.Event) bool {
+	id, body, ok := ev.Teammate()
+	if !ok || id == "" {
+		return false
+	}
+	// The newest open lane under that name: a teammate spawned again
+	// under the same name is the one still out.
+	for i := len(s.branches) - 1; i >= 0; i-- {
+		b := &s.branches[i]
+		if b.Done || b.Teammate != id {
+			continue
+		}
+		b.Done = true
+		b.End = ev.Timestamp
+		if line := firstNonEmptyLine(body); line != "" {
+			b.Report = clip(line, waypointText)
+		}
+		return true
+	}
+	return false
 }
 
 // The task tools, by name. Their shapes are Claude Code's own and were read
@@ -564,6 +608,7 @@ func (s *Segmenter) fork(use transcript.ToolUse, at time.Time) {
 	s.branches = append(s.branches, Branch{
 		ToolUseID: use.ID,
 		Label:     branchLabel(use.Input),
+		Teammate:  branchTeammate(use.Input),
 		Start:     at,
 		AfterLeg:  after,
 	})
