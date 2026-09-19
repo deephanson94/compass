@@ -1120,9 +1120,9 @@ func r111ttWordWalk() []string {
 // of the last panel rule.
 func r111ttMarkedCells(frame string) []string {
 	var out []string
+	at := r113fhKeysColumn(frame) // the keys' panel: the last, or the pair's left half (#398)
 	for _, l := range strings.Split(ansi.Strip(frame), "\n") {
-		parts := strings.Split(l, "│")
-		cell := strings.TrimRight(parts[len(parts)-1], " ")
+		cell := strings.TrimRight(r113fhColumnAt(l, at), " ")
 		if strings.Contains(cell, "▸") {
 			out = append(out, cell)
 		}
@@ -1316,10 +1316,10 @@ func r111fhRowsWith(doc []readerLine, q string) []int {
 // companion from 120 up, alone below it — so the mark is looked for after
 // the row's last panel rule, never in the trail's own cursor.
 func r111fhMarkedLine(frame string) (string, bool) {
+	at := r113fhKeysColumn(frame) // the keys' panel: the last, or the pair's left half (#398)
 	for _, l := range strings.Split(frame, "\n") {
-		cells := strings.Split(ansi.Strip(l), "│")
-		if strings.Contains(cells[len(cells)-1], "▸") {
-			return cells[len(cells)-1], true
+		if col := r113fhColumnAt(l, at); strings.Contains(col, "▸") {
+			return col, true
 		}
 	}
 	return "", false

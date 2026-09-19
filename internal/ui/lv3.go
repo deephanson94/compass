@@ -64,8 +64,11 @@ func (m *Model) laneSilenceWord() string {
 		// stub under the hung call takes the fresher reading: below the
 		// deck's width there is no trail panel at all, and at 120 the
 		// trail's sub-row sheds the clause for want of cells, so the
-		// silence stood alone on the whole frame (#66, #68, #69).
-		if !m.trailRowSaysWrote(b) {
+		// silence stood alone on the whole frame (#66, #68, #69). In the
+		// pair the follower's title carries the session's own clock and
+		// its page is the fresher reading itself, so the stub says its
+		// silence alone (#398).
+		if !m.trailRowSaysWrote(b) && !m.pairShown() {
 			tr := m.trails[m.selectedKey]
 			agents := m.agentsFor(m.selectedKey)
 			if n, ok := m.laneLinks(tr, agents)[b.Label]; ok && n > 0 {
@@ -170,6 +173,9 @@ func (m *Model) readerWidth() int {
 	switch {
 	case inner < minDeckCols:
 		return inner // one column, and at Lv3 it is the reader's
+	case m.pairShown():
+		left, _ := m.pairWidths() // the lane's reader is the pair's left half (#398)
+		return left
 	case m.boardFits() && !m.archiveView:
 		companion, _ := sessionSplit(inner) // the session view, at Lv2 or Lv3
 		return companion
@@ -245,7 +251,7 @@ func (m *Model) readerColumn(w, h int) []string {
 	}
 	if h > 2 {
 		wDoc := m.doc(w)
-		frame := RenderReader(events, ReaderOpts{
+		frame := renderReaderDoc(wDoc, ReaderOpts{
 			Width:       w,
 			Height:      h - 2,
 			Scroll:      readerTopIn(wDoc, m.scroll, h-2), // never a result row without its owner
@@ -624,12 +630,14 @@ func (m *Model) enterReader() {
 	lane := m.laneWanted() // read where the cursor is before the level moves
 	m.level = levelReader
 	m.readerLane = ""
+	m.closePair()
 	if lane != "" {
 		if _, ok := m.agentsFor(m.selectedKey)[lane]; ok {
 			// The cursor is on a lane whose own file was read: the reader
 			// shows the agent's conversation in place of the lead's, and
 			// opens on its newest line — what it is doing now (#49).
 			m.readerLane = lane
+			m.openPair() // a linked lane reads beside the session it links to (#398)
 			m.anchor, m.anchorAt, m.anchorText = -1, time.Time{}, ""
 			m.scroll = 0
 			m.scrollBy(1 << 30)
@@ -638,6 +646,7 @@ func (m *Model) enterReader() {
 		}
 	}
 	m.anchorReader()
+	m.openPair() // the peer this session is talking to, where there is one (#399)
 }
 
 // nonBlankRow walks the document from i in the given direction (+1 or -1),

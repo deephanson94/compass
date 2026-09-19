@@ -627,6 +627,13 @@ func promptTitle(ev transcript.Event) (string, int) {
 	if ev.Machinery() {
 		return "", titleNone
 	}
+	if _, body, ok := ev.AgentMessage(); ok {
+		// The message, not its `<agent-message from="…">` tag (#399).
+		if title := clipTitle(body); title != "" {
+			return title, titleRelay
+		}
+		return "", titleNone
+	}
 	if ev.Relayed() {
 		if title := clipTitle(ev.RelayBody()); title != "" {
 			return title, titleRelay

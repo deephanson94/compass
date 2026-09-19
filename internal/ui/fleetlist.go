@@ -1676,6 +1676,7 @@ func (m *Model) laneLinkWrote(tr journey.Trail, agents map[string]agentLive) map
 type laneLink struct {
 	num   int
 	wrote time.Time
+	key   string // the linked session, for the pair (#398)
 }
 
 func (m *Model) laneMatches(tr journey.Trail, agents map[string]agentLive) map[string]laneLink {
@@ -1718,7 +1719,7 @@ func (m *Model) laneMatches(tr journey.Trail, agents map[string]agentLive) map[s
 					break
 				}
 				if r, ok := rows[s.Info.Key()]; ok && r.num > 0 {
-					links[b.Label] = laneLink{num: r.num, wrote: s.Info.LastEventAt}
+					links[b.Label] = laneLink{num: r.num, wrote: s.Info.LastEventAt, key: s.Info.Key()}
 				}
 				break
 			}

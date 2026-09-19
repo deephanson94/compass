@@ -57,6 +57,13 @@ type ReaderOpts struct {
 	// they walk the newest legs.
 	Anchor int
 
+	// Echo says the anchored line is not the keys' own row but where the
+	// other reader's mark falls (#398): the pair's follower. The mark's
+	// shape stays — monochrome carries "here" on the glyph, not on a
+	// style — and the inversion, which is what the keys look like
+	// everywhere else in the deck, does not (round 68).
+	Echo bool
+
 	// Lane says the document is an agent's own conversation: its first
 	// turn is the lead's assignment, and wears the lane's glyph rather
 	// than ❯ — nobody typed it (#55).
@@ -96,7 +103,22 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 		return strings.Join(fit(nil, h), "\n")
 	}
 
-	doc := readerDoc(events, o)
+	return renderReaderDoc(readerDoc(events, o), o)
+}
+
+// renderReaderDoc is RenderReader's second half: the crop, over a document
+// the caller has already flattened and cached. The reader and the pair's
+// follower draw through it: a 20,000-event conversation was flattened
+// once for the anchor and again for the frame on every keypress — 300 ms
+// a `j` at the cap, 2 ms off the cache (round 68, the reader's measure).
+func renderReaderDoc(doc []readerLine, o ReaderOpts) string {
+	h := o.Height
+	if h < 1 {
+		return ""
+	}
+	if o.Width < readerMinBody {
+		return strings.Join(fit(nil, h), "\n")
+	}
 	if len(doc) == 0 {
 		doc = readerEmptyDoc(o.Width)
 	}
@@ -120,7 +142,7 @@ func RenderReader(events []transcript.Event, o ReaderOpts) string {
 	for i := top; i < len(doc) && len(rows) < h; i++ {
 		line := doc[i].render(o.Query)
 		if i == o.Anchor {
-			line = markAnchor(line, o.Width)
+			line = markAnchor(line, o.Width, o.Echo)
 		}
 		rows = append(rows, line)
 	}
@@ -140,7 +162,7 @@ func startsAWord(c rune) bool { return unicode.IsLetter(c) || unicode.IsDigit(c)
 // faint carries no style at all (SPEC §4). The line is stripped back to its
 // plain text first: a reset left over from a tint would cancel the inversion
 // halfway across.
-func markAnchor(line string, w int) string {
+func markAnchor(line string, w int, echo bool) string {
 	plain := strings.TrimRight(ansi.Strip(line), " ")
 	// The same cell the trail spends: the space right after a leading
 	// glyph or an indent — "❯▸", "⏺▸", "  ▸⎿" — never a letter of the
@@ -162,14 +184,26 @@ func markAnchor(line string, w int) string {
 	// rule." — the mark inside the model's own words, on 42 canonical rows
 	// (`two-tools`, `alarm-storm`, `few-ongoing`, every width) — so the
 	// row is asked what its first rune is, not merely what its second is.
+	// The keys' cursor is `▸`; the follower's echo of it is `▹`, the same
+	// shape hollow — one cursor per frame, and the glyph alone tells them
+	// apart where colour is off (§4; round 68).
+	mark := '▸'
+	if echo {
+		mark = '▹'
+	}
 	if r := []rune(plain); len(r) > 1 && r[1] == ' ' && !startsAWord(r[0]) {
-		r[1] = '▸'
+		r[1] = mark
 		plain = string(r)
 	} else {
-		plain = "▸" + plain
+		plain = string(mark) + plain
 		if w > 0 {
 			plain = clip(plain, w) // a no-op on every row that fits
 		}
+	}
+	if echo {
+		// The follower's row: the mark, no inversion, no pad — the row
+		// is read, not aimed.
+		return dimStyle.Render(plain)
 	}
 	if pad := w - lipgloss.Width(plain); pad > 0 {
 		plain += strings.Repeat(" ", pad)
@@ -182,7 +216,13 @@ func markAnchor(line string, w int) string {
 // (SPEC §3) — a waypoint names a time, and the reader opens there. -1 means the
 // document has nothing at or after that moment.
 func ReaderAnchor(events []transcript.Event, o ReaderOpts, at time.Time) int {
-	doc := readerDoc(events, o)
+	return anchorRow(readerDoc(events, o), at)
+}
+
+// anchorRow is ReaderAnchor on a document already flattened: the row the
+// moment lands on, a result landing on its call. The follower asks it of
+// its cached document on every render (#399).
+func anchorRow(doc []readerLine, at time.Time) int {
 	for i, l := range doc {
 		if l.event < 0 || l.at.IsZero() {
 			continue
@@ -403,7 +443,14 @@ func readerDoc(events []transcript.Event, o ReaderOpts) []readerLine {
 		switch ev.Type {
 		case transcript.EventUser:
 			text := strings.TrimSpace(ev.Text)
-			if ev.Relayed() {
+			if from, body, ok := ev.AgentMessage(); ok {
+				// The message sent by name: who said it, then what, and
+				// never the envelope's tag (#399).
+				text = relayMark + body
+				if from != "" {
+					text = "relayed from " + from + " · " + body
+				}
+			} else if ev.Relayed() {
 				text = relayMark + ev.RelayBody() // the message, marked as the trail marks it (#106)
 			}
 			if text != "" {

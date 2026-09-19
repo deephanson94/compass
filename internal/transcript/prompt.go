@@ -59,6 +59,61 @@ func (e Event) RelayBody() string {
 	return strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(t, relayPrefix), ":"))
 }
 
+// The envelopes another session's message is relayed in when it was sent
+// by name. A subagent's hand-back: `<agent-message from="planner">…`. A
+// session's `SendMessage` to another on the machine:
+// `<cross-session-message from="uds:/run/user/…/1044442.sock"
+// from-name="latency-breakdown" from-mode="prompting">…` — there the
+// `from` is the socket, and `from-name` is the sender as the deck names it
+// (#399, the owner's screenshot).
+var agentEnvelopes = []struct{ open, close, name, fallback string }{
+	{"<agent-message", "</agent-message>", "from", ""},
+	{"<cross-session-message", "</cross-session-message>", "from-name", "from"},
+}
+
+// AgentMessage reads a relayed turn's envelope: who sent it and what it
+// said. ok is false for a turn that is not such a relay — a teammate's
+// envelope, a bare relay, a person's words.
+func (e Event) AgentMessage() (from, body string, ok bool) {
+	if !e.Relayed() {
+		return "", "", false
+	}
+	t := e.RelayBody()
+	for _, env := range agentEnvelopes {
+		if !strings.HasPrefix(t, env.open) {
+			continue
+		}
+		rest := t[len(env.open):]
+		end := strings.Index(rest, ">")
+		if end < 0 {
+			return "", "", false
+		}
+		head := rest[:end]
+		from = attr(head, env.name)
+		if from == "" && env.fallback != "" {
+			from = attr(head, env.fallback)
+		}
+		body = rest[end+1:]
+		if j := strings.Index(body, env.close); j >= 0 {
+			body = body[:j]
+		}
+		return from, strings.TrimSpace(body), true
+	}
+	return "", "", false
+}
+
+// RelayFrom is who a relayed turn came from, as the envelope names them:
+// the agent-message's `from`, else the teammate's id, else "".
+func (e Event) RelayFrom() string {
+	if from, _, ok := e.AgentMessage(); ok {
+		return from
+	}
+	if id, _, ok := e.Teammate(); ok {
+		return id
+	}
+	return ""
+}
+
 // teammateOpen opens the envelope a teammate's message is relayed in:
 // `<teammate-message teammate_id="panel-theorist" color="purple">…`.
 const (
@@ -207,11 +262,15 @@ func (e Event) Machinery() bool {
 	if e.Type != EventUser {
 		return false
 	}
+	if e.Relayed() {
+		// The harness writes a relayed message as a meta turn
+		// (`isMeta: true, userType: external`), and it is still another
+		// session talking: read before the flag, or every message one
+		// session sends another vanished from the trail (#399).
+		return false
+	}
 	if e.IsMeta {
 		return true
-	}
-	if e.Relayed() {
-		return false
 	}
 	return EnvelopeText(e.Text)
 }
