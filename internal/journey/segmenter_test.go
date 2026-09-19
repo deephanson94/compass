@@ -2,6 +2,8 @@ package journey_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1204,5 +1206,95 @@ func TestATeammatesReplyClosesItsLane(t *testing.T) {
 	}
 	if len(tr.Prompts) != 1 {
 		t.Errorf("Prompts = %+v; the unmatched reply is a relayed prompt", tr.Prompts)
+	}
+}
+
+// The recorded shape (t18-teammates.jsonl, cut short in its prompts and
+// results): five teammates spawned by name, five launch acks, and one
+// relayed turn carrying five envelopes — four teammates reporting, one of
+// them twice, and the fifth never. Every lane but the fifth closes on it,
+// with the idle notification's result as its finding, never the object;
+// the lane written to twice keeps its newest word; nothing stands as a
+// prompt (#395, #396).
+func TestARecordedLeadsTeammateLanesCloseOnTheirReplies(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "scenarios", "t18-teammates.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := journey.NewSegmenter()
+	var relay time.Time
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		ev, err := transcript.ParseLine([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Relayed() {
+			relay = ev.Timestamp
+		}
+		s.Observe(ev)
+		if !ev.Relayed() {
+			for _, b := range s.Trail().Branches {
+				if b.Done {
+					t.Fatalf("lane %q closed before the relay: the launch ack is not the report", b.Teammate)
+				}
+			}
+		}
+	}
+	tr := s.Trail()
+	if len(tr.Branches) != 5 {
+		t.Fatalf("got %d lanes, want 5", len(tr.Branches))
+	}
+	want := []struct {
+		name   string
+		done   bool
+		report string
+	}{
+		{"scenario-batch-00", true, "Done. Processed all 21 memory entries from batch_00.txt and…"},
+		{"scenario-batch-01", true, "Done. I processed all 22 entries in batch_01 and wrote the…"},
+		{"scenario-batch-02", true, "Batch 02 complete. Processed **21 entries**, **0 skipped**…"},
+		{"scenario-batch-03", false, ""},
+		{"scenario-batch-04", true, "Done. All 23 memory entries from batch_04.txt processed."},
+	}
+	for i, w := range want {
+		b := tr.Branches[i]
+		if b.Teammate != w.name || b.Label != fmt.Sprintf("Paraphrase scenarios batch %02d", i) {
+			t.Errorf("lane %d = %q %q; want the spawn's name %q recorded beside its description", i, b.Teammate, b.Label, w.name)
+		}
+		if b.Done != w.done || b.Report != w.report {
+			t.Errorf("lane %s: Done %v Report %q; want %v %q", w.name, b.Done, b.Report, w.done, w.report)
+		}
+		if w.done && !b.End.Equal(relay) {
+			t.Errorf("lane %s closed at %v, want the relay's time %v", w.name, b.End, relay)
+		}
+	}
+	if len(tr.Prompts) != 0 {
+		t.Errorf("Prompts = %+v; every envelope landed on a lane, so none is a prompt", tr.Prompts)
+	}
+}
+
+// A turn whose envelopes are not all a lane's: the ones that are land on
+// it, the rest stand as relayed prompts, one each (#396).
+func TestAMixedTeammateTurnSplitsIntoLanesAndPrompts(t *testing.T) {
+	spawn := use(1*time.Minute, "a1", "Agent", rawJSON(map[string]string{"prompt": "review", "name": "panel-theorist", "description": "Theorist"}))
+	turn := prompt(9*time.Minute, "Another Claude session sent a message:\n"+
+		"<teammate-message teammate_id=\"panel-theorist\" color=\"purple\">\nThe plan holds.\n</teammate-message>\n\n"+
+		"<teammate-message teammate_id=\"panel-historian\" color=\"blue\">\nNo precedent.\n</teammate-message>\n\n"+
+		"<teammate-message color=\"red\">\nUnsigned.\n</teammate-message>")
+	tr := segment(prompt(0, "convene the panel"), spawn, turn)
+	if b := tr.Branches[0]; !b.Done || b.Report != "The plan holds." {
+		t.Errorf("the theorist's lane = %+v; want it closed by its envelope", b)
+	}
+	want := []journey.Prompt{
+		{Text: "convene the panel", At: at(0)},
+		{Text: "panel-historian: No precedent.", At: at(9 * time.Minute), Relayed: true, Teammate: "panel-historian"},
+		{Text: "Unsigned.", At: at(9 * time.Minute), Relayed: true, Teammate: "teammate"},
+	}
+	if len(tr.Prompts) != len(want) {
+		t.Fatalf("Prompts = %+v; want %+v", tr.Prompts, want)
+	}
+	for i := range want {
+		if tr.Prompts[i] != want[i] {
+			t.Errorf("Prompts[%d] = %+v, want %+v", i, tr.Prompts[i], want[i])
+		}
 	}
 }
