@@ -1117,3 +1117,92 @@ func TestATeammatesReportNamesTheTeammate(t *testing.T) {
 		t.Errorf("the ask = %+v; a person's prompt names no teammate", p)
 	}
 }
+
+// A teammate's reply comes back as a relayed user turn, not as the Agent
+// call's tool_result or a task-notification, so the lane it was sent out
+// on never closed and read `lost` on a lead whose teammates had all
+// reported. The join is the teammate's name, read off the spawn's input
+// and matched against the envelope's teammate_id; the reply is the lane's
+// finding and stands as no prompt, and a later reply under the same name
+// is the newer finding (#395).
+func TestATeammatesReplyClosesItsLane(t *testing.T) {
+	spawn := func(offset time.Duration, id, name, description string) transcript.Event {
+		return use(offset, id, "Agent", rawJSON(map[string]string{
+			"prompt": "review the plan", "name": name, "description": description, "team_name": "panel",
+		}))
+	}
+	reply := func(offset time.Duration, id, body string) transcript.Event {
+		return prompt(offset, "Another Claude session sent a message:\n\n<teammate-message teammate_id=\""+id+"\" color=\"purple\">\n"+body+"\n</teammate-message>")
+	}
+
+	tr := segment(
+		prompt(0, "convene the panel"),
+		spawn(1*time.Minute, "a1", "panel-theorist", "Theorist: review the plan"),
+		spawn(1*time.Minute+time.Second, "a2", "panel-skeptic", "Skeptic: review the plan"),
+		resultText(1*time.Minute+2*time.Second, "a1", launchAckText),
+		resultText(1*time.Minute+3*time.Second, "a2", launchAckText),
+		say(2*time.Minute, "Waiting on the panel."),
+		reply(9*time.Minute, "panel-theorist", "\nThe plan holds; two gates share a root cause.\n\nDetails follow."),
+		say(9*time.Minute+time.Second, "Noted."),
+	)
+	if len(tr.Branches) != 2 {
+		t.Fatalf("got %d branches, want 2", len(tr.Branches))
+	}
+	if b := tr.Branches[0]; b.Teammate != "panel-theorist" || !b.Done || !b.End.Equal(at(9*time.Minute)) || b.Report != "The plan holds; two gates share a root cause." {
+		t.Errorf("the theorist's lane = %+v; want it closed at +9m by its reply, with the reply's first line as its finding", b)
+	}
+	if b := tr.Branches[1]; b.Teammate != "panel-skeptic" || b.Done || b.Report != "" {
+		t.Errorf("the skeptic's lane = %+v; nothing came back on it", b)
+	}
+	// The reply is the lane's finding, said once beneath it: no prompt row.
+	if len(tr.Prompts) != 1 || tr.Prompts[0].Text != "convene the panel" {
+		t.Errorf("Prompts = %+v; the reply that closed its lane stood as a prompt too", tr.Prompts)
+	}
+	// Rule 2 stands: the lead starts a turn on the reply, so the leg closes.
+	if n := len(tr.Legs); n > 0 && tr.Legs[n-1].Current {
+		t.Errorf("the open leg did not close on the reply: %+v", tr.Legs)
+	}
+
+	// A teammate writes more than once: a progress note, then the finding,
+	// then a follow-up. Every reply under the name lands on the lane, and
+	// the newest word is the finding; none stands as a prompt. A reply
+	// that names no lane — a teammate this trail never forked, an envelope
+	// without an id — stands as a relayed prompt (#97, #394).
+	tr = segment(
+		prompt(0, "convene the panel"),
+		spawn(1*time.Minute, "a1", "panel-theorist", "Theorist: review the plan"),
+		reply(5*time.Minute, "panel-historian", "No precedent."),
+		reply(6*time.Minute, "", "Unsigned."),
+		reply(8*time.Minute, "panel-theorist", "Halfway through the gates."),
+		reply(9*time.Minute, "panel-theorist", "The plan holds."),
+		reply(10*time.Minute, "panel-theorist", "One more thing: gate 4 is gate 7."),
+	)
+	if b := tr.Branches[0]; !b.Done || !b.End.Equal(at(10*time.Minute)) || b.Report != "One more thing: gate 4 is gate 7." {
+		t.Errorf("the theorist's lane = %+v; want it closed at its newest reply, with that reply as its finding", b)
+	}
+	want := []journey.Prompt{
+		{Text: "convene the panel", At: at(0)},
+		{Text: "panel-historian: No precedent.", At: at(5 * time.Minute), Relayed: true, Teammate: "panel-historian"},
+		{Text: "Unsigned.", At: at(6 * time.Minute), Relayed: true, Teammate: "teammate"},
+	}
+	if len(tr.Prompts) != len(want) {
+		t.Fatalf("Prompts = %+v; want %+v", tr.Prompts, want)
+	}
+	for i := range want {
+		if tr.Prompts[i] != want[i] {
+			t.Errorf("Prompts[%d] = %+v, want %+v", i, tr.Prompts[i], want[i])
+		}
+	}
+
+	// A plain subagent names no teammate, and a lane never matches by label.
+	tr = segment(
+		agent(1*time.Minute, "a1", "panel-theorist"),
+		reply(9*time.Minute, "panel-theorist", "The plan holds."),
+	)
+	if b := tr.Branches[0]; b.Teammate != "" || b.Done {
+		t.Errorf("a plain subagent's lane = %+v; a reply never closes a lane by its label", b)
+	}
+	if len(tr.Prompts) != 1 {
+		t.Errorf("Prompts = %+v; the unmatched reply is a relayed prompt", tr.Prompts)
+	}
+}

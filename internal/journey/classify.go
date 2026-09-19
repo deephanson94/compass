@@ -146,6 +146,12 @@ type pathInput struct {
 
 type agentInput struct {
 	Description string `json:"description"`
+	// A teammate spawn names the teammate: Claude Code's agent teams put
+	// it in `name`, and the id its messages come back under (#395) is
+	// that name. `teammate_id` is read too, for a harness that spells
+	// it as the envelope does. Empty for a plain subagent.
+	Name       string `json:"name"`
+	TeammateID string `json:"teammate_id"`
 }
 
 // Classify returns the class vote for one event and whether it votes at all.
@@ -230,6 +236,24 @@ func branchLabel(input json.RawMessage) string {
 		return label
 	}
 	return "agent"
+}
+
+// branchTeammate is the teammate a spawn's input names, or "" for a
+// subagent that is not a teammate. It is the join a teammate's relayed
+// report closes its lane by (#395): read off the input at the fork,
+// never guessed from a label.
+func branchTeammate(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var in agentInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return ""
+	}
+	if id := strings.TrimSpace(in.Name); id != "" {
+		return id
+	}
+	return strings.TrimSpace(in.TeammateID)
 }
 
 func commandOf(input json.RawMessage) string {
