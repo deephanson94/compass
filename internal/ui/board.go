@@ -978,7 +978,7 @@ func (m *Model) boardSelect(i int) bool {
 		// The digit is a session's the search left out — the one a lane's
 		// `→N` names, say. The selection always has a column (#16), so
 		// the digit lands on it and the note says the search does not
-		// (#396).
+		// (#397).
 		for _, s := range m.sessions {
 			if m.onBoard(s) && m.digits[s.Info.Key()] == i+1 {
 				m.point(s.Info.Key())

@@ -1222,7 +1222,7 @@ func TestNoDigitDeniesALiveSessionTheFleetNumbers(t *testing.T) {
 
 			// The board under a query that matches nothing: `1` is the
 			// fleet's needs-you session, which stays under any query
-			// (#396), so the digit lands on it and refuses nothing.
+			// (#397), so the digit lands on it and refuses nothing.
 			m := r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "1")
 			foot := r90ttFoot(m)
 			if strings.Contains(foot, "no session 1") {
@@ -1234,7 +1234,7 @@ func TestNoDigitDeniesALiveSessionTheFleetNumbers(t *testing.T) {
 			// `3` is a working session the query left out: live, on the
 			// board one esc away, and the digit lands on it — the
 			// selection always has a column (#16) — under a note that
-			// says the search does not (#396).
+			// says the search does not (#397).
 			m = r90ttStand(sceneTwoTools(), w, h, "2", "/", "zzz", "enter", "3")
 			foot = r90ttFoot(m)
 			if strings.Contains(foot, "no session 3") {

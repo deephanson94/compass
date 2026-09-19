@@ -331,7 +331,7 @@ type Model struct {
 	// places is where the reader stood in each session it left from Lv2
 	// or Lv3 — the lane, the cursor, the mark and the page — so `l` to the
 	// teammate's own session and `h` back lands where it left, not on the
-	// lead's present with the lane gone (#396). Only `h`/`l` restore
+	// lead's present with the lane gone (#397). Only `h`/`l` restore
 	// one: a digit still lands on the present (#70).
 	places    map[string]readerPlace
 	returning bool // the selection is moving by h/l, so a place comes back
@@ -477,7 +477,7 @@ func (m *Model) SetEvents(events []transcript.Event) {
 		// and its title carries the row and its clock (#55).
 		m.anchorReader()
 	} else if m.level >= levelReader && m.anchor >= 0 && m.readerLane == "" && len(events) > 0 {
-		// A mark restored from a place stashed earlier (#396) stands on
+		// A mark restored from a place stashed earlier (#397) stands on
 		// a row of a document that may have grown since: it is found
 		// again by its moment and its text, as a rewrap finds it (#321).
 		m.keepReaderCursorOnPage(readerSeat{})
@@ -2112,7 +2112,7 @@ func (m *Model) matchesQuery(s fleet.Session) bool {
 	if has(s.Info.ToolName()) || has(s.Info.Model) {
 		// The row wears its tool and model where the fleet runs two tools
 		// (#50); a search on either found nothing, on the one scene named
-		// for the question (#396).
+		// for the question (#397).
 		return true
 	}
 	tr := m.trails[s.Info.Key()]
@@ -2136,7 +2136,7 @@ func (m *Model) matchesQuery(s fleet.Session) bool {
 
 // alarmed says whether a session owes an alarm — needs you, dead on the
 // API, stuck, looping, or a question you walked away from: every row that
-// wears amber or red. It is what a standing search never hides (#396).
+// wears amber or red. It is what a standing search never hides (#397).
 func (m *Model) alarmed(s fleet.Session) bool {
 	if s.Waiting {
 		return true
@@ -2149,7 +2149,7 @@ func (m *Model) alarmed(s fleet.Session) bool {
 // alarm back through a hide (onBoard); the search had no such door, so
 // `/pytest` on a storm drew one column and left three dead on quota and
 // one asking as counts in the header and nowhere else — the frame §2.4
-// says must never exist. No amber is ever unnamed (#396).
+// says must never exist. No amber is ever unnamed (#397).
 func (m *Model) inSearch(s fleet.Session) bool {
 	return m.matchesQuery(s) || m.alarmed(s)
 }
@@ -2903,7 +2903,7 @@ func (m *Model) clampSelection() {
 			// On the board, left out of the search: the selection stays,
 			// and the board gives it its column (#16). A query nothing
 			// answers kept the selection when it emptied the view, and
-			// keeps it now that the alarms stay in the view (#396).
+			// keeps it now that the alarms stay in the view (#397).
 			return
 		}
 		// Nothing selected yet: the board's first column — what owes
@@ -2972,7 +2972,7 @@ func (m *Model) pointQuiet(key string) {
 }
 
 // readerPlace is a session's reader as it was left: what pointAs stashes
-// on the way out and restores on the way back (#396).
+// on the way out and restores on the way back (#397).
 type readerPlace struct {
 	lane       string
 	cursor     int
@@ -2984,7 +2984,7 @@ type readerPlace struct {
 }
 
 // stashPlace remembers where the reader stands in the selected session,
-// for a return to it at the same level (#396).
+// for a return to it at the same level (#397).
 func (m *Model) stashPlace() {
 	if m.selectedKey == "" || m.level < levelWaypoints {
 		return
@@ -3077,7 +3077,7 @@ func (m *Model) pointAs(key string, quiet bool) {
 		// way tab and h/l do: a digit landed with the keys in the trail
 		// and no row under the cursor, and the first j placed it (#70) —
 		// unless the reader was left standing somewhere in this session,
-		// in which case it comes back there (#396).
+		// in which case it comes back there (#397).
 		m.restorePlace(key)
 		m.cursorMove(0)
 		m.openPair() // a lane that came back brings its pair (#398)
@@ -3941,7 +3941,7 @@ func (m *Model) headerLine(w int) string {
 			query = fmt.Sprintf(" · /%s · %d of %d", m.fleetQuery, matched, total)
 			if n := m.stayCount(); n > 0 {
 				// The alarms the search did not find and the board kept
-				// anyway, in the hide's own word (#396).
+				// anyway, in the hide's own word (#397).
 				query += fmt.Sprintf(" · %d stay", n)
 			}
 		}
@@ -6793,7 +6793,7 @@ func sessionSplit(inner int) (companion, trail int) {
 // board's order, at the same depth, its cursor on the present.
 func (m *Model) sessionMove(delta int) {
 	was := m.selectedKey
-	m.returning = true // the reader comes back where it left this session (#396)
+	m.returning = true // the reader comes back where it left this session (#397)
 	m.boardMove(delta)
 	m.returning = false
 	if m.selectedKey == was {

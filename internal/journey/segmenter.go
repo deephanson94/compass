@@ -200,15 +200,10 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		// lane's finding, not a prompt: the lane closes on it and the
 		// trail says it once, beneath the lane (#395). A reply that
 		// matches no lane stands as a relayed prompt (#97, #394).
-		if !s.observeTeammateReport(ev) {
-			p := Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()}
-			if id, _, ok := ev.Teammate(); ok {
-				p.Teammate = id
-				if p.Teammate == "" {
-					p.Teammate = "teammate" // an envelope with no id is still a teammate's
-				}
-			}
-			s.prompts = append(s.prompts, p)
+		if ms := ev.Teammates(); len(ms) > 0 {
+			s.observeTeammateReports(ms, ev.Timestamp)
+		} else {
+			s.prompts = append(s.prompts, Prompt{Text: clip(promptText(ev), 60), At: ev.Timestamp, Relayed: ev.Relayed()})
 		}
 		s.flushPress()
 		s.closeLeg()
@@ -347,34 +342,55 @@ func (s *Segmenter) observeNotification(n transcript.TaskNotification, at time.T
 	}
 }
 
-// observeTeammateReport folds a teammate's relayed reply into the lane it
-// belongs to and reports whether it did. A teammate's message comes back
-// as a relayed user turn, not as the Agent call's tool_result or a
-// task-notification, so neither observeResult nor observeNotification ever
-// saw it and every teammate lane read `lost` on a lead whose teammates had
-// all reported (#395). The join is the teammate's id: the name the spawn's
-// input gave it, recorded on the branch at the fork, against the
-// envelope's teammate_id. A teammate often writes more than once — a
-// progress note, then the finding, then a follow-up — so every reply
-// under the name lands on the lane, closed or not, and the newest word is
-// the finding. An envelope without an id, or one naming no lane, closes
-// nothing: a lane is never closed by guesswork, and the reply stays a
-// relayed prompt as before.
-func (s *Segmenter) observeTeammateReport(ev transcript.Event) bool {
-	id, body, ok := ev.Teammate()
-	if !ok || id == "" {
+// observeTeammateReports folds a relayed turn's teammate messages into the
+// lanes they belong to. A teammate's message comes back as a relayed user
+// turn, not as the Agent call's tool_result or a task-notification, so
+// neither observeResult nor observeNotification ever saw it and every
+// teammate lane read `lost` on a lead whose teammates had all reported
+// (#395). The join is the teammate's id: the name the spawn's input gave
+// it, recorded on the branch at the fork, against the envelope's
+// teammate_id. A teammate often writes more than once — a progress note,
+// then the finding, then a follow-up — and several teammates come back in
+// one turn (#396), so every message lands on its lane, closed or not, and
+// the newest word is the finding. A message without an id, or naming no
+// lane, closes nothing: a lane is never closed by guesswork, and that
+// message stays a relayed prompt as before (#97, #394).
+func (s *Segmenter) observeTeammateReports(ms []transcript.TeammateMessage, at time.Time) {
+	for _, m := range ms {
+		if s.observeTeammateReport(m, at) {
+			continue
+		}
+		p := Prompt{At: at, Relayed: true, Teammate: m.ID}
+		if p.Teammate == "" {
+			p.Teammate = "teammate" // an envelope with no id is still a teammate's
+		}
+		// The teammate and its words, not the tag they came in: the
+		// envelope's first line was `<teammate-message teammate_id=…`
+		// on every row that quoted it (#394).
+		text := firstLine(m.Body)
+		if m.ID != "" {
+			text = m.ID + ": " + text
+		}
+		p.Text = clip(text, 60)
+		s.prompts = append(s.prompts, p)
+	}
+}
+
+// observeTeammateReport lands one message on the newest lane under its
+// teammate's name — a teammate spawned again under the same name is the
+// one still writing — and reports whether there was one.
+func (s *Segmenter) observeTeammateReport(m transcript.TeammateMessage, at time.Time) bool {
+	if m.ID == "" {
 		return false
 	}
-	// The newest lane under that name: a teammate spawned again under
-	// the same name is the one still writing.
 	for i := len(s.branches) - 1; i >= 0; i-- {
 		b := &s.branches[i]
-		if b.Teammate != id {
+		if b.Teammate != m.ID {
 			continue
 		}
 		b.Done = true
-		b.End = ev.Timestamp
-		if line := firstNonEmptyLine(body); line != "" {
+		b.End = at
+		if line := firstNonEmptyLine(m.Body); line != "" {
 			b.Report = clip(line, waypointText)
 		}
 		return true
@@ -493,16 +509,7 @@ func promptText(ev transcript.Event) string {
 		return cmd
 	}
 	if ev.Relayed() {
-		if id, body, ok := ev.Teammate(); ok {
-			// The teammate and its words, not the tag they came in: the
-			// envelope's first line was `<teammate-message teammate_id=…`
-			// on every row that quoted it (#394).
-			if id != "" {
-				return id + ": " + firstLine(body)
-			}
-			return firstLine(body)
-		}
-		return firstLine(ev.RelayBody()) // the message, not its envelope (#97)
+		return firstLine(ev.RelayBody()) // the message, not its envelope (#97); a teammate's is read in Observe (#394)
 	}
 	return firstLine(ev.Text)
 }

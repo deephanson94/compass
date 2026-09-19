@@ -1686,7 +1686,7 @@ func (m *Model) laneMatches(tr journey.Trail, agents map[string]agentLive) map[s
 	// The link is the session's own digit, which it wears for life (#32):
 	// numbering it off the searched view struck the `→1` from every lane
 	// the moment `/pytest` left its session out, and the row beneath
-	// read `silent 12m` as if nobody knew better (#396).
+	// read `silent 12m` as if nobody knew better (#397).
 	rows := m.boardRows()
 	if !m.archiveView {
 		for i, s := range m.sessions {

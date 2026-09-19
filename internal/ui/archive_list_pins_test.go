@@ -109,7 +109,7 @@ func TestTheSentRowInTheArchiveDoesNotKeepAMoveThatCannotMove(t *testing.T) {
 				foot := rows[len(rows)-1]
 				lipgloss.SetColorProfile(old)
 				if !m.archiveView && len(m.viewOrder()) > 1 {
-					// The alarms stay under any query (#396): this
+					// The alarms stay under any query (#397): this
 					// scene's board is drawn, not the empty stand.
 					continue
 				}
