@@ -936,7 +936,7 @@ func (m *Model) anchorReader() {
 	if m.cursor < 0 {
 		return
 	}
-	rows := TrailRows(m.trail, m.level)
+	rows := m.selRows()
 	if m.cursor >= len(rows) {
 		return
 	}
@@ -954,7 +954,17 @@ func (m *Model) anchorReader() {
 func (m *Model) anchorOn(at time.Time, text string, leg int) {
 	m.anchor = -1
 	opts := ReaderOpts{Width: m.readerWidth(), Unfolded: m.unfolded, CWD: m.readerCWD(), Now: m.now, Lanes: m.laneClauses()}
-	if line := ReaderAnchor(m.events, opts, at); line >= 0 {
+	line := -1
+	if m.readerLane == "" {
+		// The lead's own document is the one the reader caches: anchoring
+		// off it costs the row search, not a second flattening of the
+		// whole conversation on every j the trail's cursor takes (the
+		// reader's measure, round 68, reached from the trail this time).
+		line = anchorRow(m.doc(opts.Width), at)
+	} else {
+		line = ReaderAnchor(m.events, opts, at)
+	}
+	if line >= 0 {
 		// The scroll is clamped to the last screenful at once: an offset
 		// past it drew the same frame, and the first j after it moved the
 		// number and nothing else.

@@ -152,7 +152,7 @@ func (m *Model) laneWanted() string {
 		return ""
 	}
 	if m.level == levelWaypoints && m.cursor >= 0 {
-		if rows := TrailRows(m.trail, m.level); m.cursor < len(rows) && rows[m.cursor].Kind == "branch" {
+		if rows := m.selRows(); m.cursor < len(rows) && rows[m.cursor].Kind == "branch" {
 			return rows[m.cursor].Lane
 		}
 	}

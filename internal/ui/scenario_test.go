@@ -741,65 +741,7 @@ func sceneVeryLong() scene {
 	tr := map[string]journey.Trail{}
 	var ss []fleet.Session
 
-	long := func(id string, legs int, start time.Time, current bool) journey.Trail {
-		project := id // the commits are the session's own, not another's
-		classes := []journey.Class{journey.Scout, journey.Build, journey.Test, journey.Fix, journey.Test, journey.Build, journey.Docs, journey.Ship, journey.Scout, journey.Design}
-		labels := map[journey.Class][]string{
-			journey.Scout:  {"the router", "the session store", "how tokens are minted", "the audit log", "the old migration"},
-			journey.Build:  {"router.py", "store.py", "tokens.py", "audit.py", "migrate_007.py"},
-			journey.Test:   {"pytest", "pytest", "pytest tests/auth", "pytest -x"},
-			journey.Fix:    {"a nil session on logout", "expiry in local time", "the audit row order", "a flaky ordering"},
-			journey.Docs:   {"CHANGELOG.md", "README.md", "docs/auth.md"},
-			journey.Ship:   {"commit", "push", "open the pr"},
-			journey.Design: {"the refresh flow", "where the audit log lives"},
-		}
-		tr := journey.Trail{Prompts: []journey.Prompt{{Text: "rebuild session handling end to end: router, store, tokens, audit", At: start}}}
-		at := start.Add(time.Minute)
-		fails := 0
-		for i := 0; i < legs; i++ {
-			c := classes[i%len(classes)]
-			names := labels[c]
-			leg := journey.Leg{Class: c, Label: names[i%len(names)], Start: at, End: at.Add(time.Duration(3+i%9) * time.Minute), Votes: 4}
-			switch c {
-			case journey.Test:
-				switch i % 3 {
-				case 0:
-					fails++ // the same test, red again: Runs is what the segmenter would count
-					leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "310 passed · 2 failed", Short: "310✓ 2✗", At: leg.End}, {Kind: journey.WaypointTestFail, Text: "test_logout_nil_session", Runs: fails, At: leg.End}}
-				case 1:
-					leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "312 passed", Short: "312✓", At: leg.End}}
-				default:
-					// a run whose output never parsed: a tick on the rail
-				}
-			case journey.Ship:
-				subject := map[string]string{
-					"commit":      project + ": " + []string{"route sessions through the store", "mint tokens from the store", "audit every refresh", "migrate the old sessions", "drop the legacy path"}[(i/10)%5],
-					"push":        project + ": push " + []string{"feat/sessions", "feat/audit", "feat/migrate"}[(i/10)%3],
-					"open the pr": project + ": open the pr for review",
-				}[leg.Label]
-				leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointCommit, Text: subject, At: leg.End}}
-			case journey.Build:
-				leg.Files = []string{leg.Label}
-			case journey.Fix:
-				leg.Files = []string{[]string{"router.py", "tokens.py", "audit.py", "tests/test_order.py"}[i%4]}
-			case journey.Docs:
-				leg.Files = []string{leg.Label}
-			}
-			if current && i == legs-1 {
-				leg.Current = true
-			}
-			tr.Legs = append(tr.Legs, leg)
-			at = leg.End.Add(30 * time.Second)
-			if i%14 == 13 {
-				// A prompt comes after the session sat waiting for it — six
-				// to twelve minutes here, as a person at a fleet does.
-				wait := time.Duration(6+(i/14)%3*3) * time.Minute
-				tr.Prompts = append(tr.Prompts, journey.Prompt{Text: []string{"ok keep going", "now the audit log", "fix all the failures first", "yes and update the docs", "please continue — our quota is back"}[(i/14)%5], At: leg.End.Add(wait)})
-				at = leg.End.Add(wait + 30*time.Second)
-			}
-		}
-		return tr
-	}
+	long := dayLongTrail
 	ss = append(ss, sess("auth", "auth", "/home/user/auth", "feat/sessions", "rebuild session handling end to end", state.Working, n.Add(-90*time.Second), journey.Build, "312✓", "tool call in flight", "Edit: audit.py"))
 	tr[sessionKey("auth")] = withCompactions(withTasks(long("auth", 160, n.Add(-22*time.Hour), true),
 		journey.Task{ID: "1", Subject: "Router", Status: "completed"}, journey.Task{ID: "2", Subject: "Store", Status: "completed"},
@@ -1278,4 +1220,68 @@ func TestScenarioWalkthrough(t *testing.T) {
 			}
 		}
 	}
+}
+
+// dayLongTrail is a day-long session of `legs` legs, every class in rotation,
+// a prompt every fourteen legs: the very-long scene's builder, shared with
+// the reader's benchmark.
+func dayLongTrail(id string, legs int, start time.Time, current bool) journey.Trail {
+	project := id // the commits are the session's own, not another's
+
+	classes := []journey.Class{journey.Scout, journey.Build, journey.Test, journey.Fix, journey.Test, journey.Build, journey.Docs, journey.Ship, journey.Scout, journey.Design}
+	labels := map[journey.Class][]string{
+		journey.Scout:  {"the router", "the session store", "how tokens are minted", "the audit log", "the old migration"},
+		journey.Build:  {"router.py", "store.py", "tokens.py", "audit.py", "migrate_007.py"},
+		journey.Test:   {"pytest", "pytest", "pytest tests/auth", "pytest -x"},
+		journey.Fix:    {"a nil session on logout", "expiry in local time", "the audit row order", "a flaky ordering"},
+		journey.Docs:   {"CHANGELOG.md", "README.md", "docs/auth.md"},
+		journey.Ship:   {"commit", "push", "open the pr"},
+		journey.Design: {"the refresh flow", "where the audit log lives"},
+	}
+	tr := journey.Trail{Prompts: []journey.Prompt{{Text: "rebuild session handling end to end: router, store, tokens, audit", At: start}}}
+	at := start.Add(time.Minute)
+	fails := 0
+	for i := 0; i < legs; i++ {
+		c := classes[i%len(classes)]
+		names := labels[c]
+		leg := journey.Leg{Class: c, Label: names[i%len(names)], Start: at, End: at.Add(time.Duration(3+i%9) * time.Minute), Votes: 4}
+		switch c {
+		case journey.Test:
+			switch i % 3 {
+			case 0:
+				fails++ // the same test, red again: Runs is what the segmenter would count
+				leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "310 passed · 2 failed", Short: "310✓ 2✗", At: leg.End}, {Kind: journey.WaypointTestFail, Text: "test_logout_nil_session", Runs: fails, At: leg.End}}
+			case 1:
+				leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "312 passed", Short: "312✓", At: leg.End}}
+			default:
+				// a run whose output never parsed: a tick on the rail
+			}
+		case journey.Ship:
+			subject := map[string]string{
+				"commit":      project + ": " + []string{"route sessions through the store", "mint tokens from the store", "audit every refresh", "migrate the old sessions", "drop the legacy path"}[(i/10)%5],
+				"push":        project + ": push " + []string{"feat/sessions", "feat/audit", "feat/migrate"}[(i/10)%3],
+				"open the pr": project + ": open the pr for review",
+			}[leg.Label]
+			leg.Waypoints = []journey.Waypoint{{Kind: journey.WaypointCommit, Text: subject, At: leg.End}}
+		case journey.Build:
+			leg.Files = []string{leg.Label}
+		case journey.Fix:
+			leg.Files = []string{[]string{"router.py", "tokens.py", "audit.py", "tests/test_order.py"}[i%4]}
+		case journey.Docs:
+			leg.Files = []string{leg.Label}
+		}
+		if current && i == legs-1 {
+			leg.Current = true
+		}
+		tr.Legs = append(tr.Legs, leg)
+		at = leg.End.Add(30 * time.Second)
+		if i%14 == 13 {
+			// A prompt comes after the session sat waiting for it — six
+			// to twelve minutes here, as a person at a fleet does.
+			wait := time.Duration(6+(i/14)%3*3) * time.Minute
+			tr.Prompts = append(tr.Prompts, journey.Prompt{Text: []string{"ok keep going", "now the audit log", "fix all the failures first", "yes and update the docs", "please continue — our quota is back"}[(i/14)%5], At: leg.End.Add(wait)})
+			at = leg.End.Add(wait + 30*time.Second)
+		}
+	}
+	return tr
 }
