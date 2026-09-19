@@ -183,3 +183,55 @@ func TestATeammatesMessageIsReadOutOfItsEnvelope(t *testing.T) {
 		t.Errorf("an envelope the harness did not relay is machinery, not a teammate's message")
 	}
 }
+
+// A lead's teammates come back in one relayed turn: the preamble once,
+// then an envelope per message, blank-line separated. Recorded from a
+// lead with five teammates (t18-teammates.jsonl, its last line): five
+// envelopes, two from the same teammate, four of them carrying the
+// harness's idle notification for the teammate — a JSON object whose
+// `result` is what it reported, with the result's closing quote escaped
+// so the object does not parse — and one the teammate's own words with
+// a `summary` attribute (#396).
+func TestEveryTeammateEnvelopeInATurnIsRead(t *testing.T) {
+	lines := fixtureLines(t, "scenarios/t18-teammates.jsonl")
+	ev, err := transcript.ParseLine([]byte(lines[len(lines)-1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := ev.Teammates()
+	want := []transcript.TeammateMessage{
+		{ID: "scenario-batch-00", Body: "Done. Processed all 21 memory entries from batch_00.txt and generated 2 scenarios for each — no entries were too abstract to extract from.\n\n**Results:** 21 entries processed, 0 skipped. Scenarios written to `/hdd4/deep/tmp/memory_retrieval_experiment/scenarios_batch_00.json`."},
+		{ID: "scenario-batch-01", Body: "Done. I processed all 22 entries in batch_01 and wrote the scenarios JSON file. Each entry generated 2 scenario sentences grounded in facts from the \\\"Why:\\\" and incident sections.\n\n**Results:** 22 entries processed, 0 skipped."},
+		{ID: "scenario-batch-02", Body: "Batch 02 complete. Processed **21 entries**, **0 skipped** (all were grounded enough to produce concrete scenarios)."},
+		{ID: "scenario-batch-04", Body: "Batch 04 complete: 23 entries processed, 0 skipped. Scenarios written to /hdd4/deep/tmp/memory_retrieval_experiment/scenarios_batch_04.json."},
+		{ID: "scenario-batch-04", Body: "Done. All 23 memory entries from batch_04.txt processed.\n\n**Results:** 23 entries processed, 0 skipped."},
+	}
+	if len(ms) != len(want) {
+		t.Fatalf("Teammates() = %d messages, want %d:\n%+v", len(ms), len(want), ms)
+	}
+	for i := range want {
+		if ms[i] != want[i] {
+			t.Errorf("Teammates()[%d] = %+v\nwant %+v", i, ms[i], want[i])
+		}
+	}
+	// Teammate() is the first of them.
+	if id, body, ok := ev.Teammate(); !ok || id != want[0].ID || body != want[0].Body {
+		t.Errorf("Teammate() = %q, %q, %v", id, body, ok)
+	}
+	// A prose envelope is read as written; an idle notification that does
+	// parse is read by its result; one with no result is read as written.
+	one := func(body string) string {
+		ev := transcript.Event{Type: transcript.EventUser, Text: "Another Claude session sent a message:\n<teammate-message teammate_id=\"x\">\n" + body + "\n</teammate-message>"}
+		_, b, _ := ev.Teammate()
+		return b
+	}
+	if got := one(`{"type":"idle_notification","from":"x","idleReason":"available","result":"All done.\nSecond line."}`); got != "All done.\nSecond line." {
+		t.Errorf("a well-formed idle notification reads as its result: %q", got)
+	}
+	if got := one(`{"type":"idle_notification","from":"x","idleReason":"available"}`); got != `{"type":"idle_notification","from":"x","idleReason":"available"}` {
+		t.Errorf("a notification without a result reads as written: %q", got)
+	}
+	if got := one("{not json, just a brace to open with}"); got != "{not json, just a brace to open with}" {
+		t.Errorf("a brace-led message that is no notification reads as written: %q", got)
+	}
+}

@@ -1,6 +1,10 @@
 package transcript
 
-import "strings"
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+)
 
 // A transcript's user lines are not all people talking. The harness writes its
 // own turns through the same channel — notifications, reminders, hook feedback,
@@ -57,37 +61,129 @@ func (e Event) RelayBody() string {
 
 // teammateOpen opens the envelope a teammate's message is relayed in:
 // `<teammate-message teammate_id="panel-theorist" color="purple">…`.
-const teammateOpen = "<teammate-message"
+const (
+	teammateOpen  = "<teammate-message"
+	teammateClose = "</teammate-message>"
+)
 
-// Teammate is the teammate a relayed message came from and the message
-// itself, out of the envelope the harness wraps it in; ok is false for a
-// relay that is not a teammate's. A teammate's message is a report to
-// the session that sent it out, not an ask: it is no chapter of the
-// trail (#394).
-func (e Event) Teammate() (id, body string, ok bool) {
+// TeammateMessage is one teammate's message out of a relayed turn: who it
+// came from and what it said.
+type TeammateMessage struct {
+	ID string // the envelope's teammate_id; "" when the envelope had none
+
+	// Body is the message: the teammate's own words, or, where the
+	// envelope carried the harness's idle notification for it, the
+	// notification's `result` — what the teammate reported when it went
+	// idle (#396).
+	Body string
+}
+
+// Teammates reads every teammate envelope out of a relayed turn. A lead's
+// teammates come back in one user turn: the preamble once, then an
+// envelope per message, blank-line separated — five on one recorded line,
+// two of them from the same teammate. Nil for a relay that is not a
+// teammate's, and for an envelope the harness did not relay (the tag rule
+// above: that is machinery). A teammate's message is a report to the
+// session that sent it out, not an ask: it is no chapter of the trail
+// (#394), and the lane it was sent out on closes on it (#395).
+func (e Event) Teammates() []TeammateMessage {
 	if !e.Relayed() {
-		return "", "", false // an envelope the harness did not relay is machinery (the tag rule above)
+		return nil
 	}
 	t := e.RelayBody()
 	if !strings.HasPrefix(t, teammateOpen) {
-		return "", "", false
+		return nil
 	}
-	end := strings.Index(t, ">")
-	if end < 0 {
-		return "", "", false
-	}
-	head := t[len(teammateOpen):end]
-	if i := strings.Index(head, `teammate_id="`); i >= 0 {
-		rest := head[i+len(`teammate_id="`):]
-		if j := strings.Index(rest, `"`); j >= 0 {
-			id = rest[:j]
+	var out []TeammateMessage
+	for {
+		i := strings.Index(t, teammateOpen)
+		if i < 0 {
+			break
 		}
+		t = t[i+len(teammateOpen):]
+		end := strings.Index(t, ">")
+		if end < 0 {
+			break
+		}
+		m := TeammateMessage{ID: attr(t[:end], "teammate_id")}
+		t = t[end+1:]
+		body := t
+		if j := strings.Index(t, teammateClose); j >= 0 {
+			body = t[:j]
+			t = t[j+len(teammateClose):]
+		} else {
+			t = ""
+		}
+		m.Body = teammateWords(body)
+		out = append(out, m)
 	}
-	body = t[end+1:]
-	if i := strings.LastIndex(body, "</teammate-message>"); i >= 0 {
-		body = body[:i]
+	return out
+}
+
+// Teammate is the first teammate message of a relayed turn: the teammate
+// it came from and what it said; ok is false for a relay that is not a
+// teammate's. Teammates reads them all.
+func (e Event) Teammate() (id, body string, ok bool) {
+	ms := e.Teammates()
+	if len(ms) == 0 {
+		return "", "", false
 	}
-	return id, strings.TrimSpace(body), true
+	return ms[0].ID, ms[0].Body, true
+}
+
+// attr reads one quoted attribute out of a tag's head, "" when absent.
+func attr(head, name string) string {
+	i := strings.Index(head, name+`="`)
+	if i < 0 {
+		return ""
+	}
+	rest := head[i+len(name)+2:]
+	j := strings.Index(rest, `"`)
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+// teammateWords is what a teammate said, out of the shape it was said in.
+// A teammate that finishes its turn does not write to the lead; the
+// harness relays its idle notification, a JSON object whose `result` is
+// the teammate's last words:
+//
+//	{"type":"idle_notification","from":"scenario-batch-00","timestamp":"…",
+//	 "idleReason":"available","result":"Done. Processed all 21 entries…"}
+//
+// The recorded line carried every result's closing quote escaped —
+// `…\"}` — so the object does not parse; the field is read by hand when
+// it does not. Anything that is not such an object is the message as
+// written.
+func teammateWords(body string) string {
+	body = strings.TrimSpace(body)
+	if !strings.HasPrefix(body, "{") {
+		return body
+	}
+	var n struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(body), &n); err == nil {
+		if n.Result != "" {
+			return strings.TrimSpace(n.Result)
+		}
+		return body
+	}
+	const key = `"result":"`
+	i := strings.Index(body, key)
+	if i < 0 {
+		return body
+	}
+	r := strings.TrimSpace(body[i+len(key):])
+	r = strings.TrimSuffix(r, "}")
+	r = strings.TrimSuffix(strings.TrimSpace(r), `\"`)
+	r = strings.TrimSuffix(r, `"`)
+	if s, err := strconv.Unquote(`"` + r + `"`); err == nil {
+		r = s
+	}
+	return strings.TrimSpace(r)
 }
 
 // compactionPreamble opens the turn that carries a summary of a conversation
