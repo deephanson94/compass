@@ -195,6 +195,17 @@ look for that previous version (`git.ignore_tags` in `.goreleaser.yaml`): it
 names the latest build of main, not a version, so it is no boundary for a
 release's notes.
 
+A subject's prefix names an audience, not a folder. That is what makes the
+exclude list honest: `tests:`, `docs:` and `chore:` are dropped because all
+three name work nobody running the deck can see. So the prefix is chosen by
+who the change is for, not by which directory it touched — a change to the
+build that alters what someone downloads (a new platform in the matrix, a file
+added to the archive, a pre-release that did not exist before) is news and
+keeps a visible prefix; the plumbing behind it (a filter, a comment, a job's
+wiring) is `chore:`. `release:` is a visible prefix for that reason and is
+never excluded: it spans both, and a blanket rule against it would have
+silently swallowed the arrival of `edge`.
+
 Versions start at **v0.1.0** and stay on 0.x while the SPEC still moves, and
 a 0.x release is an ordinary one — the major version says the ground is still
 moving, so no flag has to. `prerelease: auto` marks a release as a pre-release

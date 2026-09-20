@@ -57,7 +57,10 @@ git:
 changelog:
   # The notes are the commit subjects since the previous version. Test,
   # documentation and chore commits are housekeeping, not news: a settings file
-  # nobody downloading a binary can see is not a change to that binary.
+  # nobody downloading a binary can see is not a change to that binary. The
+  # three excluded prefixes are the three that name an audience of nobody —
+  # PROCESS section 6 says how a prefix is chosen, and why `release:` is not on
+  # this list even when the commit only moves the plumbing.
   # `sort: asc` sorts the subjects, not the history — goreleaser orders the
   # lines it printed — so the notes arrive grouped by the area each subject
   # names rather than as a timeline. There is no oldest-first to ask for here.
