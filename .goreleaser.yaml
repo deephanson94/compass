@@ -66,6 +66,10 @@ changelog:
   # names rather than as a timeline. There is no oldest-first to ask for here.
   use: git
   sort: asc
+  # The subject is the line; the hash in front of it is noise on a page whose
+  # reader came for the binary. -1 drops it (0 would keep the whole forty
+  # characters, which is what v0.4.0's notes were published with).
+  abbrev: -1
   filters:
     exclude:
       - '^tests:'
