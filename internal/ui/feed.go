@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +16,9 @@ import (
 // fleet Manager has a tailer of its own for the state machine; this one is
 // separate so a session that is never selected costs nothing.
 type feed struct {
-	keepsEvents bool      // the reader's ring is kept (the selected session's feed)
-	polled      time.Time // last poll, for retain's expiry
+	mu          sync.Mutex // one poll of this feed at a time; the store's lock covers only the map
+	keepsEvents bool       // the reader's ring is kept (the selected session's feed)
+	polled      time.Time  // last poll, for retain's expiry
 	tailer      *transcript.Tailer
 	seg         *journey.Segmenter
 	trail       journey.Trail
@@ -63,14 +65,19 @@ func (fs *feedStore) poll(key, path string, wantEvents bool) (journey.Trail, []t
 		return journey.Trail{}, nil
 	}
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	f := fs.feeds[key]
 	if f == nil || f.tailer.Path() != path || (wantEvents && !f.keepsEvents) {
 		f = &feed{tailer: transcript.NewTailer(path), seg: journey.NewSegmenter(), keepsEvents: wantEvents}
 		fs.feeds[key] = f
 	}
 	f.polled = time.Now()
+	fs.mu.Unlock()
+
+	// The store's lock is let go before the file is read: the board's
+	// columns are polled side by side (pollEach), and holding it through a
+	// replay would have put them back in a line (round 70).
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	events, err := f.tailer.Poll()
 	if err != nil || len(events) == 0 {
@@ -85,6 +92,42 @@ func (fs *feedStore) poll(key, path string, wantEvents bool) (journey.Trail, []t
 		f.remember(events)
 	}
 	return f.trail, f.events
+}
+
+// pollEach polls one feed per target, side by side up to one per core, and
+// returns each trail in the targets' order. At launch every column replays
+// its whole transcript, and eight columns on one core took eight times as
+// long as one (round 70). Events are never wanted here: a column draws only
+// the trail.
+func (fs *feedStore) pollEach(targets []boardTarget) []journey.Trail {
+	trails := make([]journey.Trail, len(targets))
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(targets) {
+		workers = len(targets)
+	}
+	if workers <= 1 {
+		for i, t := range targets {
+			trails[i], _ = fs.poll(t.key, t.path, false)
+		}
+		return trails
+	}
+	var wg sync.WaitGroup
+	next := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				trails[i], _ = fs.poll(targets[i].key, targets[i].path, false)
+			}
+		}()
+	}
+	for i := range targets {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	return trails
 }
 
 // feedIdle is how long a feed nobody polls is kept. A session that had a

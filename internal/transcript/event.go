@@ -128,24 +128,30 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// rawLine stages the common top-level fields. `message` and `content` stay raw
-// because their shapes vary by line type.
+// rawLine is the line as encoding/json sees it, decoded in one pass. The
+// message and its blocks are typed rather than staged as RawMessage: every
+// RawMessage is a copy of its subtree and every nested Unmarshal a second
+// validation of it, and a tool result's text sat inside three of each — a
+// 20KB result was copied three times and scanned eight before its text was
+// clamped to 4KB (round 70). Only the shapes that genuinely vary by line
+// type — a content field that is a string on one line and an array on the
+// next — carry their own UnmarshalJSON, which decides by the first byte.
 type rawLine struct {
-	Type        string          `json:"type"`
-	UUID        string          `json:"uuid"`
-	ParentUUID  string          `json:"parentUuid"` // may be null; null decodes to ""
-	Timestamp   string          `json:"timestamp"`
-	SessionID   string          `json:"sessionId"`
-	CWD         string          `json:"cwd"`
-	CustomTitle string          `json:"customTitle"` // a "custom-title" line: the name /rename gave the session
-	AgentName   string          `json:"agentName"`   // an "agent-name" line: the same name, as the harness files it
-	GitBranch   string          `json:"gitBranch"`
-	Version     string          `json:"version"`
-	IsSidechain bool            `json:"isSidechain"`
-	Message     json.RawMessage `json:"message"`
-	Content     json.RawMessage `json:"content"` // queue-operation: a plain string
-	IsMeta      bool            `json:"isMeta"`
-	ToolResult  json.RawMessage `json:"toolUseResult"`
+	Type        string      `json:"type"`
+	UUID        string      `json:"uuid"`
+	ParentUUID  string      `json:"parentUuid"` // may be null; null decodes to ""
+	Timestamp   string      `json:"timestamp"`
+	SessionID   string      `json:"sessionId"`
+	CWD         string      `json:"cwd"`
+	CustomTitle string      `json:"customTitle"` // a "custom-title" line: the name /rename gave the session
+	AgentName   string      `json:"agentName"`   // an "agent-name" line: the same name, as the harness files it
+	GitBranch   string      `json:"gitBranch"`
+	Version     string      `json:"version"`
+	IsSidechain bool        `json:"isSidechain"`
+	Message     *rawMessage `json:"message"`
+	Content     textField   `json:"content"` // queue-operation: a plain string
+	IsMeta      bool        `json:"isMeta"`
+	ToolResult  metaField   `json:"toolUseResult"`
 
 	// The API-error flags again, at the line's top level: Claude Code has
 	// written them there as well as inside the message, and a session
@@ -157,9 +163,9 @@ type rawLine struct {
 }
 
 type rawMessage struct {
-	Role    string          `json:"role"`
-	ID      string          `json:"id"`      // the turn's own id, shared by its lines
-	Content json.RawMessage `json:"content"` // string OR array of blocks
+	Role    string       `json:"role"`
+	ID      string       `json:"id"`      // the turn's own id, shared by its lines
+	Content contentField `json:"content"` // string OR array of blocks
 
 	// Claude Code writes a failed API call as a synthetic assistant message —
 	// model "<synthetic>", the error's own text as its only content block —
@@ -183,7 +189,73 @@ type rawBlock struct {
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
-	Content   json.RawMessage `json:"content"`
+	Content   contentField    `json:"content"`
+}
+
+// contentField is a `content` value: a plain string (a human prompt, a tool
+// result's text) or an array of blocks (text / thinking / tool_use /
+// tool_result). Anything else — null, a number, an object — is nothing, and
+// an unreadable array is nothing too: the line still parses, as it always
+// did when the inner decode failed.
+type contentField struct {
+	text   string
+	isText bool
+	blocks []rawBlock
+}
+
+func (c *contentField) UnmarshalJSON(b []byte) error {
+	b = skipSpace(b)
+	if len(b) == 0 {
+		return nil
+	}
+	switch b[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(b, &s); err == nil {
+			c.text, c.isText = s, true
+		}
+	case '[':
+		var blocks []rawBlock
+		if err := json.Unmarshal(b, &blocks); err == nil {
+			c.blocks = blocks
+		}
+	}
+	return nil
+}
+
+// textField is a top-level `content` that is only ever a string; a value of
+// any other shape is ignored rather than failing the line.
+type textField string
+
+func (t *textField) UnmarshalJSON(b []byte) error {
+	b = skipSpace(b)
+	if len(b) == 0 || b[0] != '"' {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*t = textField(s)
+	}
+	return nil
+}
+
+// metaCap bounds the toolUseResult a result keeps. Its one reader is the
+// task id in a TaskCreate result, a few dozen bytes; a Bash result's
+// toolUseResult carries the whole stdout a second time, and keeping it was
+// a copy of every tool's output nobody read (round 70).
+const metaCap = 8 * 1024
+
+// metaField is a toolUseResult kept verbatim while it is small enough to
+// be the structured record it exists for, and dropped when it is a tool's
+// output written twice.
+type metaField json.RawMessage
+
+func (m *metaField) UnmarshalJSON(b []byte) error {
+	if len(b) > metaCap || string(b) == "null" {
+		return nil
+	}
+	*m = append((*m)[:0], b...)
+	return nil
 }
 
 // ParseLine parses one JSONL line. Unknown `type` values return an Event with
@@ -192,7 +264,13 @@ type rawBlock struct {
 func ParseLine(line []byte) (Event, error) {
 	var raw rawLine
 	if err := json.Unmarshal(line, &raw); err != nil {
-		return Event{}, err
+		// A field of the wrong shape — a message that is a string, a
+		// cwd that is a number — is skipped by the decoder, which fills
+		// the rest and reports it after; the line is JSON and it is read
+		// for what it does say. Only a line that is not JSON is malformed.
+		if _, typed := err.(*json.UnmarshalTypeError); !typed {
+			return Event{}, err
+		}
 	}
 
 	ev := Event{
@@ -214,40 +292,34 @@ func ParseLine(line []byte) (Event, error) {
 	}
 
 	// queue-operation carries the enqueued prompt as a top-level string.
-	if len(raw.Message) == 0 && len(raw.Content) > 0 {
-		var s string
-		if err := json.Unmarshal(raw.Content, &s); err == nil {
-			ev.Text = s
-		}
+	if raw.Message == nil && raw.Content != "" {
+		ev.Text = string(raw.Content)
 	}
 
-	if len(raw.Message) > 0 {
-		var msg rawMessage
-		if err := json.Unmarshal(raw.Message, &msg); err == nil {
-			parseContent(&ev, msg.Content)
-			// Every shape the failure has been written in: the flag on
-			// the message, the flag on the line, the synthetic model,
-			// and — when none of those is there — the text itself,
-			// which is what the person sees on their screen.
-			ev.Status, ev.ErrorKey = firstNonZero(msg.APIStatus, raw.LineStatus), firstNonEmpty(msg.APIErrorKey, raw.LineErrorKey)
-			ev.APIError = msg.IsAPIError || raw.LineAPIError || msg.Model == "<synthetic>"
-			ev.MessageID = msg.ID
-			if ev.Type == EventAssistant && msg.Model != "" && msg.Model != "<synthetic>" {
-				ev.Model = msg.Model
-			}
-			if ev.Type == EventAssistant {
-				if status, ok := apiErrorInText(ev.Text); ok {
-					ev.APIError = true
-					if ev.Status == 0 {
-						ev.Status = status
-					}
+	if msg := raw.Message; msg != nil {
+		parseContent(&ev, msg.Content)
+		// Every shape the failure has been written in: the flag on
+		// the message, the flag on the line, the synthetic model,
+		// and — when none of those is there — the text itself,
+		// which is what the person sees on their screen.
+		ev.Status, ev.ErrorKey = firstNonZero(msg.APIStatus, raw.LineStatus), firstNonEmpty(msg.APIErrorKey, raw.LineErrorKey)
+		ev.APIError = msg.IsAPIError || raw.LineAPIError || msg.Model == "<synthetic>"
+		ev.MessageID = msg.ID
+		if ev.Type == EventAssistant && msg.Model != "" && msg.Model != "<synthetic>" {
+			ev.Model = msg.Model
+		}
+		if ev.Type == EventAssistant {
+			if status, ok := apiErrorInText(ev.Text); ok {
+				ev.APIError = true
+				if ev.Status == 0 {
+					ev.Status = status
 				}
 			}
 		}
 	}
 	if len(raw.ToolResult) > 0 {
 		for i := range ev.ToolResults {
-			ev.ToolResults[i].Meta = raw.ToolResult
+			ev.ToolResults[i].Meta = json.RawMessage(raw.ToolResult)
 		}
 	}
 	return ev, nil
@@ -264,76 +336,53 @@ func eventType(s string) EventType {
 
 // parseContent handles both content shapes: a plain string (a human prompt) and
 // an array of blocks (text / thinking / tool_use / tool_result).
-func parseContent(ev *Event, content json.RawMessage) {
-	trimmed := skipSpace(content)
-	if len(trimmed) == 0 {
+func parseContent(ev *Event, content contentField) {
+	if content.isText {
+		ev.Text = content.text
 		return
 	}
-	switch trimmed[0] {
-	case '"':
-		var s string
-		if err := json.Unmarshal(trimmed, &s); err == nil {
-			ev.Text = s
-		}
-	case '[':
-		var blocks []rawBlock
-		if err := json.Unmarshal(trimmed, &blocks); err != nil {
-			return
-		}
-		var texts []string
-		for _, b := range blocks {
-			switch b.Type {
-			case "text":
-				// Only assistant turns contribute Text; a user block array is
-				// tool results, whose Text stays empty by contract.
-				if ev.Type == EventAssistant && b.Text != "" {
-					texts = append(texts, b.Text)
-				}
-			case "tool_use":
-				ev.ToolUses = append(ev.ToolUses, ToolUse{ID: b.ID, Name: b.Name, Input: b.Input})
-			case "tool_result":
-				ev.ToolResults = append(ev.ToolResults, ToolResult{
-					ToolUseID: b.ToolUseID,
-					IsError:   b.IsError,
-					Text:      resultText(b.Content),
-				})
+	var texts []string
+	for _, b := range content.blocks {
+		switch b.Type {
+		case "text":
+			// Only assistant turns contribute Text; a user block array is
+			// tool results, whose Text stays empty by contract.
+			if ev.Type == EventAssistant && b.Text != "" {
+				texts = append(texts, b.Text)
 			}
-			// "thinking" blocks are intentionally ignored.
+		case "tool_use":
+			ev.ToolUses = append(ev.ToolUses, ToolUse{ID: b.ID, Name: b.Name, Input: b.Input})
+		case "tool_result":
+			ev.ToolResults = append(ev.ToolResults, ToolResult{
+				ToolUseID: b.ToolUseID,
+				IsError:   b.IsError,
+				Text:      resultText(b.Content),
+			})
 		}
-		if len(texts) > 0 {
-			ev.Text = strings.Join(texts, "\n")
-		}
+		// "thinking" blocks are intentionally ignored.
+	}
+	if len(texts) > 0 {
+		ev.Text = strings.Join(texts, "\n")
 	}
 }
 
 // resultText extracts a tool_result's text — the content is either a plain
 // string or an array of blocks whose text entries are joined — clamped to
 // resultTextCap bytes at each end with the middle elided.
-func resultText(content json.RawMessage) string {
-	trimmed := skipSpace(content)
-	if len(trimmed) == 0 {
+func resultText(content contentField) string {
+	if content.isText {
+		return clampMiddle(content.text)
+	}
+	var texts []string
+	for _, b := range content.blocks {
+		if b.Type == "text" && b.Text != "" {
+			texts = append(texts, b.Text)
+		}
+	}
+	if len(texts) == 0 {
 		return ""
 	}
-	switch trimmed[0] {
-	case '"':
-		var s string
-		if err := json.Unmarshal(trimmed, &s); err == nil {
-			return clampMiddle(s)
-		}
-	case '[':
-		var blocks []rawBlock
-		if err := json.Unmarshal(trimmed, &blocks); err != nil {
-			return ""
-		}
-		var texts []string
-		for _, b := range blocks {
-			if b.Type == "text" && b.Text != "" {
-				texts = append(texts, b.Text)
-			}
-		}
-		return clampMiddle(strings.Join(texts, "\n"))
-	}
-	return ""
+	return clampMiddle(strings.Join(texts, "\n"))
 }
 
 // clampMiddle keeps the first and last resultTextCap bytes of s, joined by an

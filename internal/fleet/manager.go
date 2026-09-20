@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -299,6 +300,19 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	kept := make(map[string]bool, len(infos))
 	out := make([]Session, 0, len(infos))
 	archive := make([]Session, 0, len(infos))
+	// Two passes. The first decides who is live and wakes them; the second
+	// judges them. Between the two, every live tailer is polled — and at
+	// launch that is every live transcript replayed from its first byte,
+	// which is the most expensive thing compass does and was done one
+	// session after another on one core (round 70). Each entry's tailer,
+	// machine and outcomes are its own, so the replays run side by side.
+	type judged struct {
+		key  string
+		e    *entry
+		live bool
+	}
+	rows := make([]judged, 0, len(infos))
+	var polls []*entry
 	for _, info := range infos {
 		if m.isExcluded(info.CWD) {
 			continue // never tracked, so the next sweep also forgets it
@@ -319,18 +333,16 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			if e.tailer == nil {
 				m.wake(key, e)
 			}
-			// A session whose file we cannot read keeps its last known state
-			// rather than vanishing from the fleet.
-			if events, err := e.tailer.Poll(); err == nil {
-				for _, ev := range events {
-					e.machine.Observe(ev)
-					e.absorb(ev)
-				}
-			}
+			polls = append(polls, e)
 		} else {
 			e.sleep()
 		}
+		rows = append(rows, judged{key: key, e: e, live: live})
+	}
+	pollAll(polls)
 
+	for _, r := range rows {
+		key, e, live := r.key, r.e, r.live
 		// Discovery reads the head of the file; the events may name a different
 		// cwd, and an excluded one only has to be seen once to disqualify.
 		if m.isExcluded(e.info.CWD) {
@@ -380,6 +392,51 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	sortFleet(out)
 	sortArchive(archive)
 	return append(out, archive...), nil
+}
+
+// poll reads what the session has written since the last look and folds it
+// into the machine and the entry. A session whose file we cannot read keeps
+// its last known state rather than vanishing from the fleet.
+func (e *entry) poll() {
+	events, err := e.tailer.Poll()
+	if err != nil {
+		return
+	}
+	for _, ev := range events {
+		e.machine.Observe(ev)
+		e.absorb(ev)
+	}
+}
+
+// pollAll polls every entry, side by side up to one per core. A lone entry
+// is polled on the calling goroutine.
+func pollAll(entries []*entry) {
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(entries) {
+		workers = len(entries)
+	}
+	if workers <= 1 {
+		for _, e := range entries {
+			e.poll()
+		}
+		return
+	}
+	var wg sync.WaitGroup
+	next := make(chan *entry)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for e := range next {
+				e.poll()
+			}
+		}()
+	}
+	for _, e := range entries {
+		next <- e
+	}
+	close(next)
+	wg.Wait()
 }
 
 // outcome is the last result this session produced, if any.

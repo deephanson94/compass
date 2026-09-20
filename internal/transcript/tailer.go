@@ -103,15 +103,18 @@ func (t *Tailer) Poll() ([]Event, error) {
 	}
 	defer f.Close()
 
-	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
+	// The stat already said how much is new, so the buffer is made once at
+	// that size. io.ReadAll grew one from 512 bytes by doubling, and on a
+	// 20MB replay the copies and the garbage they left cost as much as the
+	// parse itself (round 70).
+	chunk := make([]byte, size-t.offset)
+	n, err := f.ReadAt(chunk, t.offset)
+	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	chunk, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-	t.offset += int64(len(chunk))
-	if len(chunk) == 0 {
+	chunk = chunk[:n]
+	t.offset += int64(n)
+	if n == 0 {
 		return nil, nil
 	}
 
