@@ -104,7 +104,16 @@ func main() {
 		// The palette is set before the first frame is drawn: an unreadable
 		// value is ignored inside SetDim, so a typo costs nothing.
 		ui.SetDim(*dim)
-		if err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build); err != nil {
+		// The deck resumes where the last process — a deck or a status
+		// line — stopped reading, as `status` does: at launch every live
+		// session is otherwise replayed from its first byte, and the scan
+		// opens every archived transcript again (round 70). Saved on the
+		// way out; a deck that is killed leaves the last save, which the
+		// next start replays forward from.
+		resume := openResume(mgr, *root)
+		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build)
+		resume.Save()
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
 		}

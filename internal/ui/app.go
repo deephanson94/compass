@@ -400,9 +400,13 @@ type readerCache struct {
 
 // New returns a deck bound to a fleet Manager.
 func New(mgr *fleet.Manager) *Model {
+	feeds := newFeedStore()
+	if mgr != nil {
+		feeds.resume = mgr.Resume()
+	}
 	return &Model{
 		mgr:         mgr,
-		feeds:       newFeedStore(),
+		feeds:       feeds,
 		runner:      tmuxop.RealRunner{},
 		replies:     DefaultReplies,
 		sent:        map[string]sentReply{},
@@ -674,16 +678,21 @@ func (m *Model) refresh() tea.Cmd {
 			// replays its whole journey once, the same as selecting it does.
 			if len(targets) > 0 {
 				msg.trails = make(map[string]journey.Trail, len(targets))
+				// A column draws only the trail; the reader's events are
+				// kept for the selected session alone. The columns are
+				// read side by side, then their lanes one after another:
+				// the lanes' files are small, and msg is one message.
+				var others []boardTarget
 				for _, t := range targets {
 					if t.key == selected && msg.hasTrail {
 						msg.trails[t.key] = msg.trail
 						continue
 					}
-					// A column draws only the trail; the reader's events are
-					// kept for the selected session alone.
-					tr, _ := feeds.poll(t.key, t.path, false)
-					msg.trails[t.key] = tr
-					pollAgents(t.key, tr)
+					others = append(others, t)
+				}
+				for i, tr := range feeds.pollEach(others) {
+					msg.trails[others[i].key] = tr
+					pollAgents(others[i].key, tr)
 				}
 			}
 		}
@@ -821,7 +830,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if first && len(m.sessions) > 0 {
 			m.refreshBoard(msg.trails)
 			m.openFleetOfOne(msg.paired)
-			return m, tea.Batch(m.titleCmd(), m.relistPanes())
+			// The first poll knew no fleet, so it polled no column: the
+			// board's trails are owed, and the second poll goes now rather
+			// than at the tick a second on (round 70).
+			return m, tea.Batch(m.titleCmd(), m.relistPanes(), m.refresh())
 		}
 		cmds := []tea.Cmd{m.titleCmd()}
 		if m.pairOwed && len(m.sessions) > 0 {

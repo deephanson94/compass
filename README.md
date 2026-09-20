@@ -249,4 +249,4 @@ run and nothing else.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical design: data sources, engine, stack, milestones
 - [`docs/dev/`](docs/dev/) — the per-milestone API contracts the code and tests were built against
 - [`docs/PROCESS.md`](docs/PROCESS.md) — how it is built: scenes, the rendered corpus, the operator panel, the fold-and-pin loop, and the decision log
-- [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) — render performance: what a keypress on a long trail cost, the memos that fixed it, and how to measure it again
+- [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) — performance: what a keypress on a long trail and a launch over a big fleet cost, what fixed each, and how to measure them again

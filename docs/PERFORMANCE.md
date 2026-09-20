@@ -1,10 +1,12 @@
-# Render performance — what was slow, what was done, how to check
+# Performance — what was slow, what was done, how to check
 
-The deck redraws on every keypress and every second. A frame is cheap on a
-short session and was not on a long one: the cost of drawing scaled with the
-length of the journey, not with the size of the screen. This file records
-each measurement and its fix, so the next slow keypress is profiled against a
-known baseline rather than guessed at.
+The deck redraws on every keypress and every second, and at launch it reads
+every live transcript from its first byte. A frame is cheap on a short
+session and was not on a long one: the cost of drawing scaled with the
+length of the journey, not with the size of the screen; and the launch
+scaled with the bytes on disk, one core at a time. This file records each
+measurement and its fix, so the next slow keypress or slow start is profiled
+against a known baseline rather than guessed at.
 
 ## 1. How to measure
 
@@ -17,7 +19,17 @@ go test ./internal/ui -run XXX -bench TrailWalkLv2_3000 -benchtime 20x \
   -cpuprofile cpu.out -o ui.test && go tool pprof -top -cum ui.test cpu.out
 ```
 
-`internal/ui/perf_bench_test.go` holds the benchmarks. `longStand` takes the
+```sh
+# launch: the fleet's and the board's first polls, cold and warm from a
+# resume cache — 8 live sessions of ~43MB each (342MB) and 150 archived,
+# written by startupHome
+go test ./internal/ui -run XXX -bench Startup -benchtime 3x
+go test ./internal/ui -run XXX -bench StartupRefresh -benchtime 2x \
+  -cpuprofile cpu.out -o ui.test && go tool pprof -top -cum ui.test cpu.out
+```
+
+`internal/ui/perf_bench_test.go` holds the keypress benchmarks and
+`internal/ui/startup_bench_test.go` the launch ones. `longStand` takes the
 `very-long` scene and grows its lead session to N legs with `dayLongTrail`
 (the scene's own builder, in `scenario_test.go`), then presses keys as
 `sceneModel` does: `"1", "tab"` lands on the trail with the reader beside it
@@ -111,7 +123,123 @@ cap. `readerCache` (`Model.doc`) keeps the flattened document between keys,
 retired on a fold, a width change, a new event count, or a lane switch;
 `renderReaderDoc` and `anchorRow` draw and search through it. 2 ms after.
 
-## 4. Rules that fall out of this
+## 4. The launch (round 70)
+
+**Symptom.** Two to three seconds from `compass` to a fleet, then another
+second before the board's columns had trails.
+
+**Where it went.** The deck's first poll knows no fleet, so it polls no
+column: `Manager.Refresh` peeks every transcript, then replays every live one
+through its state machine — one after another, on one goroutine. Its
+`fleetMsg` lands, the board draws with no trails, and the *next* tick's poll
+— a second later — replays every column's transcript a second time, into its
+feed's segmenter, again one after another. Two full parses of every live
+byte, serial, with a second of nothing between them. Inside the parse:
+
+1. **`Tailer.Poll` read the file with `io.ReadAll`**, which grows its buffer
+   from 512 bytes by doubling. On a 20MB replay the copies and the garbage
+   they left were 12 of the 26 seconds the poll took under the profiler.
+2. **`ParseLine` decoded each line in four nested `json.Unmarshal` calls** —
+   the line into `RawMessage`s, the message into `RawMessage`s, the content
+   into blocks, a result's content into its string. Every `RawMessage` is a
+   copy of its subtree and every nested `Unmarshal` a second validation of
+   it, so a 20KB tool result was copied three times and scanned eight before
+   `resultText` clamped it to 4KB. `toolUseResult`, which carries the same
+   output a second time, was copied whole into every result's `Meta`, whose
+   one reader is the task id in a `TaskCreate` result.
+3. **Nothing ran on a second core.** The manager's entries and the feeds are
+   independent; the manager walked them in a loop, and `feedStore.poll` held
+   the store's one lock for the whole replay.
+4. **The deck never used the resume cache** `compass status` has had since
+   round 61: every launch replayed every live session from byte zero.
+
+**Fixes.**
+
+- `Tailer.Poll` allocates the buffer once, at the size the stat already
+  reported, and reads with `ReadAt`.
+- `ParseLine` decodes in one typed pass: `message` is a struct, not a
+  `RawMessage`; the two `content` fields that vary by shape (`contentField`)
+  decide by their first byte and decode only what is there; `toolUseResult`
+  (`metaField`) is kept only up to `metaCap` (8KB). A field of the wrong
+  type is skipped by the decoder and no longer fails the line — only text
+  that is not JSON is malformed.
+- `Manager.Refresh` splits its loop: the first pass decides who is live and
+  wakes them, `pollAll` replays every live tailer side by side (one worker
+  per core), and the second pass judges them. Each entry's tailer, machine
+  and outcomes are its own, so nothing is shared between workers.
+- `feedStore.poll` holds the store's lock only to find the feed, then the
+  feed's own; `pollEach` polls the board's columns one worker per core, and
+  `refresh` uses it.
+- The first `fleetMsg` that brings a fleet fires the next poll at once
+  rather than leaving it to the tick, so the board's trails follow the
+  fleet by the time of one replay, not one replay plus a second.
+- `main` gives the deck the resume cache `status` uses, and saves it on the
+  way out: a warm launch resumes every live tailer at the last mark and
+  restores each machine from its fold, and the scan opens no transcript
+  whose size and mtime have not moved.
+
+**Measured** (4 cores; 8 live sessions of ~43MB, 150 archived; wall time):
+
+| | before | after |
+|---|---|---|
+| fleet's first poll, cold | 9.9 s | 1.3 s |
+| board's first poll (every column replayed) | 10.3 s | 1.2 s |
+| fleet's first poll, warm (resume cache) | — (the deck had none) | 0.035 s |
+| idle wait between the fleet landing and the board's poll | one tick (1 s) | none |
+
+### 4.1 The board warms too (round 71)
+
+After the above a relaunch felt instant on the fleet and still paid the
+board: the resume cache carried the state machine's fold, and the journey
+segmenter — whose output the columns are — had no saved form, so every
+launch replayed every column in full. And a restored fleet row was blank
+where the class and the "18✓ 2✗" badge go: those come from the events, and
+the fold that skipped the events had never been asked for them.
+
+- `journey.Fold` is the segmenter's whole state as a wire format — the legs
+  as they are being built, the pressure gauge, the runner memory, the lanes,
+  the plan — with `Segmenter.Fold` and `RestoreSegmenter`. The test folds
+  every fixture under `testdata/scenarios`, and a synthetic one that lands
+  inside a pressure streak and a pending `TaskCreate`, at every split, and
+  requires the restored segmenter to reach the trail a full replay reaches.
+  `journey.OutcomesFold` does the same for the fleet row's outcome.
+- The resume cache carries a `JourneyPoint` (mark and fold) per transcript
+  beside the manager's points, and each `ResumePoint` carries an `EntryFold`
+  — class, outcome, title rank, model. It has its own lock now: the
+  manager records under the fleet's, the feeds from a worker per column.
+- `feedStore.poll` restores a column from its journey point when the mark
+  still fits the file, and records one whenever the file moved. Only a feed
+  that keeps no events resumes: the reader's document is the events, which
+  no fold carries, so opening a session still replays it once — the cost
+  selecting it always had.
+- A session that falls asleep drops the class from its cached point: the
+  fleet says what a session is doing only while it is live, and a session
+  woken from a mark is not doing what it stopped on.
+- `ResumeCache.SaveEvery`: `Manager.Refresh` writes the cache out every 30
+  seconds, so a deck that is killed loses at most that much of appended
+  bytes rather than the whole run.
+
+| | cold | warm |
+|---|---|---|
+| fleet's first poll (4 cores) | 1.4 s | 0.04 s |
+| board's first poll (4 cores) | 1.2 s | 0.016 s |
+
+A warm launch reads for tens of milliseconds in total, the cost of opening
+every transcript once for its stat and reading one cache file.
+
+**What is still cold.** The first launch after the cache is deleted; a live
+session the cache has never seen; a transcript that shrank or was replaced
+since its mark; and the selected session's reader, always. On a genuinely
+cold launch the board's columns are still a second parse of every live
+transcript — the manager's tailer and the feed's read the same bytes for
+different consumers (the machine and the segmenter). Sharing one read would
+halve that launch; it means one tailer per live session with two consumers
+and a hand-over when a session leaves the fleet, and is not done. Within the
+parse, `encoding/json` scans each value twice (validate, then decode) and
+the polymorphic `content` subtree twice more; a hand-rolled or third-party
+decoder is the next step if the parse itself is ever the bottleneck.
+
+## 5. Rules that fall out of this
 
 - **A document is built once per change, not once per question.** Anything
   that walks every leg or every event belongs behind a memo keyed on what it
@@ -123,3 +251,12 @@ retired on a fold, a width change, a new event count, or a lane switch;
 - **Measure at the deck's own sizes with the deck's own key path.** The
   benchmarks press keys through `Update` and draw through `View`; a profile of
   `trailDoc` alone would have missed that it was called ten times.
+- **A byte is read once and decoded once.** A `RawMessage` is a copy and a
+  nested `Unmarshal` a second scan; a growing buffer is a copy per doubling.
+  Size the buffer from the stat and type the decode.
+- **Independent files are read side by side.** Anything that walks every
+  live transcript at once is a worker per core, not a loop.
+- **Anything folded from a whole transcript has a fold.** A machine, a
+  segmenter, an outcome: if a launch would replay the file to rebuild it, it
+  is written to the resume cache at the mark and restored from there, with a
+  test that restoring at every split reaches what the replay reaches.
