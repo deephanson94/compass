@@ -221,6 +221,14 @@ request — it only builds.
 `compass -version` prints whichever build you are on: `dev` from a working
 tree, `edge-<short sha>` from main, `vX.Y.Z` from a tag.
 
+Both workflows pin every action to a commit sha, with the version beside it in
+a comment: `v4` is a branch its owner can move, and the release job hands
+whatever it finds there a token that can write to this repository. Read the
+comment to know the version, change the sha to change it. The token itself is
+asked for per job — ci.yml reads and says pass or fail, so it takes
+`contents: read`; the three jobs in release.yml each publish, so each carries
+`contents: write` in its own block.
+
 To see what a release would contain without publishing one:
 
 ```sh
