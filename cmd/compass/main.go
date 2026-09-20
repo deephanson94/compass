@@ -22,8 +22,7 @@ const defaultLiveWithin = "5m"
 
 // version is the build's name. It is "dev" for a binary built from a working
 // tree; a release build stamps the tag over it with
-// -ldflags "-X main.version=v1.2.3", and the rolling build of main stamps
-// "edge-<short sha>".
+// -ldflags "-X main.version=v1.2.3".
 var version = "dev"
 
 func main() {

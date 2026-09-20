@@ -88,8 +88,7 @@ hands the keys to the conversation.
 ## Install
 
 Take a binary from the [releases page](https://github.com/deephanson94/compass/releases)
-— tagged versions (`vX.Y.Z`), plus `edge`, which is the latest main, rebuilt on
-every merge:
+— one archive per version (`vX.Y.Z`):
 
 ```sh
 tar xzf compass_<version>_<os>_<arch>.tar.gz   # linux/darwin, amd64/arm64

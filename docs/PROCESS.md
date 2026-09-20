@@ -190,10 +190,9 @@ subjects left out: the log is the round-by-round record, the notes are what
 changed for someone running the deck. They are not a timeline — `sort: asc`
 sorts the subjects goreleaser printed, not the history behind them, so the
 lines arrive grouped by the area each one names (`fleet:` beside `fleet:`,
-`trail:` beside `trail:`). The `edge` tag is ignored when the notes
-look for that previous version (`git.ignore_tags` in `.goreleaser.yaml`): it
-names the latest build of main, not a version, so it is no boundary for a
-release's notes.
+`trail:` beside `trail:`). Every tag in this repository is a version, so the
+previous one is whatever `git describe` finds — there is no rolling tag to step
+over.
 
 A subject's prefix names an audience, not a folder. That is what makes the
 exclude list honest: `tests:`, `docs:` and `chore:` are dropped because all
@@ -204,22 +203,23 @@ added to the archive, a pre-release that did not exist before) is news and
 keeps a visible prefix; the plumbing behind it (a filter, a comment, a job's
 wiring) is `chore:`. `release:` is a visible prefix for that reason and is
 never excluded: it spans both, and a blanket rule against it would have
-silently swallowed the arrival of `edge`.
+silently swallowed the arrival of a platform.
 
 Versions start at **v0.1.0** and stay on 0.x while the SPEC still moves, and
 a 0.x release is an ordinary one — the major version says the ground is still
 moving, so no flag has to. `prerelease: auto` marks a release as a pre-release
-only when the tag says so itself (`v0.2.0-rc1`, `v1.0.0-beta.1`); `edge` is the
-only standing pre-release.
+only when the tag says so itself (`v0.2.0-rc1`, `v1.0.0-beta.1`); nothing else
+is one.
 
-Between tags nobody builds from source. Every push to main refreshes one
-pre-release named `edge`: the same four binaries, its tag and release deleted
-and recreated at the merge commit, wearing `edge-<short sha>` where a version
-would be. That job does not run the suite again — ci.yml ran it on the pull
-request — it only builds.
+Between versions there is nothing to download. main carried a rolling
+pre-release named `edge` until #63: a build of every merge, published under a
+tag that was deleted and written again each time. It cost a build on every
+merge and a tag that had to be stepped over wherever a version was looked for,
+and the people it was for — the ones who would run main — have the source and
+`go build ./cmd/compass`. Cut a version instead; they are cheap.
 
 `compass -version` prints whichever build you are on: `dev` from a working
-tree, `edge-<short sha>` from main, `vX.Y.Z` from a tag.
+tree, `vX.Y.Z` from a tag.
 
 Both workflows pin every action to a commit sha, with the version beside it in
 a comment: `v4` is a branch its owner can move, and the release job hands

@@ -1,7 +1,6 @@
 # How a compass release is built. One binary, four machines, one archive each.
-# Run by .github/workflows/release.yml: `release --clean` on a v* tag, and
-# `release --snapshot --clean` on every push to main for the rolling `edge`
-# pre-release. Try it locally with:
+# Run by .github/workflows/release.yml: `release --clean` on a v* tag. Try it
+# locally with:
 #
 #   goreleaser check
 #   goreleaser release --snapshot --clean --skip=publish
@@ -28,10 +27,10 @@ builds:
     # built twice gives the same bytes.
     mod_timestamp: '{{ .CommitTimestamp }}'
 
-# A snapshot has no tag to take its version from; main's builds call themselves
-# edge-<short sha>, which is what `compass -version` then says.
+# A snapshot has no tag to take its version from. Nothing publishes one any
+# more — it is the local dry run — so it wears the working tree's own word.
 snapshot:
-  version_template: 'edge-{{ .ShortCommit }}'
+  version_template: 'dev-{{ .ShortCommit }}'
 
 archives:
   - formats: [tar.gz]
@@ -43,16 +42,6 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
-
-# Which tags count when the previous version is looked for. `edge` is the
-# rolling pre-release that every push to main deletes and writes again: it names
-# the latest build of main, not a version, so it must never be the boundary the
-# notes are measured from. Left in, it is the tag one merge back, and a release
-# gets the commits since the last merge instead of the commits since the last
-# version — which is what the first cut, v0.1.0, got.
-git:
-  ignore_tags:
-    - edge
 
 changelog:
   # The notes are the commit subjects since the previous version. Test,
@@ -79,6 +68,5 @@ changelog:
 release:
   # A 0.x tag is an ordinary release: the major version, not a flag, is what
   # says the SPEC still moves. `auto` marks a release as a pre-release when the
-  # tag itself carries a suffix (v0.2.0-rc1), so `edge` is the only standing
-  # pre-release.
+  # tag itself carries a suffix (v0.2.0-rc1), and nothing else is one.
   prerelease: auto
