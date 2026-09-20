@@ -1,9 +1,8 @@
-# Three ways a binary leaves this repository, and one file for all three so they
-# are read together: a `v*` tag cuts a version, every push to main refreshes the
-# single rolling pre-release named `edge`, and Run workflow on the Actions tab
+# Two ways a binary leaves this repository, and one file for both so they are
+# read together: a `v*` tag cuts a version, and Run workflow on the Actions tab
 # cuts a version from the branch it is run on, for an environment that cannot
-# push a tag. The `if:` on each job keeps the three apart — a tag push runs
-# `release` only, a branch push runs `edge` only, a dispatch runs `cut` only.
+# push a tag. The `if:` on each job keeps the two apart — a tag push runs
+# `release` only, a dispatch runs `cut` only.
 #
 # The dispatch job publishes its release itself instead of handing the tag to
 # `release`: a tag pushed with GITHUB_TOKEN starts no workflow run, so nothing
@@ -12,7 +11,6 @@ name: release
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -21,9 +19,9 @@ on:
         required: true
         type: string
 
-# Each job asks for the token it needs, and asks in its own block: all three
-# publish, so all three carry `contents: write`, and a job added later that
-# only builds starts from nothing rather than inheriting a token that can write.
+# Each job asks for the token it needs, and asks in its own block: both
+# publish, so both carry `contents: write`, and a job added later that only
+# builds starts from nothing rather than inheriting a token that can write.
 jobs:
   # A tag is a name someone chose, so it is tested before it is published.
   release:
@@ -47,44 +45,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # main is always downloadable. The suite already ran on the pull request, so
-  # this job only builds.
-  edge:
-    permissions:
-      contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          # goreleaser reads the repository's state; give it an unshallow one.
-          fetch-depth: 0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-      - name: build
-        run: go build ./...
-      # A snapshot needs no tag: the four binaries call themselves
-      # edge-<short sha> (see snapshot.version_template in .goreleaser.yaml).
-      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
-        with:
-          args: release --snapshot --clean
-      # One pre-release, replaced each time, so `edge` is a link that never
-      # goes stale and never accumulates a version's worth of noise.
-      - name: publish the edge pre-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ github.sha }}
-        run: |
-          short=$(printf '%s' "$SHA" | cut -c1-7)
-          gh release delete edge --yes --cleanup-tag || true
-          gh release create edge \
-            --target "$SHA" \
-            --prerelease \
-            --title "edge ($short)" \
-            --notes "Rolling build of main at $SHA. Not a version." \
-            dist/*.tar.gz dist/checksums.txt
 
   # The Actions tab: type the version into Run workflow, and this job does what
   # a tag push would have done, in that order — the two checks, then the suite,
