@@ -133,3 +133,26 @@ func BenchmarkStartupRefreshWarm(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkStartupBoardWarm is the board's first poll with the last run's
+// journeys in the resume cache: every column is restored at its mark, and
+// nothing is replayed.
+func BenchmarkStartupBoardWarm(b *testing.B) {
+	_, paths := startupHome(b, 8, 4000, 20000, 0)
+	targets := make([]boardTarget, len(paths))
+	for i, p := range paths {
+		targets[i] = boardTarget{key: p, path: p}
+	}
+	cachePath := filepath.Join(b.TempDir(), "resume.json")
+	last := fleet.OpenResumeCache(cachePath)
+	warm := newFeedStore()
+	warm.resume = last
+	warm.pollEach(targets)
+	last.Save()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fs := newFeedStore()
+		fs.resume = fleet.OpenResumeCache(cachePath)
+		fs.pollEach(targets)
+	}
+}

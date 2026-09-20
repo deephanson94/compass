@@ -400,9 +400,13 @@ type readerCache struct {
 
 // New returns a deck bound to a fleet Manager.
 func New(mgr *fleet.Manager) *Model {
+	feeds := newFeedStore()
+	if mgr != nil {
+		feeds.resume = mgr.Resume()
+	}
 	return &Model{
 		mgr:         mgr,
-		feeds:       newFeedStore(),
+		feeds:       feeds,
 		runner:      tmuxop.RealRunner{},
 		replies:     DefaultReplies,
 		sent:        map[string]sentReply{},

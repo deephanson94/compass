@@ -43,6 +43,13 @@ type feedStore struct {
 	mu     sync.Mutex
 	feeds  map[string]*feed
 	agents map[string]*agentFeed // the subagents' own transcripts, keyed session\x00call
+
+	// resume, when set, is where a column's journey is picked up from and
+	// recorded to: a launch restores each column's segmenter at the mark the
+	// last process reached instead of replaying its transcript (round 71).
+	// Only a feed that keeps no events resumes — the reader's document is
+	// the events themselves, which no fold carries.
+	resume *fleet.ResumeCache
 }
 
 func newFeedStore() *feedStore {
@@ -68,6 +75,12 @@ func (fs *feedStore) poll(key, path string, wantEvents bool) (journey.Trail, []t
 	f := fs.feeds[key]
 	if f == nil || f.tailer.Path() != path || (wantEvents && !f.keepsEvents) {
 		f = &feed{tailer: transcript.NewTailer(path), seg: journey.NewSegmenter(), keepsEvents: wantEvents}
+		if !wantEvents {
+			if p, ok := fs.resume.Journey(key); ok && f.tailer.Resume(p.Mark) {
+				f.seg = journey.RestoreSegmenter(p.Fold)
+				f.trail = f.seg.Trail()
+			}
+		}
 		fs.feeds[key] = f
 	}
 	f.polled = time.Now()
@@ -91,6 +104,9 @@ func (fs *feedStore) poll(key, path string, wantEvents bool) (journey.Trail, []t
 	if f.keepsEvents {
 		f.remember(events)
 	}
+	// Recorded whenever the file moved, from every feed: a column's mark is
+	// as good a place to resume from whether or not its reader was open.
+	fs.resume.RecordJourney(key, fleet.JourneyPoint{Mark: f.tailer.Mark(), Fold: f.seg.Fold()})
 	return f.trail, f.events
 }
 

@@ -20,9 +20,9 @@ go test ./internal/ui -run XXX -bench TrailWalkLv2_3000 -benchtime 20x \
 ```
 
 ```sh
-# launch: the fleet's first poll cold, the board's first poll, and the
-# fleet's first poll warm from a resume cache — 8 live sessions of ~43MB
-# each (342MB) and 150 archived, written by startupHome
+# launch: the fleet's and the board's first polls, cold and warm from a
+# resume cache — 8 live sessions of ~43MB each (342MB) and 150 archived,
+# written by startupHome
 go test ./internal/ui -run XXX -bench Startup -benchtime 3x
 go test ./internal/ui -run XXX -bench StartupRefresh -benchtime 2x \
   -cpuprofile cpu.out -o ui.test && go tool pprof -top -cum ui.test cpu.out
@@ -187,15 +187,57 @@ byte, serial, with a second of nothing between them. Inside the parse:
 | fleet's first poll, warm (resume cache) | — (the deck had none) | 0.035 s |
 | idle wait between the fleet landing and the board's poll | one tick (1 s) | none |
 
-**What is left.** The board's columns are still a second parse of every live
+### 4.1 The board warms too (round 71)
+
+After the above a relaunch felt instant on the fleet and still paid the
+board: the resume cache carried the state machine's fold, and the journey
+segmenter — whose output the columns are — had no saved form, so every
+launch replayed every column in full. And a restored fleet row was blank
+where the class and the "18✓ 2✗" badge go: those come from the events, and
+the fold that skipped the events had never been asked for them.
+
+- `journey.Fold` is the segmenter's whole state as a wire format — the legs
+  as they are being built, the pressure gauge, the runner memory, the lanes,
+  the plan — with `Segmenter.Fold` and `RestoreSegmenter`. The test folds
+  every fixture under `testdata/scenarios`, and a synthetic one that lands
+  inside a pressure streak and a pending `TaskCreate`, at every split, and
+  requires the restored segmenter to reach the trail a full replay reaches.
+  `journey.OutcomesFold` does the same for the fleet row's outcome.
+- The resume cache carries a `JourneyPoint` (mark and fold) per transcript
+  beside the manager's points, and each `ResumePoint` carries an `EntryFold`
+  — class, outcome, title rank, model. It has its own lock now: the
+  manager records under the fleet's, the feeds from a worker per column.
+- `feedStore.poll` restores a column from its journey point when the mark
+  still fits the file, and records one whenever the file moved. Only a feed
+  that keeps no events resumes: the reader's document is the events, which
+  no fold carries, so opening a session still replays it once — the cost
+  selecting it always had.
+- A session that falls asleep drops the class from its cached point: the
+  fleet says what a session is doing only while it is live, and a session
+  woken from a mark is not doing what it stopped on.
+- `ResumeCache.SaveEvery`: `Manager.Refresh` writes the cache out every 30
+  seconds, so a deck that is killed loses at most that much of appended
+  bytes rather than the whole run.
+
+| | cold | warm |
+|---|---|---|
+| fleet's first poll (4 cores) | 1.4 s | 0.04 s |
+| board's first poll (4 cores) | 1.2 s | 0.016 s |
+
+A warm launch reads for tens of milliseconds in total, the cost of opening
+every transcript once for its stat and reading one cache file.
+
+**What is still cold.** The first launch after the cache is deleted; a live
+session the cache has never seen; a transcript that shrank or was replaced
+since its mark; and the selected session's reader, always. On a genuinely
+cold launch the board's columns are still a second parse of every live
 transcript — the manager's tailer and the feed's read the same bytes for
 different consumers (the machine and the segmenter). Sharing one read would
-halve the cold launch again; it means one tailer per live session with two
-consumers and a hand-over when a session leaves the fleet, and is not done.
-Within the parse, `encoding/json` scans each value twice (validate, then
-decode) and the polymorphic `content` subtree twice more; a hand-rolled or
-third-party decoder is the next step if the parse itself is ever the
-bottleneck.
+halve that launch; it means one tailer per live session with two consumers
+and a hand-over when a session leaves the fleet, and is not done. Within the
+parse, `encoding/json` scans each value twice (validate, then decode) and
+the polymorphic `content` subtree twice more; a hand-rolled or third-party
+decoder is the next step if the parse itself is ever the bottleneck.
 
 ## 5. Rules that fall out of this
 
@@ -214,3 +256,7 @@ bottleneck.
   Size the buffer from the stat and type the decode.
 - **Independent files are read side by side.** Anything that walks every
   live transcript at once is a worker per core, not a loop.
+- **Anything folded from a whole transcript has a fold.** A machine, a
+  segmenter, an outcome: if a launch would replay the file to rebuild it, it
+  is written to the resume cache at the mark and restored from there, with a
+  test that restoring at every split reaches what the replay reaches.

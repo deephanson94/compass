@@ -219,6 +219,19 @@ func (m *Manager) UseResumeCache(c *ResumeCache) {
 	m.resume = c
 }
 
+// Resume is the cache the Manager was given, or nil: the deck's feeds record
+// their journeys into the same one, so a launch resumes the board's columns
+// as it resumes the fleet.
+func (m *Manager) Resume() *ResumeCache {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.resume
+}
+
+// resumeSaveEvery is how often a long-lived process writes the cache out
+// between its start and its exit.
+const resumeSaveEvery = 30 * time.Second
+
 // ExcludeCWD hides sessions whose CWD is path (the narrator's Dir): compass
 // must never watch itself narrate. Paths are compared cleaned and absolute, so
 // the caller can pass whatever form it has. An already-tracked session at that
@@ -336,6 +349,10 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			polls = append(polls, e)
 		} else {
 			e.sleep()
+			// The cache forgets its class with it: a session that wakes
+			// from a mark, in this process or the next, is not doing what
+			// it was doing when it stopped.
+			m.resume.sleepEntry(key)
 		}
 		rows = append(rows, judged{key: key, e: e, live: live})
 	}
@@ -357,7 +374,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 			// session that is read again next run must not replay its
 			// whole transcript to reach the same answer, and `compass
 			// status` is a fresh process every few seconds (round 61).
-			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold()})
+			m.resume.record(key, ResumePoint{Mark: e.tailer.Mark(), Fold: e.machine.Fold(), Entry: e.fold()})
 			if waiting && (snap.State != state.NeedsYou || snap.APIError) {
 				// The door is the file's word and the fold is the
 				// machine's, and where they differ the machine wins: it
@@ -391,7 +408,29 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 
 	sortFleet(out)
 	sortArchive(archive)
+	// Off the render loop — Refresh already is — and cheap: the cache is a
+	// few hundred small records.
+	m.resume.SaveEvery(resumeSaveEvery)
 	return append(out, archive...), nil
+}
+
+// fold is the entry's own resume state (EntryFold).
+func (e *entry) fold() EntryFold {
+	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model}
+	if e.outcomes != nil {
+		f.Outcomes = e.outcomes.Fold()
+	}
+	return f
+}
+
+// restore takes the entry's own state back from a fold. The model is kept
+// only where discovery gave none: the store's own word stands.
+func (e *entry) restore(f EntryFold) {
+	e.class, e.hasClass, e.titleRank = f.Class, f.HasClass, f.TitleRank
+	e.outcomes = journey.RestoreOutcomes(f.Outcomes)
+	if e.info.Model == "" {
+		e.info.Model = f.Model
+	}
 }
 
 // poll reads what the session has written since the last look and folds it
@@ -467,6 +506,7 @@ func (m *Manager) wake(key string, e *entry) {
 	if p, ok := m.resume.point(key); ok && e.tailer.Resume(p.Mark) {
 		e.machine = state.RestoreMachine(p.Fold)
 		e.sawEvent = !p.Fold.LastEventAt.IsZero()
+		e.restore(p.Entry)
 		return
 	}
 	e.machine = state.NewMachine()
