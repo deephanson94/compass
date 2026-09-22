@@ -927,3 +927,93 @@ func TestTheScanFindsARenameInTheHeadAndTheTail(t *testing.T) {
 		t.Errorf("Discover names = %v, want alpha-head and alpha-tail", got)
 	}
 }
+
+// ------------------------------------------------- the name given at launch
+
+// launchNamed writes the transcript `claude -n NAME` produces: the custom-title
+// and agent-name lines stand at the very head of the file, ahead of the first
+// event, and nothing appends them again. `last` is how long ago it spoke.
+func launchNamed(t *testing.T, root, slug, id, name string, last time.Duration) {
+	t.Helper()
+	newTranscript(t, id, "/home/user/alpha", "main").
+		prompt(ago(last+time.Minute), "run the auth tests").
+		text(ago(last), "Done — 18 passed.").
+		write(root, slug)
+	path := filepath.Join(root, "projects", slug, id+".jsonl")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := `{"type":"custom-title","customTitle":"` + name + `","sessionId":"` + id + `"}` + "\n" +
+		`{"type":"agent-name","agentName":"` + name + `","sessionId":"` + id + `"}` + "\n"
+	if err := os.WriteFile(path, append([]byte(head), body...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An archived session keeps the name it was launched under (#402). It has no
+// tailer — nothing reads its events at all — so the scan's word is the only
+// one there is, and `merge` dropped it on the floor.
+func TestTheArchiveKeepsTheNameGivenAtLaunch(t *testing.T) {
+	root := t.TempDir()
+	launchNamed(t, root, "-home-user-alpha", "ee000012-0000-4000-8000-000000000012", "alpha-launch", 48*time.Hour)
+	got, err := fleet.NewManager(root).Refresh(fleetNow)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("refresh: %v, %d sessions", err, len(got))
+	}
+	if got[0].Live {
+		t.Fatalf("a session two days quiet is archived, not live")
+	}
+	if got[0].Info.Name != "alpha-launch" {
+		t.Errorf("archived name = %q, want alpha-launch", got[0].Info.Name)
+	}
+}
+
+// A second run keeps it too (#402). The first run tails from byte zero and
+// reads the head lines as events; the second resumes at the mark the first
+// wrote down (#59) and starts reading past them, so only the scan can say.
+func TestAResumedRunKeepsTheNameGivenAtLaunch(t *testing.T) {
+	root := t.TempDir()
+	launchNamed(t, root, "-home-user-alpha", "ee000013-0000-4000-8000-000000000013", "alpha-launch", 30*time.Second)
+	cache := fleet.OpenResumeCache(filepath.Join(t.TempDir(), "resume.json"))
+
+	first := liveManager(root)
+	first.UseResumeCache(cache)
+	one, err := first.Refresh(fleetNow)
+	if err != nil || len(one) != 1 || one[0].Info.Name != "alpha-launch" {
+		t.Fatalf("first run: %v, %d sessions, name %q", err, len(one), one[0].Info.Name)
+	}
+
+	second := liveManager(root)
+	second.UseResumeCache(cache)
+	two, err := second.Refresh(fleetNow.Add(time.Second))
+	if err != nil || len(two) != 1 {
+		t.Fatalf("second run: %v, %d sessions", err, len(two))
+	}
+	if two[0].Info.Name != "alpha-launch" {
+		t.Errorf("resumed name = %q, want alpha-launch", two[0].Info.Name)
+	}
+}
+
+// A rename typed while compass watches still wins over the launch name: the
+// tailer's word is the newest, and the scan never overwrites it (#79, #402).
+func TestARenameBeatsTheLaunchName(t *testing.T) {
+	root := t.TempDir()
+	const slug = "-home-user-alpha"
+	id := "ee000014-0000-4000-8000-000000000014"
+	launchNamed(t, root, slug, id, "alpha-launch", 30*time.Second)
+	mgr := liveManager(root)
+	if _, err := mgr.Refresh(fleetNow); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(root, "projects", slug, id+".jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"type":"custom-title","customTitle":"alpha-renamed","sessionId":"` + id + `"}` + "\n")
+	f.Close()
+	got, err := mgr.Refresh(fleetNow.Add(time.Second))
+	if err != nil || len(got) != 1 || got[0].Info.Name != "alpha-renamed" {
+		t.Fatalf("after the rename: %v, %d sessions, name %q", err, len(got), got[0].Info.Name)
+	}
+}
