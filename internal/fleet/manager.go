@@ -555,6 +555,19 @@ func (e *entry) merge(info SessionInfo) {
 	if e.info.GitBranch == "" {
 		e.info.GitBranch = info.GitBranch
 	}
+	if e.info.Name == "" {
+		// The name the person gave the session (#79) — typed as `/rename`,
+		// or handed to the CLI at launch as `claude -n NAME`, which writes
+		// the custom-title and agent-name lines at the very head of the
+		// transcript and never again. The scan is the only reader that ever
+		// looks there: an archived session has no tailer at all, and a live
+		// one resumed at the last run's mark (#59) starts reading past the
+		// head. Without this the name reached the deck on exactly one kind
+		// of run — a first sight, tailed from byte zero — and every row
+		// fell back to its directory afterwards. The tailer still wins where
+		// it has seen one, so a rename typed since the scan's window stands.
+		e.info.Name = info.Name
+	}
 	if e.info.Title == "" || (info.Tool != "" && info.Title != "") {
 		e.info.Title = info.Title // a store names its sessions after the fact; the file's first prompt stands
 	}
