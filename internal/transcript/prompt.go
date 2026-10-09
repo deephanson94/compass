@@ -343,6 +343,68 @@ func tagBody(text, tag string) (string, bool) {
 	return strings.TrimSpace(rest[:j]), true
 }
 
+// A background subagent's final report comes back as an agent-message whose
+// body opens with the harness's frame, then the report with every line
+// indented two spaces:
+//
+//	<agent-message from="ae2f2969057c6a7cb">
+//	[Subagent hand-back] The text below is the final report of a subagent
+//	this session delegated to. … The report follows:
+//	  `Outcome` is defined at internal/journey/outcome.go:14. …
+//	</agent-message>
+//
+// It reaches the transcript as a relayed user turn between turns, or as a
+// queue-operation when it lands mid-turn. `from` is the agent's id, the one
+// its launch result named.
+const (
+	handBackFrame   = "[Subagent hand-back]"
+	handBackReport  = "The report follows:"
+	handBackIndent  = "  "
+	agentMessageTag = "<agent-message"
+)
+
+// HandBack reads a subagent's hand-back: which agent, and its report as it
+// wrote it. ok is false for anything else, a messaging peer's
+// agent-message included.
+func (e Event) HandBack() (from, report string, ok bool) {
+	if e.Type != EventUser && e.Type != EventQueueOp {
+		return "", "", false
+	}
+	t := strings.TrimSpace(e.Text)
+	if strings.HasPrefix(t, relayPrefix) {
+		t = strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(t, relayPrefix), ":"))
+	}
+	if !strings.HasPrefix(t, agentMessageTag) {
+		return "", "", false
+	}
+	rest := t[len(agentMessageTag):]
+	end := strings.Index(rest, ">")
+	if end < 0 {
+		return "", "", false
+	}
+	from = attr(rest[:end], "from")
+	body := rest[end+1:]
+	if j := strings.Index(body, "</agent-message>"); j >= 0 {
+		body = body[:j]
+	}
+	body = strings.TrimSpace(body)
+	if !strings.HasPrefix(body, handBackFrame) {
+		return "", "", false
+	}
+	if j := strings.Index(body, handBackReport); j >= 0 {
+		body = body[j+len(handBackReport):]
+	} else if j := strings.IndexByte(body, '\n'); j >= 0 {
+		body = body[j+1:]
+	} else {
+		body = ""
+	}
+	lines := strings.Split(strings.TrimLeft(body, " "), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimPrefix(l, handBackIndent)
+	}
+	return from, strings.TrimSpace(strings.Join(lines, "\n")), true
+}
+
 // TaskNotification is what a background agent leaves behind when it stops.
 // It does not come back as a tool_result — the tool_result was the launch
 // acknowledgement, minutes earlier — but as a user turn wrapped in tags, and

@@ -8,6 +8,7 @@ package journey
 import (
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/deephanson94/compass/internal/transcript"
@@ -216,10 +217,43 @@ func classifyCommand(cmd string) vote {
 			return vote{class: Ship, keyword: lastWord(pattern)}
 		}
 	}
+	// A command that writes a file is work whatever its verb: `cat >>
+	// README.md <<EOF` starts with a reader's word and is an edit.
+	if file, ok := WrittenFile(line); ok {
+		if docExts[strings.ToLower(filepath.Ext(file))] {
+			return vote{class: Docs, file: file}
+		}
+		return vote{class: Build, file: file}
+	}
 	if readOnlyCommands[firstWord(lower)] {
 		return vote{class: Scout}
 	}
 	return vote{class: Build}
+}
+
+// shellWrite finds where a command line writes: a redirect (> or >>) to a
+// path, `tee [-a] path`, or `sed -i … path`. A redirect onto a descriptor
+// (2>&1) or into /dev/null writes nothing anyone keeps.
+var (
+	redirectTo = regexp.MustCompile(`(?:^|[^0-9&>])>>?\s*([^\s&|;<>()]+)`)
+	teeTo      = regexp.MustCompile(`\btee\s+(?:-a\s+)?([^\s&|;<>()-][^\s&|;<>()]*)`)
+	sedInPlace = regexp.MustCompile(`\bsed\s+-i\S*\s.*?([^\s'"&|;<>()]+)\s*$`)
+)
+
+// WrittenFile is the basename of the file a shell command line writes, if
+// it writes one: what the vote table and the trail's edit clock both read.
+func WrittenFile(line string) (string, bool) {
+	for _, m := range redirectTo.FindAllStringSubmatch(line, -1) {
+		if target := m[1]; target != "/dev/null" && !strings.HasPrefix(target, "&") {
+			return filepath.Base(strings.Trim(target, `"'`)), true
+		}
+	}
+	for _, re := range []*regexp.Regexp{teeTo, sedInPlace} {
+		if m := re.FindStringSubmatch(line); m != nil {
+			return filepath.Base(m[1]), true
+		}
+	}
+	return "", false
 }
 
 // branchLabel is the Agent call's own description, the one line it already

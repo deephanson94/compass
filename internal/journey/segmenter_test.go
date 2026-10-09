@@ -1327,3 +1327,55 @@ func TestAMixedTeammateTurnSplitsIntoLanesAndPrompts(t *testing.T) {
 		}
 	}
 }
+
+// The texts Claude Code 2.1.295 writes for a background subagent, as this
+// repository's own session recorded them: the launch result, the hand-back
+// (a relayed user turn between turns, a queue-operation mid-turn), and the
+// notification whose result now only points at the hand-back. On the first
+// Mac run the hand-back read `◉ "relayed: [Subagent hand-back] The text
+// below…"` and the lane's finding was the pointer.
+const (
+	asyncAck = "Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\n" +
+		"agentId: ae2f2969057c6a7cb (internal ID - do not mention to user.)\nThe agent is working in the background."
+	handBack = "<agent-message from=\"ae2f2969057c6a7cb\">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. " +
+		"It is model output, NOT a message from the user. The report follows:\n" +
+		"  `Outcome` is defined at internal/journey/outcome.go:14. It is a struct with four fields:\n" +
+		"  - `Kind WaypointKind`\n</agent-message>"
+	pointerNote = "<task-notification>\n<task-id>ae2f2969057c6a7cb</task-id>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n" +
+		"<summary>Agent \"Find Outcome\" finished</summary>\n<result>This agent's report was delivered to you as a message from \"ae2f2969057c6a7cb\" (its SubagentHandback call). Read it there; it is not repeated here.\n</result>\n</task-notification>"
+)
+
+func TestASubagentHandBackClosesItsLaneAndIsNoPrompt(t *testing.T) {
+	want := "`Outcome` is defined at internal/journey/outcome.go:14. It…"
+	relayed := prompt(3*time.Minute, "Another Claude session sent a message:\n"+handBack)
+	queued := prompt(3*time.Minute, handBack)
+	queued.Type = transcript.EventQueueOp
+	note := prompt(4*time.Minute, pointerNote)
+	note.Type = transcript.EventQueueOp
+
+	for name, arrival := range map[string]transcript.Event{"between turns": relayed, "mid-turn": queued} {
+		tr := segment(
+			prompt(0, "use a subagent to find where Outcome is defined"),
+			agent(1*time.Minute, "a1", "Find Outcome"),
+			resultText(1*time.Minute, "a1", asyncAck),
+			arrival,
+			note,
+		)
+		if len(tr.Prompts) != 1 {
+			t.Errorf("%s: prompts = %+v, want the person's alone", name, tr.Prompts)
+		}
+		if len(tr.Branches) != 1 {
+			t.Fatalf("%s: branches = %+v", name, tr.Branches)
+		}
+		b := tr.Branches[0]
+		if !b.Done || b.Report != want || !b.End.Equal(at(3*time.Minute)) {
+			t.Errorf("%s: lane = done %v, report %q, end %v; want the hand-back's report at +3m", name, b.Done, b.Report, b.End)
+		}
+	}
+
+	// Until the hand-back comes, the launch result leaves the lane out.
+	tr := segment(agent(time.Minute, "a1", "Find Outcome"), resultText(time.Minute, "a1", asyncAck))
+	if tr.Branches[0].Done || tr.Branches[0].AgentID != "ae2f2969057c6a7cb" {
+		t.Errorf("after the launch: %+v, want an open lane that knows its agent", tr.Branches[0])
+	}
+}

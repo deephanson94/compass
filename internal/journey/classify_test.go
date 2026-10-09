@@ -292,8 +292,10 @@ func TestT19ClassifyBashFirstLineOnly(t *testing.T) {
 			bash(0, "tu", "ls -la\nrm -rf /tmp/scratch"), journey.Scout, true},
 		{"ship on the first line, runner below",
 			bash(0, "tu", "git push origin main\npytest -x"), journey.Ship, true},
+		// The body's `make test` is not the command; the first line is,
+		// and it writes /w/notes, which is work.
 		{"heredoc body is not the command",
-			bash(0, "tu", "cat <<'EOF' > /w/notes\nmake test\nEOF"), journey.Scout, true},
+			bash(0, "tu", "cat <<'EOF' > /w/notes\nmake test\nEOF"), journey.Build, true},
 	})
 }
 
@@ -341,5 +343,35 @@ func TestT19ClassStrings(t *testing.T) {
 			t.Errorf("duplicate Class string %q", c.String())
 		}
 		seen[c.String()] = true
+	}
+}
+
+// A command that writes a file is work, whatever word it opens with: the
+// README edit `cat >> README.md <<EOF` was read as a scout leg.
+func TestAShellWriteIsWork(t *testing.T) {
+	for cmd, want := range map[string]struct {
+		class journey.Class
+		file  string
+	}{
+		"cat >> README.md <<'EOF'":            {journey.Docs, "README.md"},
+		"printf 'x' > internal/a.go":          {journey.Build, "a.go"},
+		"echo done | tee -a notes.txt":        {journey.Docs, "notes.txt"},
+		"sed -i 's/a/b/' cmd/compass/main.go": {journey.Build, "main.go"},
+		"cat go.mod 2>&1":                     {journey.Scout, ""},
+		"grep -rn foo . > /dev/null":          {journey.Scout, ""},
+		"ls -la 2>/dev/null":                  {journey.Scout, ""},
+		"go test ./... > out.log":             {journey.Test, ""},
+	} {
+		file, wrote := journey.WrittenFile(cmd)
+		if want.file != "" && (!wrote || file != want.file) {
+			t.Errorf("WrittenFile(%q) = %q, %v; want %q", cmd, file, wrote, want.file)
+		}
+		if want.class == journey.Scout && wrote {
+			t.Errorf("WrittenFile(%q) = %q, want no write", cmd, file)
+		}
+		tr := segment(prompt(0, "go"), bash(time.Minute, "b1", cmd))
+		if len(tr.Legs) != 1 || tr.Legs[0].Class != want.class {
+			t.Errorf("%q opens %+v, want one %s leg", cmd, tr.Legs, want.class)
+		}
 	}
 }

@@ -14,7 +14,14 @@ const labelOf = (leg: Leg, labels: Labels) => labels[legKey(leg)] ?? leg.label
 
 export type Tone = 'prompt' | 'done' | 'head' | 'red' | 'lane' | 'ghost' | 'note'
 
-export type Row = { key: string; text: string; right: string; tone: Tone }
+/**
+ * One line of the pane. `lead` is how many characters of `text` open it in
+ * the leg class's colour (`cls`): the glyph and the verb, as the deck tints.
+ */
+export type Row = { key: string; text: string; right: string; tone: Tone; cls?: string; lead?: number }
+
+/** The coloured opening of a leg-like row: "◆ build " is glyph, space, verb padded. */
+const leadOf = (cls: string) => 2 + Math.max(cls.length, 6)
 
 const ms = (iso: string) => Date.parse(iso)
 
@@ -47,6 +54,8 @@ export function block(snap: Snapshot): Row[] {
       text: `◆ ${pad(cls, 6)} ${sum.legs} legs${sum.red ? ` · ${sum.red} red` : ''}`,
       right: span(sum.seconds),
       tone: sum.red ? 'red' : 'note',
+      cls,
+      lead: leadOf(cls),
     }))
 }
 
@@ -73,6 +82,8 @@ export function trail(snap: Snapshot, labels: Labels = {}): Row[] {
         text: `${leg.current ? '●' : '◆'} ${pad(leg.class, 6)} ${badge}${labelOf(leg, labels)}`,
         right: leg.current ? `← ${ago(leg.start, snap.now)}` : ago(leg.start, snap.now),
         tone: leg.current ? 'head' : isRed ? 'red' : 'done',
+        cls: leg.class,
+        lead: leadOf(leg.class),
       },
     ]
     if (leg.current) {
@@ -109,7 +120,7 @@ export function trail(snap: Snapshot, labels: Labels = {}): Row[] {
   return rows
 }
 
-export type BandPart = { key: string; text: string; tone: 'red' | 'good' | 'note' }
+export type BandPart = { key: string; text: string; tone: 'red' | 'good' | 'note'; cls?: string; lead?: number }
 
 /**
  * The line above the prompt: the latest test run (and whether code moved
@@ -122,9 +133,16 @@ export function band(snap: Snapshot, labels: Labels = {}): BandPart[] {
 
   if (out?.kind === 'testRun') {
     const isRed = (out.short ?? out.text).includes('✗') || /fail/.test(out.text)
-    const edited = snap.legs.some(l => (l.class === 'build' || l.class === 'fix') && ms(l.start) > ms(out.at))
+    // A write after the run, by its own clock where compass gives one: a
+    // leg's class says what most of it was, and one shell write in a
+    // scout leg is still an edit.
+    const edited = snap.lastEdit
+      ? ms(snap.lastEdit) > ms(out.at)
+      : snap.legs.some(l => ['build', 'fix', 'docs'].includes(l.class) && ms(l.start) > ms(out.at))
     parts.push({
       key: 'test',
+      cls: 'test',
+      lead: 6,
       text: `◆ test ${isRed ? 'red' : 'green'} ${out.short ?? out.text}${edited ? ' · edited since' : ''}`,
       tone: isRed ? 'red' : 'good',
     })
@@ -145,7 +163,13 @@ export function band(snap: Snapshot, labels: Labels = {}): BandPart[] {
   if (head !== undefined) {
     const glyph = head.current ? '●' : '◆'
     const legs = `${snap.legs.length} leg${snap.legs.length === 1 ? '' : 's'}`
-    parts.unshift({ key: 'head', text: `${glyph} ${head.class} ${labelOf(head, labels)}`.trimEnd() + ` · ${legs}`, tone: 'note' })
+    parts.unshift({
+      key: 'head',
+      text: `${glyph} ${head.class} ${labelOf(head, labels)}`.trimEnd() + ` · ${legs}`,
+      tone: 'note',
+      cls: head.class,
+      lead: 2 + head.class.length,
+    })
   }
   return parts
 }

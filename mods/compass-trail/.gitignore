@@ -1,3 +1,4 @@
 bin/
 .claude-plugin/types/
 diag.log
+tsconfig.json

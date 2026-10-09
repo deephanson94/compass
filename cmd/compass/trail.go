@@ -125,14 +125,19 @@ func findTranscript(root, id string) string {
 // are spelled out, times are RFC 3339, and nothing is pre-rendered — the
 // reader picks glyphs and widths for the room it has.
 type trailSnapshot struct {
-	Transcript string             `json:"transcript"`
-	Now        time.Time          `json:"now"`
-	Prompts    []snapPrompt       `json:"prompts"`
-	Legs       []snapLeg          `json:"legs"`
-	Branches   []snapBranch       `json:"branches"`
-	Tasks      []snapTask         `json:"tasks"`
-	Outcome    *snapOutcome       `json:"outcome,omitempty"`
-	Counts     map[string]snapSum `json:"counts"`
+	Transcript string       `json:"transcript"`
+	Now        time.Time    `json:"now"`
+	Prompts    []snapPrompt `json:"prompts"`
+	Legs       []snapLeg    `json:"legs"`
+	Branches   []snapBranch `json:"branches"`
+	Tasks      []snapTask   `json:"tasks"`
+	Outcome    *snapOutcome `json:"outcome,omitempty"`
+	// LastEdit is the main thread's latest write: an edit tool, or a shell
+	// command that writes a file. "Edited since the last test run" is a
+	// question about writes, not about what the leg that holds them is
+	// called — one write in a scout leg is still a write.
+	LastEdit *time.Time         `json:"lastEdit,omitempty"`
+	Counts   map[string]snapSum `json:"counts"`
 }
 
 type snapPrompt struct {
@@ -256,6 +261,10 @@ func snapshot(path string, tr journey.Trail, out *journey.Outcomes, acts *actLog
 		}
 		s.Tasks = append(s.Tasks, snapTask{ID: t.ID, Subject: t.Subject, Active: t.Active, Status: t.Status})
 	}
+	if !acts.lastEdit.IsZero() {
+		at := acts.lastEdit
+		s.LastEdit = &at
+	}
 	if o, ok := out.Latest(); ok {
 		s.Outcome = &snapOutcome{Kind: waypointKind(o.Kind), Text: o.Text, Short: o.Short, At: o.At}
 	}
@@ -269,7 +278,8 @@ func writeSnapshot(w io.Writer, path string, seg *journey.Segmenter, out *journe
 // actLog keeps the main thread's tool calls as one line each, in file order,
 // for the legs to claim by time.
 type actLog struct {
-	acts []act
+	acts     []act
+	lastEdit time.Time
 }
 
 type act struct {
@@ -292,6 +302,9 @@ func (a *actLog) observe(ev transcript.Event) {
 	for _, use := range ev.ToolUses {
 		if text := actText(use); text != "" {
 			a.acts = append(a.acts, act{at: ev.Timestamp, text: text})
+		}
+		if writes(use) && ev.Timestamp.After(a.lastEdit) {
+			a.lastEdit = ev.Timestamp
 		}
 	}
 	if len(a.acts) > maxActs {
@@ -350,6 +363,22 @@ func namedFiles(cmd string) []string {
 		}
 	}
 	return out
+}
+
+// writes reports whether a tool call changes a file.
+func writes(use transcript.ToolUse) bool {
+	switch use.Name {
+	case "Edit", "MultiEdit", "Write", "NotebookEdit":
+		return true
+	case "Bash":
+		var in struct {
+			Command string `json:"command"`
+		}
+		_ = json.Unmarshal(use.Input, &in)
+		_, ok := journey.WrittenFile(strings.SplitN(commandCore(in.Command), "\n", 2)[0])
+		return ok
+	}
+	return false
 }
 
 // actText is one tool call in words. A Bash call's own description says

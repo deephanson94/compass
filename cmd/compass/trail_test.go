@@ -30,6 +30,8 @@ func TestTrailSnapshot(t *testing.T) {
 		line("user", t0.Add(time.Minute), `[{"type":"tool_result","tool_use_id":"r1","content":"..."}]`),
 		line("assistant", t0.Add(2*time.Minute), `[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"pytest tests/auth -x"}}]`),
 		line("user", t0.Add(3*time.Minute), `[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"FAILED tests/auth/test_refresh.py::test_expiry - AssertionError\n18 passed, 2 failed in 1.2s"}]`),
+		line("user", t0.Add(4*time.Minute), `"note it"`),
+		line("assistant", t0.Add(5*time.Minute), `[{"type":"tool_use","id":"w1","name":"Bash","input":{"command":"cat >> NOTES.md <<'EOF'\nred again\nEOF"}}]`),
 	}
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
@@ -48,7 +50,7 @@ func TestTrailSnapshot(t *testing.T) {
 		acts.observe(ev)
 	}
 	var buf bytes.Buffer
-	if err := writeSnapshot(&buf, path, seg, outs, acts, t0.Add(4*time.Minute)); err != nil {
+	if err := writeSnapshot(&buf, path, seg, outs, acts, t0.Add(6*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if n := strings.Count(buf.String(), "\n"); n != 1 {
@@ -59,12 +61,18 @@ func TestTrailSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(s.Prompts) != 1 || s.Prompts[0].Text != "fix the auth tests" {
+	if len(s.Prompts) != 2 || s.Prompts[0].Text != "fix the auth tests" {
 		t.Errorf("prompts = %+v", s.Prompts)
 	}
-	last := s.Legs[len(s.Legs)-1]
-	if last.Class != "test" || !last.Current {
-		t.Fatalf("HEAD = %+v, want the open test leg", last)
+	if head := s.Legs[len(s.Legs)-1]; head.Class != "docs" || !head.Current {
+		t.Errorf("HEAD = %+v, want the open docs leg the shell write opened", head)
+	}
+	if s.LastEdit == nil || !s.LastEdit.Equal(t0.Add(5*time.Minute)) {
+		t.Errorf("lastEdit = %v, want the shell write at +5m", s.LastEdit)
+	}
+	last := s.Legs[len(s.Legs)-2]
+	if last.Class != "test" {
+		t.Fatalf("legs = %+v, want the test leg before HEAD", s.Legs)
 	}
 	var kinds []string
 	for _, w := range last.Waypoints {
