@@ -92,7 +92,7 @@ async function locate($: EngineInterface, configured: string | undefined): Promi
 async function follow($: EngineInterface, configured: string | undefined): Promise<void> {
   const found = await locate($, configured)
   if ('why' in found) {
-    await update($, problem, () => `compass-trail: ${found.why}`)
+    await update($, problem, () => found.why)
     return
   }
   const session = await $.session.id()
@@ -113,9 +113,9 @@ async function follow($: EngineInterface, configured: string | undefined): Promi
       await update($, problem, () => null)
       void narrate($, next)
     }
-    await update($, problem, () => `compass-trail: ${found.bin} trail stopped`)
+    await update($, problem, () => `${found.bin} trail stopped`)
   } catch (err) {
-    await update($, problem, () => `compass-trail: ${found.bin} trail failed: ${String(err)}`)
+    await update($, problem, () => `${found.bin} trail failed: ${String(err)}`)
   }
 }
 
@@ -134,8 +134,8 @@ export const register: Register = (on, options) => {
     trace($, `ui.open isPlaced=${opened.isPlaced}${opened.isPlaced ? '' : ` reason=${opened.reason}`}`)
     $.ui.log(
       opened.isPlaced
-        ? `compass-trail: Trail pane open (${e.surface ?? 'no surface'})`
-        : `compass-trail: Trail pane waits: ${opened.reason}. /trail opens it`,
+        ? `Trail pane open (${e.surface ?? 'no surface'})`
+        : `Trail pane waits: ${opened.reason}. /trail opens it`,
     )
     return started
   })
@@ -149,7 +149,7 @@ export const register: Register = (on, options) => {
     // does not attach): the command's own reply is the one place it shows.
     if (surfaces === 'none') {
       const s = await read($, snap)
-      return { text: s === null ? 'compass-trail: no trail read yet.' : '```\n' + text(s, await read($, labels)) + '\n```' }
+      return { text: s === null ? 'no trail read yet.' : '\n' + text(s, await read($, labels)) }
     }
     const state = opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}.`
     return { text: `${state} Drawing on: ${surfaces}.` }
@@ -158,7 +158,7 @@ export const register: Register = (on, options) => {
   on('session.attach', async ($, e, next) => {
     const joined = await next(e)
     trace($, `session.attach surface=${e.surface} client=${e.clientId}`)
-    $.ui.log(`compass-trail: a ${e.surface} client attached`)
+    $.ui.log(`a ${e.surface} client attached`)
     return joined
   })
 
