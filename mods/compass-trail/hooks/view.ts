@@ -25,6 +25,12 @@ const leadOf = (cls: string) => 2 + Math.max(cls.length, 6)
 
 const ms = (iso: string) => Date.parse(iso)
 
+/** "40s", "4m", "2h", "3d": `ago` to the second, for a clause that reads "edited 40s ago". */
+export function since(from: string, now: string): string {
+  const s = Math.max(0, (ms(now) - ms(from)) / 1000)
+  return s < 60 ? `${Math.floor(s)}s` : ago(from, now)
+}
+
 /** "now", "4m", "2h", "3d": how long since `from`, at the snapshot's clock. */
 export function ago(from: string, now: string): string {
   const s = Math.max(0, (ms(now) - ms(from)) / 1000)
@@ -136,19 +142,25 @@ export function band(snap: Snapshot, labels: Labels = {}): BandPart[] {
     // A write after the run, by its own clock where compass gives one: a
     // leg's class says what most of it was, and one shell write in a
     // scout leg is still an edit.
+    // How long ago code moved after the run, by its own clock; a compass
+    // without the write clock can only say that it did.
     const edited = snap.lastEdit
       ? ms(snap.lastEdit) > ms(out.at)
+        ? ` · edited ${since(snap.lastEdit, snap.now)} ago`
+        : ''
       : snap.legs.some(l => ['build', 'fix', 'docs'].includes(l.class) && ms(l.start) > ms(out.at))
+        ? ' · edited since'
+        : ''
     parts.push({
       key: 'test',
       cls: 'test',
       lead: 6,
-      text: `◆ test ${isRed ? 'red' : 'green'} ${out.short ?? out.text}${edited ? ' · edited since' : ''}`,
+      text: `◆ test ${isRed ? 'red' : 'green'} ${out.short ?? out.text}${edited}`,
       tone: isRed ? 'red' : 'good',
     })
   }
   if (out?.kind === 'commit') {
-    parts.push({ key: 'ship', text: `✓ shipped ${ago(out.at, snap.now)} ago`, tone: 'good' })
+    parts.push({ key: 'ship', text: `✓ shipped ${since(out.at, snap.now)} ago`, tone: 'good' })
   }
 
   const outLanes = snap.branches.filter(b => !b.done)
@@ -157,15 +169,13 @@ export function band(snap: Snapshot, labels: Labels = {}): BandPart[] {
     parts.push({ key: 'lanes', text: `◈${outLanes.length} out · oldest ${ago(oldest.start, snap.now)}`, tone: 'note' })
   }
 
-  // HEAD always leads once there is a leg: the band is where the trail is
-  // seen when no pane is seated.
+  // The deck's HEAD sentence, while a leg is open: what it is and how long
+  // it has run. A closed newest leg is history, which the pane keeps.
   const head = snap.legs.at(-1)
-  if (head !== undefined) {
-    const glyph = head.current ? '●' : '◆'
-    const legs = `${snap.legs.length} leg${snap.legs.length === 1 ? '' : 's'}`
+  if (head?.current) {
     parts.unshift({
       key: 'head',
-      text: `${glyph} ${head.class} ${labelOf(head, labels)}`.trimEnd() + ` · ${legs}`,
+      text: `● ${head.class} ${labelOf(head, labels)}`.trimEnd() + ` · for ${since(head.start, snap.now)}`,
       tone: 'note',
       cls: head.class,
       lead: 2 + head.class.length,

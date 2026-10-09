@@ -43,14 +43,22 @@ test('the trail reads oldest first, HEAD marked, the plan as ghosts', async () =
 
 test('the band says the run, that code moved since, and the lane out', async () => {
   const text = band(SNAP).map(p => p.text).join(' | ')
-  expect(text).toBe('● fix refresh.py · 3 legs | ◆ test red 18✓ 2✗ · edited since | ◈1 out · oldest 14m')
+  expect(text).toBe('● fix refresh.py · for 15m | ◆ test red 18✓ 2✗ · edited since | ◈1 out · oldest 14m')
   expect(band({ ...SNAP, legs: [], outcome: undefined, branches: [] })).toEqual([])
+  // A closed newest leg is history: the band says nothing about it.
+  const closed = { ...SNAP, legs: SNAP.legs.map(l => ({ ...l, current: false })), outcome: undefined, branches: [] }
+  expect(band(closed)).toEqual([])
 })
 
 test('edited since reads the write clock: a shell write in a scout leg counts, a write before the run does not', async () => {
   const scoutAfter = { ...SNAP, legs: [...SNAP.legs.slice(0, 2), { class: 'scout', label: 'README.md', start: at(5), end: at(6), current: true }] }
-  expect(band({ ...scoutAfter, lastEdit: at(6) }).map(p => p.text)).toContain('◆ test red 18✓ 2✗ · edited since')
+  expect(band({ ...scoutAfter, lastEdit: at(6) }).map(p => p.text)).toContain('◆ test red 18✓ 2✗ · edited 14m ago')
   expect(band({ ...scoutAfter, lastEdit: at(2) }).map(p => p.text)).toContain('◆ test red 18✓ 2✗')
+  // Under a minute it counts seconds: "edited 40s ago", never "now ago".
+  const fresh = { ...scoutAfter, now: at(19), lastEdit: new Date(Date.parse(at(19)) - 40_000).toISOString() }
+  expect(band(fresh).map(p => p.text)).toContain('◆ test red 18✓ 2✗ · edited 40s ago')
+  const shipped = { ...SNAP, outcome: { kind: 'commit' as const, text: 'mod test', at: new Date(Date.parse(at(20)) - 5_000).toISOString() } }
+  expect(band(shipped).map(p => p.text)).toContain('✓ shipped 5s ago')
 })
 
 test('as text, the trail ends on HEAD and the band line', async () => {
