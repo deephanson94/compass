@@ -45,6 +45,8 @@ export type Snapshot = {
   branches: Branch[]
   tasks: Task[]
   outcome?: Outcome
+  /** The main thread's latest write: an edit tool or a shell write. */
+  lastEdit?: string
   counts: Record<string, Sum>
 }
 

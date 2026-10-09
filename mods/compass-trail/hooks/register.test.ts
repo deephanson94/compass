@@ -47,6 +47,12 @@ test('the band says the run, that code moved since, and the lane out', async () 
   expect(band({ ...SNAP, legs: [], outcome: undefined, branches: [] })).toEqual([])
 })
 
+test('edited since reads the write clock: a shell write in a scout leg counts, a write before the run does not', async () => {
+  const scoutAfter = { ...SNAP, legs: [...SNAP.legs.slice(0, 2), { class: 'scout', label: 'README.md', start: at(5), end: at(6), current: true }] }
+  expect(band({ ...scoutAfter, lastEdit: at(6) }).map(p => p.text)).toContain('◆ test red 18✓ 2✗ · edited since')
+  expect(band({ ...scoutAfter, lastEdit: at(2) }).map(p => p.text)).toContain('◆ test red 18✓ 2✗')
+})
+
 test('as text, the trail ends on HEAD and the band line', async () => {
   const out = text(SNAP, {}, 40, 50).split('\n')
   expect(out.at(-3)).toContain('◌ Run the full suite')

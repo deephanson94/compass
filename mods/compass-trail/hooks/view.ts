@@ -122,7 +122,12 @@ export function band(snap: Snapshot, labels: Labels = {}): BandPart[] {
 
   if (out?.kind === 'testRun') {
     const isRed = (out.short ?? out.text).includes('✗') || /fail/.test(out.text)
-    const edited = snap.legs.some(l => (l.class === 'build' || l.class === 'fix') && ms(l.start) > ms(out.at))
+    // A write after the run, by its own clock where compass gives one: a
+    // leg's class says what most of it was, and one shell write in a
+    // scout leg is still an edit.
+    const edited = snap.lastEdit
+      ? ms(snap.lastEdit) > ms(out.at)
+      : snap.legs.some(l => ['build', 'fix', 'docs'].includes(l.class) && ms(l.start) > ms(out.at))
     parts.push({
       key: 'test',
       text: `◆ test ${isRed ? 'red' : 'green'} ${out.short ?? out.text}${edited ? ' · edited since' : ''}`,
