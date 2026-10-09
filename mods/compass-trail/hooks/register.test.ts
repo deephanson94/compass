@@ -54,6 +54,8 @@ test('the band draws what compass streams, on every surface that has one', async
   // compass that writes one snapshot cut across two pieces, then exits.
   on('session.start', async (_, e) => ({ cwd: e.cwd }))
   on('session.id', async () => ({ value: 'sess-1' }))
+  on('session.surfaces', async () => ({ value: ['terminal'] as const }))
+  on('fs.write', async () => ({ value: undefined }))
   on('command.register', async (_, e) => ({ value: { command: e.name } }))
   on('ui.open', async () => ({ value: { isPlaced: true } as const }))
   on('ui.render', async () => h('Box', {}) as RenderElement)

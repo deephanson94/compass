@@ -12,6 +12,14 @@ const snap = atom({ plugin: 'compass-trail', key: 'snap' } as const, null)
 const problem = atom({ plugin: 'compass-trail', key: 'problem' } as const, null)
 const isBandHidden = atom({ plugin: 'compass-trail', key: 'isBandHidden' } as const, false)
 
+// Diagnostics while the mod is young: what the engine and its clients asked
+// of it, written beside the mod so a session can read why nothing shows.
+const seen: string[] = []
+function trace($: EngineInterface, what: string): void {
+  seen.push(`${new Date().toISOString()} ${what}`)
+  void $.fs.write(`${$.plugin.root}/diag.log`, seen.slice(-200).join('\n') + '\n').catch(() => {})
+}
+
 const rowColor = { prompt: 'claude', done: undefined, head: 'text', red: 'error', lane: 'suggestion', ghost: 'inactive', note: 'subtle' } as const
 const partColor = { red: 'error', good: 'success', note: 'subtle' } as const
 
@@ -55,12 +63,14 @@ async function follow($: EngineInterface): Promise<void> {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    trace($, `session.start surface=${e.surface} surfaces=${(await $.session.surfaces()).join(',') || 'none'}`)
     await $.command.register({ name: 'trail', description: 'Show this session’s compass trail in a pane' })
     await $.command.register({ name: 'trail-band', description: 'Show or hide the compass line above the prompt' })
     void follow($)
     // A pane opened unasked waits on a narrow screen or a surface that seats
     // none; say which, once, so a missing pane is never a mystery.
     const opened = await $.ui.open({ id: PANE, title: TITLE })
+    trace($, `ui.open isPlaced=${opened.isPlaced}${opened.isPlaced ? '' : ` reason=${opened.reason}`}`)
     $.ui.log(
       opened.isPlaced
         ? `compass-trail: Trail pane open (${e.surface ?? 'no surface'})`
@@ -73,12 +83,14 @@ export const register: Register = on => {
     const opened = await $.ui.open({ id: PANE, title: TITLE })
     // Which clients draw this session: a pane is only seen on one of these.
     const surfaces = (await $.session.surfaces()).join(', ') || 'none'
+    trace($, `/trail isPlaced=${opened.isPlaced} surfaces=${surfaces}`)
     const state = opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}.`
     return { text: `${state} Drawing on: ${surfaces}.` }
   })
 
   on('session.attach', async ($, e, next) => {
     const joined = await next(e)
+    trace($, `session.attach surface=${e.surface} client=${e.clientId}`)
     $.ui.log(`compass-trail: a ${e.surface} client attached`)
     return joined
   })
@@ -89,6 +101,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    trace($, `render Pane surface=${e.surface} placement=${e.props.placement} cols=${e.viewport?.columns}`)
     const { Box, Text } = $.ui.resolve(e)
     const s = await read($, snap)
     const why = await read($, problem)
@@ -127,6 +140,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    trace($, `render AbovePrompt surface=${e.surface}`)
     const s = await read($, snap)
     if (s === null || e.props.hasSurvey || (await read($, isBandHidden))) return next(e)
     const parts = band(s)
