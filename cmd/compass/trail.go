@@ -35,6 +35,7 @@ func runTrail(args []string) int {
 	follow := fs.Bool("follow", false, "keep reading: one snapshot per line as the transcript grows")
 	poll := fs.Duration("poll", 500*time.Millisecond, "with -follow, how often the transcript is read")
 	beat := fs.Duration("heartbeat", 30*time.Second, "with -follow, the longest gap between snapshots")
+	cutsArg := fs.String("cuts", "", `rewinds seen live, as JSON: [{"at":"<RFC 3339>","prompt":"<first line of the prompt rewound to>"}]`)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -55,6 +56,12 @@ func runTrail(args []string) int {
 	out := bufio.NewWriter(os.Stdout)
 	var t *transcript.Tailer
 	f := newFollower()
+	if *cutsArg != "" {
+		if err := json.Unmarshal([]byte(*cutsArg), &f.cuts); err != nil {
+			fmt.Fprintln(os.Stderr, "compass trail: -cuts:", err)
+			return 2
+		}
+	}
 	read := func() (bool, error) {
 		if t == nil {
 			if !resolve() {
@@ -119,13 +126,27 @@ func runTrail(args []string) int {
 // trail follows the conversation the session is actually having. Until the
 // next prompt is sent the rewind has written nothing, and the trail still
 // shows the old branch.
+//
+// A rewind seen live (a reader watching the session, the mod) arrives as a
+// cut instead: the prompt rewound to and when. The trail can drop that
+// branch at once, before the next prompt writes the fork into the file.
 type follower struct {
 	events   []transcript.Event
 	index    map[string]int // uuid → position in events
 	lastUUID string         // the newest line that has a uuid
+	cuts     []cut          // rewinds seen live, applied once each
 	seg      *journey.Segmenter
 	outs     *journey.Outcomes
 	acts     *actLog
+}
+
+// cut is a rewind as a reader saw it happen: everything from the latest
+// prompt reading Prompt up to At is the branch walked away from. What is
+// written after At is the conversation going on, and stays.
+type cut struct {
+	At     time.Time `json:"at"`
+	Prompt string    `json:"prompt"`
+	done   bool
 }
 
 func newFollower() *follower {
@@ -161,6 +182,9 @@ func (f *follower) add(evs []transcript.Event) bool {
 			f.observe(ev)
 		}
 	}
+	if f.applyCuts() {
+		rewound = true
+	}
 	if rewound {
 		f.reset()
 		for _, ev := range f.events {
@@ -168,6 +192,59 @@ func (f *follower) add(evs []transcript.Event) bool {
 		}
 	}
 	return rewound
+}
+
+// applyCuts drops each cut's window that the lines read so far contain, and
+// reports whether any did. A cut whose prompt is not there is left to wait:
+// a reader started fresh reads the whole file in its first batch.
+func (f *follower) applyCuts() bool {
+	applied := false
+	for i := range f.cuts {
+		c := &f.cuts[i]
+		if c.done {
+			continue
+		}
+		start := -1
+		for j, ev := range f.events {
+			if ev.Timestamp.After(c.At) {
+				break
+			}
+			if typedPrompt(ev) && firstLineOf(ev.Text) == strings.TrimSpace(c.Prompt) {
+				start = j
+			}
+		}
+		if start < 0 {
+			continue
+		}
+		end := start
+		for end < len(f.events) && !f.events[end].Timestamp.After(c.At) {
+			end++
+		}
+		f.events = append(f.events[:start], f.events[end:]...)
+		c.done, applied = true, true
+	}
+	if applied {
+		f.index, f.lastUUID = map[string]int{}, ""
+		for j, ev := range f.events {
+			if ev.UUID != "" {
+				f.index[ev.UUID] = j
+				if !ev.IsSidechain {
+					f.lastUUID = ev.UUID
+				}
+			}
+		}
+	}
+	return applied
+}
+
+// typedPrompt is a line a person typed: a user turn with words in it, not a
+// tool's result or the harness's own note.
+func typedPrompt(ev transcript.Event) bool {
+	return ev.Type == transcript.EventUser && !ev.IsSidechain && !ev.IsMeta && len(ev.ToolResults) == 0 && strings.TrimSpace(ev.Text) != ""
+}
+
+func firstLineOf(s string) string {
+	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
 }
 
 func (f *follower) observe(ev transcript.Event) {
@@ -180,10 +257,7 @@ func (f *follower) observe(ev transcript.Event) {
 // the position of the older line it hangs off. ok is false for every line
 // that continues the conversation where it was.
 func (f *follower) branchPoint(ev transcript.Event) (int, bool) {
-	if ev.Type != transcript.EventUser || ev.IsSidechain || ev.IsMeta || len(ev.ToolResults) > 0 {
-		return 0, false
-	}
-	if strings.TrimSpace(ev.Text) == "" || ev.ParentUUID == "" || ev.ParentUUID == f.lastUUID {
+	if !typedPrompt(ev) || ev.ParentUUID == "" || ev.ParentUUID == f.lastUUID {
 		return 0, false
 	}
 	at, ok := f.index[ev.ParentUUID]

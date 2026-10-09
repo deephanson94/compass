@@ -1,9 +1,10 @@
 import type { RenderElement } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 import type { Snapshot } from '../types'
 import { candidates, judge } from './locate'
 import { digests, legKey, parse } from './narrate'
+import { rewindBetween, sig } from './rewind'
 import { band, lines, text, trail } from './view'
 
 const T0 = '2026-08-30T12:00:00Z'
@@ -104,6 +105,26 @@ test('a binary is used only when -version names the trail protocol this mod read
   expect(judge(0, 'compass v0.9.0 (trail 2)').ok).toBe(false)
   expect(judge(2, '').ok).toBe(false)
   expect(judge(0, 'go version go1.24').ok).toBe(false)
+})
+
+test('a rewind is the messages shrinking back to their own beginning, onto a prompt', async () => {
+  const said = [
+    { role: 'user', text: 'read outcome.go' },
+    { role: 'assistant', text: 'Outcome is…', toolUses: [{ tool_use_id: 't1' }] },
+    { role: 'user', text: 'run go test ./internal/journey\nall of it' },
+    { role: 'assistant', text: 'passes' },
+  ]
+  const before = said.map(sig)
+  const at = '2026-10-09T05:56:29.094Z'
+  expect(rewindBetween(before, said.slice(0, 2), at)).toEqual({ at, prompt: 'run go test ./internal/journey' })
+  expect(rewindBetween(before, [], at)).toEqual({ at, prompt: 'read outcome.go' })
+  // Growing, standing still, or a /compact's summary in place of the old
+  // beginning: no rewind.
+  expect(rewindBetween(before, said, at)).toBeNull()
+  expect(rewindBetween(before.slice(0, 2), said, at)).toBeNull()
+  expect(rewindBetween(before, [{ role: 'user', text: 'This session is being continued…' }], at)).toBeNull()
+  // A cut landing on the assistant's turn is not a rewind point.
+  expect(rewindBetween(before, said.slice(0, 1), at)).toBeNull()
 })
 
 test('a chunk cut mid-line keeps the tail for the next one', async () => {
@@ -233,4 +254,46 @@ test('an older compass is never started: the pane says what to install', async (
     viewport: { columns: 60, rows: 24 },
   })
   expect((await pane.find({ type: 'Text', text: /older than the trail subcommand/ }))?.text).toContain('Install a newer compass')
+})
+
+test('a rewind seen live starts compass again with the cut, before any prompt is sent', async ($, on) => {
+  on('session.start', async (_, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-1' }))
+  on('session.surfaces', async () => ({ value: ['terminal'] as const }))
+  on('fs.write', async () => ({ value: undefined }))
+  on('env.get', async () => ({ value: undefined }))
+  on('config.list', async () => ({ value: [] }))
+  on('command.register', async (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', async () => ({ value: { isPlaced: true } as const }))
+  on('ui.render', async () => h('Box', {}) as RenderElement)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: 'compass dev (trail 1)\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  // Four messages, then the rewind to before the second prompt.
+  const full = [
+    { role: 'user' as const, text: 'read outcome.go', toolUses: [] },
+    { role: 'assistant' as const, text: 'Outcome is…', toolUses: [] },
+    { role: 'user' as const, text: 'run the tests', toolUses: [] },
+    { role: 'assistant' as const, text: 'passes', toolUses: [] },
+  ]
+  let said = full
+  on('session.messages', async () => ({ value: said }))
+  const spawned: string[][] = []
+  let respawned!: () => void
+  const isRespawned = new Promise<void>(resolve => (respawned = resolve))
+  on('process.spawn', async function* (_, e) {
+    spawned.push([...e.argv])
+    if (spawned.length === 2) respawned()
+    return { value: { code: 0, signal: null } }
+  })
+  const clock = mock.clock(on, { now: Date.parse('2026-10-09T05:56:00Z') })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(2000)
+  said = full.slice(0, 2)
+  await clock.advance(2000)
+  await isRespawned
+
+  const argv = spawned[1]!
+  const cuts = JSON.parse(argv[argv.indexOf('-cuts') + 1]!) as { prompt: string }[]
+  expect(cuts.map(c => c.prompt)).toEqual(['run the tests'])
+  expect(cuts[0]).toEqual({ at: '2026-10-09T05:56:04.000Z', prompt: 'run the tests' })
+  expect(spawned[0]).not.toContain('-cuts')
 })

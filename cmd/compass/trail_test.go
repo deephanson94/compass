@@ -177,3 +177,39 @@ func TestARewoundBranchLeavesTheTrail(t *testing.T) {
 		t.Error("the abandoned branch's test run is still the latest outcome")
 	}
 }
+
+// A rewind seen live drops its branch at once: the reader names the prompt
+// rewound to and when, and the trail loses that prompt and what followed it
+// before the next prompt is written. Lines after the rewind stay, and the
+// next prompt, hanging off the line before the cut, reads as no new rewind.
+func TestALiveCutDropsTheBranchBeforeTheNextPrompt(t *testing.T) {
+	t0 := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	lines := []string{
+		node("user", "u1", "", m(0), `"fix the auth tests"`),
+		node("assistant", "a1", "u1", m(1), `[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/auth.py"}}]`),
+		node("user", "r1", "a1", m(2), `[{"type":"tool_result","tool_use_id":"e1","content":"ok"}]`),
+		node("user", "u2", "r1", m(3), `"now run the tests\nall of them"`),
+		node("assistant", "a2", "u2", m(4), `[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"pytest tests/auth"}}]`),
+		node("user", "r2", "a2", m(5), `[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"18 passed, 2 failed in 1.2s"}]`),
+	}
+	f := newFollower()
+	f.cuts = []cut{{At: m(6), Prompt: "now run the tests"}}
+	if !f.add(readAll(t, lines)) {
+		t.Fatal("the cut was not applied")
+	}
+	tr := f.seg.Trail()
+	if len(tr.Prompts) != 1 || len(tr.Legs) != 1 || tr.Legs[0].Class != journey.Build {
+		t.Fatalf("after the cut: prompts %+v, legs %+v; want the first prompt and its build", tr.Prompts, tr.Legs)
+	}
+	if _, ok := f.outs.Latest(); ok {
+		t.Error("the cut branch's test run is still the latest outcome")
+	}
+	// The next prompt hangs off r1, the line before the cut.
+	if f.add(readAll(t, []string{node("user", "u3", "r1", m(8), `"commit it instead"`)})) {
+		t.Error("the prompt after a live cut read as another rewind")
+	}
+	if got := len(f.seg.Trail().Prompts); got != 2 {
+		t.Errorf("prompts after the next one = %d, want 2", got)
+	}
+}

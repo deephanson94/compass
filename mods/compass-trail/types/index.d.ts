@@ -37,6 +37,9 @@ export type Outcome = { kind: Waypoint['kind']; text: string; short?: string; at
 
 export type Sum = { legs: number; seconds: number; red?: number }
 
+/** A rewind seen live: the prompt rewound to (its first line), and when. */
+export type Cut = { at: string; prompt: string }
+
 export type Snapshot = {
   transcript: string
   now: string
@@ -58,6 +61,7 @@ declare module 'claude-code' {
       isBandHidden: boolean
       labels: Record<string, string>
       isLight: boolean
+      cuts: Cut[]
     }
   }
 }
