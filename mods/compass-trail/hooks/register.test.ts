@@ -2,7 +2,7 @@ import type { RenderElement } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 import type { Snapshot } from '../types'
-import { band, lines, trail } from './view'
+import { band, lines, text, trail } from './view'
 
 const T0 = '2026-08-30T12:00:00Z'
 const at = (min: number) => new Date(Date.parse(T0) + min * 60_000).toISOString()
@@ -43,6 +43,13 @@ test('the band says the run, that code moved since, and the lane out', async () 
   const text = band(SNAP).map(p => p.text).join(' | ')
   expect(text).toBe('● fix refresh.py · 3 legs | ◆ test red 18✓ 2✗ · edited since | ◈1 out · oldest 14m')
   expect(band({ ...SNAP, legs: [], outcome: undefined, branches: [] })).toEqual([])
+})
+
+test('as text, the trail ends on HEAD and the band line', async () => {
+  const out = text(SNAP, 40, 50).split('\n')
+  expect(out.at(-3)).toContain('◌ Run the full suite')
+  expect(out.at(-1)).toContain('◆ test red 18✓ 2✗')
+  expect(out.find(l => l.startsWith('● fix'))?.endsWith('← 15m')).toBe(true)
 })
 
 test('a chunk cut mid-line keeps the tail for the next one', async () => {

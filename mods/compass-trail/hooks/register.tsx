@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Snapshot } from '../types'
-import { band, block, lines, trail } from './view'
+import { band, block, lines, text, trail } from './view'
 import type { BandPart, Row } from './view'
 
 const PANE = 'compass-trail'
@@ -84,6 +84,12 @@ export const register: Register = on => {
     // Which clients draw this session: a pane is only seen on one of these.
     const surfaces = (await $.session.surfaces()).join(', ') || 'none'
     trace($, `/trail isPlaced=${opened.isPlaced} surfaces=${surfaces}`)
+    // No client draws mod UI here (a cloud session viewed from an app that
+    // does not attach): the command's own reply is the one place it shows.
+    if (surfaces === 'none') {
+      const s = await read($, snap)
+      return { text: s === null ? 'compass-trail: no trail read yet.' : '```\n' + text(s) + '\n```' }
+    }
     const state = opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}.`
     return { text: `${state} Drawing on: ${surfaces}.` }
   })

@@ -149,3 +149,20 @@ export function lines(buffer: string): { done: string[]; rest: string } {
   if (cut < 0) return { done: [], rest: buffer }
   return { done: buffer.slice(0, cut).split('\n').filter(Boolean), rest: buffer.slice(cut + 1) }
 }
+
+/**
+ * The pane as plain text, for a session no surface draws: the block, a
+ * blank line, the last `room` trail rows, each right column aligned.
+ */
+export function text(snap: Snapshot, room = 40, width = 72): string {
+  const fmt = (r: Row) => {
+    const gap = Math.max(1, width - r.text.length - r.right.length)
+    return r.right ? r.text + ' '.repeat(gap) + r.right : r.text
+  }
+  const head = block(snap).map(fmt)
+  const body = trail(snap)
+  const shown = body.slice(-room)
+  const cut = body.length > shown.length ? [`↑ ${body.length - shown.length} earlier`] : []
+  const strip = band(snap).map(p => p.text).join('  ·  ')
+  return [...head, ...(head.length ? [''] : []), ...cut, ...shown.map(fmt), ...(strip ? ['', strip] : [])].join('\n')
+}
