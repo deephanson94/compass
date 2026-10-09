@@ -151,6 +151,11 @@ type Segmenter struct {
 	// travel with them. Trail() folds the buffer into the open leg for display
 	// so a streak-in-progress still reads as part of the journey.
 	press []pended
+
+	// localNext is set by the caveat Claude Code writes before a command it
+	// runs itself (/trail, /model, /config): the slash command on the next
+	// user line went to the CLI, not to the model, and steers nothing.
+	localNext bool
 }
 
 // pended is one buffered pressure vote.
@@ -195,6 +200,17 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 	// marks it.
 	if ev.Compaction() {
 		s.compactions = append(s.compactions, ev.Timestamp)
+	}
+
+	// A local command is the person talking to the CLI: no ◉, no boundary.
+	// A command the model answers — a skill, a custom command — has no
+	// caveat before it and stays the prompt it is.
+	if ev.Type == transcript.EventUser {
+		local := s.localNext
+		s.localNext = ev.IsMeta && strings.HasPrefix(strings.TrimSpace(ev.Text), localCommandCaveat)
+		if _, cmd := transcript.SlashCommand(ev.Text); local && cmd {
+			return
+		}
 	}
 
 	// Rule 2: a human prompt is a hard boundary, whatever was running. Pressure
@@ -502,6 +518,10 @@ func (s *Segmenter) updateTask(use transcript.ToolUse) {
 // launchAck recognises the tool_result Claude Code writes the moment a
 // background agent is spawned. The wording is Claude Code's own, not the
 // agent's, and it is the same for every agent.
+// localCommandCaveat opens the meta line Claude Code writes before a slash
+// command it runs itself, rather than sends to the model.
+const localCommandCaveat = "<local-command-caveat>"
+
 func launchAck(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "Spawned successfully")
 }

@@ -33,6 +33,20 @@ func main() {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
+	// trail reads one transcript and never the fleet: it has flags of its
+	// own and skips the deck's setup entirely.
+	if sub == "trail" {
+		os.Exit(runTrail(args))
+	}
+	// A word compass does not know is a mistake, not a request for the
+	// deck: a reader probing for a subcommand (a mod asking for `trail`)
+	// must get an error back, never a full-screen deck with no terminal.
+	switch sub {
+	case "", "status", "panes", "help":
+	default:
+		fmt.Fprintf(os.Stderr, "compass: unknown command %q (try compass help)\n", sub)
+		os.Exit(2)
+	}
 
 	cfg := loadConfig()
 	rootDefault := defaultRoot()
@@ -66,7 +80,10 @@ func main() {
 	}
 	// -version answers and stops: it reads nothing and watches nothing.
 	if *showVersion {
-		fmt.Printf("compass %s\n", version)
+		// The trail protocol rides on the version line: -version is the one
+		// question every compass answers without starting anything, so a
+		// mod asks it before it ever runs `trail`.
+		fmt.Printf("compass %s (trail %d)\n", version, trailProtocol)
 		os.Exit(0)
 	}
 	window, err := time.ParseDuration(*liveWithin)
@@ -187,6 +204,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "\n  compass           the deck: every session, one glance")
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
 		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
+		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()
 	}

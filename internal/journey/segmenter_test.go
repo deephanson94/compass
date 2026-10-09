@@ -912,6 +912,35 @@ func TestASlashCommandPromptReadsAsTyped(t *testing.T) {
 	}
 }
 
+// A command Claude Code runs itself — /trail, /model — follows a caveat line
+// and never reaches the model: it marks no ◉ and leaves the open leg open. A
+// dogfooded trail read `◉ "/trail"` three times between two real prompts.
+func TestALocalCommandIsNoPrompt(t *testing.T) {
+	caveat := prompt(2*time.Minute, "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>")
+	caveat.IsMeta = true
+	tr := segment(
+		prompt(0, "fix the auth tests"),
+		edit(1*time.Minute, "e1", "/src/auth.py"),
+		caveat,
+		prompt(2*time.Minute, "<command-name>/trail</command-name>\n            <command-message>trail</command-message>\n            <command-args></command-args>"),
+		edit(3*time.Minute, "e2", "/src/auth.py"),
+	)
+	if len(tr.Prompts) != 1 {
+		t.Fatalf("got %d prompts %+v, want only the person's", len(tr.Prompts), tr.Prompts)
+	}
+	if len(tr.Legs) != 1 || !tr.Legs[0].Current {
+		t.Fatalf("legs = %+v, want the one build leg still open", tr.Legs)
+	}
+
+	// The caveat speaks for the line after it only: a skill typed next is
+	// the model's to answer, and stays a prompt.
+	tr = segment(caveat, prompt(2*time.Minute, "<command-name>/trail</command-name>"),
+		prompt(4*time.Minute, "<command-name>/code-review</command-name>"))
+	if len(tr.Prompts) != 1 || tr.Prompts[0].Text != "/code-review" {
+		t.Errorf("prompts = %+v, want /code-review alone", tr.Prompts)
+	}
+}
+
 // ---------------------------------------------------------------- background agents
 
 // resultText is a tool_result carrying words, which result() cannot make.
