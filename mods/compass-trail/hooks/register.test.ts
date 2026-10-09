@@ -41,8 +41,8 @@ test('the trail reads oldest first, HEAD marked, the plan as ghosts', async () =
 
 test('the band says the run, that code moved since, and the lane out', async () => {
   const text = band(SNAP).map(p => p.text).join(' | ')
-  expect(text).toBe('● fix refresh.py | ◆ test red 18✓ 2✗ · edited since | ◈1 out · oldest 14m')
-  expect(band({ ...SNAP, outcome: undefined, branches: [] })).toEqual([])
+  expect(text).toBe('● fix refresh.py · 3 legs | ◆ test red 18✓ 2✗ · edited since | ◈1 out · oldest 14m')
+  expect(band({ ...SNAP, legs: [], outcome: undefined, branches: [] })).toEqual([])
 })
 
 test('a chunk cut mid-line keeps the tail for the next one', async () => {

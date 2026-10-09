@@ -132,9 +132,13 @@ export function band(snap: Snapshot): BandPart[] {
     parts.push({ key: 'lanes', text: `◈${outLanes.length} out · oldest ${ago(oldest.start, snap.now)}`, tone: 'note' })
   }
 
+  // HEAD always leads once there is a leg: the band is where the trail is
+  // seen when no pane is seated.
   const head = snap.legs.at(-1)
-  if (parts.length > 0 && head?.current) {
-    parts.unshift({ key: 'head', text: `● ${head.class} ${head.label}`.trimEnd(), tone: 'note' })
+  if (head !== undefined) {
+    const glyph = head.current ? '●' : '◆'
+    const legs = `${snap.legs.length} leg${snap.legs.length === 1 ? '' : 's'}`
+    parts.unshift({ key: 'head', text: `${glyph} ${head.class} ${head.label}`.trimEnd() + ` · ${legs}`, tone: 'note' })
   }
   return parts
 }

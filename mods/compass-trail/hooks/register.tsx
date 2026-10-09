@@ -57,14 +57,21 @@ export const register: Register = on => {
     const started = await next(e)
     await $.command.register({ name: 'trail', description: 'Show this session’s compass trail in a pane' })
     await $.command.register({ name: 'trail-band', description: 'Show or hide the compass line above the prompt' })
-    void $.ui.open({ id: PANE, title: TITLE })
     void follow($)
+    // A pane opened unasked waits on a narrow screen or a surface that seats
+    // none; say which, once, so a missing pane is never a mystery.
+    const opened = await $.ui.open({ id: PANE, title: TITLE })
+    $.ui.log(
+      opened.isPlaced
+        ? `compass-trail: Trail pane open (${e.surface ?? 'no surface'})`
+        : `compass-trail: Trail pane waits: ${opened.reason}. /trail opens it`,
+    )
     return started
   })
 
   on('command.run', { command: 'trail' }, async $ => {
-    const { isPlaced } = await $.ui.open({ id: PANE, title: TITLE })
-    return { text: isPlaced ? 'Trail pane open.' : 'Trail pane open; this surface has no room to place it now.' }
+    const opened = await $.ui.open({ id: PANE, title: TITLE })
+    return { text: opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}` }
   })
 
   on('command.run', { command: 'trail-band' }, async $ => {
