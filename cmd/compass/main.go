@@ -33,6 +33,11 @@ func main() {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sub, args = args[0], args[1:]
 	}
+	// trail reads one transcript and never the fleet: it has flags of its
+	// own and skips the deck's setup entirely.
+	if sub == "trail" {
+		os.Exit(runTrail(args))
+	}
 
 	cfg := loadConfig()
 	rootDefault := defaultRoot()
@@ -187,6 +192,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "\n  compass           the deck: every session, one glance")
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
 		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
+		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()
 	}

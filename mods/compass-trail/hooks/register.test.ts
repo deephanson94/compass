@@ -1,0 +1,95 @@
+import type { RenderElement } from 'claude-code'
+import { expect, test } from 'claude-code/testing'
+
+import type { Snapshot } from '../types'
+import { band, lines, trail } from './view'
+
+const T0 = '2026-08-30T12:00:00Z'
+const at = (min: number) => new Date(Date.parse(T0) + min * 60_000).toISOString()
+
+const SNAP: Snapshot = {
+  transcript: '/x.jsonl',
+  now: at(20),
+  prompts: [{ text: 'fix the auth tests', at: at(0) }],
+  legs: [
+    { class: 'scout', label: 'auth.py', start: at(1), end: at(2) },
+    {
+      class: 'test',
+      label: 'pytest',
+      start: at(3),
+      end: at(4),
+      waypoints: [
+        { kind: 'testRun', text: '18 passed · 2 failed', short: '18✓ 2✗', at: at(4) },
+        { kind: 'testFail', text: 'test_expiry', at: at(4), runs: 2 },
+      ],
+    },
+    { class: 'fix', label: 'refresh.py', start: at(5), end: at(18), current: true },
+  ],
+  branches: [{ label: 'map the payments module', start: at(6), done: false, afterLeg: 2 }],
+  tasks: [{ id: '1', subject: 'Run the full suite', status: 'pending' }],
+  outcome: { kind: 'testRun', text: '18 passed · 2 failed', short: '18✓ 2✗', at: at(4) },
+  counts: { scout: { legs: 1, seconds: 60 }, test: { legs: 1, seconds: 60, red: 1 }, fix: { legs: 1, seconds: 780 } },
+}
+
+test('the trail reads oldest first, HEAD marked, the plan as ghosts', async () => {
+  const rows = trail(SNAP)
+  expect(rows.map(r => r.tone)).toEqual(['prompt', 'done', 'red', 'head', 'lane', 'ghost'])
+  expect(rows[3]?.text).toContain('● fix')
+  expect(rows[3]?.right).toBe('← 15m')
+  expect(rows[4]?.right).toBe('⋯ 14m out')
+})
+
+test('the band says the run, that code moved since, and the lane out', async () => {
+  const text = band(SNAP).map(p => p.text).join(' | ')
+  expect(text).toBe('● fix refresh.py | ◆ test red 18✓ 2✗ · edited since | ◈1 out · oldest 14m')
+  expect(band({ ...SNAP, outcome: undefined, branches: [] })).toEqual([])
+})
+
+test('a chunk cut mid-line keeps the tail for the next one', async () => {
+  expect(lines('{"a":1}\n{"b"')).toEqual({ done: ['{"a":1}'], rest: '{"b"' })
+})
+
+test('the band draws what compass streams, on every surface that has one', async ($, on) => {
+  // Beneath the mod stands what the engine would do: a session id, and a
+  // compass that writes one snapshot cut across two pieces, then exits.
+  on('session.start', async (_, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-1' }))
+  on('command.register', async (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', async () => ({ value: { isPlaced: true } as const }))
+  on('ui.render', async () => h('Box', {}) as RenderElement)
+  let streamed!: () => void
+  const isStreamed = new Promise<void>(resolve => (streamed = resolve))
+  on('process.spawn', async function* () {
+    const json = JSON.stringify(SNAP) + '\n'
+    yield { stream: 'stdout' as const, text: json.slice(0, 40) }
+    yield { stream: 'stdout' as const, text: json.slice(40) }
+    streamed()
+    return { value: { code: 0, signal: null } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await isStreamed
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({
+      plugin: 'compass-trail',
+      surface,
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: true, maxRows: 4, bodyColumns: 100, scroll: { offset: 0, bodyRows: 4 }, view: {} },
+    })
+    const found = await ui.find({ type: 'Text', text: /test red/ })
+    expect(found?.text).toContain('18✓ 2✗')
+    await ui.unmount()
+
+    const pane = await $.ui.mount({
+      plugin: 'compass-trail',
+      surface,
+      component: 'Pane',
+      requestId: 'compass-trail',
+      props: { title: 'Trail', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+      viewport: { columns: 40, rows: 24 },
+    })
+    expect((await pane.find({ type: 'Text', text: /^● fix/ }))?.text).toContain('refresh.py')
+    expect(await pane.find({ type: 'Text', text: /◌ Run the full suite/ })).toBeDefined()
+    await pane.unmount()
+  }
+})

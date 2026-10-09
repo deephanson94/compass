@@ -1,0 +1,147 @@
+// What the pane and the band say, worked out from a snapshot as plain rows:
+// no elements here, so a test reads it without mounting anything. Glyphs
+// follow the deck's (◉ prompt, ◆ leg, ● HEAD, ◈ lane, ◌ ghost); every row
+// also says it in words, so it reads in monochrome.
+
+import type { Snapshot, Sum } from '../types'
+
+export type Tone = 'prompt' | 'done' | 'head' | 'red' | 'lane' | 'ghost' | 'note'
+
+export type Row = { key: string; text: string; right: string; tone: Tone }
+
+const ms = (iso: string) => Date.parse(iso)
+
+/** "now", "4m", "2h", "3d": how long since `from`, at the snapshot's clock. */
+export function ago(from: string, now: string): string {
+  const s = Math.max(0, (ms(now) - ms(from)) / 1000)
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}
+
+/** "45s", "12m", "3h45m". */
+export function span(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const m = Math.floor(seconds / 60)
+  if (m < 60) return `${m}m`
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`
+}
+
+const pad = (s: string, n: number) => (s.length >= n ? s : s + ' '.repeat(n - s.length))
+
+/** The block: one row per class with more than one leg, the longest first. */
+export function block(snap: Snapshot): Row[] {
+  return Object.entries(snap.counts)
+    .filter(([, sum]) => sum.legs > 1)
+    .sort(([, a], [, b]) => b.seconds - a.seconds)
+    .map(([cls, sum]: [string, Sum]) => ({
+      key: `block-${cls}`,
+      text: `◆ ${pad(cls, 6)} ${sum.legs} legs${sum.red ? ` · ${sum.red} red` : ''}`,
+      right: span(sum.seconds),
+      tone: sum.red ? 'red' : 'note',
+    }))
+}
+
+/** The trail, oldest first: prompts, legs and lanes by time, then the plan's ghosts. */
+export function trail(snap: Snapshot): Row[] {
+  const items: { at: number; order: number; rows: Row[] }[] = []
+
+  snap.prompts.forEach((p, i) => {
+    const who = p.teammate ? `${p.teammate}: ` : p.relayed ? 'relayed: ' : ''
+    items.push({
+      at: ms(p.at),
+      order: 0,
+      rows: [{ key: `p${i}`, text: `◉ "${who}${p.text}"`, right: ago(p.at, snap.now), tone: 'prompt' }],
+    })
+  })
+
+  snap.legs.forEach((leg, i) => {
+    const run = [...(leg.waypoints ?? [])].reverse().find(w => w.kind === 'testRun' || w.kind === 'commit')
+    const isRed = (leg.waypoints ?? []).some(w => w.kind === 'testFail')
+    const badge = run?.short ? `${run.short} ` : ''
+    const rows: Row[] = [
+      {
+        key: `l${i}`,
+        text: `${leg.current ? '●' : '◆'} ${pad(leg.class, 6)} ${badge}${leg.label}`,
+        right: leg.current ? `← ${ago(leg.start, snap.now)}` : ago(leg.start, snap.now),
+        tone: leg.current ? 'head' : isRed ? 'red' : 'done',
+      },
+    ]
+    if (leg.current) {
+      for (const [j, w] of (leg.waypoints ?? []).entries()) {
+        if (w.kind !== 'testFail') continue
+        const loop = w.runs && w.runs > 1 ? ` · ${w.runs} legs` : ''
+        rows.push({ key: `l${i}w${j}`, text: `  ✗ ${w.text}${loop}`, right: '', tone: 'red' })
+      }
+    }
+    items.push({ at: ms(leg.start), order: 1, rows })
+  })
+
+  snap.branches.forEach((b, i) => {
+    const rows: Row[] = [
+      {
+        key: `b${i}`,
+        text: `├─◈ ${b.label}`,
+        right: b.done && b.end ? `✓ ${ago(b.end, snap.now)} ago` : `⋯ ${ago(b.start, snap.now)} out`,
+        tone: 'lane',
+      },
+    ]
+    if (b.done && b.report) rows.push({ key: `b${i}r`, text: `│   ${b.report}`, right: '', tone: 'note' })
+    items.push({ at: ms(b.start), order: 2, rows })
+  })
+
+  items.sort((a, b) => a.at - b.at || a.order - b.order)
+  const rows = items.flatMap(item => item.rows)
+
+  for (const task of snap.tasks) {
+    if (task.status === 'completed') continue
+    const now = task.status === 'in_progress' ? ' (now)' : ''
+    rows.push({ key: `t${task.id}`, text: `◌ ${task.subject}${now}`, right: '', tone: 'ghost' })
+  }
+  return rows
+}
+
+export type BandPart = { key: string; text: string; tone: 'red' | 'good' | 'note' }
+
+/**
+ * The line above the prompt: the latest test run (and whether code moved
+ * since), the latest ship, the agents still out. Empty when none has
+ * anything to say, and the band then draws nothing.
+ */
+export function band(snap: Snapshot): BandPart[] {
+  const parts: BandPart[] = []
+  const out = snap.outcome
+
+  if (out?.kind === 'testRun') {
+    const isRed = (out.short ?? out.text).includes('✗') || /fail/.test(out.text)
+    const edited = snap.legs.some(l => (l.class === 'build' || l.class === 'fix') && ms(l.start) > ms(out.at))
+    parts.push({
+      key: 'test',
+      text: `◆ test ${isRed ? 'red' : 'green'} ${out.short ?? out.text}${edited ? ' · edited since' : ''}`,
+      tone: isRed ? 'red' : 'good',
+    })
+  }
+  if (out?.kind === 'commit') {
+    parts.push({ key: 'ship', text: `✓ shipped ${ago(out.at, snap.now)} ago`, tone: 'good' })
+  }
+
+  const outLanes = snap.branches.filter(b => !b.done)
+  if (outLanes.length > 0) {
+    const oldest = outLanes.reduce((a, b) => (ms(a.start) <= ms(b.start) ? a : b))
+    parts.push({ key: 'lanes', text: `◈${outLanes.length} out · oldest ${ago(oldest.start, snap.now)}`, tone: 'note' })
+  }
+
+  const head = snap.legs.at(-1)
+  if (parts.length > 0 && head?.current) {
+    parts.unshift({ key: 'head', text: `● ${head.class} ${head.label}`.trimEnd(), tone: 'note' })
+  }
+  return parts
+}
+
+/** Takes complete lines off the front of `buffer`: the lines, and what is left. */
+export function lines(buffer: string): { done: string[]; rest: string } {
+  const cut = buffer.lastIndexOf('\n')
+  if (cut < 0) return { done: [], rest: buffer }
+  return { done: buffer.slice(0, cut).split('\n').filter(Boolean), rest: buffer.slice(cut + 1) }
+}
