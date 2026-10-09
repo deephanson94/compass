@@ -71,7 +71,16 @@ export const register: Register = on => {
 
   on('command.run', { command: 'trail' }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: TITLE })
-    return { text: opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}` }
+    // Which clients draw this session: a pane is only seen on one of these.
+    const surfaces = (await $.session.surfaces()).join(', ') || 'none'
+    const state = opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}.`
+    return { text: `${state} Drawing on: ${surfaces}.` }
+  })
+
+  on('session.attach', async ($, e, next) => {
+    const joined = await next(e)
+    $.ui.log(`compass-trail: a ${e.surface} client attached`)
+    return joined
   })
 
   on('command.run', { command: 'trail-band' }, async $ => {
