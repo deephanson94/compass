@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Snapshot } from '../types'
+import { digests, INSTRUCTION, parse } from './narrate'
 import { band, block, lines, text, trail } from './view'
 import type { BandPart, Row } from './view'
 
@@ -11,6 +12,39 @@ const TITLE = 'Trail'
 const snap = atom({ plugin: 'compass-trail', key: 'snap' } as const, null)
 const problem = atom({ plugin: 'compass-trail', key: 'problem' } as const, null)
 const isBandHidden = atom({ plugin: 'compass-trail', key: 'isBandHidden' } as const, false)
+const labels = atom({ plugin: 'compass-trail', key: 'labels' } as const, {})
+
+// One narration in flight at a time; the keys the last failed batch asked
+// about sit out the next one, so a broken call is not repeated every snapshot.
+let isNarrating = false
+let cooling = new Set<string>()
+
+/** Names the snapshot's closed, unnamed legs in one model call. */
+async function narrate($: EngineInterface, s: Snapshot): Promise<void> {
+  if (isNarrating) return
+  const skip = cooling
+  cooling = new Set()
+  const batch = digests(s, await read($, labels), skip)
+  if (batch.length === 0) return
+  isNarrating = true
+  try {
+    const r = await $.model.complete({
+      model: 'haiku',
+      prompt: INSTRUCTION + JSON.stringify(batch),
+      maxTokens: 2000,
+      timeoutMs: 60_000,
+    })
+    const named = r.isAnswered ? parse(r.text, batch) : {}
+    trace($, `narrate asked=${batch.length} named=${Object.keys(named).length}${r.isAnswered ? '' : ` reason=${r.reason}`}`)
+    if (Object.keys(named).length > 0) await update($, labels, was => ({ ...was, ...named }))
+    for (const d of batch) if (!(d.key in named)) cooling.add(d.key)
+  } catch (err) {
+    trace($, `narrate failed: ${String(err)}`)
+    for (const d of batch) cooling.add(d.key)
+  } finally {
+    isNarrating = false
+  }
+}
 
 // Diagnostics while the mod is young: what the engine and its clients asked
 // of it, written beside the mod so a session can read why nothing shows.
@@ -50,6 +84,7 @@ async function follow($: EngineInterface): Promise<void> {
         const next = JSON.parse(latest) as Snapshot
         await update($, snap, () => next)
         await update($, problem, () => null)
+        void narrate($, next)
       }
       if (sawOutput) return
       tried.push(`${bin}: exited without a snapshot`)
@@ -88,7 +123,7 @@ export const register: Register = on => {
     // does not attach): the command's own reply is the one place it shows.
     if (surfaces === 'none') {
       const s = await read($, snap)
-      return { text: s === null ? 'compass-trail: no trail read yet.' : '```\n' + text(s) + '\n```' }
+      return { text: s === null ? 'compass-trail: no trail read yet.' : '```\n' + text(s, await read($, labels)) + '\n```' }
     }
     const state = opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}.`
     return { text: `${state} Drawing on: ${surfaces}.` }
@@ -121,7 +156,7 @@ export const register: Register = on => {
     }
 
     const head = block(s)
-    const body = trail(s)
+    const body = trail(s, await read($, labels))
     const room = Math.max(3, (e.viewport?.rows ?? 24) - 4 - head.length - (head.length ? 1 : 0))
     const shown = body.slice(-room)
     const line = (row: Row) => (
@@ -149,7 +184,7 @@ export const register: Register = on => {
     trace($, `render AbovePrompt surface=${e.surface}`)
     const s = await read($, snap)
     if (s === null || e.props.hasSurvey || (await read($, isBandHidden))) return next(e)
-    const parts = band(s)
+    const parts = band(s, await read($, labels))
     if (parts.length === 0) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)

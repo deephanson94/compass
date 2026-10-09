@@ -17,6 +17,7 @@ export type Leg = {
   current?: boolean
   files?: string[]
   waypoints?: Waypoint[]
+  acts?: string[]
 }
 
 export type Branch = {
@@ -53,6 +54,7 @@ declare module 'claude-code' {
       snap: Snapshot | null
       problem: string | null
       isBandHidden: boolean
+      labels: Record<string, string>
     }
   }
 }

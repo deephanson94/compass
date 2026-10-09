@@ -3,7 +3,14 @@
 // follow the deck's (◉ prompt, ◆ leg, ● HEAD, ◈ lane, ◌ ghost); every row
 // also says it in words, so it reads in monochrome.
 
-import type { Snapshot, Sum } from '../types'
+import type { Leg, Snapshot, Sum } from '../types'
+import { legKey } from './narrate'
+
+/** Names the narrator gave closed legs, by legKey. */
+export type Labels = Readonly<Record<string, string>>
+
+/** A leg's label: the narrator's when it has one, else the heuristic's. */
+const labelOf = (leg: Leg, labels: Labels) => labels[legKey(leg)] ?? leg.label
 
 export type Tone = 'prompt' | 'done' | 'head' | 'red' | 'lane' | 'ghost' | 'note'
 
@@ -44,7 +51,7 @@ export function block(snap: Snapshot): Row[] {
 }
 
 /** The trail, oldest first: prompts, legs and lanes by time, then the plan's ghosts. */
-export function trail(snap: Snapshot): Row[] {
+export function trail(snap: Snapshot, labels: Labels = {}): Row[] {
   const items: { at: number; order: number; rows: Row[] }[] = []
 
   snap.prompts.forEach((p, i) => {
@@ -63,7 +70,7 @@ export function trail(snap: Snapshot): Row[] {
     const rows: Row[] = [
       {
         key: `l${i}`,
-        text: `${leg.current ? '●' : '◆'} ${pad(leg.class, 6)} ${badge}${leg.label}`,
+        text: `${leg.current ? '●' : '◆'} ${pad(leg.class, 6)} ${badge}${labelOf(leg, labels)}`,
         right: leg.current ? `← ${ago(leg.start, snap.now)}` : ago(leg.start, snap.now),
         tone: leg.current ? 'head' : isRed ? 'red' : 'done',
       },
@@ -109,7 +116,7 @@ export type BandPart = { key: string; text: string; tone: 'red' | 'good' | 'note
  * since), the latest ship, the agents still out. Empty when none has
  * anything to say, and the band then draws nothing.
  */
-export function band(snap: Snapshot): BandPart[] {
+export function band(snap: Snapshot, labels: Labels = {}): BandPart[] {
   const parts: BandPart[] = []
   const out = snap.outcome
 
@@ -138,7 +145,7 @@ export function band(snap: Snapshot): BandPart[] {
   if (head !== undefined) {
     const glyph = head.current ? '●' : '◆'
     const legs = `${snap.legs.length} leg${snap.legs.length === 1 ? '' : 's'}`
-    parts.unshift({ key: 'head', text: `${glyph} ${head.class} ${head.label}`.trimEnd() + ` · ${legs}`, tone: 'note' })
+    parts.unshift({ key: 'head', text: `${glyph} ${head.class} ${labelOf(head, labels)}`.trimEnd() + ` · ${legs}`, tone: 'note' })
   }
   return parts
 }
@@ -154,15 +161,15 @@ export function lines(buffer: string): { done: string[]; rest: string } {
  * The pane as plain text, for a session no surface draws: the block, a
  * blank line, the last `room` trail rows, each right column aligned.
  */
-export function text(snap: Snapshot, room = 40, width = 72): string {
+export function text(snap: Snapshot, labels: Labels = {}, room = 40, width = 72): string {
   const fmt = (r: Row) => {
     const gap = Math.max(1, width - r.text.length - r.right.length)
     return r.right ? r.text + ' '.repeat(gap) + r.right : r.text
   }
   const head = block(snap).map(fmt)
-  const body = trail(snap)
+  const body = trail(snap, labels)
   const shown = body.slice(-room)
   const cut = body.length > shown.length ? [`↑ ${body.length - shown.length} earlier`] : []
-  const strip = band(snap).map(p => p.text).join('  ·  ')
+  const strip = band(snap, labels).map(p => p.text).join('  ·  ')
   return [...head, ...(head.length ? [''] : []), ...cut, ...shown.map(fmt), ...(strip ? ['', strip] : [])].join('\n')
 }

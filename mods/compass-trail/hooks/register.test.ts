@@ -2,6 +2,7 @@ import type { RenderElement } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 import type { Snapshot } from '../types'
+import { digests, legKey, parse } from './narrate'
 import { band, lines, text, trail } from './view'
 
 const T0 = '2026-08-30T12:00:00Z'
@@ -46,10 +47,27 @@ test('the band says the run, that code moved since, and the lane out', async () 
 })
 
 test('as text, the trail ends on HEAD and the band line', async () => {
-  const out = text(SNAP, 40, 50).split('\n')
+  const out = text(SNAP, {}, 40, 50).split('\n')
   expect(out.at(-3)).toContain('◌ Run the full suite')
   expect(out.at(-1)).toContain('◆ test red 18✓ 2✗')
   expect(out.find(l => l.startsWith('● fix'))?.endsWith('← 15m')).toBe(true)
+})
+
+test('the narrator asks about closed unnamed legs, newest first, and keeps only fitting answers', async () => {
+  const asked = digests(SNAP, { [legKey(SNAP.legs[0]!)]: 'mapped auth' }, new Set())
+  expect(asked.map(d => d.class)).toEqual(['test'])
+  expect(asked[0]?.prompt).toBe('fix the auth tests')
+
+  const key = asked[0]!.key
+  const reply = '```json\n[{"key":"' + key + '","label":"ran the auth suite."},{"key":"other","label":"x"}]\n```'
+  expect(parse(reply, asked)).toEqual({ [key]: 'ran the auth suite' })
+  expect(parse('[{"key":"' + key + '","label":"test"}]', asked)).toEqual({})
+  expect(parse('no json here', asked)).toEqual({})
+})
+
+test('a narrated label replaces the heuristic one on a closed leg', async () => {
+  const rows = trail(SNAP, { [legKey(SNAP.legs[1]!)]: 'ran the auth suite' })
+  expect(rows[2]?.text).toBe('◆ test   18✓ 2✗ ran the auth suite')
 })
 
 test('a chunk cut mid-line keeps the tail for the next one', async () => {
@@ -66,6 +84,20 @@ test('the band draws what compass streams, on every surface that has one', async
   on('command.register', async (_, e) => ({ value: { command: e.name } }))
   on('ui.open', async () => ({ value: { isPlaced: true } as const }))
   on('ui.render', async () => h('Box', {}) as RenderElement)
+  let narrated!: () => void
+  const isNarrated = new Promise<void>(resolve => (narrated = resolve))
+  // The labels landing is the narration done: wait on the write itself.
+  on('state.set', async ($, e, next) => {
+    const set = await next(e)
+    if (JSON.stringify(e).includes('"labels"')) narrated()
+    return set
+  })
+  on('model.complete', async (_, e) => {
+    const asked = JSON.parse(String(e.prompt).slice(String(e.prompt).indexOf('['))) as { key: string }[]
+    const text = JSON.stringify(asked.map(d => ({ key: d.key, label: `named ${d.key.split('/')[1]}` })))
+    const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    return { value: { isAnswered: true as const, text, usage } }
+  })
   let streamed!: () => void
   const isStreamed = new Promise<void>(resolve => (streamed = resolve))
   on('process.spawn', async function* () {
@@ -77,6 +109,7 @@ test('the band draws what compass streams, on every surface that has one', async
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await isStreamed
+  await isNarrated
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({
@@ -99,6 +132,7 @@ test('the band draws what compass streams, on every surface that has one', async
     })
     expect((await pane.find({ type: 'Text', text: /^● fix/ }))?.text).toContain('refresh.py')
     expect(await pane.find({ type: 'Text', text: /◌ Run the full suite/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /scout +named scout/ })).toBeDefined()
     await pane.unmount()
   }
 })

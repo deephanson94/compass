@@ -17,3 +17,8 @@ claude plugin test mods/compass-trail
 
 - `/trail` opens the pane
 - `/trail-band` hides or shows the line above the prompt
+
+Closed legs are named by Haiku through the session's own model access, one
+batch of up to 20 legs per snapshot that has unnamed ones, each leg once
+(`hooks/narrate.ts`, the deck narrator's instruction). The evidence is the
+leg's `acts` from the snapshot: each tool call in one line.

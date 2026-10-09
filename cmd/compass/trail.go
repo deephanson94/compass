@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/deephanson94/compass/internal/journey"
@@ -49,6 +51,7 @@ func runTrail(args []string) int {
 	var t *transcript.Tailer
 	seg := journey.NewSegmenter()
 	outs := journey.NewOutcomes()
+	acts := &actLog{}
 	read := func() (bool, error) {
 		if t == nil {
 			if !resolve() {
@@ -63,11 +66,12 @@ func runTrail(args []string) int {
 		for _, ev := range evs {
 			seg.Observe(ev)
 			outs.Observe(ev)
+			acts.observe(ev)
 		}
 		return len(evs) > 0, nil
 	}
 	emit := func() error {
-		if err := writeSnapshot(out, *path, seg, outs, time.Now()); err != nil {
+		if err := writeSnapshot(out, *path, seg, outs, acts, time.Now()); err != nil {
 			return err
 		}
 		return out.Flush()
@@ -141,6 +145,11 @@ type snapLeg struct {
 	Current   bool           `json:"current,omitempty"`
 	Files     []string       `json:"files,omitempty"`
 	Waypoints []snapWaypoint `json:"waypoints,omitempty"`
+	// Acts are what the leg did, in words: a Bash call's description or
+	// command, a file it edited or read. The evidence a narrator names the
+	// leg from when files and waypoints say nothing — a leg that edits
+	// through a heredoc touches no file the vote table can see.
+	Acts []string `json:"acts,omitempty"`
 }
 
 type snapWaypoint struct {
@@ -196,7 +205,7 @@ func waypointKind(k journey.WaypointKind) string {
 	return "unknown"
 }
 
-func snapshot(path string, tr journey.Trail, out *journey.Outcomes, now time.Time) trailSnapshot {
+func snapshot(path string, tr journey.Trail, out *journey.Outcomes, acts *actLog, now time.Time) trailSnapshot {
 	s := trailSnapshot{
 		Transcript: path,
 		Now:        now,
@@ -210,7 +219,7 @@ func snapshot(path string, tr journey.Trail, out *journey.Outcomes, now time.Tim
 		s.Prompts = append(s.Prompts, snapPrompt{Text: p.Text, At: p.At, Relayed: p.Relayed, Teammate: p.Teammate})
 	}
 	for _, l := range tr.Legs {
-		leg := snapLeg{Class: l.Class.String(), Label: l.Label, Start: l.Start, End: l.End, Current: l.Current, Files: l.Files}
+		leg := snapLeg{Class: l.Class.String(), Label: l.Label, Start: l.Start, End: l.End, Current: l.Current, Files: l.Files, Acts: acts.within(l.Start, l.End)}
 		red := false
 		for _, w := range l.Waypoints {
 			leg.Waypoints = append(leg.Waypoints, snapWaypoint{Kind: waypointKind(w.Kind), Text: w.Text, Short: w.Short, At: w.At, Runs: w.Runs})
@@ -248,6 +257,134 @@ func snapshot(path string, tr journey.Trail, out *journey.Outcomes, now time.Tim
 	return s
 }
 
-func writeSnapshot(w io.Writer, path string, seg *journey.Segmenter, out *journey.Outcomes, now time.Time) error {
-	return json.NewEncoder(w).Encode(snapshot(path, seg.Trail(), out, now))
+func writeSnapshot(w io.Writer, path string, seg *journey.Segmenter, out *journey.Outcomes, acts *actLog, now time.Time) error {
+	return json.NewEncoder(w).Encode(snapshot(path, seg.Trail(), out, acts, now))
+}
+
+// actLog keeps the main thread's tool calls as one line each, in file order,
+// for the legs to claim by time.
+type actLog struct {
+	acts []act
+}
+
+type act struct {
+	at   time.Time
+	text string
+}
+
+// maxActs bounds the log: a day-long session makes thousands of calls, and
+// a leg claims only its own.
+const maxActs = 4000
+
+// maxLegActs is how many distinct acts one leg carries: enough to name it,
+// few enough to batch many legs into one narration.
+const maxLegActs = 8
+
+func (a *actLog) observe(ev transcript.Event) {
+	if ev.IsSidechain {
+		return
+	}
+	for _, use := range ev.ToolUses {
+		if text := actText(use); text != "" {
+			a.acts = append(a.acts, act{at: ev.Timestamp, text: text})
+		}
+	}
+	if len(a.acts) > maxActs {
+		a.acts = append([]act(nil), a.acts[len(a.acts)-maxActs:]...)
+	}
+}
+
+// within is the distinct acts in [start, end], oldest first.
+func (a *actLog) within(start, end time.Time) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, x := range a.acts {
+		if x.at.Before(start) || x.at.After(end) || seen[x.text] {
+			continue
+		}
+		seen[x.text] = true
+		out = append(out, x.text)
+		if len(out) == maxLegActs {
+			break
+		}
+	}
+	return out
+}
+
+// preamble is what a command line opens with before its work: variable
+// assignments and a change of directory, each ended by ; or &&.
+var preamble = regexp.MustCompile(`^\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)|cd\s+\S+)\s*(?:;|&&)\s*)+`)
+
+// commandCore is a command without its preamble: "M=/long/path; cat $M/x"
+// reads "cat $M/x", which says what the call was for.
+func commandCore(cmd string) string {
+	if core := preamble.ReplaceAllString(cmd, ""); strings.TrimSpace(core) != "" {
+		return core
+	}
+	return cmd
+}
+
+// pathLike is a file named in a command: a word with an extension of
+// letters, the way scripts name the files they write.
+var pathLike = regexp.MustCompile(`[\w./~-]+\.(?:go|ts|tsx|js|py|rs|java|rb|sh|json|ya?ml|toml|md|sql|css|html)\b`)
+
+// namedFiles is up to three distinct basenames a command names: a heredoc's
+// first line says nothing, the files it opens say what it changed.
+func namedFiles(cmd string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range pathLike.FindAllString(cmd, -1) {
+		base := filepath.Base(m)
+		if seen[base] {
+			continue
+		}
+		seen[base] = true
+		out = append(out, base)
+		if len(out) == 3 {
+			break
+		}
+	}
+	return out
+}
+
+// actText is one tool call in words. A Bash call's own description says
+// what it was for, so it wins over the command it ran.
+func actText(use transcript.ToolUse) string {
+	var in struct {
+		Command     string `json:"command"`
+		Description string `json:"description"`
+		FilePath    string `json:"file_path"`
+		Pattern     string `json:"pattern"`
+		Skill       string `json:"skill"`
+	}
+	_ = json.Unmarshal(use.Input, &in)
+	clip := func(s string) string {
+		s = strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+		if r := []rune(s); len(r) > 70 {
+			return string(r[:69]) + "…"
+		}
+		return s
+	}
+	switch use.Name {
+	case "Bash":
+		if in.Description != "" {
+			return clip(in.Description)
+		}
+		act := clip("$ " + commandCore(in.Command))
+		if names := namedFiles(in.Command); len(names) > 0 {
+			act += " [" + strings.Join(names, ", ") + "]"
+		}
+		return act
+	case "Edit", "MultiEdit", "Write", "NotebookEdit":
+		return "edit " + filepath.Base(in.FilePath)
+	case "Read":
+		return "read " + filepath.Base(in.FilePath)
+	case "Grep", "Glob":
+		return clip(strings.ToLower(use.Name) + " " + in.Pattern)
+	case "Skill":
+		return "skill " + in.Skill
+	case "Agent", "Task", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch":
+		return ""
+	}
+	return use.Name
 }
