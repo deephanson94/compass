@@ -68,6 +68,26 @@ function trace($: EngineInterface, what: string): void {
   void $.fs.write(`${$.plugin.root}/diag.log`, seen.slice(-200).join('\n') + '\n').catch(() => {})
 }
 
+// PROBE (temporary): does $.session.messages() shrink the moment a rewind
+// point is picked, or only when the next prompt is sent? An immediate trail
+// update after /rewind rests on the first. Each line says how many messages
+// the session holds and what the last one is; diag.log gets a line on every
+// slash command, and whenever the count changes.
+let probed = ''
+async function probe($: EngineInterface, why: string, always = false): Promise<void> {
+  try {
+    const ms = await $.session.messages()
+    const last = ms.at(-1)
+    const tools = last?.toolUses?.map(u => u.tool_use_id).join(',') ?? ''
+    const sum = `n=${ms.length} last=${last?.role ?? '-'}:${JSON.stringify((last?.text ?? '').slice(0, 40))}${tools ? ` tools=${tools}` : ''}`
+    if (!always && sum === probed) return
+    probed = sum
+    trace($, `probe ${why} ${sum}`)
+  } catch (err) {
+    trace($, `probe ${why} failed: ${String(err)}`)
+  }
+}
+
 /**
  * A row's colours under the deck's rules: the class hue on the glyph and
  * verb only, a prompt bold and uncoloured, a failing test's name in the
@@ -165,6 +185,12 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'trail', description: 'Show this session’s compass trail in a pane' })
     await $.command.register({ name: 'trail-band', description: 'Show or hide the compass line above the prompt' })
     void follow($, configured)
+    // PROBE: a double-Esc rewind runs no command; a slow watch catches it.
+    try {
+      $.clock.every(3000, () => void probe($, 'tick'))
+    } catch (err) {
+      trace($, `probe tick unavailable: ${String(err)}`)
+    }
     // A pane opened unasked waits on a narrow screen or a surface that seats
     // none; say which, once, so a missing pane is never a mystery.
     const opened = await $.ui.open({ id: PANE, title: TITLE })
@@ -190,6 +216,24 @@ export const register: Register = (on, options) => {
     }
     const state = opened.isPlaced ? 'Trail pane open.' : `Trail pane waits: ${opened.reason}.`
     return { text: `${state} Drawing on: ${surfaces}.` }
+  })
+
+  // PROBE: every slash command, before and after it runs; after /rewind,
+  // twice a second for a minute, so the log shows when the picked point
+  // reaches the session's messages.
+  on('command.run', async ($, e, next) => {
+    await probe($, `/${e.command} before`, true)
+    const ran = await next(e)
+    await probe($, `/${e.command} after`, true)
+    if (e.command === 'rewind') {
+      void (async () => {
+        for (let i = 0; i < 120; i++) {
+          await $.clock.sleep(500)
+          await probe($, `/rewind +${(i + 1) / 2}s`)
+        }
+      })()
+    }
+    return ran
   })
 
   on('config.set', async ($, e, next) => {
