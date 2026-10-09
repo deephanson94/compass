@@ -110,6 +110,7 @@ test('the band draws what compass streams, on every surface that has one', async
   on('session.surfaces', async () => ({ value: ['terminal'] as const }))
   on('fs.write', async () => ({ value: undefined }))
   on('env.get', async () => ({ value: undefined }))
+  on('config.list', async () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'enum', value: 'light', provider: { kind: 'user' }, isLocked: false }] as never }))
   on('process.run', async () => ({ value: { exitCode: 0, stdout: 'compass dev (trail 1)\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('command.register', async (_, e) => ({ value: { command: e.name } }))
   on('ui.open', async () => ({ value: { isPlaced: true } as const }))
@@ -148,8 +149,12 @@ test('the band draws what compass streams, on every surface that has one', async
       component: 'AbovePrompt',
       props: { hasSurvey: false, isWorking: true, maxRows: 4, bodyColumns: 100, scroll: { offset: 0, bodyRows: 4 }, view: {} },
     })
-    const found = await ui.find({ type: 'Text', text: /test red/ })
+    const found = await ui.find({ type: 'Text', text: / red 18✓/ })
     expect(found?.text).toContain('18✓ 2✗')
+    // The deck's palette, its light half under a light theme: teal on the
+    // verb, the alarm red on the result.
+    expect((await ui.find({ type: 'Text', text: /^◆ test$/ }))?.props.color).toBe('#0f766e')
+    expect(found?.props.color).toBe('#b91c1c')
     await ui.unmount()
 
     const pane = await $.ui.mount({
@@ -160,9 +165,14 @@ test('the band draws what compass streams, on every surface that has one', async
       props: { title: 'Trail', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
       viewport: { columns: 40, rows: 24 },
     })
-    expect((await pane.find({ type: 'Text', text: /^● fix/ }))?.text).toContain('refresh.py')
+    // HEAD's verb in fuchsia, its label uncoloured; a prompt bold and never coloured.
+    expect((await pane.find({ type: 'Text', text: /^● fix +$/ }))?.props.color).toBe('#a21caf')
+    expect((await pane.find({ type: 'Text', text: /refresh\.py/ }))?.props.color).toBeUndefined()
+    const asked = await pane.find({ type: 'Text', text: /fix the auth tests/ })
+    expect(asked?.props.color).toBeUndefined()
+    expect(asked?.props.bold).toBe(true)
     expect(await pane.find({ type: 'Text', text: /◌ Run the full suite/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /scout +named scout/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ ?named scout/ })).toBeDefined()
     await pane.unmount()
   }
 })
@@ -173,6 +183,7 @@ test('an older compass is never started: the pane says what to install', async (
   on('session.surfaces', async () => ({ value: ['terminal'] as const }))
   on('fs.write', async () => ({ value: undefined }))
   on('env.get', async () => ({ value: undefined }))
+  on('config.list', async () => ({ value: [] }))
   on('command.register', async (_, e) => ({ value: { command: e.name } }))
   on('ui.open', async () => ({ value: { isPlaced: true } as const }))
   on('ui.render', async () => h('Box', {}) as RenderElement)

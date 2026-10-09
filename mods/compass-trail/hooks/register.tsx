@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Snapshot } from '../types'
 import { candidates, judge } from './locate'
 import { digests, INSTRUCTION, parse } from './narrate'
+import { classColor, DIM, isLightTheme, pick, STUCK, WORKING } from './palette'
 import { band, block, lines, text, trail } from './view'
 import type { BandPart, Row } from './view'
 
@@ -14,6 +15,9 @@ const snap = atom({ plugin: 'compass-trail', key: 'snap' } as const, null)
 const problem = atom({ plugin: 'compass-trail', key: 'problem' } as const, null)
 const isBandHidden = atom({ plugin: 'compass-trail', key: 'isBandHidden' } as const, false)
 const labels = atom({ plugin: 'compass-trail', key: 'labels' } as const, {})
+// Which of the deck's two palettes to draw with: Claude Code's own theme
+// setting, read at start and followed when /config changes it.
+const isLight = atom({ plugin: 'compass-trail', key: 'isLight' } as const, false)
 
 // One narration in flight at a time; the keys the last failed batch asked
 // about sit out the next one, so a broken call is not repeated every snapshot.
@@ -50,13 +54,44 @@ async function narrate($: EngineInterface, s: Snapshot): Promise<void> {
 // Diagnostics while the mod is young: what the engine and its clients asked
 // of it, written beside the mod so a session can read why nothing shows.
 const seen: string[] = []
+// A surface's first draw of each component is worth a line; every redraw after
+// it would rewrite the file on each snapshot.
+const drawn = new Set<string>()
+function traceFirstDraw($: EngineInterface, what: string): void {
+  if (drawn.has(what)) return
+  drawn.add(what)
+  trace($, what)
+}
+
 function trace($: EngineInterface, what: string): void {
   seen.push(`${new Date().toISOString()} ${what}`)
   void $.fs.write(`${$.plugin.root}/diag.log`, seen.slice(-200).join('\n') + '\n').catch(() => {})
 }
 
-const rowColor = { prompt: 'claude', done: undefined, head: 'text', red: 'error', lane: 'suggestion', ghost: 'inactive', note: 'subtle' } as const
-const partColor = { red: 'error', good: 'success', note: 'subtle' } as const
+/**
+ * A row's colours under the deck's rules: the class hue on the glyph and
+ * verb only, a prompt bold and uncoloured, a failing test's name in the
+ * alarm red, the quiet rows in the neutral grey.
+ */
+function rowPaint(row: Row, light: boolean) {
+  const dim = pick(DIM, light)
+  const lead = row.lead ?? 0
+  const lit = row.tone === 'ghost' || row.tone === 'note' || row.tone === 'lane' ? dim : row.cls === undefined && row.tone === 'red' ? pick(STUCK, light) : undefined
+  return {
+    lead: row.text.slice(0, lead),
+    rest: row.text.slice(lead),
+    leadColor: classColor(row.cls, light),
+    restColor: lit,
+    isBold: row.tone === 'head' || row.tone === 'prompt',
+    dim,
+  }
+}
+
+function partPaint(part: BandPart, light: boolean) {
+  const lead = part.lead ?? 0
+  const tone = { red: pick(STUCK, light), good: pick(WORKING, light), note: pick(DIM, light) }[part.tone]
+  return { lead: part.text.slice(0, lead), rest: part.text.slice(lead), leadColor: classColor(part.cls, light) ?? tone, restColor: tone }
+}
 
 /**
  * The first candidate that answers `-version` with the trail protocol this
@@ -124,7 +159,9 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    trace($, `session.start surface=${e.surface} surfaces=${(await $.session.surfaces()).join(',') || 'none'}`)
+    const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
+    await update($, isLight, () => isLightTheme(theme))
+    trace($, `session.start theme=${String(theme)} surface=${e.surface} surfaces=${(await $.session.surfaces()).join(',') || 'none'}`)
     await $.command.register({ name: 'trail', description: 'Show this session’s compass trail in a pane' })
     await $.command.register({ name: 'trail-band', description: 'Show or hide the compass line above the prompt' })
     void follow($, configured)
@@ -155,6 +192,12 @@ export const register: Register = (on, options) => {
     return { text: `${state} Drawing on: ${surfaces}.` }
   })
 
+  on('config.set', async ($, e, next) => {
+    const set = await next(e)
+    if (e.key === 'theme') await update($, isLight, () => isLightTheme(e.value))
+    return set
+  })
+
   on('session.attach', async ($, e, next) => {
     const joined = await next(e)
     trace($, `session.attach surface=${e.surface} client=${e.clientId}`)
@@ -168,15 +211,17 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    trace($, `render Pane surface=${e.surface} placement=${e.props.placement} cols=${e.viewport?.columns}`)
+    traceFirstDraw($, `render Pane surface=${e.surface} placement=${e.props.placement}`)
     const { Box, Text } = $.ui.resolve(e)
     const s = await read($, snap)
     const why = await read($, problem)
+    const light = await read($, isLight)
+    const grey = pick(DIM, light)
 
     if (s === null) {
       return (
         <Box flexDirection="column">
-          <Text dimColor>{why ?? 'Reading the transcript…'}</Text>
+          <Text color={grey}>{why ?? 'Reading the transcript…'}</Text>
         </Box>
       )
     }
@@ -185,21 +230,31 @@ export const register: Register = (on, options) => {
     const body = trail(s, await read($, labels))
     const room = Math.max(3, (e.viewport?.rows ?? 24) - 4 - head.length - (head.length ? 1 : 0))
     const shown = body.slice(-room)
-    const line = (row: Row) => (
-      <Box key={row.key} flexDirection="row" justifyContent="space-between">
-        <Text wrap="truncate-end" color={rowColor[row.tone]} dimColor={row.tone === 'ghost' || row.tone === 'note'} bold={row.tone === 'head'}>
-          {row.text}
-        </Text>
-        <Text dimColor>{row.right ? ` ${row.right}` : ''}</Text>
-      </Box>
-    )
+    const line = (row: Row) => {
+      const p = rowPaint(row, light)
+      return (
+        <Box key={row.key} flexDirection="row" justifyContent="space-between">
+          <Box flexDirection="row" flexShrink={1}>
+            {p.lead !== '' && (
+              <Text color={p.leadColor} bold={p.isBold}>
+                {p.lead}
+              </Text>
+            )}
+            <Text wrap="truncate-end" color={p.restColor} bold={p.isBold}>
+              {p.rest}
+            </Text>
+          </Box>
+          <Text color={p.dim}>{row.right ? ` ${row.right}` : ''}</Text>
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="column">
         {head.map(line)}
-        {head.length > 0 && <Text dimColor>{' '}</Text>}
-        {body.length === 0 && <Text dimColor>No legs yet: the trail starts with the first tool call.</Text>}
-        {body.length > shown.length && <Text dimColor>{`↑ ${body.length - shown.length} earlier`}</Text>}
+        {head.length > 0 && <Text color={grey}>{' '}</Text>}
+        {body.length === 0 && <Text color={grey}>No legs yet: the trail starts with the first tool call.</Text>}
+        {body.length > shown.length && <Text color={grey}>{`↑ ${body.length - shown.length} earlier`}</Text>}
         {shown.map(line)}
         {why !== null && <Text color="warning">{why}</Text>}
       </Box>
@@ -207,20 +262,28 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    trace($, `render AbovePrompt surface=${e.surface}`)
+    traceFirstDraw($, `render AbovePrompt surface=${e.surface}`)
     const s = await read($, snap)
     if (s === null || e.props.hasSurvey || (await read($, isBandHidden))) return next(e)
     const parts = band(s, await read($, labels))
     if (parts.length === 0) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
+    const light = await read($, isLight)
     return (
       <Box flexDirection="row" flexWrap="wrap">
-        {parts.map((part: BandPart, i) => (
-          <Text key={part.key} wrap="truncate-end" color={partColor[part.tone]} dimColor={part.tone === 'note'}>
-            {(i > 0 ? '  ·  ' : '') + part.text}
-          </Text>
-        ))}
+        {parts.map((part: BandPart, i) => {
+          const p = partPaint(part, light)
+          return (
+            <Box key={part.key} flexDirection="row">
+              {i > 0 && <Text color={pick(DIM, light)}>{'  ·  '}</Text>}
+              {p.lead !== '' && <Text color={p.leadColor}>{p.lead}</Text>}
+              <Text wrap="truncate-end" color={p.restColor}>
+                {p.rest}
+              </Text>
+            </Box>
+          )
+        })}
       </Box>
     )
   })

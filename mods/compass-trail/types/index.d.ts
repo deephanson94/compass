@@ -57,6 +57,7 @@ declare module 'claude-code' {
       problem: string | null
       isBandHidden: boolean
       labels: Record<string, string>
+      isLight: boolean
     }
   }
 }
