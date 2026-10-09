@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Snapshot } from '../types'
+import { candidates, judge } from './locate'
 import { digests, INSTRUCTION, parse } from './narrate'
 import { band, block, lines, text, trail } from './view'
 import type { BandPart, Row } from './view'
@@ -58,50 +59,75 @@ const rowColor = { prompt: 'claude', done: undefined, head: 'text', red: 'error'
 const partColor = { red: 'error', good: 'success', note: 'subtle' } as const
 
 /**
- * Follows this session's transcript through `compass trail -follow`: the
- * binary the mod ships first, then one on PATH. The loop is the child's life;
- * a reload of the module kills it and session.start starts the next.
+ * The first candidate that answers `-version` with the trail protocol this
+ * mod reads, or why none did: a missing file and a too-old compass are told
+ * apart, so the message says which to fix.
  */
-async function follow($: EngineInterface): Promise<void> {
-  const session = await $.session.id()
-  const tried: string[] = []
-
-  for (const bin of [`${$.plugin.root}/bin/compass`, 'compass']) {
-    let buffer = ''
-    let sawOutput = false
+async function locate($: EngineInterface, configured: string | undefined): Promise<{ bin: string } | { why: string }> {
+  const home = await $.env.get('HOME')
+  const fromEnv = await $.env.get('COMPASS_BIN')
+  const tooOld: string[] = []
+  for (const bin of candidates($.plugin.root, home, [configured, fromEnv])) {
     try {
-      const child = $.process.spawn({ argv: [bin, 'trail', '-session', session, '-follow'] })
-      for await (const chunk of child) {
-        if (chunk.stream === 'stderr') {
-          await update($, problem, () => chunk.text.trim())
-          continue
-        }
-        sawOutput = true
-        const { done, rest } = lines(buffer + chunk.text)
-        buffer = rest
-        const latest = done.at(-1)
-        if (latest === undefined) continue
-        const next = JSON.parse(latest) as Snapshot
-        await update($, snap, () => next)
-        await update($, problem, () => null)
-        void narrate($, next)
-      }
-      if (sawOutput) return
-      tried.push(`${bin}: exited without a snapshot`)
-    } catch (err) {
-      tried.push(`${bin}: ${String(err)}`)
+      const r = await $.process.run([bin, '-version'], { timeoutMs: 5000 })
+      const v = judge(r.exitCode, r.stdout)
+      trace($, `locate ${bin}: ${v.ok ? `ok ${v.version}` : v.why}`)
+      if (v.ok) return { bin }
+      tooOld.push(`${bin}: ${v.why}`)
+    } catch {
+      // Not there, or not runnable: the next place, without a word.
     }
   }
-  await update($, problem, () => `compass did not start (${tried.join('; ')})`)
+  if (tooOld.length > 0) return { why: `${tooOld.join('; ')}. Install a newer compass` }
+  return {
+    why: 'no compass found. Set the mod\'s compass path, or COMPASS_BIN, to the binary, or put it on PATH (e.g. /usr/local/bin)',
+  }
 }
 
-export const register: Register = on => {
+/**
+ * Follows this session's transcript through `compass trail -follow`. The
+ * loop is the child's life; a reload of the module kills it and
+ * session.start starts the next.
+ */
+async function follow($: EngineInterface, configured: string | undefined): Promise<void> {
+  const found = await locate($, configured)
+  if ('why' in found) {
+    await update($, problem, () => `compass-trail: ${found.why}`)
+    return
+  }
+  const session = await $.session.id()
+  let buffer = ''
+  try {
+    const child = $.process.spawn({ argv: [found.bin, 'trail', '-session', session, '-follow'] })
+    for await (const chunk of child) {
+      if (chunk.stream === 'stderr') {
+        await update($, problem, () => chunk.text.trim())
+        continue
+      }
+      const { done, rest } = lines(buffer + chunk.text)
+      buffer = rest
+      const latest = done.at(-1)
+      if (latest === undefined) continue
+      const next = JSON.parse(latest) as Snapshot
+      await update($, snap, () => next)
+      await update($, problem, () => null)
+      void narrate($, next)
+    }
+    await update($, problem, () => `compass-trail: ${found.bin} trail stopped`)
+  } catch (err) {
+    await update($, problem, () => `compass-trail: ${found.bin} trail failed: ${String(err)}`)
+  }
+}
+
+export const register: Register = (on, options) => {
+  const configured = typeof options.compassPath === 'string' ? options.compassPath : undefined
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     trace($, `session.start surface=${e.surface} surfaces=${(await $.session.surfaces()).join(',') || 'none'}`)
     await $.command.register({ name: 'trail', description: 'Show this session’s compass trail in a pane' })
     await $.command.register({ name: 'trail-band', description: 'Show or hide the compass line above the prompt' })
-    void follow($)
+    void follow($, configured)
     // A pane opened unasked waits on a narrow screen or a surface that seats
     // none; say which, once, so a missing pane is never a mystery.
     const opened = await $.ui.open({ id: PANE, title: TITLE })

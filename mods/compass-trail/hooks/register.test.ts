@@ -2,6 +2,7 @@ import type { RenderElement } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 import type { Snapshot } from '../types'
+import { candidates, judge } from './locate'
 import { digests, legKey, parse } from './narrate'
 import { band, lines, text, trail } from './view'
 
@@ -70,6 +71,27 @@ test('a narrated label replaces the heuristic one on a closed leg', async () => 
   expect(rows[2]?.text).toBe('◆ test   18✓ 2✗ ran the auth suite')
 })
 
+test('the places to look: what the person named first, then the bundle, PATH and the install folders', async () => {
+  expect(candidates('/mod', '/home/me', ['/opt/tools/compass', undefined])).toEqual([
+    '/opt/tools/compass',
+    '/mod/bin/compass',
+    'compass',
+    '/home/me/.local/bin/compass',
+    '/home/me/go/bin/compass',
+    '/usr/local/bin/compass',
+    '/opt/homebrew/bin/compass',
+  ])
+  expect(candidates('/mod', undefined, ['', '  '])[0]).toBe('/mod/bin/compass')
+})
+
+test('a binary is used only when -version names the trail protocol this mod reads', async () => {
+  expect(judge(0, 'compass v0.5.0 (trail 1)\n')).toEqual({ ok: true, version: 'v0.5.0' })
+  expect(judge(0, 'compass v0.3.0\n')).toEqual({ ok: false, why: 'compass v0.3.0 is older than the trail subcommand' })
+  expect(judge(0, 'compass v0.9.0 (trail 2)').ok).toBe(false)
+  expect(judge(2, '').ok).toBe(false)
+  expect(judge(0, 'go version go1.24').ok).toBe(false)
+})
+
 test('a chunk cut mid-line keeps the tail for the next one', async () => {
   expect(lines('{"a":1}\n{"b"')).toEqual({ done: ['{"a":1}'], rest: '{"b"' })
 })
@@ -81,6 +103,8 @@ test('the band draws what compass streams, on every surface that has one', async
   on('session.id', async () => ({ value: 'sess-1' }))
   on('session.surfaces', async () => ({ value: ['terminal'] as const }))
   on('fs.write', async () => ({ value: undefined }))
+  on('env.get', async () => ({ value: undefined }))
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: 'compass dev (trail 1)\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('command.register', async (_, e) => ({ value: { command: e.name } }))
   on('ui.open', async () => ({ value: { isPlaced: true } as const }))
   on('ui.render', async () => h('Box', {}) as RenderElement)
@@ -135,4 +159,53 @@ test('the band draws what compass streams, on every surface that has one', async
     expect(await pane.find({ type: 'Text', text: /scout +named scout/ })).toBeDefined()
     await pane.unmount()
   }
+})
+
+test('an older compass is never started: the pane says what to install', async ($, on) => {
+  on('session.start', async (_, e) => ({ cwd: e.cwd }))
+  on('session.id', async () => ({ value: 'sess-1' }))
+  on('session.surfaces', async () => ({ value: ['terminal'] as const }))
+  on('fs.write', async () => ({ value: undefined }))
+  on('env.get', async () => ({ value: undefined }))
+  on('command.register', async (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', async () => ({ value: { isPlaced: true } as const }))
+  on('ui.render', async () => h('Box', {}) as RenderElement)
+  // Only PATH's compass exists, and it predates `trail`.
+  on('process.run', async (_, e) => {
+    const isOld = e.argv[0] === 'compass'
+    return {
+      value: {
+        exitCode: isOld ? 0 : 127,
+        stdout: isOld ? 'compass v0.3.0\n' : '',
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+  let spawned = false
+  on('process.spawn', async function* () {
+    spawned = true
+    return { value: { code: 0, signal: null } }
+  })
+  let told!: () => void
+  const isTold = new Promise<void>(resolve => (told = resolve))
+  on('state.set', async ($, e, next) => {
+    const set = await next(e)
+    if (JSON.stringify(e).includes('older than the trail subcommand')) told()
+    return set
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await isTold
+
+  expect(spawned).toBe(false)
+  const pane = await $.ui.mount({
+    plugin: 'compass-trail',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'compass-trail',
+    props: { title: 'Trail', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+    viewport: { columns: 60, rows: 24 },
+  })
+  expect((await pane.find({ type: 'Text', text: /older than the trail subcommand/ }))?.text).toContain('Install a newer compass')
 })

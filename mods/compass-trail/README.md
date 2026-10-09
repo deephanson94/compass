@@ -6,8 +6,30 @@ stand. No board and no fleet: a mod sees only its own session.
 
 The journey is not reimplemented here. The mod runs
 `compass trail -session <id> -follow` (see `cmd/compass/trail.go`) and draws
-the NDJSON snapshots it streams. It looks for the binary at `bin/compass`
-inside the mod first, then `compass` on PATH.
+the NDJSON snapshots it streams.
+
+## Where it finds compass
+
+It asks each of these `compass -version` and takes the first whose answer
+ends `(trail 1)`, the snapshot shape this mod reads:
+
+1. the mod's **compass binary** setting (`/config`, or `pluginConfigs` in
+   settings.json): an absolute path, for a compass kept anywhere
+2. `COMPASS_BIN`, from the environment Claude Code starts in
+3. `bin/compass` inside the mod
+4. `compass` on PATH
+5. `~/.local/bin/compass`, `~/go/bin/compass`, `/usr/local/bin/compass`,
+   `/opt/homebrew/bin/compass`: where the README's installs put it, which an
+   app started from the Dock often has no PATH to
+
+An older compass, one that predates `trail`, is never started; the pane says
+which binary it found and to install a newer one.
+
+On a shared server, one install serves everyone:
+
+```sh
+sudo install compass /usr/local/bin/compass
+```
 
 ```sh
 go build -o mods/compass-trail/bin/compass ./cmd/compass

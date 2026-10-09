@@ -1,6 +1,14 @@
 {
   "name": "compass-trail",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "This session's compass trail in a pane, and how its tests, ships and agents stand above the prompt",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "compassPath": {
+      "type": "string",
+      "title": "compass binary",
+      "description": "Absolute path to a compass binary that is not on PATH. Empty: the mod's own bin/compass, then COMPASS_BIN, PATH and the usual install folders.",
+      "default": ""
+    }
+  }
 }

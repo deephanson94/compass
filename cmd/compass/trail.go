@@ -17,6 +17,11 @@ import (
 	"github.com/deephanson94/compass/internal/transcript"
 )
 
+// trailProtocol numbers the snapshot's shape for readers outside Go. It
+// goes up when a field a reader relies on changes meaning or goes away;
+// an added field leaves it alone. `compass -version` prints it.
+const trailProtocol = 1
+
 // runTrail is `compass trail`: one session's journey as JSON, for a reader
 // that draws it somewhere other than the deck (a Claude Code mod, a script).
 // Without -follow it prints one snapshot and exits; with it, a snapshot per

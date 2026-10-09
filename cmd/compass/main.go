@@ -38,6 +38,15 @@ func main() {
 	if sub == "trail" {
 		os.Exit(runTrail(args))
 	}
+	// A word compass does not know is a mistake, not a request for the
+	// deck: a reader probing for a subcommand (a mod asking for `trail`)
+	// must get an error back, never a full-screen deck with no terminal.
+	switch sub {
+	case "", "status", "panes", "help":
+	default:
+		fmt.Fprintf(os.Stderr, "compass: unknown command %q (try compass help)\n", sub)
+		os.Exit(2)
+	}
 
 	cfg := loadConfig()
 	rootDefault := defaultRoot()
@@ -71,7 +80,10 @@ func main() {
 	}
 	// -version answers and stops: it reads nothing and watches nothing.
 	if *showVersion {
-		fmt.Printf("compass %s\n", version)
+		// The trail protocol rides on the version line: -version is the one
+		// question every compass answers without starting anything, so a
+		// mod asks it before it ever runs `trail`.
+		fmt.Printf("compass %s (trail %d)\n", version, trailProtocol)
 		os.Exit(0)
 	}
 	window, err := time.ParseDuration(*liveWithin)
