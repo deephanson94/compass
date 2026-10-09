@@ -57,6 +57,12 @@ type Branch struct {
 	// reply closes this lane by id and never by label (#395). "" for a
 	// subagent that is not a teammate.
 	Teammate string
+
+	// AgentID is the background agent's id, as its launch result named it
+	// ("agentId: …"): what its hand-back comes from, and so what closes
+	// this lane when its report arrives as an agent-message. "" for an
+	// agent run in the foreground.
+	AgentID string
 }
 
 // Task is one entry of the plan Claude keeps for itself, read from the
@@ -193,6 +199,13 @@ func (s *Segmenter) Observe(ev transcript.Event) {
 		if n, ok := transcript.ParseTaskNotification(ev.Text); ok {
 			s.observeNotification(n, ev.Timestamp)
 		}
+		// A subagent's hand-back is its lane's finding, from either line it
+		// reaches the transcript on, and never a prompt: nobody asked
+		// anything, and a relayed turn would otherwise open a chapter.
+		if from, report, ok := ev.HandBack(); ok {
+			s.observeHandBack(from, report, ev.Timestamp)
+			return
+		}
 	}
 
 	// A compaction is machinery, not a prompt — it marks no ◉ and closes no
@@ -322,7 +335,11 @@ func (s *Segmenter) observeResult(res transcript.ToolResult, at time.Time) {
 		// result put "Spawned successfully. (This tool result is internal
 		// metadata…" on the trail as the agent's finding, and drew the lane
 		// merged while the agent was minutes from done.
-		if !launchAck(res.Text) {
+		if launchAck(res.Text) {
+			if m := launchedAgent.FindStringSubmatch(res.Text); m != nil {
+				b.AgentID = m[1]
+			}
+		} else {
 			b.Done = true
 			b.End = at
 			if line := firstNonEmptyLine(res.Text); line != "" {
@@ -351,13 +368,23 @@ func (s *Segmenter) observeNotification(n transcript.TaskNotification, at time.T
 		return
 	}
 	b := &s.branches[i]
+	if b.AgentID == "" {
+		b.AgentID = n.TaskID
+	}
+	if !b.Done {
+		b.End = at
+	}
 	b.Done = true
-	b.End = at
 	// The agent's own last words are the report; the harness's one-line
-	// summary is the fallback for an agent that said nothing.
-	if line := firstNonEmptyLine(n.Result); line != "" {
+	// summary is the fallback for an agent that said nothing. A result that
+	// only points at the hand-back is neither: the hand-back has the words.
+	result := n.Result
+	if strings.HasPrefix(strings.TrimSpace(result), reportPointer) {
+		result = ""
+	}
+	if line := firstNonEmptyLine(result); line != "" {
 		b.Report = clip(line, waypointText)
-	} else if line := firstNonEmptyLine(n.Summary); line != "" {
+	} else if line := firstNonEmptyLine(n.Summary); line != "" && b.Report == "" {
 		b.Report = clip(line, waypointText)
 	}
 }
@@ -523,7 +550,37 @@ func (s *Segmenter) updateTask(use transcript.ToolUse) {
 const localCommandCaveat = "<local-command-caveat>"
 
 func launchAck(text string) bool {
-	return strings.HasPrefix(strings.TrimSpace(text), "Spawned successfully")
+	t := strings.TrimSpace(text)
+	return strings.HasPrefix(t, "Spawned successfully") || strings.HasPrefix(t, "Async agent launched successfully")
+}
+
+// launchedAgent is the id a launch result names, the one the agent's
+// hand-back comes from.
+var launchedAgent = regexp.MustCompile(`agentId:\s*([A-Za-z0-9_-]+)`)
+
+// reportPointer opens a notification's result that only says where the
+// report went: the hand-back carries it, and the lane already has it.
+const reportPointer = "This agent's report was delivered to you as a message"
+
+// observeHandBack lands a subagent's final report on its lane, found by the
+// id its launch result named; a hand-back from an agent this trail never
+// forked closes nothing.
+func (s *Segmenter) observeHandBack(from, report string, at time.Time) {
+	if from == "" {
+		return
+	}
+	for i := len(s.branches) - 1; i >= 0; i-- {
+		b := &s.branches[i]
+		if b.AgentID != from {
+			continue
+		}
+		b.Done = true
+		b.End = at
+		if line := firstNonEmptyLine(report); line != "" {
+			b.Report = clip(line, waypointText)
+		}
+		return
+	}
 }
 
 // promptText is the one line of a prompt the trail quotes. A slash command is
