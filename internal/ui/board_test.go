@@ -790,7 +790,7 @@ func TestSeenTimesSurviveARestart(t *testing.T) {
 	}
 
 	// An ancient entry is pruned when the next save happens.
-	m.seen["k-old"] = time.Now().Add(-seenKeep - time.Hour)
+	m.seen["k-old"] = m.now.Add(-seenKeep - time.Hour)
 	m.markSeen(sessionKey("s-webapp"))
 	pruned := boardModel(152, 30)
 	pruned.LoadSeen(path)

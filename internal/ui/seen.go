@@ -69,7 +69,10 @@ func (m *Model) saveSeen() {
 	if m.seenFile == "" {
 		return
 	}
-	cutoff := time.Now().Add(-seenKeep)
+	// The deck's clock, the one markSeen stamps with: against the wall
+	// clock a deck whose clock is not now (a replay, a fixture) pruned the
+	// very look it had just recorded.
+	cutoff := m.now.Add(-seenKeep)
 	for key, at := range m.seen {
 		if at.Before(cutoff) {
 			delete(m.seen, key)
