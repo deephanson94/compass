@@ -117,12 +117,68 @@ var shipCommands = []string{
 	"gh release",
 }
 
-// readOnlyCommands are matched on the command's first word only — `find` is
-// scouting, but `xargs find`-style pipelines are not worth guessing about.
+// readOnlyCommands are the verbs that only look: a command line is scouting
+// when every stage of it (split on |, &&, || and ;) opens with one of these
+// and nothing writes a file. Anything else is work, which is the safe side
+// to err on: a build mistaken for a look hides work, a look mistaken for a
+// build only names it too eagerly.
 var readOnlyCommands = map[string]bool{
 	"ls": true, "cat": true, "head": true, "tail": true, "grep": true,
 	"rg": true, "find": true, "fd": true, "wc": true, "tree": true,
 	"stat": true, "file": true, "which": true,
+	// Asking the machine, not changing it: the environment, the process
+	// table, where we are, what a file holds.
+	"env": true, "printenv": true, "pwd": true, "echo": true, "jq": true,
+	"less": true, "more": true, "diff": true, "cmp": true, "du": true,
+	"df": true, "ps": true, "uname": true, "date": true, "whoami": true,
+	"id": true, "hostname": true, "sort": true, "uniq": true, "cut": true,
+	"tr": true, "awk": true, "sed": true, "xxd": true, "od": true,
+	"basename": true, "dirname": true, "realpath": true, "readlink": true,
+	"type": true, "command": true, "true": true,
+}
+
+// readOnlySub are the tools whose first word is not enough: `git status`
+// looks, `git checkout` does not.
+var readOnlySub = map[string]map[string]bool{
+	"git": {"status": true, "log": true, "diff": true, "show": true, "blame": true,
+		"branch": true, "remote": true, "rev-parse": true, "ls-files": true,
+		"grep": true, "shortlog": true, "describe": true, "reflog": true},
+	"go": {"list": true, "env": true, "version": true, "doc": true},
+}
+
+// shellStages splits a command line on its separators: |, ||, && and ;.
+var shellStages = regexp.MustCompile(`\|\||&&|\||;`)
+
+// looksOnly reports whether every stage of a command line only looks.
+func looksOnly(line string) bool {
+	for _, stage := range shellStages.Split(line, -1) {
+		fields := strings.Fields(stage)
+		if len(fields) == 0 {
+			continue
+		}
+		verb := strings.ToLower(fields[0])
+		if readOnlyCommands[verb] {
+			continue
+		}
+		if subs, ok := readOnlySub[verb]; ok && len(fields) > 1 && subs[strings.ToLower(fields[1])] {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// preamble is what a command line opens with before its work: variable
+// assignments and a change of directory, each ended by ; or &&.
+var preamble = regexp.MustCompile(`^\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)|cd\s+\S+)\s*(?:;|&&)\s*)+`)
+
+// CommandCore is a command without its preamble: "M=/long/path; cat $M/x"
+// reads "cat $M/x", which is what the call was for.
+func CommandCore(cmd string) string {
+	if core := preamble.ReplaceAllString(cmd, ""); strings.TrimSpace(core) != "" {
+		return core
+	}
+	return cmd
 }
 
 // vote is one tool_use's opinion, carrying the crumbs a leg needs for its
@@ -204,7 +260,7 @@ func voteFor(use transcript.ToolUse) (vote, bool) {
 // classifyCommand reads a shell command the way a glance would: is it running
 // the tests, is it shipping, is it just looking around, or is it work?
 func classifyCommand(cmd string) vote {
-	line := firstLine(cmd)
+	line := firstLine(CommandCore(cmd))
 	lower := strings.ToLower(line)
 
 	for _, pattern := range testRunners {
@@ -225,7 +281,7 @@ func classifyCommand(cmd string) vote {
 		}
 		return vote{class: Build, file: file}
 	}
-	if readOnlyCommands[firstWord(lower)] {
+	if looksOnly(line) {
 		return vote{class: Scout}
 	}
 	return vote{class: Build}

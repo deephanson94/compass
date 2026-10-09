@@ -218,10 +218,11 @@ func TestT19ClassifyBashShipPatterns(t *testing.T) {
 		bashCase("gh pr merge 42 --squash", journey.Ship),
 		bashCase("gh release create v1.2.0 --notes x", journey.Ship),
 
-		// git/gh verbs outside the ship list fall through to "Bash otherwise".
-		bashCase("git status --short", journey.Build),
-		bashCase("git diff --stat", journey.Build),
-		bashCase("git log --oneline -20", journey.Build),
+		// git's looking verbs scout; gh verbs outside the ship list fall
+		// through to "Bash otherwise".
+		bashCase("git status --short", journey.Scout),
+		bashCase("git diff --stat", journey.Scout),
+		bashCase("git log --oneline -20", journey.Scout),
 		bashCase("gh issue list --limit 5", journey.Build),
 		bashCase("gh repo view", journey.Build),
 	})
@@ -372,6 +373,32 @@ func TestAShellWriteIsWork(t *testing.T) {
 		tr := segment(prompt(0, "go"), bash(time.Minute, "b1", cmd))
 		if len(tr.Legs) != 1 || tr.Legs[0].Class != want.class {
 			t.Errorf("%q opens %+v, want one %s leg", cmd, tr.Legs, want.class)
+		}
+	}
+}
+
+// A command that only asks — the environment, git's state, a pipeline of
+// readers — is scouting, whatever its first word was before: `env | grep
+// TASK` opened a build leg on the Mac run because env was not on the list.
+func TestALookIsScoutingWhateverItsVerb(t *testing.T) {
+	for cmd, want := range map[string]journey.Class{
+		"env | grep -i task":                      journey.Scout,
+		"printenv HOME":                           journey.Scout,
+		"git status --short":                      journey.Scout,
+		"git log --oneline -5 && git diff --stat": journey.Scout,
+		"cd /repo && git status":                  journey.Scout,
+		"M=/x/y; cat $M/diag.log":                 journey.Scout,
+		"jq .permissions ~/.claude/settings.json": journey.Scout,
+		"go list ./...":                           journey.Scout,
+		"git checkout -b feature":                 journey.Build,
+		"cd /repo && npm install":                 journey.Build,
+		"cat a.txt | python3 transform.py":        journey.Build,
+		"env > snapshot.env":                      journey.Build,
+		"git log -1 && git commit -am wip":        journey.Ship,
+	} {
+		tr := segment(prompt(0, "go"), bash(time.Minute, "b1", cmd))
+		if len(tr.Legs) != 1 || tr.Legs[0].Class != want {
+			t.Errorf("%q opens %+v, want one %s leg", cmd, tr.Legs, want)
 		}
 	}
 }

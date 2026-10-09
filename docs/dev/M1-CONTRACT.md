@@ -48,12 +48,17 @@ tool_uses votes once per tool_use):
 | `Edit`, `Write`, `NotebookEdit` otherwise | Build |
 | `Bash`, command matches test runners (`pytest`, `go test`, `jest`, `vitest`, `cargo test`, `npm test`, `yarn test`, `make test`, `rspec`, `phpunit`, `mvn test`, `gradle test`, `tox`, `unittest`) | Test |
 | `Bash`, command matches `git commit`, `git push`, `git tag`, `gh pr`, `gh release` | Ship |
-| `Bash`, first word in `ls cat head tail grep rg find fd wc tree stat file which` | Scout |
+| `Bash` that writes a file (`>`/`>>` to a path, `tee`, `sed -i`) | Docs for a doc file, else Build |
+| `Bash`, every stage (split on `\|`, `\|\|`, `&&`, `;`) opens with a read-only verb: `ls cat head tail grep rg find fd wc tree stat file which env printenv pwd echo jq less more diff cmp du df ps uname date whoami id hostname sort uniq cut tr awk sed xxd od basename dirname realpath readlink type command true`, or `git status/log/diff/show/blame/branch/remote/rev-parse/ls-files/grep/shortlog/describe/reflog`, or `go list/env/version/doc` | Scout |
 | `Bash` otherwise | Build |
 | any other tool | no vote |
 
-Command matching is on the first line of `input.command`, substring for the
-multi-word patterns, first-word for the read-only list.
+Command matching is on the first line of `input.command` after its preamble
+(leading `VAR=value;` assignments and `cd dir &&`), substring for the
+multi-word patterns, first-word per stage for the read-only verbs. The
+read-only list grew after the mod's first Mac run, where `env | grep …`
+opened a build leg; erring toward Build stays the default for anything
+unlisted.
 
 ### Trail model
 
