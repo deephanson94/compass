@@ -1,6 +1,6 @@
 {
   "name": "compass-trail",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "This session's compass trail in a pane, and how its tests, ships and agents stand above the prompt",
   "types": "./types/index.d.ts"
 }
