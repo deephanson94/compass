@@ -1,9 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Snapshot } from '../types'
+import type { Cut, Snapshot } from '../types'
 import { candidates, judge } from './locate'
 import { digests, INSTRUCTION, parse } from './narrate'
+import { rewindBetween, sig } from './rewind'
+import type { Sig } from './rewind'
 import { classColor, DIM, isLightTheme, pick, STUCK, WORKING } from './palette'
 import { band, block, lines, text, trail } from './view'
 import type { BandPart, Row } from './view'
@@ -18,6 +20,33 @@ const labels = atom({ plugin: 'compass-trail', key: 'labels' } as const, {})
 // Which of the deck's two palettes to draw with: Claude Code's own theme
 // setting, read at start and followed when /config changes it.
 const isLight = atom({ plugin: 'compass-trail', key: 'isLight' } as const, false)
+// The rewinds seen live this session, handed to every compass started after:
+// a reload or a restart keeps the branches they dropped dropped.
+const cuts = atom({ plugin: 'compass-trail', key: 'cuts' } as const, [])
+
+// Which follow is current: a rewind starts a new compass at once, and the
+// one before it stops at its next read, its output ignored meanwhile.
+let generation = 0
+// The session's messages as of the last watch, one signature each.
+let heard: Sig[] | null = null
+
+/** Compares the session's messages with the last read, and cuts on a rewind. */
+async function watchRewind($: EngineInterface, configured: string | undefined): Promise<void> {
+  try {
+    const said = await $.session.messages()
+    const before = heard
+    heard = said.map(sig)
+    if (before === null) return
+    const at = new Date(await $.clock.now()).toISOString()
+    const cut = rewindBetween(before, said, at)
+    if (cut === null) return
+    trace($, `rewind to ${JSON.stringify(cut.prompt)} at ${cut.at}`)
+    await update($, cuts, was => [...was, cut])
+    void follow($, configured)
+  } catch (err) {
+    trace($, `rewind watch failed: ${String(err)}`)
+  }
+}
 
 // One narration in flight at a time; the keys the last failed batch asked
 // about sit out the next one, so a broken call is not repeated every snapshot.
@@ -125,6 +154,7 @@ async function locate($: EngineInterface, configured: string | undefined): Promi
  * session.start starts the next.
  */
 async function follow($: EngineInterface, configured: string | undefined): Promise<void> {
+  const mine = ++generation
   const found = await locate($, configured)
   if ('why' in found) {
     await update($, problem, () => found.why)
@@ -133,8 +163,12 @@ async function follow($: EngineInterface, configured: string | undefined): Promi
   const session = await $.session.id()
   let buffer = ''
   try {
-    const child = $.process.spawn({ argv: [found.bin, 'trail', '-session', session, '-follow'] })
+    const seen: readonly Cut[] = await read($, cuts)
+    const argv = [found.bin, 'trail', '-session', session, '-follow']
+    if (seen.length > 0) argv.push('-cuts', JSON.stringify(seen))
+    const child = $.process.spawn({ argv })
     for await (const chunk of child) {
+      if (mine !== generation) return
       if (chunk.stream === 'stderr') {
         await update($, problem, () => chunk.text.trim())
         continue
@@ -148,7 +182,7 @@ async function follow($: EngineInterface, configured: string | undefined): Promi
       await update($, problem, () => null)
       void narrate($, next)
     }
-    await update($, problem, () => `${found.bin} trail stopped`)
+    if (mine === generation) await update($, problem, () => `${found.bin} trail stopped`)
   } catch (err) {
     await update($, problem, () => `${found.bin} trail failed: ${String(err)}`)
   }
@@ -165,6 +199,13 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'trail', description: 'Show this session’s compass trail in a pane' })
     await $.command.register({ name: 'trail-band', description: 'Show or hide the compass line above the prompt' })
     void follow($, configured)
+    // A rewind shrinks the session's messages before it writes anything:
+    // watching them lets the trail drop the branch at once.
+    try {
+      $.clock.every(2000, () => void watchRewind($, configured))
+    } catch (err) {
+      trace($, `rewind watch unavailable: ${String(err)}`)
+    }
     // A pane opened unasked waits on a narrow screen or a surface that seats
     // none; say which, once, so a missing pane is never a mystery.
     const opened = await $.ui.open({ id: PANE, title: TITLE })

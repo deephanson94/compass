@@ -35,6 +35,7 @@ func runTrail(args []string) int {
 	follow := fs.Bool("follow", false, "keep reading: one snapshot per line as the transcript grows")
 	poll := fs.Duration("poll", 500*time.Millisecond, "with -follow, how often the transcript is read")
 	beat := fs.Duration("heartbeat", 30*time.Second, "with -follow, the longest gap between snapshots")
+	cutsArg := fs.String("cuts", "", `rewinds seen live, as JSON: [{"at":"<RFC 3339>","prompt":"<first line of the prompt rewound to>"}]`)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -54,9 +55,13 @@ func runTrail(args []string) int {
 
 	out := bufio.NewWriter(os.Stdout)
 	var t *transcript.Tailer
-	seg := journey.NewSegmenter()
-	outs := journey.NewOutcomes()
-	acts := &actLog{}
+	f := newFollower()
+	if *cutsArg != "" {
+		if err := json.Unmarshal([]byte(*cutsArg), &f.cuts); err != nil {
+			fmt.Fprintln(os.Stderr, "compass trail: -cuts:", err)
+			return 2
+		}
+	}
 	read := func() (bool, error) {
 		if t == nil {
 			if !resolve() {
@@ -68,15 +73,11 @@ func runTrail(args []string) int {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, err
 		}
-		for _, ev := range evs {
-			seg.Observe(ev)
-			outs.Observe(ev)
-			acts.observe(ev)
-		}
+		f.add(evs)
 		return len(evs) > 0, nil
 	}
 	emit := func() error {
-		if err := writeSnapshot(out, *path, seg, outs, acts, time.Now()); err != nil {
+		if err := writeSnapshot(out, *path, f.seg, f.outs, f.acts, time.Now()); err != nil {
 			return err
 		}
 		return out.Flush()
@@ -109,6 +110,158 @@ func runTrail(args []string) int {
 		}
 		last = time.Now()
 	}
+}
+
+// follower is one session's trail as of the transcript it has read: the
+// segmenter, outcomes and acts, fed in file order, plus every line kept so
+// the trail can be read again when the conversation is rewound.
+//
+// A transcript is append-only and its lines form a tree by parentUuid. In
+// a conversation that goes forward, every typed prompt hangs off the line
+// written just before it (parallel tool results fork, but the next prompt
+// joins the newest line again). /rewind does not delete anything: the
+// next prompt hangs off an older line instead, and everything written
+// between that line and the prompt is the branch the person walked away
+// from. The follower drops that window and replays what is left, so the
+// trail follows the conversation the session is actually having. Until the
+// next prompt is sent the rewind has written nothing, and the trail still
+// shows the old branch.
+//
+// A rewind seen live (a reader watching the session, the mod) arrives as a
+// cut instead: the prompt rewound to and when. The trail can drop that
+// branch at once, before the next prompt writes the fork into the file.
+type follower struct {
+	events   []transcript.Event
+	index    map[string]int // uuid → position in events
+	lastUUID string         // the newest line that has a uuid
+	cuts     []cut          // rewinds seen live, applied once each
+	seg      *journey.Segmenter
+	outs     *journey.Outcomes
+	acts     *actLog
+}
+
+// cut is a rewind as a reader saw it happen: everything from the latest
+// prompt reading Prompt up to At is the branch walked away from. What is
+// written after At is the conversation going on, and stays.
+type cut struct {
+	At     time.Time `json:"at"`
+	Prompt string    `json:"prompt"`
+	done   bool
+}
+
+func newFollower() *follower {
+	f := &follower{index: map[string]int{}}
+	f.reset()
+	return f
+}
+
+func (f *follower) reset() {
+	f.seg, f.outs, f.acts = journey.NewSegmenter(), journey.NewOutcomes(), &actLog{}
+}
+
+// add reads new lines in file order. It reports whether one of them
+// rewound the conversation, in which case the trail was read again.
+func (f *follower) add(evs []transcript.Event) bool {
+	rewound := false
+	for _, ev := range evs {
+		if at, ok := f.branchPoint(ev); ok {
+			for _, gone := range f.events[at+1:] {
+				delete(f.index, gone.UUID)
+			}
+			f.events = f.events[:at+1]
+			rewound = true
+		}
+		if ev.UUID != "" {
+			f.index[ev.UUID] = len(f.events)
+			if !ev.IsSidechain {
+				f.lastUUID = ev.UUID
+			}
+		}
+		f.events = append(f.events, ev)
+		if !rewound {
+			f.observe(ev)
+		}
+	}
+	if f.applyCuts() {
+		rewound = true
+	}
+	if rewound {
+		f.reset()
+		for _, ev := range f.events {
+			f.observe(ev)
+		}
+	}
+	return rewound
+}
+
+// applyCuts drops each cut's window that the lines read so far contain, and
+// reports whether any did. A cut whose prompt is not there is left to wait:
+// a reader started fresh reads the whole file in its first batch.
+func (f *follower) applyCuts() bool {
+	applied := false
+	for i := range f.cuts {
+		c := &f.cuts[i]
+		if c.done {
+			continue
+		}
+		start := -1
+		for j, ev := range f.events {
+			if ev.Timestamp.After(c.At) {
+				break
+			}
+			if typedPrompt(ev) && firstLineOf(ev.Text) == strings.TrimSpace(c.Prompt) {
+				start = j
+			}
+		}
+		if start < 0 {
+			continue
+		}
+		end := start
+		for end < len(f.events) && !f.events[end].Timestamp.After(c.At) {
+			end++
+		}
+		f.events = append(f.events[:start], f.events[end:]...)
+		c.done, applied = true, true
+	}
+	if applied {
+		f.index, f.lastUUID = map[string]int{}, ""
+		for j, ev := range f.events {
+			if ev.UUID != "" {
+				f.index[ev.UUID] = j
+				if !ev.IsSidechain {
+					f.lastUUID = ev.UUID
+				}
+			}
+		}
+	}
+	return applied
+}
+
+// typedPrompt is a line a person typed: a user turn with words in it, not a
+// tool's result or the harness's own note.
+func typedPrompt(ev transcript.Event) bool {
+	return ev.Type == transcript.EventUser && !ev.IsSidechain && !ev.IsMeta && len(ev.ToolResults) == 0 && strings.TrimSpace(ev.Text) != ""
+}
+
+func firstLineOf(s string) string {
+	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
+}
+
+func (f *follower) observe(ev transcript.Event) {
+	f.seg.Observe(ev)
+	f.outs.Observe(ev)
+	f.acts.observe(ev)
+}
+
+// branchPoint is where a rewound prompt picks the conversation back up:
+// the position of the older line it hangs off. ok is false for every line
+// that continues the conversation where it was.
+func (f *follower) branchPoint(ev transcript.Event) (int, bool) {
+	if !typedPrompt(ev) || ev.ParentUUID == "" || ev.ParentUUID == f.lastUUID {
+		return 0, false
+	}
+	at, ok := f.index[ev.ParentUUID]
+	return at, ok
 }
 
 // findTranscript is the session's file under projects/, whichever project
@@ -329,19 +482,6 @@ func (a *actLog) within(start, end time.Time) []string {
 	return out
 }
 
-// preamble is what a command line opens with before its work: variable
-// assignments and a change of directory, each ended by ; or &&.
-var preamble = regexp.MustCompile(`^\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)|cd\s+\S+)\s*(?:;|&&)\s*)+`)
-
-// commandCore is a command without its preamble: "M=/long/path; cat $M/x"
-// reads "cat $M/x", which says what the call was for.
-func commandCore(cmd string) string {
-	if core := preamble.ReplaceAllString(cmd, ""); strings.TrimSpace(core) != "" {
-		return core
-	}
-	return cmd
-}
-
 // pathLike is a file named in a command: a word with an extension of
 // letters, the way scripts name the files they write.
 var pathLike = regexp.MustCompile(`[\w./~-]+\.(?:go|ts|tsx|js|py|rs|java|rb|sh|json|ya?ml|toml|md|sql|css|html)\b`)
@@ -375,7 +515,7 @@ func writes(use transcript.ToolUse) bool {
 			Command string `json:"command"`
 		}
 		_ = json.Unmarshal(use.Input, &in)
-		_, ok := journey.WrittenFile(strings.SplitN(commandCore(in.Command), "\n", 2)[0])
+		_, ok := journey.WrittenFile(strings.SplitN(journey.CommandCore(in.Command), "\n", 2)[0])
 		return ok
 	}
 	return false
@@ -404,7 +544,7 @@ func actText(use transcript.ToolUse) string {
 		if in.Description != "" {
 			return clip(in.Description)
 		}
-		act := clip("$ " + commandCore(in.Command))
+		act := clip("$ " + journey.CommandCore(in.Command))
 		if names := namedFiles(in.Command); len(names) > 0 {
 			act += " [" + strings.Join(names, ", ") + "]"
 		}

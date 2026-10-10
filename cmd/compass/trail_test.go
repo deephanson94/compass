@@ -95,7 +95,7 @@ func TestTrailSnapshot(t *testing.T) {
 	}
 }
 
-func TestCommandCore(t *testing.T) {
+func TestCommandCoreIsShared(t *testing.T) {
 	for in, want := range map[string]string{
 		"M=/root/x/compass-trail; cat $M/diag.log": "cat $M/diag.log",
 		"cd /home/user/compass && go test ./...":   "go test ./...",
@@ -103,8 +103,113 @@ func TestCommandCore(t *testing.T) {
 		"go vet ./...":                             "go vet ./...",
 		"X=1":                                      "X=1",
 	} {
-		if got := commandCore(in); got != want {
-			t.Errorf("commandCore(%q) = %q, want %q", in, got, want)
+		if got := journey.CommandCore(in); got != want {
+			t.Errorf("CommandCore(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// node is one transcript line with its place in the tree.
+func node(kind, uuid, parent string, at time.Time, content string) string {
+	p := "null"
+	if parent != "" {
+		p = fmt.Sprintf("%q", parent)
+	}
+	return fmt.Sprintf(`{"type":%q,"uuid":%q,"parentUuid":%s,"isSidechain":false,"timestamp":%q,"message":{"role":%q,"content":%s}}`,
+		kind, uuid, p, at.Format(time.RFC3339Nano), kind, content)
+}
+
+func readAll(t *testing.T, lines []string) []transcript.Event {
+	t.Helper()
+	var evs []transcript.Event
+	for _, l := range lines {
+		ev, err := transcript.ParseLine([]byte(l))
+		if err != nil {
+			t.Fatal(err)
+		}
+		evs = append(evs, ev)
+	}
+	return evs
+}
+
+// /rewind writes nothing until the next prompt, and that prompt hangs off an
+// older line: the branch between them is the one walked away from, and the
+// trail drops it. Parallel tool results fork the tree too, and drop nothing.
+func TestARewoundBranchLeavesTheTrail(t *testing.T) {
+	t0 := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	before := []string{
+		node("user", "u1", "", m(0), `"fix the auth tests"`),
+		// Two edits in parallel: both results hang off their own call.
+		node("assistant", "a1", "u1", m(1), `[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/auth.py"}}]`),
+		node("assistant", "a2", "a1", m(1), `[{"type":"tool_use","id":"e2","name":"Edit","input":{"file_path":"/src/token.py"}}]`),
+		node("user", "r1", "a1", m(2), `[{"type":"tool_result","tool_use_id":"e1","content":"ok"}]`),
+		node("user", "r2", "a2", m(2), `[{"type":"tool_result","tool_use_id":"e2","content":"ok"}]`),
+		node("assistant", "a3", "r2", m(2), `[{"type":"text","text":"done"}]`),
+		node("user", "u2", "a3", m(3), `"now run the tests"`),
+		node("assistant", "a4", "u2", m(4), `[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"pytest tests/auth"}}]`),
+		node("user", "r3", "a4", m(5), `[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"18 passed, 2 failed in 1.2s"}]`),
+	}
+	f := newFollower()
+	if f.add(readAll(t, before)) {
+		t.Fatal("parallel results read as a rewind")
+	}
+	if tr := f.seg.Trail(); len(tr.Prompts) != 2 || len(tr.Legs) != 2 {
+		t.Fatalf("before the rewind: %d prompts, %d legs; want 2 and 2", len(tr.Prompts), len(tr.Legs))
+	}
+
+	// Rewound to before "now run the tests": the next prompt hangs off a3.
+	if !f.add(readAll(t, []string{node("user", "u3", "a3", m(7), `"commit it instead"`)})) {
+		t.Fatal("a prompt off an older line did not read as a rewind")
+	}
+	tr := f.seg.Trail()
+	var asked []string
+	for _, p := range tr.Prompts {
+		asked = append(asked, p.Text)
+	}
+	if got := strings.Join(asked, " | "); got != "fix the auth tests | commit it instead" {
+		t.Errorf("prompts = %q, want the rewound one gone", got)
+	}
+	if len(tr.Legs) != 1 || tr.Legs[0].Class != journey.Build {
+		t.Errorf("legs = %+v, want the build alone: the red test run was on the abandoned branch", tr.Legs)
+	}
+	if _, ok := f.outs.Latest(); ok {
+		t.Error("the abandoned branch's test run is still the latest outcome")
+	}
+}
+
+// A rewind seen live drops its branch at once: the reader names the prompt
+// rewound to and when, and the trail loses that prompt and what followed it
+// before the next prompt is written. Lines after the rewind stay, and the
+// next prompt, hanging off the line before the cut, reads as no new rewind.
+func TestALiveCutDropsTheBranchBeforeTheNextPrompt(t *testing.T) {
+	t0 := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	lines := []string{
+		node("user", "u1", "", m(0), `"fix the auth tests"`),
+		node("assistant", "a1", "u1", m(1), `[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/auth.py"}}]`),
+		node("user", "r1", "a1", m(2), `[{"type":"tool_result","tool_use_id":"e1","content":"ok"}]`),
+		node("user", "u2", "r1", m(3), `"now run the tests\nall of them"`),
+		node("assistant", "a2", "u2", m(4), `[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"pytest tests/auth"}}]`),
+		node("user", "r2", "a2", m(5), `[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"18 passed, 2 failed in 1.2s"}]`),
+	}
+	f := newFollower()
+	f.cuts = []cut{{At: m(6), Prompt: "now run the tests"}}
+	if !f.add(readAll(t, lines)) {
+		t.Fatal("the cut was not applied")
+	}
+	tr := f.seg.Trail()
+	if len(tr.Prompts) != 1 || len(tr.Legs) != 1 || tr.Legs[0].Class != journey.Build {
+		t.Fatalf("after the cut: prompts %+v, legs %+v; want the first prompt and its build", tr.Prompts, tr.Legs)
+	}
+	if _, ok := f.outs.Latest(); ok {
+		t.Error("the cut branch's test run is still the latest outcome")
+	}
+	// The next prompt hangs off r1, the line before the cut.
+	if f.add(readAll(t, []string{node("user", "u3", "r1", m(8), `"commit it instead"`)})) {
+		t.Error("the prompt after a live cut read as another rewind")
+	}
+	if got := len(f.seg.Trail().Prompts); got != 2 {
+		t.Errorf("prompts after the next one = %d, want 2", got)
 	}
 }

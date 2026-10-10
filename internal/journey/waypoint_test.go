@@ -989,7 +989,7 @@ func TestT40CommitLinesOnANonShipResultAreIgnored(t *testing.T) {
 
 	t.Run("build vote", func(t *testing.T) {
 		tr := segment(
-			bash(1*time.Minute, "tu1", "git log --oneline -1"),
+			bash(1*time.Minute, "tu1", "go build ./..."),
 			okResult(2*time.Minute, "tu1", out),
 		)
 		assertLegs(t, tr, legWant{journey.Build, 1 * time.Minute, 1 * time.Minute, 1, true})
