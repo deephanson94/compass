@@ -1,0 +1,14 @@
+{
+  "name": "compass",
+  "description": "compass, the trail of a Claude Code session, inside Claude Code",
+  "owner": {
+    "name": "deephanson94"
+  },
+  "plugins": [
+    {
+      "name": "compass-trail",
+      "source": "./mods/compass-trail",
+      "description": "This session's compass trail in a pane, and how its tests, ships and agents stand above the prompt"
+    }
+  ]
+}
