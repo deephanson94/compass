@@ -2,6 +2,9 @@
   "name": "compass-trail",
   "version": "0.2.0",
   "description": "This session's compass trail in a pane, and how its tests, ships and agents stand above the prompt",
+  "author": {
+    "name": "deephanson94"
+  },
   "types": "./types/index.d.ts",
   "userConfig": {
     "compassPath": {

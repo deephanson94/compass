@@ -4,6 +4,20 @@ This session's trail inside Claude Code itself: a **Trail** pane with the
 journey, and one line above the prompt with how the tests, ships and agents
 stand. No board and no fleet: a mod sees only its own session.
 
+## Install
+
+In a Claude Code terminal session:
+
+```
+/plugin install compass-trail --marketplace deephanson94/compass
+```
+
+Answer `y` to add the marketplace, then pick a scope (user: every session
+you start). The mod needs a compass of v0.5.0 or newer where it can find it,
+below; on a server, one `sudo install` serves everyone.
+
+## How it works
+
 The journey is not reimplemented here. The mod runs
 `compass trail -session <id> -follow` (see `cmd/compass/trail.go`) and draws
 the NDJSON snapshots it streams.
@@ -30,6 +44,8 @@ On a shared server, one install serves everyone:
 ```sh
 sudo install compass /usr/local/bin/compass
 ```
+
+Working on the mod from a clone, with the binary built beside it:
 
 ```sh
 go build -o mods/compass-trail/bin/compass ./cmd/compass
