@@ -1443,7 +1443,8 @@ func (m *Model) columnHeader(key string, r fleetRow, w int) []string {
 	tag := m.columnTag(key, s, w)
 	entry := m.entryLinesUnder(r, w, tag)
 	second := entry[1]
-	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView {
+	_, pr := m.prOf(s) // the pull request's line stands under the name; the verdict is the trail's to say
+	if tr, ok := m.trails[key]; ok && s.Snap.State == state.Working && !m.archiveView && !pr {
 		// A working column shows its HEAD row anyway — pinned, it is always
 		// the last row of the trail — so the header says what HEAD cannot:
 		// how the suite stands, what shipped, what is still out.
@@ -1649,6 +1650,17 @@ func redNow(tr journey.Trail) bool {
 // done comes before what shipped clean — "all calm" should mean nothing
 // owes you, not merely nothing is amber.
 func (m *Model) obligation(s fleet.Session) int {
+	r := m.ownObligation(s)
+	if r > rankNeedsYou && m.prYours(s) {
+		// A reviewer answered: the pull request waits on you exactly as a
+		// question does, and sorts with the questions.
+		return rankNeedsYou
+	}
+	return r
+}
+
+// ownObligation is obligation from the session alone, before its pull request.
+func (m *Model) ownObligation(s fleet.Session) int {
 	tr := m.trails[s.Info.Key()]
 	if s.Waiting {
 		// A question you walked away from: nothing is happening in it, and

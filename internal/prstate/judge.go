@@ -1,0 +1,309 @@
+// Package prstate says whose move it is on the pull request a session's
+// branch has open: the reviewer's, because the last word on it is yours, or
+// yours, because a reviewer answered. It reads a Gitea through `tea api` and a
+// session's checkout through `git`, both behind one Runner, and keeps what it
+// learned in a small cache so a fresh `compass status` does not ask again.
+package prstate
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Move is whose turn a pull request is.
+type Move int
+
+const (
+	// Theirs: the newest word is yours — a reply or a push. Nothing to do.
+	Theirs Move = iota
+	// Yours: a reviewer answered, or the PR is approved and only merging is left.
+	Yours
+	// Merged and Closed are shown once, on the poll that found them, and dropped on the next.
+	Merged
+	Closed
+)
+
+// Status is one pull request's state as a session's row says it.
+type Status struct {
+	Repo   string // owner/repo, lower case
+	Number int
+	URL    string
+	Move   Move
+
+	// Reason is why it is your move: "changes requested", "approved —
+	// ready to merge", "reviewed", "2 new comments". Empty for the rest.
+	Reason string
+	// Who is the reviewer it waits on, for Theirs.
+	Who string
+	// At is the event the line's age counts from: the reviewer's answer for
+	// Yours, your last word for Theirs.
+	At time.Time
+
+	// Stale says the last poll failed, or is taking too long: this is the
+	// last state known, not the present one.
+	Stale bool
+}
+
+// Ready is the reason an approved pull request carries.
+const Ready = "approved — ready to merge"
+
+// Line is the status in words, the way the board, the fleet row and the
+// diagnostic print it. The words carry the meaning on their own; colour
+// only reinforces them (README, principle 5).
+func (s Status) Line(now time.Time) string {
+	pr := fmt.Sprintf("PR #%d", s.Number)
+	var line string
+	switch s.Move {
+	case Merged:
+		line = pr + " merged"
+	case Closed:
+		line = pr + " closed"
+	case Yours:
+		switch {
+		case s.Reason == Ready || s.At.IsZero():
+			line = pr + " · " + s.Reason
+		default:
+			line = pr + " · " + s.Reason + " " + Age(now, s.At) + " ago"
+		}
+	default:
+		who := s.Who
+		if who == "" {
+			who = "review"
+		}
+		line = pr + " · waiting on " + who
+		if !s.At.IsZero() {
+			line += " · " + Age(now, s.At)
+		}
+	}
+	if s.Stale {
+		line += " · PR state stale"
+	}
+	return line
+}
+
+// Age is a duration the way a row says it: 40s, 12m, 3h, 2d.
+func Age(now, at time.Time) string {
+	d := now.Sub(at)
+	switch {
+	case d < time.Minute:
+		if d < 0 {
+			d = 0
+		}
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	}
+}
+
+// The Gitea shapes, as much of them as the rules read.
+type user struct {
+	Login string `json:"login"`
+}
+
+// Pull is a pull request, from /repos/<owner>/<repo>/pulls/<n>.
+type Pull struct {
+	Number    int       `json:"number"`
+	State     string    `json:"state"`
+	Merged    bool      `json:"merged"`
+	UpdatedAt time.Time `json:"updated_at"`
+	HTMLURL   string    `json:"html_url"`
+	User      user      `json:"user"`
+	Head      struct {
+		Ref string `json:"ref"`
+		Sha string `json:"sha"`
+	} `json:"head"`
+	RequestedReviewers []user `json:"requested_reviewers"`
+}
+
+// Review is one entry of /pulls/<n>/reviews. Stale means commits landed on
+// the branch after it was submitted.
+type Review struct {
+	ID          int64     `json:"id"`
+	User        user      `json:"user"`
+	State       string    `json:"state"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	Stale       bool      `json:"stale"`
+	Dismissed   bool      `json:"dismissed"`
+}
+
+// Comment is one entry of /issues/<n>/comments.
+type Comment struct {
+	ID        int64     `json:"id"`
+	User      user      `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Detail is everything the rules read about one pull request.
+type Detail struct {
+	Pull          Pull      `json:"pull"`
+	Reviews       []Review  `json:"reviews"`
+	IssueComments []Comment `json:"issue_comments"`
+	// HeadAt is when the head commit was committed: the push, when it is
+	// known. Zero when it could not be read; a stale review still says a
+	// push came after it.
+	HeadAt time.Time `json:"head_at"`
+}
+
+// event is one dated word on a pull request.
+type event struct {
+	at     time.Time
+	who    string
+	mine   bool
+	review string // the review's state; "" for a comment or a push
+}
+
+// Judge decides whose move a pull request is. me is the login the PR's
+// author goes by; it is compared without case.
+//
+// The newest event among the submitted reviews, the issue comments and the
+// pushes decides it: yours if someone else said it, theirs if you did. An
+// approval nobody has requested changes since is your move whatever came
+// after it — what is left is merging.
+func Judge(d Detail, me string) Status {
+	p := d.Pull
+	s := Status{Number: p.Number, URL: p.HTMLURL}
+	switch {
+	case p.Merged:
+		s.Move = Merged
+		return s
+	case p.State == "closed":
+		s.Move = Closed
+		return s
+	}
+	isMe := func(login string) bool { return strings.EqualFold(login, me) }
+
+	var evs []event
+	// latest is each reviewer's latest decision: an approval or a request
+	// for changes, not dismissed. A review that only comments decides nothing.
+	latest := map[string]Review{}
+	for _, r := range d.Reviews {
+		if r.State == "PENDING" || r.State == "" || r.SubmittedAt.IsZero() {
+			continue // not submitted: nobody has seen it
+		}
+		evs = append(evs, event{at: r.SubmittedAt, who: r.User.Login, mine: isMe(r.User.Login), review: r.State})
+		if r.Stale {
+			// Commits landed after this review. When is not said, only
+			// after: the push stands just behind it.
+			evs = append(evs, event{at: r.SubmittedAt.Add(time.Nanosecond), who: me, mine: true})
+		}
+		if isMe(r.User.Login) || r.Dismissed {
+			continue
+		}
+		if r.State != "APPROVED" && r.State != "REQUEST_CHANGES" {
+			continue
+		}
+		if prev, ok := latest[r.User.Login]; !ok || !r.SubmittedAt.Before(prev.SubmittedAt) {
+			latest[r.User.Login] = r
+		}
+	}
+	for _, c := range d.IssueComments {
+		evs = append(evs, event{at: c.CreatedAt, who: c.User.Login, mine: isMe(c.User.Login)})
+	}
+	if !d.HeadAt.IsZero() {
+		evs = append(evs, event{at: d.HeadAt, who: me, mine: true})
+	}
+	// Oldest first; on a tie your own word goes first, so the reviewer's
+	// answer at the same second is the newer.
+	sort.SliceStable(evs, func(i, j int) bool {
+		if !evs[i].at.Equal(evs[j].at) {
+			return evs[i].at.Before(evs[j].at)
+		}
+		return evs[i].mine && !evs[j].mine
+	})
+
+	approved, changes := time.Time{}, false
+	for _, r := range latest {
+		switch r.State {
+		case "REQUEST_CHANGES":
+			changes = true
+		case "APPROVED":
+			if r.SubmittedAt.After(approved) {
+				approved = r.SubmittedAt
+			}
+		}
+	}
+	if !approved.IsZero() && !changes {
+		s.Move, s.Reason, s.At = Yours, Ready, approved
+		return s
+	}
+
+	if len(evs) == 0 || evs[len(evs)-1].mine {
+		s.Move = Theirs
+		s.Who = waitingOn(p, evs)
+		if len(evs) > 0 {
+			s.At = evs[len(evs)-1].at
+		}
+		return s
+	}
+
+	newest := evs[len(evs)-1]
+	s.Move, s.At = Yours, newest.at
+	switch {
+	case newest.review == "REQUEST_CHANGES":
+		s.Reason = "changes requested"
+	case newest.review == "APPROVED":
+		s.Reason = "approved" // and someone else still wants changes
+	case newest.review != "":
+		s.Reason = "reviewed"
+	case changes:
+		s.Reason = "changes requested"
+	default:
+		n := 0
+		for i := len(evs) - 1; i >= 0 && !evs[i].mine; i-- {
+			if evs[i].review == "" {
+				n++
+			}
+		}
+		s.Reason = fmt.Sprintf("%d new comment", n)
+		if n != 1 {
+			s.Reason += "s"
+		}
+	}
+	return s
+}
+
+// waitingOn names who a pull request waits on: the reviewers requested on
+// it, else whoever last spoke on it who is not you.
+func waitingOn(p Pull, evs []event) string {
+	var names []string
+	for _, u := range p.RequestedReviewers {
+		if u.Login != "" {
+			names = append(names, u.Login)
+		}
+	}
+	if len(names) > 0 {
+		return strings.Join(names, ", ")
+	}
+	for i := len(evs) - 1; i >= 0; i-- {
+		if !evs[i].mine && evs[i].who != "" {
+			return evs[i].who
+		}
+	}
+	return ""
+}
+
+// Segment is the status line's word for the pull requests: "PR▲1" when one
+// waits on you, "PR▲0" when every one waits on its reviewers, "" when no
+// session has one open.
+func Segment(states map[string]Status) string {
+	open, yours := 0, 0
+	for _, s := range states {
+		switch s.Move {
+		case Yours:
+			open++
+			yours++
+		case Theirs:
+			open++
+		}
+	}
+	if open == 0 {
+		return ""
+	}
+	return fmt.Sprintf("PR▲%d", yours)
+}

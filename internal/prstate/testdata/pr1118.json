@@ -1,0 +1,15 @@
+{
+ "pull": {"number": 1118, "state": "open", "merged": false, "draft": false,
+  "updated_at": "2026-10-22T10:36:56Z", "html_url": "https://gitea.example.com/org/repo/pulls/1118",
+  "user": {"login": "me"}, "head": {"ref": "dev/feature-x", "sha": "a309a37f73e9"},
+  "base": {"ref": "master"}, "requested_reviewers": [{"login": "reviewer1"}],
+  "comments": 3, "review_comments": 1},
+ "reviews": [{"id": 73091, "user": {"login": "reviewer1"}, "state": "REQUEST_CHANGES",
+  "submitted_at": "2026-10-22T08:06:03Z", "commit_id": "eaa626a6fa3a", "stale": true,
+  "dismissed": false, "comments_count": 1, "body": "<scrubbed>"}],
+ "issue_comments": [
+  {"id": 1547168, "user": {"login": "reviewer1"}, "created_at": "2026-10-22T08:07:34Z", "body": "<scrubbed>"},
+  {"id": 1548359, "user": {"login": "me"}, "created_at": "2026-10-22T10:36:56Z", "body": "<scrubbed>"}],
+ "review_comments": [{"id": 1547144, "user": {"login": "reviewer1"},
+  "created_at": "2026-10-22T08:06:03Z", "path": "src/file.cc", "body": "<scrubbed>"}]
+}

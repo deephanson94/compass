@@ -13,6 +13,7 @@ import (
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/narrator"
 	"github.com/deephanson94/compass/internal/opencode"
+	"github.com/deephanson94/compass/internal/prstate"
 	"github.com/deephanson94/compass/internal/ui"
 )
 
@@ -73,6 +74,9 @@ func main() {
 	liveWithin := fs.String("live-within", liveDefault,
 		`how recently a paneless session must have spoken to count as live ("0" = tmux panes only, questions included)`)
 	opencodeDB := fs.String("opencode-db", opencode.DefaultDB(), `OpenCode's store, whose sessions join the fleet when the file exists ("" = never)`)
+	prInterval := fs.Duration("pr-interval", prstate.DefaultInterval,
+		`how often to ask Gitea (through tea) whose move each session's pull request is ("0" turns it off)`)
+	teaLogin := fs.String("tea-login", "", `the tea login to ask as ("" = tea's own default)`)
 	showVersion := fs.Bool("version", false, "print the build's version and exit")
 	fs.Usage = usage(fs)
 	if err := fs.Parse(args); err != nil {
@@ -103,6 +107,7 @@ func main() {
 		}
 	}
 	build := buildNarrator(mgr, *root, *model)
+	prs := openPRs(*root, *teaLogin, *prInterval)
 
 	switch sub {
 	case "status":
@@ -110,10 +115,25 @@ func main() {
 		// each time, and the sessions worth reporting on are the long live ones
 		// that cost the most to replay. Resume where the last run stopped.
 		resume := openResume(mgr, *root)
-		fmt.Println(mgr.StatusLine(time.Now()))
+		now := time.Now()
+		line := "○ all quiet"
+		if sessions, err := mgr.Refresh(now); err == nil {
+			line = fleet.StatusOf(sessions)
+			if prs != nil {
+				// A poll is due once every -pr-interval; between them
+				// the cache answers and nothing leaves the machine.
+				prs.PollIfDue(liveCWDs(sessions), now)
+				if seg := prstate.Segment(livePRs(sessions, prs.States(now))); seg != "" {
+					line += " " + seg
+				}
+			}
+		}
+		fmt.Println(line)
 		resume.Save()
 	case "panes":
 		printPanes(os.Stdout, mgr, *root, time.Now())
+		fmt.Println()
+		fmt.Println(prstate.Probe(prstate.RealRunner{Timeout: teaTimeout}, *teaLogin, *prInterval))
 	case "help":
 		fs.Usage()
 	default:
@@ -127,7 +147,7 @@ func main() {
 		// way out; a deck that is killed leaves the last save, which the
 		// next start replays forward from.
 		resume := openResume(mgr, *root)
-		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build)
+		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build, prs)
 		resume.Save()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
@@ -159,6 +179,45 @@ func buildNarrator(mgr *fleet.Manager, root, model string) func(notify func()) u
 	return func(notify func()) ui.Narrator {
 		return narrator.New(runner, cache, notify)
 	}
+}
+
+// teaTimeout is how long one tea call may take before it is given up on.
+const teaTimeout = 30 * time.Second
+
+// openPRs is the pull-request tracker, its cache beside the others. An
+// interval of zero is no tracker at all.
+func openPRs(root, login string, interval time.Duration) *prstate.Tracker {
+	if interval <= 0 {
+		return nil
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = root
+	}
+	return prstate.New(prstate.RealRunner{Timeout: teaTimeout}, login, interval, filepath.Join(base, "compass", "prs.json"))
+}
+
+// liveCWDs is where each live session works, keyed as the fleet keys it.
+func liveCWDs(sessions []fleet.Session) map[string]string {
+	out := map[string]string{}
+	for _, s := range sessions {
+		if s.Live && s.Info.CWD != "" {
+			out[s.Info.Key()] = s.Info.CWD
+		}
+	}
+	return out
+}
+
+// livePRs keeps the pull requests of the live sessions: the status line
+// counts what is happening, not the archive.
+func livePRs(sessions []fleet.Session, states map[string]prstate.Status) map[string]prstate.Status {
+	out := map[string]prstate.Status{}
+	for _, s := range sessions {
+		if st, ok := states[s.Info.Key()]; ok && s.Live {
+			out[s.Info.Key()] = st
+		}
+	}
+	return out
 }
 
 // openResume points the manager at a resume cache beside the narrator's, and

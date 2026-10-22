@@ -752,7 +752,12 @@ func (m *Manager) StatusLine(now time.Time) string {
 	if err != nil {
 		return "○ all quiet"
 	}
+	return StatusOf(sessions)
+}
 
+// StatusOf is StatusLine over a fleet already refreshed: `compass status`
+// reads the fleet once and adds the pull requests' segment to the line.
+func StatusOf(sessions []Session) string {
 	counts := map[state.State]int{}
 	for _, s := range sessions {
 		if !s.Live || s.Waiting {

@@ -1423,6 +1423,12 @@ func (m *Model) secondLineUnder(s fleet.Session, w int, tag string) string {
 		}
 		return dimStyle.Render(clip(line, w))
 	}
+	// A pull request the session's branch has open: whose move it is owns
+	// the line, unless the session itself is asking or stuck — that
+	// sentence is the one a person must not miss.
+	if st, ok := m.prOf(s); ok && !wantsAttention(s.Snap.State) && !s.Snap.APIError {
+		return m.prLine(st, w)
+	}
 	// Result before process. "1216✓ 2✗" answers whether the session is going
 	// well; "Bash: pytest tests/auth -x" only answers whether it is busy, which
 	// the glyph beside the name already said. The call in flight is the
