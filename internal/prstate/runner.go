@@ -43,14 +43,22 @@ type link struct {
 	Branch string `json:"branch"`
 }
 
-// linkOf reads a checkout's branch and origin. A directory that is not a
-// checkout, a detached HEAD, or an origin that names no owner/repo is no
-// link: the session has no pull request to show.
-func linkOf(r Runner, cwd string) (link, bool) {
+// linkOf reads the branch and origin of the checkout dir is in. A directory
+// that is in no checkout, a detached HEAD, or an origin that names no
+// owner/repo is no link: there is no pull request to show for it.
+func linkOf(r Runner, dir string) (link, bool) {
+	if dir == "" {
+		return link{}, false
+	}
+	out, err := r.Output("git", "-C", dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return link{}, false
+	}
+	cwd := strings.TrimSpace(string(out))
 	if cwd == "" {
 		return link{}, false
 	}
-	out, err := r.Output("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err = r.Output("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return link{}, false
 	}

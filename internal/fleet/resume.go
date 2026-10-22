@@ -41,6 +41,7 @@ type EntryFold struct {
 	TitleRank int                  `json:"title_rank,omitempty"`
 	Model     string               `json:"model,omitempty"`
 	Outcomes  journey.OutcomesFold `json:"outcomes,omitzero"`
+	Dirs      []string             `json:"dirs,omitempty"` // where its tool calls worked
 }
 
 // JourneyPoint is one transcript's saved reading position and folded journey:

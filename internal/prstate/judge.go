@@ -52,8 +52,15 @@ const Ready = "approved — ready to merge"
 // Line is the status in words, the way the board, the fleet row and the
 // diagnostic print it. The words carry the meaning on their own; colour
 // only reinforces them (README, principle 5).
-func (s Status) Line(now time.Time) string {
-	pr := fmt.Sprintf("PR #%d", s.Number)
+func (s Status) Line(now time.Time) string { return s.line(now, true, "") }
+
+// line is Line with or without its clock, the number named as repo+"#n"
+// when repo is given.
+func (s Status) line(now time.Time, clock bool, repo string) string {
+	if !clock {
+		now = time.Time{}
+	}
+	pr := fmt.Sprintf("PR %s#%d", repo, s.Number)
 	var line string
 	switch s.Move {
 	case Merged:
@@ -62,7 +69,7 @@ func (s Status) Line(now time.Time) string {
 		line = pr + " closed"
 	case Yours:
 		switch {
-		case s.Reason == Ready || s.At.IsZero():
+		case s.Reason == Ready || s.At.IsZero() || now.IsZero():
 			line = pr + " · " + s.Reason
 		default:
 			line = pr + " · " + s.Reason + " " + Age(now, s.At) + " ago"
@@ -73,12 +80,12 @@ func (s Status) Line(now time.Time) string {
 			who = "review"
 		}
 		line = pr + " · waiting on " + who
-		if !s.At.IsZero() {
+		if !s.At.IsZero() && !now.IsZero() {
 			line += " · " + Age(now, s.At)
 		}
 	}
 	if s.Stale {
-		line += " · PR state stale"
+		line += staleMark
 	}
 	return line
 }
@@ -288,22 +295,117 @@ func waitingOn(p Pull, evs []event) string {
 	return ""
 }
 
-// Segment is the status line's word for the pull requests: "PR▲1" when one
-// waits on you, "PR▲0" when every one waits on its reviewers, "" when no
-// session has one open.
-func Segment(states map[string]Status) string {
-	open, yours := 0, 0
-	for _, s := range states {
-		switch s.Move {
+// Sort orders one session's pull requests most urgent first: yours, then
+// theirs, then the ones just merged or closed; the longest-waiting first
+// among yours, then by number.
+func Sort(sts []Status) {
+	rank := func(m Move) int {
+		switch m {
 		case Yours:
-			open++
-			yours++
+			return 0
 		case Theirs:
-			open++
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(sts, func(i, j int) bool {
+		a, b := sts[i], sts[j]
+		if ra, rb := rank(a.Move), rank(b.Move); ra != rb {
+			return ra < rb
+		}
+		if a.Move == Yours && !a.At.Equal(b.At) {
+			return a.At.Before(b.At)
+		}
+		if a.Repo != b.Repo {
+			return a.Repo < b.Repo
+		}
+		return a.Number < b.Number
+	})
+}
+
+// Summary is a session's pull requests in one line, sts sorted (Sort): the
+// most urgent in full, then how many more and how many of those wait on
+// you. Where there is more than one, each is named with its repository —
+// "repoA#1118" — since two repositories can both have a #77.
+func Summary(sts []Status, now time.Time) string {
+	if forms := Summaries(sts, now); len(forms) > 0 {
+		return forms[0]
+	}
+	return ""
+}
+
+// Summaries is Summary in every form a narrower row can take, longest
+// first: without "ago", without the clock, without the repository's name.
+// The count of the others is the last thing shed — it is the only word
+// saying there are others.
+func Summaries(sts []Status, now time.Time) []string {
+	if len(sts) == 0 {
+		return nil
+	}
+	first, repo := sts[0], ""
+	tail := ""
+	if len(sts) > 1 {
+		repo = repoName(first.Repo)
+		yours := 0
+		for _, s := range sts[1:] {
+			if s.Move == Yours {
+				yours++
+			}
+		}
+		tail = fmt.Sprintf(" · +%d PR", len(sts)-1)
+		if yours > 0 {
+			tail += fmt.Sprintf(" (%d yours)", yours)
 		}
 	}
-	if open == 0 {
+	with := func(line string) string {
+		// The stale mark is the line's last word, and the whole line's.
+		if strings.HasSuffix(line, staleMark) {
+			return strings.TrimSuffix(line, staleMark) + tail + staleMark
+		}
+		return line + tail
+	}
+	full := first.line(now, true, repo)
+	forms := []string{with(full)}
+	if short := strings.Replace(full, " ago", "", 1); short != full {
+		forms = append(forms, with(short))
+	}
+	forms = append(forms, with(first.line(now, false, repo)))
+	if repo != "" {
+		bare := first.line(now, false, "")
+		forms = append(forms, with(bare), with(strings.TrimPrefix(bare, "PR "))) // "#1118 · changes requested · +1 PR"
+	}
+	return forms
+}
+
+// staleMark ends a line whose poll failed.
+const staleMark = " · PR state stale"
+
+// repoName is a repository's own name, without its owner.
+func repoName(repo string) string {
+	if i := strings.LastIndexByte(repo, '/'); i >= 0 {
+		return repo[i+1:]
+	}
+	return repo
+}
+
+// Segment is the status line's word for the pull requests: "PR▲1" when one
+// waits on you, "PR▲0" when every one waits on its reviewers, "" when no
+// session has one open. A pull request two sessions share counts once.
+func Segment(states map[string][]Status) string {
+	open, yours := map[string]bool{}, map[string]bool{}
+	for _, sts := range states {
+		for _, s := range sts {
+			k := fmt.Sprintf("%s#%d", s.Repo, s.Number)
+			switch s.Move {
+			case Yours:
+				open[k], yours[k] = true, true
+			case Theirs:
+				open[k] = true
+			}
+		}
+	}
+	if len(open) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("PR▲%d", yours)
+	return fmt.Sprintf("PR▲%d", len(yours))
 }

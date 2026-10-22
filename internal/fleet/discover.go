@@ -106,6 +106,12 @@ type Session struct {
 	// a commit subject — as opposed to the tool call it currently has in
 	// flight. Empty when it has not finished anything worth reporting.
 	Outcome string
+
+	// Dirs is where the session's own tool calls worked — the directories
+	// of the files it edited, the ones its shell cd'd into or ran git in —
+	// most recent last. A session opened above two repositories names
+	// neither in its cwd; these are how its pull requests are found.
+	Dirs []string
 }
 
 // titleMax is how much of a first prompt survives into the fleet list.

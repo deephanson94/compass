@@ -15,9 +15,9 @@ func prScene(t *testing.T, w, h int) *Model {
 	t.Helper()
 	sc := sceneFewOngoing()
 	m := sceneModel(sc, w, h)
-	m.SetPRs(map[string]prstate.Status{
-		sessionKey("billing"): {Number: 1118, Move: prstate.Yours, Reason: "changes requested", At: sceneNow.Add(-2 * 3600e9)},
-		sessionKey("webapp"):  {Number: 77, Move: prstate.Theirs, Who: "reviewer1", At: sceneNow.Add(-3 * 3600e9)},
+	m.SetPRs(map[string][]prstate.Status{
+		sessionKey("billing"): {{Number: 1118, Move: prstate.Yours, Reason: "changes requested", At: sceneNow.Add(-2 * 3600e9)}},
+		sessionKey("webapp"):  {{Number: 77, Move: prstate.Theirs, Who: "reviewer1", At: sceneNow.Add(-3 * 3600e9)}},
 	})
 	return m
 }
@@ -86,5 +86,22 @@ func TestNoPRNoLine(t *testing.T) {
 	m := sceneModel(sc, 220, 48)
 	if view := ansi.Strip(m.View()); strings.Contains(view, "PR #") {
 		t.Fatalf("a PR line with no PR:\n%s", view)
+	}
+}
+
+// A session with two pull requests says the most urgent and counts the rest.
+func TestTwoPRsOneRow(t *testing.T) {
+	forceASCII(t)
+	sc := sceneFewOngoing()
+	m := sceneModel(sc, 220, 48)
+	m.SetPRs(map[string][]prstate.Status{
+		sessionKey("billing"): {
+			{Repo: "org/repoa", Number: 1118, Move: prstate.Yours, Reason: "changes requested", At: sceneNow.Add(-2 * 3600e9)},
+			{Repo: "org/repob", Number: 77, Move: prstate.Theirs, Who: "reviewer1", At: sceneNow.Add(-3 * 3600e9)},
+		},
+	})
+	// The board's column is narrow: the clock is shed before the count.
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "▲ #1118 · changes requested · +1 PR") {
+		t.Fatalf("no two-PR row:\n%s", view)
 	}
 }

@@ -207,6 +207,7 @@ func gitea(t *testing.T, d Detail, updated string) *fakeRunner {
 		return string(b)
 	}
 	f := &fakeRunner{answers: map[string]string{
+		"git -C " + cwd + " rev-parse --show-toplevel":   cwd + "\n",
 		"git -C " + cwd + " rev-parse --abbrev-ref HEAD": "dev/feature-x\n",
 		"git -C " + cwd + " remote get-url origin":       "git@gitea.example.com:org/repo.git\n",
 		"tea api /user":                                `{"login":"me"}`,
@@ -218,7 +219,18 @@ func gitea(t *testing.T, d Detail, updated string) *fakeRunner {
 	return f
 }
 
-var sessions = map[string]string{"s1": cwd}
+var sessions = map[string][]string{"s1": {cwd}}
+
+// one is a session's only pull request.
+func one(sts []Status) (Status, bool) {
+	if len(sts) == 0 {
+		return Status{}, false
+	}
+	return sts[0], true
+}
+
+// only is one without the ok.
+func only(sts []Status) Status { s, _ := one(sts); return s }
 
 func TestPollLinksTheSessionToItsPR(t *testing.T) {
 	f := gitea(t, fixture(t), "2026-10-22T10:36:56Z")
@@ -226,7 +238,7 @@ func TestPollLinksTheSessionToItsPR(t *testing.T) {
 	if err := tr.Poll(sessions, now); err != nil {
 		t.Fatal(err)
 	}
-	st, ok := tr.States(now)["s1"]
+	st, ok := one(tr.States(now)["s1"])
 	if !ok {
 		t.Fatal("no PR for the session")
 	}
@@ -265,7 +277,7 @@ func TestPollNoMatchingBranchShowsNothing(t *testing.T) {
 	if err := tr.Poll(sessions, now); err != nil {
 		t.Fatal(err)
 	}
-	if st, ok := tr.States(now)["s1"]; ok {
+	if st, ok := one(tr.States(now)["s1"]); ok {
 		t.Fatalf("a branch with no PR shows %q", st.Line(now))
 	}
 }
@@ -304,7 +316,7 @@ func TestPollErrorKeepsTheLastStateAndMarksItStale(t *testing.T) {
 	if err := tr.Poll(sessions, now.Add(time.Minute)); err == nil {
 		t.Fatal("a failed search reported no error")
 	}
-	st, ok := tr.States(now)["s1"]
+	st, ok := one(tr.States(now)["s1"])
 	if !ok {
 		t.Fatal("a failed poll erased the PR")
 	}
@@ -319,7 +331,7 @@ func TestPollErrorKeepsTheLastStateAndMarksItStale(t *testing.T) {
 	if err := tr.Poll(sessions, now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if tr.States(now)["s1"].Stale {
+	if only(tr.States(now)["s1"]).Stale {
 		t.Fatal("a good poll left the state stale")
 	}
 }
@@ -339,13 +351,13 @@ func TestPollMergedShowsOnceThenGoes(t *testing.T) {
 	if err := tr.Poll(sessions, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if got := tr.States(now)["s1"].Line(now); got != "PR #1118 merged" {
+	if got := only(tr.States(now)["s1"]).Line(now); got != "PR #1118 merged" {
 		t.Fatalf("after the merge %q, want PR #1118 merged", got)
 	}
 	if err := tr.Poll(sessions, now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if st, ok := tr.States(now)["s1"]; ok {
+	if st, ok := one(tr.States(now)["s1"]); ok {
 		t.Fatalf("the merge is still shown a poll later: %q", st.Line(now))
 	}
 }
@@ -381,7 +393,102 @@ func TestCacheCarriesStateToTheNextProcess(t *testing.T) {
 	if next.Due(now.Add(30 * time.Second)) {
 		t.Fatal("a fresh process polls again inside the interval")
 	}
-	if st, ok := next.States(now)["s1"]; !ok || st.Number != 1118 {
+	if st, ok := one(next.States(now)["s1"]); !ok || st.Number != 1118 {
 		t.Fatalf("the cache lost the PR: %+v", st)
+	}
+}
+
+// twoRepos is a working dir that is no checkout, with repoA under it and
+// repoB elsewhere on disk; each has a PR open for its branch. repoA's
+// reviewer asked for changes; repoB waits on its reviewer.
+func twoRepos(t *testing.T) (f *fakeRunner, work, repoA, repoB string) {
+	t.Helper()
+	work = t.TempDir()
+	repoA = filepath.Join(work, "repoA")
+	repoB = filepath.Join(t.TempDir(), "repoB")
+	for _, d := range []string{filepath.Join(repoA, ".git"), filepath.Join(work, "notes"), filepath.Join(repoB, ".git")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := fixture(t)
+	a.IssueComments = a.IssueComments[:1] // the reviewer spoke last: your move
+	b := fixture(t)
+	b.Pull.Number, b.Pull.Head.Ref = 77, "dev/feature-y"
+	enc := func(v any) string {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	f = &fakeRunner{answers: map[string]string{
+		"git -C " + repoA + " rev-parse --show-toplevel":   repoA + "\n",
+		"git -C " + repoA + " rev-parse --abbrev-ref HEAD": "dev/feature-x\n",
+		"git -C " + repoA + " remote get-url origin":       "git@gitea.example.com:org/repoA.git\n",
+		"git -C " + repoB + " rev-parse --show-toplevel":   repoB + "\n",
+		"git -C " + repoB + " rev-parse --abbrev-ref HEAD": "dev/feature-y\n",
+		"git -C " + repoB + " remote get-url origin":       "https://gitea.example.com/org/repoB\n",
+		"tea api /user": `{"login":"me"}`,
+		"tea api " + searchPath: `[{"number":1118,"updated_at":"a","repository":{"full_name":"org/repoA"}},` +
+			`{"number":77,"updated_at":"b","repository":{"full_name":"org/repoB"}}]`,
+		"tea api /repos/org/repoa/pulls/1118":           enc(a.Pull),
+		"tea api /repos/org/repoa/pulls/1118/reviews":   enc(a.Reviews),
+		"tea api /repos/org/repoa/issues/1118/comments": enc(a.IssueComments),
+		"tea api /repos/org/repob/pulls/77":             enc(b.Pull),
+		"tea api /repos/org/repob/pulls/77/reviews":     enc(b.Reviews),
+		"tea api /repos/org/repob/issues/77/comments":   enc(b.IssueComments),
+	}}
+	return f, work, repoA, repoB
+}
+
+// A session opened in a working dir above its repositories, which pushed
+// to one under it and one elsewhere, has both pull requests: the one under
+// its cwd found by looking, the other by where its tool calls worked.
+func TestASessionAboveTwoReposHasBoth(t *testing.T) {
+	f, work, _, repoB := twoRepos(t)
+	tr := New(f, "", time.Minute, "")
+	if err := tr.Poll(map[string][]string{"s1": {work, repoB}}, now); err != nil {
+		t.Fatal(err)
+	}
+	sts := tr.States(now)["s1"]
+	if len(sts) != 2 {
+		t.Fatalf("got %d PRs, want 2: %+v", len(sts), sts)
+	}
+	if sts[0].Number != 1118 || sts[0].Move != Yours || sts[1].Number != 77 || sts[1].Move != Theirs {
+		t.Fatalf("not most urgent first: %+v", sts)
+	}
+	if got, want := Summary(sts, now), "PR repoa#1118 · changes requested 2h ago · +1 PR"; got != want {
+		t.Fatalf("summary %q, want %q", got, want)
+	}
+	if got := Segment(tr.States(now)); got != "PR▲1" {
+		t.Fatalf("segment %q, want PR▲1", got)
+	}
+}
+
+// Without the directories its tool calls worked in, only the repository
+// under the cwd is found; without looking under the cwd, only the other.
+func TestEachWayOfFindingARepoIsNeeded(t *testing.T) {
+	f, work, _, repoB := twoRepos(t)
+	tr := New(f, "", time.Minute, "")
+	if err := tr.Poll(map[string][]string{"s1": {work}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if sts := tr.States(now)["s1"]; len(sts) != 1 || sts[0].Number != 1118 {
+		t.Fatalf("the cwd alone: %+v, want repoA's #1118 found under it", sts)
+	}
+	if err := tr.Poll(map[string][]string{"s1": {"/elsewhere", repoB}}, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if sts := tr.States(now)["s1"]; len(sts) != 1 || sts[0].Number != 77 {
+		t.Fatalf("a worked-in dir: %+v, want repoB's #77", sts)
+	}
+}
+
+// A pull request two sessions share counts once on the status line.
+func TestSegmentCountsASharedPROnce(t *testing.T) {
+	st := Status{Repo: "org/repo", Number: 1, Move: Yours}
+	if got := Segment(map[string][]Status{"a": {st}, "b": {st}}); got != "PR▲1" {
+		t.Fatalf("got %q, want PR▲1", got)
 	}
 }

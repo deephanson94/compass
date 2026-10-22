@@ -122,7 +122,7 @@ func main() {
 			if prs != nil {
 				// A poll is due once every -pr-interval; between them
 				// the cache answers and nothing leaves the machine.
-				prs.PollIfDue(liveCWDs(sessions), now)
+				prs.PollIfDue(liveDirs(sessions), now)
 				if seg := prstate.Segment(livePRs(sessions, prs.States(now))); seg != "" {
 					line += " " + seg
 				}
@@ -197,12 +197,13 @@ func openPRs(root, login string, interval time.Duration) *prstate.Tracker {
 	return prstate.New(prstate.RealRunner{Timeout: teaTimeout}, login, interval, filepath.Join(base, "compass", "prs.json"))
 }
 
-// liveCWDs is where each live session works, keyed as the fleet keys it.
-func liveCWDs(sessions []fleet.Session) map[string]string {
-	out := map[string]string{}
+// liveDirs is where each live session works, keyed as the fleet keys it:
+// its cwd first, then the directories its tool calls worked in.
+func liveDirs(sessions []fleet.Session) map[string][]string {
+	out := map[string][]string{}
 	for _, s := range sessions {
-		if s.Live && s.Info.CWD != "" {
-			out[s.Info.Key()] = s.Info.CWD
+		if s.Live {
+			out[s.Info.Key()] = ui.WorkDirs(s)
 		}
 	}
 	return out
@@ -210,8 +211,8 @@ func liveCWDs(sessions []fleet.Session) map[string]string {
 
 // livePRs keeps the pull requests of the live sessions: the status line
 // counts what is happening, not the archive.
-func livePRs(sessions []fleet.Session, states map[string]prstate.Status) map[string]prstate.Status {
-	out := map[string]prstate.Status{}
+func livePRs(sessions []fleet.Session, states map[string][]prstate.Status) map[string][]prstate.Status {
+	out := map[string][]prstate.Status{}
 	for _, s := range sessions {
 		if st, ok := states[s.Info.Key()]; ok && s.Live {
 			out[s.Info.Key()] = st

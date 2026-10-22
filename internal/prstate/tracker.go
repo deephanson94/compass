@@ -65,8 +65,8 @@ type Tracker struct {
 	stale     bool
 	off       string // why there is nothing to show; "" while it works
 	prs       map[string]*pr
-	links     map[string]link   // session key → checkout
-	cwds      map[string]string // session key → the cwd its link was read from
+	links     map[string][]link // session key → the checkouts it works in
+	cwds      map[string]string // session key → the dirs its links were read from, joined
 }
 
 // cacheFile is what a Tracker writes down for the next process.
@@ -76,7 +76,7 @@ type cacheFile struct {
 	Stale    bool              `json:"stale"`
 	Off      string            `json:"off,omitempty"`
 	PRs      []*pr             `json:"prs"`
-	Links    map[string]link   `json:"links"`
+	Links    map[string][]link `json:"links"`
 	CWDs     map[string]string `json:"cwds"`
 }
 
@@ -85,7 +85,7 @@ type cacheFile struct {
 // unreadable cache is a fresh start.
 func New(run Runner, login string, interval time.Duration, path string) *Tracker {
 	t := &Tracker{run: run, login: login, interval: interval, path: path,
-		prs: map[string]*pr{}, links: map[string]link{}, cwds: map[string]string{}}
+		prs: map[string]*pr{}, links: map[string][]link{}, cwds: map[string]string{}}
 	if path == "" {
 		return t
 	}
@@ -126,7 +126,10 @@ func (t *Tracker) Due(now time.Time) bool {
 // any session it has not seen in the background — git only, no network — so
 // a session opened between polls finds a pull request the last poll already
 // knows. It returns at once.
-func (t *Tracker) Kick(cwds map[string]string, now time.Time) {
+//
+// dirs is each session's directories by session key: its cwd first, then
+// wherever else its tool calls worked (fleet.Session.Dirs).
+func (t *Tracker) Kick(dirs map[string][]string, now time.Time) {
 	t.mu.Lock()
 	if t.interval <= 0 {
 		t.mu.Unlock()
@@ -136,18 +139,18 @@ func (t *Tracker) Kick(cwds map[string]string, now time.Time) {
 		t.polling, t.pollStart = true, now
 		t.mu.Unlock()
 		go func() {
-			_ = t.Poll(cwds, now)
+			_ = t.Poll(dirs, now)
 			t.mu.Lock()
 			t.polling = false
 			t.mu.Unlock()
 		}()
 		return
 	}
-	fresh := map[string]string{}
+	fresh := map[string][]string{}
 	if !t.linking {
-		for key, cwd := range cwds {
-			if prev, ok := t.cwds[key]; !ok || prev != cwd {
-				fresh[key] = cwd
+		for key, ds := range dirs {
+			if prev, ok := t.cwds[key]; !ok || prev != joinDirs(ds) {
+				fresh[key] = ds
 			}
 		}
 	}
@@ -160,8 +163,8 @@ func (t *Tracker) Kick(cwds map[string]string, now time.Time) {
 	go func() {
 		links := t.linkAll(fresh)
 		t.mu.Lock()
-		for key, cwd := range fresh {
-			t.cwds[key] = cwd
+		for key, ds := range fresh {
+			t.cwds[key] = joinDirs(ds)
 			if l, ok := links[key]; ok {
 				t.links[key] = l
 			} else {
@@ -175,26 +178,75 @@ func (t *Tracker) Kick(cwds map[string]string, now time.Time) {
 
 // PollIfDue polls now if a poll is owed, and waits for it: `compass status`
 // is a fresh process, and tmux keeps the last line on the bar while it runs.
-func (t *Tracker) PollIfDue(cwds map[string]string, now time.Time) {
+func (t *Tracker) PollIfDue(dirs map[string][]string, now time.Time) {
 	if t.Due(now) {
-		_ = t.Poll(cwds, now)
+		_ = t.Poll(dirs, now)
 	}
 }
 
-// linkAll reads each session's checkout, one git pair per distinct cwd.
-func (t *Tracker) linkAll(cwds map[string]string) map[string]link {
-	byCwd := map[string]*link{}
-	out := map[string]link{}
-	for key, cwd := range cwds {
-		l, seen := byCwd[cwd]
+func joinDirs(ds []string) string { return strings.Join(ds, "\n") }
+
+// childReposMax bounds how many folders under a cwd are looked at.
+const childReposMax = 64
+
+// childRepos is the folders directly under dir that are git checkouts: a
+// session opened in a working dir above its repositories works in them
+// without its cwd naming any.
+func childRepos(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		child := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(filepath.Join(child, ".git")); err == nil {
+			out = append(out, child)
+			if len(out) == childReposMax {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// linkAll reads the checkouts each session works in: its cwd, the folders
+// under its cwd that are checkouts, and every other directory its tool
+// calls worked in. One git trio per checkout, however many sessions and
+// directories lead to it; a repository and branch is listed once.
+func (t *Tracker) linkAll(dirs map[string][]string) map[string][]link {
+	byDir := map[string]*link{}
+	resolve := func(d string) *link {
+		l, seen := byDir[d]
 		if !seen {
-			if got, ok := linkOf(t.run, cwd); ok {
+			if got, ok := linkOf(t.run, d); ok {
 				l = &got
 			}
-			byCwd[cwd] = l
+			byDir[d] = l
 		}
-		if l != nil {
-			out[key] = *l
+		return l
+	}
+	out := map[string][]link{}
+	for key, ds := range dirs {
+		var ls []link
+		have := map[link]bool{}
+		for i, d := range ds {
+			cands := []string{d}
+			if i == 0 {
+				cands = append(cands, childRepos(d)...)
+			}
+			for _, c := range cands {
+				if l := resolve(c); l != nil && !have[*l] {
+					have[*l] = true
+					ls = append(ls, *l)
+				}
+			}
+		}
+		if len(ls) > 0 {
+			out[key] = ls
 		}
 	}
 	return out
@@ -204,11 +256,17 @@ func (t *Tracker) linkAll(cwds map[string]string) map[string]link {
 // the detail of each pull request a session's repository has open whose
 // updated_at moved since the last poll. A failed call keeps the state it
 // would have replaced and marks it stale; the error is the first one met.
-func (t *Tracker) Poll(cwds map[string]string, now time.Time) error {
-	links := t.linkAll(cwds)
+func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
+	links := t.linkAll(dirs)
 	repos := map[string]bool{}
-	for _, l := range links {
-		repos[l.Repo] = true
+	for _, ls := range links {
+		for _, l := range ls {
+			repos[l.Repo] = true
+		}
+	}
+	sigs := make(map[string]string, len(dirs))
+	for key, ds := range dirs {
+		sigs[key] = joinDirs(ds)
 	}
 
 	t.mu.Lock()
@@ -217,7 +275,7 @@ func (t *Tracker) Poll(cwds map[string]string, now time.Time) error {
 	for k, p := range t.prs {
 		prev[k] = p
 	}
-	t.links, t.cwds = links, copyMap(cwds)
+	t.links, t.cwds = links, sigs
 	t.mu.Unlock()
 
 	finish := func(next map[string]*pr, stale bool, off string, err error) error {
@@ -364,31 +422,41 @@ func fetch(r Runner, login, repo string, n int) (Detail, error) {
 // States is every linked session's pull request as of the last poll, keyed
 // by session key. It never touches the network. A session whose branch has
 // no pull request open has no entry.
-func (t *Tracker) States(now time.Time) map[string]Status {
+//
+// A session working in several checkouts has a pull request for each that
+// has one open, most urgent first (Sort).
+func (t *Tracker) States(now time.Time) map[string][]Status {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.interval <= 0 || t.off != "" {
 		return nil
 	}
 	stale := t.stale || (t.polling && now.Sub(t.pollStart) > slowPoll)
-	out := map[string]Status{}
-	for key, l := range t.links {
-		var best *pr
-		for _, p := range t.prs {
-			if p.Repo != l.Repo || p.HeadRef != l.Branch {
+	out := map[string][]Status{}
+	for key, ls := range t.links {
+		var sts []Status
+		for _, l := range ls {
+			var best *pr
+			for _, p := range t.prs {
+				if p.Repo != l.Repo || p.HeadRef != l.Branch {
+					continue
+				}
+				// An open one over one just merged, then the newest.
+				if best == nil || (best.Done && !p.Done) || (best.Done == p.Done && p.Number > best.Number) {
+					best = p
+				}
+			}
+			if best == nil {
 				continue
 			}
-			// An open one over one just merged, then the newest.
-			if best == nil || (best.Done && !p.Done) || (best.Done == p.Done && p.Number > best.Number) {
-				best = p
-			}
+			st := best.Status
+			st.Stale = stale
+			sts = append(sts, st)
 		}
-		if best == nil {
-			continue
+		if len(sts) > 0 {
+			Sort(sts)
+			out[key] = sts
 		}
-		st := best.Status
-		st.Stale = stale
-		out[key] = st
 	}
 	return out
 }

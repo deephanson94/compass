@@ -45,6 +45,10 @@ type entry struct {
 	// remembers rather than replaying it every second. `merge` clears it
 	// the moment the transcript grows (round 60).
 	askDenied bool
+
+	// dirs is where the session's own tool calls worked (workDirs), most
+	// recent last. Live sessions only, like the class.
+	dirs []string
 }
 
 // DefaultLiveWindow is the recency door a new Manager opens: a session with no
@@ -393,6 +397,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 				Waiting: waiting,
 				Class:   e.class, HasClass: e.hasClass,
 				Outcome: e.outcome(),
+				Dirs:    append([]string(nil), e.dirs...),
 			})
 		} else {
 			archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
@@ -416,7 +421,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 
 // fold is the entry's own resume state (EntryFold).
 func (e *entry) fold() EntryFold {
-	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model}
+	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model, Dirs: e.dirs}
 	if e.outcomes != nil {
 		f.Outcomes = e.outcomes.Fold()
 	}
@@ -428,6 +433,7 @@ func (e *entry) fold() EntryFold {
 func (e *entry) restore(f EntryFold) {
 	e.class, e.hasClass, e.titleRank = f.Class, f.HasClass, f.TitleRank
 	e.outcomes = journey.RestoreOutcomes(f.Outcomes)
+	e.dirs = append([]string(nil), f.Dirs...)
 	if e.info.Model == "" {
 		e.info.Model = f.Model
 	}
@@ -522,6 +528,7 @@ func (e *entry) sleep() {
 	e.sawEvent = false
 	e.hasClass = false
 	e.outcomes = nil
+	e.dirs = nil
 }
 
 // archivedSnap is the whole verdict an archived session gets: it did something
@@ -615,6 +622,9 @@ func (e *entry) absorb(ev transcript.Event) {
 		}
 	}
 	e.outcomes.Observe(ev)
+	if dirs := workDirs(ev, e.info.CWD); len(dirs) > 0 {
+		e.dirs = noteWorkDirs(e.dirs, dirs...)
+	}
 	if !ev.IsSidechain && ev.CWD != "" {
 		e.info.CWD, e.info.GitBranch = ev.CWD, ev.GitBranch
 		if e.info.OriginCWD == "" {

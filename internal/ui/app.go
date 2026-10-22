@@ -81,7 +81,7 @@ type fleetMsg struct {
 
 	// prs is each session's pull request as the tracker last knew it; nil
 	// when the feature is off.
-	prs map[string]prstate.Status
+	prs map[string][]prstate.Status
 
 	// paired says the poll ran after the tmux panes had been paired with a
 	// fleet: its liveness is the whole rule, a pane or the recency door,
@@ -234,7 +234,7 @@ type Model struct {
 	// the render loop; prs is its answer as of the last poll, by session
 	// key. A nil tracker is the feature off.
 	prTracker *prstate.Tracker
-	prs       map[string]prstate.Status
+	prs       map[string][]prstate.Status
 
 	// cursor is the Lv2 selection: an index into TrailRows(trail, level), or -1
 	// before the level is entered. narrated is the trail the last narration was
@@ -548,7 +548,7 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 
 // SetPRs gives the model each session's pull request, by session key
 // (exported so a harness can render one).
-func (m *Model) SetPRs(prs map[string]prstate.Status) {
+func (m *Model) SetPRs(prs map[string][]prstate.Status) {
 	m.retireTrailMemo()
 	m.prs = prs
 }
@@ -656,13 +656,13 @@ func (m *Model) refresh() tea.Cmd {
 		if prs != nil {
 			// The tracker polls in its own goroutine when a poll is due;
 			// this only reads what it last learned.
-			cwds := map[string]string{}
+			dirs := map[string][]string{}
 			for _, s := range sessions {
-				if s.Live && s.Info.CWD != "" {
-					cwds[s.Info.Key()] = s.Info.CWD
+				if s.Live {
+					dirs[s.Info.Key()] = WorkDirs(s)
 				}
 			}
-			prs.Kick(cwds, now)
+			prs.Kick(dirs, now)
 			msg.prs = prs.States(now)
 		}
 		// The agents' own files, for every open lane of every trail polled:
