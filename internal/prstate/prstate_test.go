@@ -784,3 +784,43 @@ func TestANamedPRAReviewSearchListsShowsAsNotReviewed(t *testing.T) {
 		t.Fatalf("got %+v, want #2042 not reviewed yet", st)
 	}
 }
+
+// A pull request a session names that Gitea cannot return — an issue's
+// number, a typo, a repository out of reach — is said in the diagnostic,
+// stales nothing, and is not asked again for an hour.
+func TestANamedPRThatCannotBeReadStalesNothing(t *testing.T) {
+	f := gitea(t, fixture(t), "x")
+	f.answers["tea api /repos/org/repo/pulls/9999"] = `{"message":"The target couldn't be found.","url":"https://gitea/api/swagger"}`
+	tr := New(f, "", time.Minute, "")
+	work := map[string]Work{"s1": {Dirs: []string{cwd}, PRs: []string{"org/repo#9999"}}}
+	if err := tr.Poll(work, now); err != nil {
+		t.Fatalf("a missing named PR failed the poll: %v", err)
+	}
+	st, ok := one(tr.States(now)["s1"])
+	if !ok || st.Number != 1118 || st.Stale {
+		t.Fatalf("got %+v, want #1118 fresh", st)
+	}
+	said := false
+	for _, e := range tr.Report().Errors {
+		said = said || (strings.Contains(e, "named org/repo#9999") && strings.Contains(e, "couldn't be found"))
+	}
+	if !said {
+		t.Fatalf("errors %q, want Gitea's own word on #9999", tr.Report().Errors)
+	}
+	before := f.teaCalls()
+	_ = tr.Poll(work, now.Add(10*time.Minute))
+	for _, c := range f.calls[before:] {
+		if strings.Contains(c, "/pulls/9999") {
+			t.Fatal("a named PR that could not be read was asked again inside the hour")
+		}
+	}
+	before = f.teaCalls()
+	_ = tr.Poll(work, now.Add(61*time.Minute))
+	asked := false
+	for _, c := range f.calls[before:] {
+		asked = asked || strings.Contains(c, "/pulls/9999")
+	}
+	if !asked {
+		t.Fatal("a named PR that could not be read is never asked again")
+	}
+}

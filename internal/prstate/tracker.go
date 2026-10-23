@@ -57,7 +57,15 @@ type pr struct {
 	// review after all — yours, or one you never touched. Kept so it is not
 	// fetched again until it moves; never shown.
 	Ignore bool `json:"ignore,omitempty"`
+	// MissingAt is when a pull request a session names could not be read —
+	// no such pull request, or none this login may see. It is not asked
+	// again for missingRetry.
+	MissingAt time.Time `json:"missing_at,omitzero"`
 }
+
+// missingRetry is how long a named pull request that could not be read is
+// left alone: a number that is an issue, a typo, a repository out of reach.
+const missingRetry = time.Hour
 
 func prKey(repo string, n int) string { return fmt.Sprintf("%s#%d", repo, n) }
 
@@ -498,15 +506,24 @@ func (t *Tracker) Poll(work map[string]Work, now time.Time) error {
 			next[k] = &cp
 			continue
 		}
+		if old != nil && !old.MissingAt.IsZero() && now.Sub(old.MissingAt) < missingRetry {
+			next[k] = old // could not be read an hour ago; not asked again yet
+			continue
+		}
 		var p Pull
 		err := api(t.run, t.login, pullPath(repo, n), &p)
 		if err == nil && p.Number == 0 {
-			err = fmt.Errorf("tea api %s: no pull request", pullPath(repo, n))
+			err = fmt.Errorf("tea api %s: not a pull request", pullPath(repo, n))
 		}
 		if err != nil {
-			fail(err)
-			if old != nil {
-				next[k] = old
+			// A name in a transcript is a hint, not a promise: an issue's
+			// number, a typo, a repository this login cannot see. It is
+			// said in the diagnostic and stales nothing else.
+			errs = append(errs, "named "+k+": "+err.Error())
+			if old != nil && old.MissingAt.IsZero() {
+				next[k] = old // it was readable: keep what was known
+			} else {
+				next[k] = &pr{Repo: repo, Number: n, Ignore: true, MissingAt: now}
 			}
 			continue
 		}

@@ -134,6 +134,16 @@ func api(r Runner, login, path string, v any) error {
 	if err := json.Unmarshal(out, v); err != nil {
 		return fmt.Errorf("tea api %s: %s", path, firstLine(out))
 	}
+	// Gitea's refusal is an object with a message — "The target couldn't
+	// be found.", "user does not have permission" — which decodes into a
+	// pull or a user without complaint and reads as an empty one. None of
+	// the shapes compass reads has a message of its own at the top.
+	var refusal struct {
+		Message string `json:"message"`
+	}
+	if len(out) > 0 && out[0] == '{' && json.Unmarshal(out, &refusal) == nil && refusal.Message != "" {
+		return fmt.Errorf("tea api %s: %s", path, refusal.Message)
+	}
 	return nil
 }
 
