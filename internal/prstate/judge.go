@@ -44,6 +44,12 @@ type Status struct {
 	// Stale says the last poll failed, or is taking too long: this is the
 	// last state known, not the present one.
 	Stale bool
+
+	// Review says this is someone else's pull request you are reviewing,
+	// judged from your side of it (JudgeReview); the line says "review PR".
+	Review bool
+	// Branch is the pull request's head branch, for the diagnostic.
+	Branch string `json:",omitempty"`
 }
 
 // Ready is the reason an approved pull request carries.
@@ -61,6 +67,9 @@ func (s Status) line(now time.Time, clock bool, repo string) string {
 		now = time.Time{}
 	}
 	pr := fmt.Sprintf("PR %s#%d", repo, s.Number)
+	if s.Review {
+		pr = "review " + pr
+	}
 	var line string
 	switch s.Move {
 	case Merged:
@@ -80,6 +89,9 @@ func (s Status) line(now time.Time, clock bool, repo string) string {
 			who = "review"
 		}
 		line = pr + " · waiting on " + who
+		if s.Reason != "" {
+			line = pr + " · " + s.Reason + " · waiting on " + who // "you approved · waiting on alice"
+		}
 		if !s.At.IsZero() && !now.IsZero() {
 			line += " · " + Age(now, s.At)
 		}
@@ -117,6 +129,7 @@ type user struct {
 type Pull struct {
 	Number    int       `json:"number"`
 	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
 	Merged    bool      `json:"merged"`
 	UpdatedAt time.Time `json:"updated_at"`
 	HTMLURL   string    `json:"html_url"`
@@ -275,6 +288,98 @@ func Judge(d Detail, me string) Status {
 	return s
 }
 
+// JudgeReview decides whose move someone else's pull request is, as its
+// reviewer me sees it. Your words are your submitted reviews and your
+// comments; the author's are their comments and their pushes — a push is
+// the head commit's date, or a review of yours marked stale. Another
+// reviewer's words are neither: they do not move your turn.
+//
+// The newest of those decides it: the author's, or a review requested of
+// you that you have not given, is your move; yours is theirs. An approval
+// of yours that nothing of the author's came after is theirs too — what is
+// left is merging. ok is false where you are neither requested nor have
+// said anything: the pull request is not yours to review.
+func JudgeReview(d Detail, me string) (s Status, ok bool) {
+	p := d.Pull
+	s = Status{Number: p.Number, URL: p.HTMLURL, Review: true, Branch: p.Head.Ref}
+	isMe := func(login string) bool { return strings.EqualFold(login, me) }
+	author := p.User.Login
+	isAuthor := func(login string) bool { return strings.EqualFold(login, author) }
+
+	requested := false
+	for _, u := range p.RequestedReviewers {
+		if isMe(u.Login) {
+			requested = true
+		}
+	}
+	var mine time.Time            // my newest word
+	var pushAt, replyAt time.Time // the author's newest push and comment
+	mineApproved := false         // my newest review approves
+	var mineReviewAt time.Time
+	later := func(t *time.Time, at time.Time) {
+		if at.After(*t) {
+			*t = at
+		}
+	}
+	for _, r := range d.Reviews {
+		if r.State == "PENDING" || r.State == "" || r.SubmittedAt.IsZero() || !isMe(r.User.Login) {
+			continue
+		}
+		later(&mine, r.SubmittedAt)
+		if !r.SubmittedAt.Before(mineReviewAt) {
+			mineReviewAt, mineApproved = r.SubmittedAt, r.State == "APPROVED"
+		}
+		if r.Stale {
+			// Commits landed after this review: the push stands just behind it.
+			later(&pushAt, r.SubmittedAt.Add(time.Nanosecond))
+		}
+	}
+	later(&pushAt, d.HeadAt)
+	for _, c := range d.IssueComments {
+		switch {
+		case isMe(c.User.Login):
+			later(&mine, c.CreatedAt)
+		case isAuthor(c.User.Login):
+			later(&replyAt, c.CreatedAt)
+		}
+	}
+	theirs := pushAt
+	later(&theirs, replyAt)
+
+	switch p := d.Pull; {
+	case p.Merged:
+		s.Move = Merged
+		return s, true
+	case p.State == "closed":
+		s.Move = Closed
+		return s, true
+	}
+	if mine.IsZero() {
+		if !requested {
+			return s, false
+		}
+		s.Move, s.Reason, s.At = Yours, "review requested", p.CreatedAt
+		return s, true
+	}
+	if !theirs.After(mine) {
+		s.Move, s.Who, s.At = Theirs, author, mine
+		if mineApproved {
+			s.Reason = "you approved"
+		}
+		return s, true
+	}
+	s.Move, s.At = Yours, theirs
+	switch pushed, replied := pushAt.After(mine), replyAt.After(mine); {
+	case pushed && replied:
+		s.Reason = author + " pushed and replied"
+	case pushed:
+		s.Reason = author + " pushed"
+	default:
+		s.Reason = author + " replied"
+	}
+	return s, true
+}
+
 // waitingOn names who a pull request waits on: the reviewers requested on
 // it, else whoever last spoke on it who is not you.
 func waitingOn(p Pull, evs []event) string {
@@ -386,6 +491,26 @@ func repoName(repo string) string {
 		return repo[i+1:]
 	}
 	return repo
+}
+
+// ReviewSegment is the status line's word for the pull requests you review:
+// "RV▲2" when two wait on you, "RV▲0" when every one waits on its author,
+// "" when there are none open.
+func ReviewSegment(sts []Status) string {
+	open, yours := 0, 0
+	for _, s := range sts {
+		switch s.Move {
+		case Yours:
+			open++
+			yours++
+		case Theirs:
+			open++
+		}
+	}
+	if open == 0 {
+		return ""
+	}
+	return fmt.Sprintf("RV▲%d", yours)
 }
 
 // Segment is the status line's word for the pull requests: "PR▲1" when one

@@ -43,7 +43,7 @@ func main() {
 	// deck: a reader probing for a subcommand (a mod asking for `trail`)
 	// must get an error back, never a full-screen deck with no terminal.
 	switch sub {
-	case "", "status", "panes", "help":
+	case "", "status", "panes", "prs", "help":
 	default:
 		fmt.Fprintf(os.Stderr, "compass: unknown command %q (try compass help)\n", sub)
 		os.Exit(2)
@@ -123,8 +123,13 @@ func main() {
 				// A poll is due once every -pr-interval; between them
 				// the cache answers and nothing leaves the machine.
 				prs.PollIfDue(liveDirs(sessions), now)
-				if seg := prstate.Segment(livePRs(sessions, prs.States(now))); seg != "" {
-					line += " " + seg
+				for _, seg := range []string{
+					prstate.Segment(livePRs(sessions, prs.States(now))),
+					prstate.ReviewSegment(prs.Reviews(now)),
+				} {
+					if seg != "" {
+						line += " " + seg
+					}
 				}
 			}
 		}
@@ -134,6 +139,16 @@ func main() {
 		printPanes(os.Stdout, mgr, *root, time.Now())
 		fmt.Println()
 		fmt.Println(prstate.Probe(prstate.RealRunner{Timeout: teaTimeout}, *teaLogin, *prInterval))
+	case "prs":
+		resume := openResume(mgr, *root)
+		now := time.Now()
+		sessions, err := mgr.Refresh(now)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "compass:", err)
+			os.Exit(1)
+		}
+		printPRs(os.Stdout, sessions, prs, now)
+		resume.Save()
 	case "help":
 		fs.Usage()
 	default:
@@ -264,6 +279,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "\n  compass           the deck: every session, one glance")
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
 		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
+		fmt.Fprintln(fs.Output(), "  compass prs       poll Gitea now: each session's checkouts and pull requests (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()

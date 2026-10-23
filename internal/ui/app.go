@@ -82,6 +82,8 @@ type fleetMsg struct {
 	// prs is each session's pull request as the tracker last knew it; nil
 	// when the feature is off.
 	prs map[string][]prstate.Status
+	// reviews is every pull request of someone else's you review.
+	reviews []prstate.Status
 
 	// paired says the poll ran after the tmux panes had been paired with a
 	// fleet: its liveness is the whole rule, a pane or the recency door,
@@ -235,6 +237,7 @@ type Model struct {
 	// key. A nil tracker is the feature off.
 	prTracker *prstate.Tracker
 	prs       map[string][]prstate.Status
+	reviews   []prstate.Status
 
 	// cursor is the Lv2 selection: an index into TrailRows(trail, level), or -1
 	// before the level is entered. narrated is the trail the last narration was
@@ -553,6 +556,12 @@ func (m *Model) SetPRs(prs map[string][]prstate.Status) {
 	m.prs = prs
 }
 
+// SetReviews gives the model the pull requests you review (a harness's way in).
+func (m *Model) SetReviews(reviews []prstate.Status) {
+	m.retireTrailMemo()
+	m.reviews = reviews
+}
+
 // SetPanes gives the model the key → pane mapping: the location line in the
 // fleet, the source of the mirror, and the pane Enter attaches to.
 func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
@@ -664,6 +673,7 @@ func (m *Model) refresh() tea.Cmd {
 			}
 			prs.Kick(dirs, now)
 			msg.prs = prs.States(now)
+			msg.reviews = prs.Reviews(now)
 		}
 		// The agents' own files, for every open lane of every trail polled:
 		// paired by the call's id, never by its name.
@@ -842,7 +852,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and the mirror falls back to the transcript — until the 5s pane tick.
 		first := !m.loaded
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
-		m.prs = msg.prs
+		m.prs, m.reviews = msg.prs, msg.reviews
 		if msg.agents != nil || msg.hasTrail {
 			m.agents = msg.agents // a poll that read the lanes' files replaces what was known
 		}
@@ -4204,6 +4214,9 @@ func (m *Model) statusChips() string {
 		// on the board — the number `X` clears in one key.
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("%s%d unanswered %s", fleet.GlyphNeedsYou, waits, m.age(waitSince))))
 	}
+	// The pull requests: yours a session works on, and the ones you review,
+	// which may have no session at all — this chip is where they show.
+	parts = append(parts, m.prChips()...)
 	for _, st := range []state.State{state.Working, state.Idle} {
 		if n := counts[st]; n > 0 {
 			parts = append(parts, stateStyle(st).Render(fmt.Sprintf("%s%d", fleet.Glyph(st), n)))

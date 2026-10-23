@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/prstate"
@@ -61,4 +63,28 @@ func (m *Model) prLine(sts []prstate.Status, w int) string {
 		return needsYouStyle.Render(clip(line, w))
 	}
 	return dimStyle.Render(clip(line, w))
+}
+
+// prChips are the header's pull-request counts, as `compass status` says
+// them: "PR▲1" for your own waiting on you, "RV▲2" for the ones you review.
+// Amber while one waits on you, dim while all wait on someone else; absent
+// when there are none.
+func (m *Model) prChips() []string {
+	live := map[string][]prstate.Status{}
+	for _, s := range m.sessions {
+		if sts := m.prs[s.Info.Key()]; s.Live && len(sts) > 0 {
+			live[s.Info.Key()] = sts // the archive's own view counts them too
+		}
+	}
+	var out []string
+	for _, seg := range []string{prstate.Segment(live), prstate.ReviewSegment(m.reviews)} {
+		switch {
+		case seg == "":
+		case strings.HasSuffix(seg, "▲0"):
+			out = append(out, dimStyle.Render(seg))
+		default:
+			out = append(out, needsYouStyle.Render(seg))
+		}
+	}
+	return out
 }

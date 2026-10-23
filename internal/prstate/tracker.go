@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,14 @@ const slowPoll = 30 * time.Second
 // searchPath is the one call a poll always makes: every open pull request
 // the login opened, across every repository.
 const searchPath = "/repos/issues/search?type=pulls&created=true&state=open&limit=50"
+
+// reviewPaths are the searches for other people's pull requests you review:
+// the ones a review is requested of you on, and the ones you reviewed —
+// Gitea can drop you from the requested list once you have.
+var reviewPaths = []string{
+	"/repos/issues/search?type=pulls&review_requested=true&state=open&limit=50",
+	"/repos/issues/search?type=pulls&reviewed=true&state=open&limit=50",
+}
 
 // searchItem is one hit of the search.
 type searchItem struct {
@@ -43,6 +52,10 @@ type pr struct {
 	// Done is a merge or close found on the last poll: shown on that poll's
 	// rows, dropped by the next one.
 	Done bool `json:"done"`
+	// Ignore is a pull request a review search listed that is not yours to
+	// review after all — yours, or one you never touched. Kept so it is not
+	// fetched again until it moves; never shown.
+	Ignore bool `json:"ignore,omitempty"`
 }
 
 func prKey(repo string, n int) string { return fmt.Sprintf("%s#%d", repo, n) }
@@ -63,7 +76,9 @@ type Tracker struct {
 	pollStart time.Time
 	linking   bool
 	stale     bool
-	off       string // why there is nothing to show; "" while it works
+	off       string   // why there is nothing to show; "" while it works
+	errs      []string // what went wrong on the last poll, for the diagnostic
+	found     [3]int   // what the last poll's searches listed: authored, review requested, reviewed
 	prs       map[string]*pr
 	links     map[string][]link // session key → the checkouts it works in
 	cwds      map[string]string // session key → the dirs its links were read from, joined
@@ -282,6 +297,8 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 		t.mu.Lock()
 		if next != nil {
 			t.prs = next
+		} else if err != nil {
+			t.errs, t.found = []string{err.Error()}, [3]int{} // the poll stopped here
 		}
 		t.me, t.lastPoll, t.stale, t.off = me, now, stale, off
 		t.mu.Unlock()
@@ -310,11 +327,14 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 	}
 
 	var firstErr error
+	var errs []string
 	fail := func(err error) {
 		if firstErr == nil {
 			firstErr = err
 		}
+		errs = append(errs, err.Error())
 	}
+	found := [3]int{len(items)}
 	next := map[string]*pr{}
 	seen := map[string]bool{}
 	for _, it := range items {
@@ -342,10 +362,57 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 		next[k] = &pr{Repo: repo, Number: it.Number, UpdatedAt: it.UpdatedAt, HeadRef: d.Pull.Head.Ref,
 			Status: st, Done: st.Move == Merged || st.Move == Closed}
 	}
+	// Other people's pull requests you review. A Gitea that does not know
+	// these searches fails them: that is said in the diagnostic and costs
+	// nothing else — your own pull requests are still judged.
+	reviewErr := false
+	for i, path := range reviewPaths {
+		var hits []searchItem
+		if err := api(t.run, t.login, path, &hits); err != nil {
+			errs = append(errs, err.Error())
+			reviewErr = true
+			continue
+		}
+		found[i+1] = len(hits)
+		for _, it := range hits {
+			repo := strings.ToLower(it.Repository.FullName)
+			k := prKey(repo, it.Number)
+			if it.Number == 0 || seen[k] {
+				continue // yours, judged above, or listed by the other search
+			}
+			seen[k] = true
+			old := prev[k]
+			if old != nil && old.UpdatedAt == it.UpdatedAt && !old.Done {
+				next[k] = old
+				continue
+			}
+			d, err := fetch(t.run, t.login, repo, it.Number)
+			if err != nil {
+				fail(err)
+				if old != nil {
+					next[k] = old
+				}
+				continue
+			}
+			e := &pr{Repo: repo, Number: it.Number, UpdatedAt: it.UpdatedAt, HeadRef: d.Pull.Head.Ref}
+			st, ok := JudgeReview(d, me)
+			if strings.EqualFold(d.Pull.User.Login, me) {
+				ok = false // your own, which the authored search answers for
+			}
+			st.Repo = repo
+			e.Status, e.Ignore = st, !ok
+			e.Done = ok && (st.Move == Merged || st.Move == Closed)
+			next[k] = e
+		}
+	}
 	// What the open search no longer lists was merged or closed — or fell
 	// past its page. One look says which, once; the next poll drops it.
 	for k, old := range prev {
-		if seen[k] || old.Done || !repos[old.Repo] {
+		if seen[k] || old.Done || old.Ignore || (!old.Status.Review && !repos[old.Repo]) {
+			continue
+		}
+		if old.Status.Review && reviewErr {
+			next[k] = old // the search that lists it failed: it was not seen, not gone
 			continue
 		}
 		var p Pull
@@ -359,16 +426,20 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 			continue
 		}
 		cp := *old
+		gone := Status{Repo: old.Repo, Number: old.Number, URL: old.Status.URL, Review: old.Status.Review, Branch: old.Status.Branch}
 		switch {
 		case p.Merged:
-			cp.Status = Status{Repo: old.Repo, Number: old.Number, URL: old.Status.URL, Move: Merged}
-			cp.Done = true
+			cp.Status, cp.Done = gone, true
+			cp.Status.Move = Merged
 		case p.State == "closed":
-			cp.Status = Status{Repo: old.Repo, Number: old.Number, URL: old.Status.URL, Move: Closed}
-			cp.Done = true
+			cp.Status, cp.Done = gone, true
+			cp.Status.Move = Closed
 		}
 		next[k] = &cp
 	}
+	t.mu.Lock()
+	t.errs, t.found = errs, found
+	t.mu.Unlock()
 	return finish(next, firstErr != nil, "", firstErr)
 }
 
@@ -438,7 +509,7 @@ func (t *Tracker) States(now time.Time) map[string][]Status {
 		for _, l := range ls {
 			var best *pr
 			for _, p := range t.prs {
-				if p.Repo != l.Repo || p.HeadRef != l.Branch {
+				if p.Ignore || p.Repo != l.Repo || p.HeadRef != l.Branch {
 					continue
 				}
 				// An open one over one just merged, then the newest.
@@ -459,6 +530,79 @@ func (t *Tracker) States(now time.Time) map[string][]Status {
 		}
 	}
 	return out
+}
+
+// Reviews is every pull request of someone else's you review, most urgent
+// first, whether or not a session works on its branch: the status line and
+// the deck's header count them. It never touches the network.
+func (t *Tracker) Reviews(now time.Time) []Status {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.interval <= 0 || t.off != "" {
+		return nil
+	}
+	stale := t.stale || (t.polling && now.Sub(t.pollStart) > slowPoll)
+	var out []Status
+	for _, p := range t.prs {
+		if p.Ignore || !p.Status.Review {
+			continue
+		}
+		st := p.Status
+		st.Stale = stale
+		out = append(out, st)
+	}
+	Sort(out)
+	return out
+}
+
+// Report is what the tracker knows, whole, for `compass prs`.
+type Report struct {
+	Me       string
+	Off      string
+	LastPoll time.Time
+	Stale    bool
+	Errors   []string
+	// Found is how many pull requests each search listed on the last poll:
+	// the ones you opened, the ones a review is requested of you on, the
+	// ones you reviewed.
+	Found [3]int
+	// Links is each session's checkouts, by session key.
+	Links map[string][]Link
+	// PRs is every pull request tracked, the ones not yours to review included.
+	PRs []Tracked
+}
+
+// Link is a checkout a session works in.
+type Link struct{ Repo, Branch string }
+
+// Tracked is one pull request as the tracker holds it.
+type Tracked struct {
+	Status
+	HeadRef string
+	Ignored bool
+}
+
+// Report hands back what the tracker knows.
+func (t *Tracker) Report() Report {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	r := Report{Me: t.me, Off: t.off, LastPoll: t.lastPoll, Stale: t.stale,
+		Errors: append([]string(nil), t.errs...), Found: t.found, Links: map[string][]Link{}}
+	for key, ls := range t.links {
+		for _, l := range ls {
+			r.Links[key] = append(r.Links[key], Link{Repo: l.Repo, Branch: l.Branch})
+		}
+	}
+	for _, p := range t.prs {
+		r.PRs = append(r.PRs, Tracked{Status: p.Status, HeadRef: p.HeadRef, Ignored: p.Ignore})
+	}
+	sort.Slice(r.PRs, func(i, j int) bool {
+		if r.PRs[i].Repo != r.PRs[j].Repo {
+			return r.PRs[i].Repo < r.PRs[j].Repo
+		}
+		return r.PRs[i].Number < r.PRs[j].Number
+	})
+	return r
 }
 
 // Off says why the tracker has nothing to show, "" when it works.

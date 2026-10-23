@@ -292,8 +292,14 @@ func TestPollSkipsDetailWhenNothingMoved(t *testing.T) {
 	if err := tr.Poll(sessions, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.teaCalls() - before; got != 1 {
-		t.Fatalf("second poll made %d tea calls, want the search alone: %v", got, f.calls[before:])
+	// The searches — yours, and the two for reviews — and nothing per PR.
+	if got := f.teaCalls() - before; got != 1+len(reviewPaths) {
+		t.Fatalf("second poll made %d tea calls, want the searches alone: %v", got, f.calls[before:])
+	}
+	for _, c := range f.calls[before:] {
+		if !strings.Contains(c, "/repos/issues/search?") {
+			t.Fatalf("second poll made a per-PR call: %s", c)
+		}
 	}
 	// And when it moves, the detail is read again.
 	f.answers["tea api "+searchPath] = strings.Replace(f.answers["tea api "+searchPath], "10:36:56", "10:50:00", 1)
@@ -490,5 +496,178 @@ func TestSegmentCountsASharedPROnce(t *testing.T) {
 	st := Status{Repo: "org/repo", Number: 1, Move: Yours}
 	if got := Segment(map[string][]Status{"a": {st}, "b": {st}}); got != "PR▲1" {
 		t.Fatalf("got %q, want PR▲1", got)
+	}
+}
+
+// asReviewer is the fixture as its reviewer sees it: alice opened it,
+// reviewer1 asked for changes and commented, alice pushed and replied.
+func asReviewer(t *testing.T) Detail {
+	t.Helper()
+	d := fixture(t)
+	d.Pull.User.Login = "alice"
+	d.Pull.CreatedAt = at("2026-10-21T09:00:00Z")
+	for i := range d.IssueComments {
+		if d.IssueComments[i].User.Login == "me" {
+			d.IssueComments[i].User.Login = "alice"
+		}
+	}
+	return d
+}
+
+func TestReviewAuthorRepliedIsYourMove(t *testing.T) {
+	s, ok := JudgeReview(asReviewer(t), "reviewer1")
+	if !ok || s.Move != Yours || s.Reason != "alice replied" {
+		t.Fatalf("got %+v %v, want your move, alice replied", s, ok)
+	}
+	if got, want := s.Line(now), "review PR #1118 · alice replied 20m ago"; got != want {
+		t.Fatalf("line %q, want %q", got, want)
+	}
+}
+
+func TestReviewMyWordLastIsTheirMove(t *testing.T) {
+	d := asReviewer(t)
+	d.IssueComments = d.IssueComments[:1] // alice has not replied
+	s, ok := JudgeReview(d, "reviewer1")
+	if !ok || s.Move != Theirs || s.Who != "alice" {
+		t.Fatalf("got %+v, want their move, waiting on alice", s)
+	}
+	if got, want := s.Line(now), "review PR #1118 · waiting on alice · 2h"; got != want {
+		t.Fatalf("line %q, want %q", got, want)
+	}
+}
+
+func TestReviewAuthorPushedIsYourMove(t *testing.T) {
+	d := asReviewer(t)
+	d.IssueComments = d.IssueComments[:1]
+	d.HeadAt = at("2026-10-22T09:30:00Z")
+	if s, _ := JudgeReview(d, "reviewer1"); s.Move != Yours || s.Reason != "alice pushed" {
+		t.Fatalf("got %+v, want your move, alice pushed", s)
+	}
+}
+
+func TestReviewRequestedAndNotGivenIsYourMove(t *testing.T) {
+	d := asReviewer(t)
+	d.Reviews, d.IssueComments = nil, nil
+	s, ok := JudgeReview(d, "reviewer1")
+	if !ok || s.Move != Yours || s.Reason != "review requested" || !s.At.Equal(d.Pull.CreatedAt) {
+		t.Fatalf("got %+v, want your move, review requested since it opened", s)
+	}
+	d.Pull.RequestedReviewers = nil // nobody asked and I said nothing: not mine
+	if _, ok := JudgeReview(d, "reviewer1"); ok {
+		t.Fatal("a PR I was never asked to review and never touched is mine to review")
+	}
+}
+
+func TestReviewMyApprovalIsTheirMove(t *testing.T) {
+	d := asReviewer(t)
+	d.Reviews = append(d.Reviews, Review{User: user{"reviewer1"}, State: "APPROVED", SubmittedAt: at("2026-10-22T10:45:00Z")})
+	s, _ := JudgeReview(d, "reviewer1")
+	if s.Move != Theirs || s.Reason != "you approved" {
+		t.Fatalf("got %+v, want their move, you approved", s)
+	}
+	if got, want := s.Line(now), "review PR #1118 · you approved · waiting on alice · 11m"; got != want {
+		t.Fatalf("line %q, want %q", got, want)
+	}
+}
+
+func TestReviewAnotherReviewerDoesNotMoveMyTurn(t *testing.T) {
+	d := asReviewer(t)
+	d.IssueComments = append(d.IssueComments[:1], Comment{User: user{"reviewer2"}, CreatedAt: at("2026-10-22T10:50:00Z")})
+	if s, _ := JudgeReview(d, "reviewer1"); s.Move != Theirs {
+		t.Fatalf("reviewer2's comment moved my turn: %+v", s)
+	}
+}
+
+// reviewGitea lists, besides my own #1118, alice's #2040 in another
+// repository, which waits on my review and which no session works on.
+func reviewGitea(t *testing.T) *fakeRunner {
+	t.Helper()
+	f := gitea(t, fixture(t), "x")
+	r := asReviewer(t)
+	r.Pull.Number, r.Pull.Head.Ref = 2040, "alice/fix"
+	// From me's side: reviewer1 is someone else; make me the reviewer.
+	for i := range r.Reviews {
+		r.Reviews[i].User.Login = "me"
+	}
+	for i := range r.IssueComments {
+		if r.IssueComments[i].User.Login == "reviewer1" {
+			r.IssueComments[i].User.Login = "me"
+		}
+	}
+	enc := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	f.answers["tea api "+reviewPaths[0]] = `[]`
+	f.answers["tea api "+reviewPaths[1]] = `[{"number":2040,"updated_at":"r","repository":{"full_name":"org/other"}},` +
+		`{"number":1118,"updated_at":"x","repository":{"full_name":"org/repo"}}]`
+	f.answers["tea api /repos/org/other/pulls/2040"] = enc(r.Pull)
+	f.answers["tea api /repos/org/other/pulls/2040/reviews"] = enc(r.Reviews)
+	f.answers["tea api /repos/org/other/issues/2040/comments"] = enc(r.IssueComments)
+	return f
+}
+
+// A pull request you review is tracked whether or not a session works on
+// it: the status line counts it, and a session on its branch shows it.
+func TestReviewsAreTrackedWithoutASession(t *testing.T) {
+	f := reviewGitea(t)
+	tr := New(f, "", time.Minute, "")
+	if err := tr.Poll(sessions, now); err != nil {
+		t.Fatal(err)
+	}
+	rv := tr.Reviews(now)
+	if len(rv) != 1 || rv[0].Number != 2040 || rv[0].Move != Yours || rv[0].Reason != "alice replied" {
+		t.Fatalf("reviews %+v, want alice's #2040 waiting on me", rv)
+	}
+	if got := ReviewSegment(rv); got != "RV▲1" {
+		t.Fatalf("segment %q, want RV▲1", got)
+	}
+	// My own #1118, which the reviewed search also lists, is judged as mine.
+	if st, _ := one(tr.States(now)["s1"]); st.Number != 1118 || st.Review {
+		t.Fatalf("session's PR %+v, want my own #1118", st)
+	}
+	// A session that checks alice's branch out shows the review.
+	f.answers["git -C /work/other rev-parse --show-toplevel"] = "/work/other\n"
+	f.answers["git -C /work/other rev-parse --abbrev-ref HEAD"] = "alice/fix\n"
+	f.answers["git -C /work/other remote get-url origin"] = "git@gitea.example.com:org/other.git\n"
+	if err := tr.Poll(map[string][]string{"s2": {"/work/other"}}, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := one(tr.States(now)["s2"]); st.Number != 2040 || !st.Review {
+		t.Fatalf("the reviewing session shows %+v, want review #2040", st)
+	}
+}
+
+// A Gitea that does not know the review searches costs nothing but them:
+// your own pull requests are fresh, and the reviews already known stay.
+func TestAFailedReviewSearchKeepsTheRest(t *testing.T) {
+	f := reviewGitea(t)
+	tr := New(f, "", time.Minute, "")
+	if err := tr.Poll(sessions, now); err != nil {
+		t.Fatal(err)
+	}
+	delete(f.answers, "tea api "+reviewPaths[1])
+	if err := tr.Poll(sessions, now.Add(time.Minute)); err != nil {
+		t.Fatalf("a failed review search failed the poll: %v", err)
+	}
+	if st, _ := one(tr.States(now)["s1"]); st.Stale {
+		t.Fatal("a failed review search marked my own PR stale")
+	}
+	if rv := tr.Reviews(now); len(rv) != 1 {
+		t.Fatalf("a failed review search dropped the reviews: %+v", rv)
+	}
+	if r := tr.Report(); len(r.Errors) == 0 {
+		t.Fatal("the diagnostic does not say the review search failed")
+	}
+}
+
+// Your own pull request, listed by the reviewed search where no session
+// works in its repository, is not one you review.
+func TestMyOwnPRIsNoReview(t *testing.T) {
+	tr := New(reviewGitea(t), "", time.Minute, "")
+	if err := tr.Poll(map[string][]string{}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range tr.Reviews(now) {
+		if st.Number == 1118 {
+			t.Fatalf("my own #1118 is counted as a review: %+v", st)
+		}
 	}
 }
