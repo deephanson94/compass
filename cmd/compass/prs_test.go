@@ -30,7 +30,7 @@ func TestPrintPRsWalksEveryStep(t *testing.T) {
 		"git -C /work remote get-url origin":                                       "git@gitea:org/repo.git\n",
 		"git -C /home rev-parse --show-toplevel":                                   "",
 		"tea api /user":                                                            `{"login":"me"}`,
-		"tea api /repos/issues/search?type=pulls&created=true&state=open&limit=50": `[{"number":5,"updated_at":"u","repository":{"full_name":"org/repo"}}]`,
+		"tea api /repos/issues/search?type=pulls&created=true&state=open&limit=50": `[{"number":5,"updated_at":"u","repository":{"full_name":"org/repo"}},{"number":9,"updated_at":"u","repository":{"full_name":"org/elsewhere"}}]`,
 		"tea api /repos/org/repo/pulls/5":                                          `{"number":5,"state":"open","user":{"login":"me"},"head":{"ref":"dev/x"},"requested_reviewers":[{"login":"bob"}]}`,
 		"tea api /repos/org/repo/pulls/5/reviews":                                  `[]`,
 		"tea api /repos/org/repo/issues/5/comments":                                `[{"user":{"login":"bob"},"created_at":"2026-10-22T10:00:00Z"}]`,
@@ -45,7 +45,8 @@ func TestPrintPRsWalksEveryStep(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"tea answers as me",
-		"searches: 1 opened by you · 0 asking your review · 0 you reviewed",
+		"searches: 2 opened by you · 0 asking your review · 0 you reviewed",
+		"your PRs not shown — no live session works in their repository (1):\n  org/elsewhere#9",
 		"api (aaaaaaaa)\n    looks in: /work\n    checkout: org/repo @ dev/x\n    shows: PR #5 · 1 new comment 1h ago",
 		"home (bbbbbbbb)\n    looks in: /nowhere/home\n    checkouts: none",
 		"org/repo#5 @ dev/x",

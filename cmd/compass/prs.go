@@ -10,6 +10,7 @@ import (
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/prstate"
+	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
 // printPRs is `compass prs`: one poll, now, whatever the interval, and
@@ -36,6 +37,9 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 	// Which pull request each session shows, by key.
 	shows := tr.States(now)
 	fmt.Fprintf(w, "\nlive sessions (%d):\n", len(dirs))
+	if len(dirs) == 0 {
+		fmt.Fprintln(w, "  none — no Claude session sits in a tmux pane or wrote in the last -live-within (5m)")
+	}
 	var keys []string
 	name := map[string]string{}
 	for _, s := range sessions {
@@ -64,7 +68,7 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 
 	fmt.Fprintf(w, "\npull requests (%d):\n", len(r.PRs))
 	if len(r.PRs) == 0 {
-		fmt.Fprintln(w, "  none — your own are tracked only in a repository a live session works in")
+		fmt.Fprintln(w, "  none")
 	}
 	for _, p := range r.PRs {
 		verdict := p.Line(now)
@@ -72,6 +76,11 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 			verdict = "not yours to review (never asked, never commented) — not shown"
 		}
 		fmt.Fprintf(w, "  %s#%d @ %s\n    %s\n", p.Repo, p.Number, p.HeadRef, verdict)
+	}
+
+	if len(r.Unlinked) > 0 {
+		fmt.Fprintf(w, "\nyour PRs not shown — no live session works in their repository (%d):\n", len(r.Unlinked))
+		fmt.Fprintf(w, "  %s\n", strings.Join(r.Unlinked, ", "))
 	}
 
 	if len(r.Errors) > 0 || err != nil {
@@ -95,4 +104,29 @@ func sessionLabel(s fleet.Session) string {
 		id = id[:8]
 	}
 	return n + " (" + id + ")"
+}
+
+// livePaned is the fleet as the deck sees it: a session sitting in a tmux
+// pane is live however long it has been quiet, not only one that wrote in
+// the last few minutes. The fleet is read, paired with the panes, and read
+// again with the pairing.
+func livePaned(mgr *fleet.Manager, now time.Time) ([]fleet.Session, error) {
+	sessions, err := mgr.Refresh(now)
+	if err != nil {
+		return nil, err
+	}
+	panes, err := tmuxop.ListPanes(tmuxop.RealRunner{})
+	if err != nil || len(panes) == 0 {
+		return sessions, nil // no tmux: the recency door is all there is
+	}
+	infos := make([]fleet.SessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		infos = append(infos, s.Info)
+	}
+	keys := map[string]bool{}
+	for key := range tmuxop.MapSessions(infos, panes, tmuxop.RealProc{}) {
+		keys[key] = true
+	}
+	mgr.MarkPaneMapped(keys)
+	return mgr.Refresh(now)
 }

@@ -79,6 +79,7 @@ type Tracker struct {
 	off       string   // why there is nothing to show; "" while it works
 	errs      []string // what went wrong on the last poll, for the diagnostic
 	found     [3]int   // what the last poll's searches listed: authored, review requested, reviewed
+	unlinked  []string // your own open PRs the last poll skipped: no session works in their repository
 	prs       map[string]*pr
 	links     map[string][]link // session key → the checkouts it works in
 	cwds      map[string]string // session key → the dirs its links were read from, joined
@@ -335,12 +336,17 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 		errs = append(errs, err.Error())
 	}
 	found := [3]int{len(items)}
+	var unlinked []string
 	next := map[string]*pr{}
 	seen := map[string]bool{}
 	for _, it := range items {
 		repo := strings.ToLower(it.Repository.FullName)
-		if !repos[repo] || it.Number == 0 {
-			continue // no session sits in that repository
+		if it.Number == 0 {
+			continue
+		}
+		if !repos[repo] {
+			unlinked = append(unlinked, prKey(repo, it.Number)) // no session sits in that repository
+			continue
 		}
 		k := prKey(repo, it.Number)
 		seen[k] = true
@@ -438,7 +444,7 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 		next[k] = &cp
 	}
 	t.mu.Lock()
-	t.errs, t.found = errs, found
+	t.errs, t.found, t.unlinked = errs, found, unlinked
 	t.mu.Unlock()
 	return finish(next, firstErr != nil, "", firstErr)
 }
@@ -566,6 +572,9 @@ type Report struct {
 	// the ones you opened, the ones a review is requested of you on, the
 	// ones you reviewed.
 	Found [3]int
+	// Unlinked is your own open PRs no live session works in the
+	// repository of, as "owner/repo#n": listed, not shown.
+	Unlinked []string
 	// Links is each session's checkouts, by session key.
 	Links map[string][]Link
 	// PRs is every pull request tracked, the ones not yours to review included.
@@ -587,7 +596,8 @@ func (t *Tracker) Report() Report {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	r := Report{Me: t.me, Off: t.off, LastPoll: t.lastPoll, Stale: t.stale,
-		Errors: append([]string(nil), t.errs...), Found: t.found, Links: map[string][]Link{}}
+		Errors: append([]string(nil), t.errs...), Found: t.found, Links: map[string][]Link{},
+		Unlinked: append([]string(nil), t.unlinked...)}
 	for key, ls := range t.links {
 		for _, l := range ls {
 			r.Links[key] = append(r.Links[key], Link{Repo: l.Repo, Branch: l.Branch})

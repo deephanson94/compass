@@ -142,7 +142,7 @@ func main() {
 	case "prs":
 		resume := openResume(mgr, *root)
 		now := time.Now()
-		sessions, err := mgr.Refresh(now)
+		sessions, err := livePaned(mgr, now)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
 			os.Exit(1)
