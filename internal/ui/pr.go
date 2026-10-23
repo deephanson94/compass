@@ -8,19 +8,21 @@ import (
 	"github.com/deephanson94/compass/internal/prstate"
 )
 
-// WorkDirs is where a session works, for the pull-request tracker: its cwd
-// first, then the directories its own tool calls worked in.
-func WorkDirs(s fleet.Session) []string {
-	var out []string
+// WorkOf is where a session works, for the pull-request tracker: its cwd
+// first, then the directories its own tool calls worked in, and the pull
+// requests it was pointed at by address.
+func WorkOf(s fleet.Session) prstate.Work {
+	var w prstate.Work
 	if s.Info.CWD != "" {
-		out = append(out, s.Info.CWD)
+		w.Dirs = append(w.Dirs, s.Info.CWD)
 	}
 	for _, d := range s.Dirs {
 		if d != s.Info.CWD {
-			out = append(out, d)
+			w.Dirs = append(w.Dirs, d)
 		}
 	}
-	return out
+	w.PRs = append(w.PRs, s.PRs...)
+	return w
 }
 
 // prOf is the session's pull requests, most urgent first, where its row

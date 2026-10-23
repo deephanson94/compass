@@ -112,6 +112,11 @@ type Session struct {
 	// most recent last. A session opened above two repositories names
 	// neither in its cwd; these are how its pull requests are found.
 	Dirs []string
+
+	// PRs is the pull requests the session was pointed at by address — in
+	// a prompt, a command, a fetch — as "owner/repo#n", most recent last. A
+	// session reviewing a pull request seldom checks its branch out.
+	PRs []string
 }
 
 // titleMax is how much of a first prompt survives into the fleet list.

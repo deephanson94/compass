@@ -95,3 +95,46 @@ func noteWorkDirs(have []string, dirs ...string) []string {
 	}
 	return have
 }
+
+// prRefsMax is how many pull requests a session remembers being pointed at.
+const prRefsMax = 16
+
+// prURL is a pull request named by its web address — a Gitea's
+// https://host/owner/repo/pulls/4, a GitHub's /pull/4, under a sub-path or
+// not — or by its API path, /repos/owner/repo/pulls/4.
+var prURL = regexp.MustCompile(`(?:https?://[^\s"'<>()]+?|/repos)/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pulls?/(\d+)`)
+
+// prRefs is the pull requests a session was pointed at by name: an address
+// in your prompt ("review https://gitea/org/repo/pulls/4"), or in a command
+// or a fetch its tool calls made. A session reviewing a pull request often
+// never checks its branch out, and this is the only thread from it to the
+// pull request. Each is "owner/repo#n", lower case.
+func prRefs(ev transcript.Event) []string {
+	if ev.IsSidechain {
+		return nil
+	}
+	var texts []string
+	if ev.Type == transcript.EventUser && !ev.IsMeta && ev.Text != "" {
+		texts = append(texts, ev.Text)
+	}
+	for _, tu := range ev.ToolUses {
+		texts = append(texts, string(tu.Input))
+	}
+	var out []string
+	for _, t := range texts {
+		for _, m := range prURL.FindAllStringSubmatch(t, -1) {
+			out = append(out, strings.ToLower(m[1]+"/"+m[2])+"#"+m[3])
+		}
+	}
+	return out
+}
+
+// notePRRefs keeps refs as the most recent last, without repeats, at most
+// prRefsMax long.
+func notePRRefs(have []string, refs ...string) []string {
+	have = noteWorkDirs(have, refs...)
+	if len(have) > prRefsMax {
+		have = append([]string(nil), have[len(have)-prRefsMax:]...)
+	}
+	return have
+}

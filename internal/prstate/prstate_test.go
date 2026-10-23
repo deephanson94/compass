@@ -219,7 +219,7 @@ func gitea(t *testing.T, d Detail, updated string) *fakeRunner {
 	return f
 }
 
-var sessions = map[string][]string{"s1": {cwd}}
+var sessions = map[string]Work{"s1": {Dirs: []string{cwd}}}
 
 // one is a session's only pull request.
 func one(sts []Status) (Status, bool) {
@@ -454,7 +454,7 @@ func twoRepos(t *testing.T) (f *fakeRunner, work, repoA, repoB string) {
 func TestASessionAboveTwoReposHasBoth(t *testing.T) {
 	f, work, _, repoB := twoRepos(t)
 	tr := New(f, "", time.Minute, "")
-	if err := tr.Poll(map[string][]string{"s1": {work, repoB}}, now); err != nil {
+	if err := tr.Poll(map[string]Work{"s1": {Dirs: []string{work, repoB}}}, now); err != nil {
 		t.Fatal(err)
 	}
 	sts := tr.States(now)["s1"]
@@ -477,13 +477,13 @@ func TestASessionAboveTwoReposHasBoth(t *testing.T) {
 func TestEachWayOfFindingARepoIsNeeded(t *testing.T) {
 	f, work, _, repoB := twoRepos(t)
 	tr := New(f, "", time.Minute, "")
-	if err := tr.Poll(map[string][]string{"s1": {work}}, now); err != nil {
+	if err := tr.Poll(map[string]Work{"s1": {Dirs: []string{work}}}, now); err != nil {
 		t.Fatal(err)
 	}
 	if sts := tr.States(now)["s1"]; len(sts) != 1 || sts[0].Number != 1118 {
 		t.Fatalf("the cwd alone: %+v, want repoA's #1118 found under it", sts)
 	}
-	if err := tr.Poll(map[string][]string{"s1": {"/elsewhere", repoB}}, now.Add(time.Minute)); err != nil {
+	if err := tr.Poll(map[string]Work{"s1": {Dirs: []string{"/elsewhere", repoB}}}, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if sts := tr.States(now)["s1"]; len(sts) != 1 || sts[0].Number != 77 {
@@ -627,7 +627,7 @@ func TestReviewsAreTrackedWithoutASession(t *testing.T) {
 	f.answers["git -C /work/other rev-parse --show-toplevel"] = "/work/other\n"
 	f.answers["git -C /work/other rev-parse --abbrev-ref HEAD"] = "alice/fix\n"
 	f.answers["git -C /work/other remote get-url origin"] = "git@gitea.example.com:org/other.git\n"
-	if err := tr.Poll(map[string][]string{"s2": {"/work/other"}}, now.Add(time.Minute)); err != nil {
+	if err := tr.Poll(map[string]Work{"s2": {Dirs: []string{"/work/other"}}}, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ := one(tr.States(now)["s2"]); st.Number != 2040 || !st.Review {
@@ -662,12 +662,125 @@ func TestAFailedReviewSearchKeepsTheRest(t *testing.T) {
 // works in its repository, is not one you review.
 func TestMyOwnPRIsNoReview(t *testing.T) {
 	tr := New(reviewGitea(t), "", time.Minute, "")
-	if err := tr.Poll(map[string][]string{}, now); err != nil {
+	if err := tr.Poll(map[string]Work{}, now); err != nil {
 		t.Fatal(err)
 	}
 	for _, st := range tr.Reviews(now) {
 		if st.Number == 1118 {
 			t.Fatalf("my own #1118 is counted as a review: %+v", st)
 		}
+	}
+}
+
+// A session on master that was pointed at a pull request it reviews shows
+// it: the reviewer never checks the branch out.
+func TestANamedReviewShowsOnTheSession(t *testing.T) {
+	f := reviewGitea(t)
+	tr := New(f, "", time.Minute, "")
+	work := map[string]Work{"s2": {Dirs: []string{"/nowhere"}, PRs: []string{"org/other#2040"}}}
+	if err := tr.Poll(work, now); err != nil {
+		t.Fatal(err)
+	}
+	st, ok := one(tr.States(now)["s2"])
+	if !ok || st.Number != 2040 || !st.Review || st.Move != Yours {
+		t.Fatalf("the reviewing session shows %+v, want review #2040, your move", st)
+	}
+}
+
+// A pull request named that no search lists — never asked, nothing said —
+// is looked up on its own: a review not given yet. The next poll asks only
+// whether it moved.
+func TestANamedPRNoSearchListsIsLookedUp(t *testing.T) {
+	f := gitea(t, fixture(t), "x")
+	p := asReviewer(t).Pull
+	p.Number, p.Head.Ref, p.RequestedReviewers = 31, "tim/x", nil
+	b, _ := json.Marshal(p)
+	f.answers["tea api /repos/org/tim/pulls/31"] = string(b)
+	f.answers["tea api /repos/org/tim/pulls/31/reviews"] = `[]`
+	f.answers["tea api /repos/org/tim/issues/31/comments"] = `[]`
+	tr := New(f, "", time.Minute, "")
+	work := map[string]Work{"s1": {Dirs: []string{cwd}, PRs: []string{"org/tim#31"}}}
+	if err := tr.Poll(work, now); err != nil {
+		t.Fatal(err)
+	}
+	sts := tr.States(now)["s1"]
+	var got *Status
+	for i := range sts {
+		if sts[i].Number == 31 {
+			got = &sts[i]
+		}
+	}
+	if got == nil || got.Move != Yours || got.Reason != "not reviewed yet" {
+		t.Fatalf("session's PRs %+v, want #31 not reviewed yet", sts)
+	}
+	before := f.teaCalls()
+	if err := tr.Poll(work, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls[before:] {
+		if strings.Contains(c, "/pulls/31/") || strings.Contains(c, "/issues/31/") {
+			t.Fatalf("an unmoved named PR was read whole again: %s", c)
+		}
+	}
+}
+
+// A named pull request that merged is said once, then hidden for as long
+// as the session still names it — not said again on every poll.
+func TestANamedMergedPRIsSaidOnce(t *testing.T) {
+	f := gitea(t, fixture(t), "x")
+	p := asReviewer(t).Pull
+	p.Number, p.Merged, p.State = 31, true, "closed"
+	b, _ := json.Marshal(p)
+	f.answers["tea api /repos/org/tim/pulls/31"] = string(b)
+	f.answers["tea api /repos/org/tim/pulls/31/reviews"] = `[]`
+	f.answers["tea api /repos/org/tim/issues/31/comments"] = `[]`
+	tr := New(f, "", time.Minute, "")
+	work := map[string]Work{"s9": {PRs: []string{"org/tim#31"}}}
+	_ = tr.Poll(work, now)
+	if st, ok := one(tr.States(now)["s9"]); !ok || st.Move != Merged {
+		t.Fatalf("got %+v, want merged once", st)
+	}
+	_ = tr.Poll(work, now.Add(time.Minute))
+	if sts := tr.States(now)["s9"]; len(sts) != 0 {
+		t.Fatalf("the merge is said again: %+v", sts)
+	}
+}
+
+// Naming a pull request for the first time looks it up within seconds,
+// not at the next five-minute poll.
+func TestANewNameIsLookedUpSoon(t *testing.T) {
+	f := reviewGitea(t)
+	tr := New(f, "", time.Hour, "")
+	if err := tr.Poll(sessions, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Minute) // inside the hour, past refPollEvery
+	tr.Kick(map[string]Work{"s2": {PRs: []string{"org/other#2041"}}}, later)
+	deadline := time.Now().Add(2 * time.Second)
+	for tr.Report().LastPoll.Equal(now) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !tr.Report().LastPoll.Equal(later) {
+		t.Fatal("a newly named PR waited for the interval")
+	}
+}
+
+// A review search can list a pull request the rules do not count as yours
+// to review; a session that names it still shows it, as a review not given.
+func TestANamedPRAReviewSearchListsShowsAsNotReviewed(t *testing.T) {
+	f := reviewGitea(t)
+	p := asReviewer(t).Pull
+	p.Number, p.RequestedReviewers = 2042, nil
+	b, _ := json.Marshal(p)
+	f.answers["tea api "+reviewPaths[0]] = `[{"number":2042,"updated_at":"q","repository":{"full_name":"org/other"}}]`
+	f.answers["tea api /repos/org/other/pulls/2042"] = string(b)
+	f.answers["tea api /repos/org/other/pulls/2042/reviews"] = `[]`
+	f.answers["tea api /repos/org/other/issues/2042/comments"] = `[]`
+	tr := New(f, "", time.Minute, "")
+	if err := tr.Poll(map[string]Work{"s3": {PRs: []string{"org/other#2042"}}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := one(tr.States(now)["s3"]); !ok || st.Number != 2042 || st.Reason != "not reviewed yet" {
+		t.Fatalf("got %+v, want #2042 not reviewed yet", st)
 	}
 }

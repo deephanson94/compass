@@ -23,8 +23,8 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 		fmt.Fprintln(w, "PR state: off — -pr-interval is 0")
 		return
 	}
-	dirs := liveDirs(sessions)
-	err := tr.Poll(dirs, now)
+	work := liveWork(sessions)
+	err := tr.Poll(work, now)
 	r := tr.Report()
 
 	if r.Off != "" {
@@ -36,8 +36,8 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 
 	// Which pull request each session shows, by key.
 	shows := tr.States(now)
-	fmt.Fprintf(w, "\nlive sessions (%d):\n", len(dirs))
-	if len(dirs) == 0 {
+	fmt.Fprintf(w, "\nlive sessions (%d):\n", len(work))
+	if len(work) == 0 {
 		fmt.Fprintln(w, "  none — no Claude session sits in a tmux pane or wrote in the last -live-within (5m)")
 	}
 	var keys []string
@@ -51,9 +51,12 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 	sort.Slice(keys, func(i, j int) bool { return name[keys[i]] < name[keys[j]] })
 	for _, key := range keys {
 		fmt.Fprintf(w, "  %s\n", name[key])
-		fmt.Fprintf(w, "    looks in: %s\n", strings.Join(dirs[key], ", "))
+		fmt.Fprintf(w, "    looks in: %s\n", strings.Join(work[key].Dirs, ", "))
+		if prs := work[key].PRs; len(prs) > 0 {
+			fmt.Fprintf(w, "    names: %s\n", strings.Join(prs, ", "))
+		}
 		links := r.Links[key]
-		if len(links) == 0 {
+		if len(links) == 0 && len(work[key].PRs) == 0 {
 			fmt.Fprintln(w, "    checkouts: none — no directory above is in a git checkout with an origin")
 		}
 		for _, l := range links {
@@ -61,8 +64,8 @@ func printPRs(w io.Writer, sessions []fleet.Session, tr *prstate.Tracker, now ti
 		}
 		if sts := shows[key]; len(sts) > 0 {
 			fmt.Fprintf(w, "    shows: %s\n", prstate.Summary(sts, now))
-		} else if len(links) > 0 {
-			fmt.Fprintln(w, "    shows: nothing — no open PR has one of these repo @ branch pairs")
+		} else if len(links) > 0 || len(work[key].PRs) > 0 {
+			fmt.Fprintln(w, "    shows: nothing — no open PR it names, and none has one of these repo @ branch pairs")
 		}
 	}
 

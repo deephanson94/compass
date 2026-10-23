@@ -665,13 +665,13 @@ func (m *Model) refresh() tea.Cmd {
 		if prs != nil {
 			// The tracker polls in its own goroutine when a poll is due;
 			// this only reads what it last learned.
-			dirs := map[string][]string{}
+			work := map[string]prstate.Work{}
 			for _, s := range sessions {
 				if s.Live {
-					dirs[s.Info.Key()] = WorkDirs(s)
+					work[s.Info.Key()] = WorkOf(s)
 				}
 			}
-			prs.Kick(dirs, now)
+			prs.Kick(work, now)
 			msg.prs = prs.States(now)
 			msg.reviews = prs.Reviews(now)
 		}

@@ -122,7 +122,7 @@ func main() {
 			if prs != nil {
 				// A poll is due once every -pr-interval; between them
 				// the cache answers and nothing leaves the machine.
-				prs.PollIfDue(liveDirs(sessions), now)
+				prs.PollIfDue(liveWork(sessions), now)
 				for _, seg := range []string{
 					prstate.Segment(livePRs(sessions, prs.States(now))),
 					prstate.ReviewSegment(prs.Reviews(now)),
@@ -212,13 +212,14 @@ func openPRs(root, login string, interval time.Duration) *prstate.Tracker {
 	return prstate.New(prstate.RealRunner{Timeout: teaTimeout}, login, interval, filepath.Join(base, "compass", "prs.json"))
 }
 
-// liveDirs is where each live session works, keyed as the fleet keys it:
-// its cwd first, then the directories its tool calls worked in.
-func liveDirs(sessions []fleet.Session) map[string][]string {
-	out := map[string][]string{}
+// liveWork is where each live session works, keyed as the fleet keys it:
+// its cwd first, then the directories its tool calls worked in, and the
+// pull requests it was pointed at.
+func liveWork(sessions []fleet.Session) map[string]prstate.Work {
+	out := map[string]prstate.Work{}
 	for _, s := range sessions {
 		if s.Live {
-			out[s.Info.Key()] = ui.WorkDirs(s)
+			out[s.Info.Key()] = ui.WorkOf(s)
 		}
 	}
 	return out

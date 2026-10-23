@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,19 +82,52 @@ type Tracker struct {
 	found     [3]int   // what the last poll's searches listed: authored, review requested, reviewed
 	unlinked  []string // your own open PRs the last poll skipped: no session works in their repository
 	prs       map[string]*pr
-	links     map[string][]link // session key → the checkouts it works in
-	cwds      map[string]string // session key → the dirs its links were read from, joined
+	links     map[string][]link   // session key → the checkouts it works in
+	cwds      map[string]string   // session key → the dirs its links were read from, joined
+	refs      map[string][]string // session key → the pull requests it was pointed at, "owner/repo#n"
+	refPolled time.Time           // when a poll last ran for a ref no poll had looked up
 }
+
+// Work is where one session works: the directories (its cwd first, then
+// wherever its tool calls worked — fleet.Session.Dirs) and the pull
+// requests it was pointed at by address (fleet.Session.PRs, "owner/repo#n").
+type Work struct {
+	Dirs []string
+	PRs  []string
+}
+
+func dirsOf(work map[string]Work) map[string][]string {
+	out := make(map[string][]string, len(work))
+	for key, w := range work {
+		out[key] = w.Dirs
+	}
+	return out
+}
+
+func refsOf(work map[string]Work) map[string][]string {
+	out := map[string][]string{}
+	for key, w := range work {
+		if len(w.PRs) > 0 {
+			out[key] = append([]string(nil), w.PRs...)
+		}
+	}
+	return out
+}
+
+// refPollEvery is how soon after the last poll a pull request named for the
+// first time is looked up: pasting an address should not wait five minutes.
+const refPollEvery = 30 * time.Second
 
 // cacheFile is what a Tracker writes down for the next process.
 type cacheFile struct {
-	Me       string            `json:"me"`
-	LastPoll time.Time         `json:"last_poll"`
-	Stale    bool              `json:"stale"`
-	Off      string            `json:"off,omitempty"`
-	PRs      []*pr             `json:"prs"`
-	Links    map[string][]link `json:"links"`
-	CWDs     map[string]string `json:"cwds"`
+	Me       string              `json:"me"`
+	LastPoll time.Time           `json:"last_poll"`
+	Stale    bool                `json:"stale"`
+	Off      string              `json:"off,omitempty"`
+	PRs      []*pr               `json:"prs"`
+	Links    map[string][]link   `json:"links"`
+	CWDs     map[string]string   `json:"cwds"`
+	Refs     map[string][]string `json:"refs,omitempty"`
 }
 
 // New returns a Tracker that polls through run as login ("" is tea's own
@@ -101,7 +135,7 @@ type cacheFile struct {
 // unreadable cache is a fresh start.
 func New(run Runner, login string, interval time.Duration, path string) *Tracker {
 	t := &Tracker{run: run, login: login, interval: interval, path: path,
-		prs: map[string]*pr{}, links: map[string][]link{}, cwds: map[string]string{}}
+		prs: map[string]*pr{}, links: map[string][]link{}, cwds: map[string]string{}, refs: map[string][]string{}}
 	if path == "" {
 		return t
 	}
@@ -125,6 +159,9 @@ func New(run Runner, login string, interval time.Duration, path string) *Tracker
 	if f.CWDs != nil {
 		t.cwds = f.CWDs
 	}
+	if f.Refs != nil {
+		t.refs = f.Refs
+	}
 	return t
 }
 
@@ -143,19 +180,33 @@ func (t *Tracker) Due(now time.Time) bool {
 // a session opened between polls finds a pull request the last poll already
 // knows. It returns at once.
 //
-// dirs is each session's directories by session key: its cwd first, then
-// wherever else its tool calls worked (fleet.Session.Dirs).
-func (t *Tracker) Kick(dirs map[string][]string, now time.Time) {
+// A pull request a session names for the first time is looked up within
+// refPollEvery, not at the next interval.
+func (t *Tracker) Kick(work map[string]Work, now time.Time) {
+	dirs := dirsOf(work)
 	t.mu.Lock()
 	if t.interval <= 0 {
 		t.mu.Unlock()
 		return
 	}
-	if !t.polling && now.Sub(t.lastPoll) >= t.interval {
+	t.refs = refsOf(work) // no network: the names are the transcript's
+	newRef := false
+	for _, rs := range t.refs {
+		for _, r := range rs {
+			if t.prs[r] == nil {
+				newRef = true
+			}
+		}
+	}
+	early := newRef && now.Sub(t.lastPoll) >= refPollEvery && now.Sub(t.refPolled) >= refPollEvery
+	if !t.polling && (now.Sub(t.lastPoll) >= t.interval || early) {
+		if early {
+			t.refPolled = now
+		}
 		t.polling, t.pollStart = true, now
 		t.mu.Unlock()
 		go func() {
-			_ = t.Poll(dirs, now)
+			_ = t.Poll(work, now)
 			t.mu.Lock()
 			t.polling = false
 			t.mu.Unlock()
@@ -194,9 +245,9 @@ func (t *Tracker) Kick(dirs map[string][]string, now time.Time) {
 
 // PollIfDue polls now if a poll is owed, and waits for it: `compass status`
 // is a fresh process, and tmux keeps the last line on the bar while it runs.
-func (t *Tracker) PollIfDue(dirs map[string][]string, now time.Time) {
+func (t *Tracker) PollIfDue(work map[string]Work, now time.Time) {
 	if t.Due(now) {
-		_ = t.Poll(dirs, now)
+		_ = t.Poll(work, now)
 	}
 }
 
@@ -272,12 +323,19 @@ func (t *Tracker) linkAll(dirs map[string][]string) map[string][]link {
 // the detail of each pull request a session's repository has open whose
 // updated_at moved since the last poll. A failed call keeps the state it
 // would have replaced and marks it stale; the error is the first one met.
-func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
+func (t *Tracker) Poll(work map[string]Work, now time.Time) error {
+	dirs, refs := dirsOf(work), refsOf(work)
 	links := t.linkAll(dirs)
 	repos := map[string]bool{}
 	for _, ls := range links {
 		for _, l := range ls {
 			repos[l.Repo] = true
+		}
+	}
+	named := map[string]bool{} // the pull requests some session names
+	for _, rs := range refs {
+		for _, r := range rs {
+			named[r] = true
 		}
 	}
 	sigs := make(map[string]string, len(dirs))
@@ -291,7 +349,7 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 	for k, p := range t.prs {
 		prev[k] = p
 	}
-	t.links, t.cwds = links, sigs
+	t.links, t.cwds, t.refs = links, sigs, refs
 	t.mu.Unlock()
 
 	finish := func(next map[string]*pr, stale bool, off string, err error) error {
@@ -345,8 +403,10 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 			continue
 		}
 		if !repos[repo] {
-			unlinked = append(unlinked, prKey(repo, it.Number)) // no session sits in that repository
-			continue
+			if !named[prKey(repo, it.Number)] {
+				unlinked = append(unlinked, prKey(repo, it.Number)) // no session sits in that repository
+			}
+			continue // a session that names it has it looked up below
 		}
 		k := prKey(repo, it.Number)
 		seen[k] = true
@@ -402,14 +462,77 @@ func (t *Tracker) Poll(dirs map[string][]string, now time.Time) error {
 			}
 			e := &pr{Repo: repo, Number: it.Number, UpdatedAt: it.UpdatedAt, HeadRef: d.Pull.Head.Ref}
 			st, ok := JudgeReview(d, me)
-			if strings.EqualFold(d.Pull.User.Login, me) {
+			switch {
+			case strings.EqualFold(d.Pull.User.Login, me) && named[k]:
+				st, ok = Judge(d, me), true // your own, named by a session in a repository none has checked out
+			case strings.EqualFold(d.Pull.User.Login, me):
 				ok = false // your own, which the authored search answers for
+			case !ok && named[k]:
+				// Named, never asked, nothing said: a review you have not given.
+				st.Move, st.Reason, st.At, ok = Yours, "not reviewed yet", d.Pull.CreatedAt, true
 			}
 			st.Repo = repo
 			e.Status, e.Ignore = st, !ok
 			e.Done = ok && (st.Move == Merged || st.Move == Closed)
 			next[k] = e
 		}
+	}
+	// The pull requests a session names that no search listed: someone
+	// else's you look at without being asked, or your own in a repository
+	// no session has checked out. One call says whether one moved; the rest
+	// only when it did. One merged or closed is shown once, then kept
+	// hidden for as long as a session still names it.
+	for k := range named {
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		repo, n, ok := splitKey(k)
+		if !ok {
+			continue
+		}
+		old := prev[k]
+		if old != nil && old.Done {
+			cp := *old
+			cp.Ignore = true
+			next[k] = &cp
+			continue
+		}
+		var p Pull
+		err := api(t.run, t.login, pullPath(repo, n), &p)
+		if err == nil && p.Number == 0 {
+			err = fmt.Errorf("tea api %s: no pull request", pullPath(repo, n))
+		}
+		if err != nil {
+			fail(err)
+			if old != nil {
+				next[k] = old
+			}
+			continue
+		}
+		stamp := p.UpdatedAt.UTC().Format(time.RFC3339)
+		if old != nil && old.UpdatedAt == stamp {
+			next[k] = old
+			continue
+		}
+		d, err := fetchRest(t.run, t.login, repo, p)
+		if err != nil {
+			fail(err)
+			if old != nil {
+				next[k] = old
+			}
+			continue
+		}
+		var st Status
+		if strings.EqualFold(p.User.Login, me) {
+			st = Judge(d, me)
+		} else if st, ok = JudgeReview(d, me); !ok {
+			// Named, never asked, nothing said: a review you have not given.
+			st.Move, st.Reason, st.At = Yours, "not reviewed yet", p.CreatedAt
+		}
+		st.Repo = repo
+		next[k] = &pr{Repo: repo, Number: n, UpdatedAt: stamp, HeadRef: p.Head.Ref,
+			Status: st, Done: st.Move == Merged || st.Move == Closed}
 	}
 	// What the open search no longer lists was merged or closed — or fell
 	// past its page. One look says which, once; the next poll drops it.
@@ -457,19 +580,36 @@ func offReason(err error) string {
 	return "tea has no usable login (" + err.Error() + ")"
 }
 
+// splitKey reads "owner/repo#n" back.
+func splitKey(k string) (repo string, n int, ok bool) {
+	repo, num, found := strings.Cut(k, "#")
+	if !found || !strings.Contains(repo, "/") {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(num)
+	return repo, n, err == nil && n > 0
+}
+
 func pullPath(repo string, n int) string { return fmt.Sprintf("/repos/%s/pulls/%d", repo, n) }
 
 // fetch reads one pull request whole: the pull, its reviews, its comments,
 // and when its head commit was made. The commit's date is a nicety — a
 // Gitea that will not say leaves the push to the stale reviews.
 func fetch(r Runner, login, repo string, n int) (Detail, error) {
-	var d Detail
-	if err := api(r, login, pullPath(repo, n), &d.Pull); err != nil {
-		return d, err
+	var p Pull
+	if err := api(r, login, pullPath(repo, n), &p); err != nil {
+		return Detail{Pull: p}, err
 	}
-	if d.Pull.Number == 0 {
-		return d, fmt.Errorf("tea api %s: no pull request", pullPath(repo, n))
+	if p.Number == 0 {
+		return Detail{Pull: p}, fmt.Errorf("tea api %s: no pull request", pullPath(repo, n))
 	}
+	return fetchRest(r, login, repo, p)
+}
+
+// fetchRest is fetch past the pull itself, already read.
+func fetchRest(r Runner, login, repo string, p Pull) (Detail, error) {
+	d := Detail{Pull: p}
+	n := p.Number
 	if err := api(r, login, pullPath(repo, n)+"/reviews", &d.Reviews); err != nil {
 		return d, err
 	}
@@ -510,8 +650,26 @@ func (t *Tracker) States(now time.Time) map[string][]Status {
 	}
 	stale := t.stale || (t.polling && now.Sub(t.pollStart) > slowPoll)
 	out := map[string][]Status{}
-	for key, ls := range t.links {
+	keys := map[string]bool{}
+	for key := range t.links {
+		keys[key] = true
+	}
+	for key := range t.refs {
+		keys[key] = true
+	}
+	for key := range keys {
+		ls := t.links[key]
 		var sts []Status
+		have := map[*pr]bool{}
+		// The pull requests the session names, then the ones on its branches.
+		for _, r := range t.refs[key] {
+			if p := t.prs[r]; p != nil && !p.Ignore && !have[p] {
+				have[p] = true
+				st := p.Status
+				st.Stale = stale
+				sts = append(sts, st)
+			}
+		}
 		for _, l := range ls {
 			var best *pr
 			for _, p := range t.prs {
@@ -523,9 +681,10 @@ func (t *Tracker) States(now time.Time) map[string][]Status {
 					best = p
 				}
 			}
-			if best == nil {
+			if best == nil || have[best] {
 				continue
 			}
+			have[best] = true
 			st := best.Status
 			st.Stale = stale
 			sts = append(sts, st)
@@ -633,7 +792,7 @@ func (t *Tracker) Save() {
 	}
 	t.mu.Lock()
 	f := cacheFile{Me: t.me, LastPoll: t.lastPoll, Stale: t.stale, Off: t.off,
-		Links: copyMap(t.links), CWDs: copyMap(t.cwds)}
+		Links: copyMap(t.links), CWDs: copyMap(t.cwds), Refs: copyMap(t.refs)}
 	for _, p := range t.prs {
 		f.PRs = append(f.PRs, p)
 	}
