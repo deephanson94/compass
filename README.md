@@ -144,7 +144,10 @@ compass -narrator off                # heuristic labels only, no claude calls
 compass -live-within 0               # only sessions tmux is holding count as live
                                      #   (an unanswered question stops holding one too)
 compass -opencode-db ""              # leave OpenCode's sessions out (default: its store, if present)
-compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1"
+compass -pr-interval 0               # don't ask Gitea (through `tea`) about each session's pull request
+compass -tea-login work              # which tea login to ask as (default: tea's own)
+compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1 PR▲1 RV▲2"
+compass prs                          # diagnostic: poll Gitea now — each session's checkouts and pull requests
 compass panes                        # diagnostic: which pane holds which session
 ```
 

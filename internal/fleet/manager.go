@@ -45,6 +45,13 @@ type entry struct {
 	// remembers rather than replaying it every second. `merge` clears it
 	// the moment the transcript grows (round 60).
 	askDenied bool
+
+	// dirs is where the session's own tool calls worked (workDirs), most
+	// recent last. Live sessions only, like the class.
+	dirs []string
+	// prs is the pull requests the session was pointed at by address
+	// (prRefs), most recent last.
+	prs []string
 }
 
 // DefaultLiveWindow is the recency door a new Manager opens: a session with no
@@ -393,6 +400,8 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 				Waiting: waiting,
 				Class:   e.class, HasClass: e.hasClass,
 				Outcome: e.outcome(),
+				Dirs:    append([]string(nil), e.dirs...),
+				PRs:     append([]string(nil), e.prs...),
 			})
 		} else {
 			archive = append(archive, Session{Info: e.info, Snap: archivedSnap(e.info)})
@@ -416,7 +425,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 
 // fold is the entry's own resume state (EntryFold).
 func (e *entry) fold() EntryFold {
-	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model}
+	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model, Dirs: e.dirs, PRs: e.prs}
 	if e.outcomes != nil {
 		f.Outcomes = e.outcomes.Fold()
 	}
@@ -428,6 +437,8 @@ func (e *entry) fold() EntryFold {
 func (e *entry) restore(f EntryFold) {
 	e.class, e.hasClass, e.titleRank = f.Class, f.HasClass, f.TitleRank
 	e.outcomes = journey.RestoreOutcomes(f.Outcomes)
+	e.dirs = append([]string(nil), f.Dirs...)
+	e.prs = append([]string(nil), f.PRs...)
 	if e.info.Model == "" {
 		e.info.Model = f.Model
 	}
@@ -522,6 +533,8 @@ func (e *entry) sleep() {
 	e.sawEvent = false
 	e.hasClass = false
 	e.outcomes = nil
+	e.dirs = nil
+	e.prs = nil
 }
 
 // archivedSnap is the whole verdict an archived session gets: it did something
@@ -615,6 +628,12 @@ func (e *entry) absorb(ev transcript.Event) {
 		}
 	}
 	e.outcomes.Observe(ev)
+	if dirs := workDirs(ev, e.info.CWD); len(dirs) > 0 {
+		e.dirs = noteWorkDirs(e.dirs, dirs...)
+	}
+	if refs := prRefs(ev); len(refs) > 0 {
+		e.prs = notePRRefs(e.prs, refs...)
+	}
 	if !ev.IsSidechain && ev.CWD != "" {
 		e.info.CWD, e.info.GitBranch = ev.CWD, ev.GitBranch
 		if e.info.OriginCWD == "" {
@@ -752,7 +771,12 @@ func (m *Manager) StatusLine(now time.Time) string {
 	if err != nil {
 		return "○ all quiet"
 	}
+	return StatusOf(sessions)
+}
 
+// StatusOf is StatusLine over a fleet already refreshed: `compass status`
+// reads the fleet once and adds the pull requests' segment to the line.
+func StatusOf(sessions []Session) string {
 	counts := map[state.State]int{}
 	for _, s := range sessions {
 		if !s.Live || s.Waiting {

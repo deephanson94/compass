@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/prstate"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
 	"github.com/deephanson94/compass/internal/todo"
@@ -77,6 +78,12 @@ type fleetMsg struct {
 	// board was not polled (a narrow terminal). The selected session's is in
 	// here and in trail both.
 	trails map[string]journey.Trail
+
+	// prs is each session's pull request as the tracker last knew it; nil
+	// when the feature is off.
+	prs map[string][]prstate.Status
+	// reviews is every pull request of someone else's you review.
+	reviews []prstate.Status
 
 	// paired says the poll ran after the tmux panes had been paired with a
 	// fleet: its liveness is the whole rule, a pane or the recency door,
@@ -224,6 +231,13 @@ type Model struct {
 	now      time.Time
 	loaded   bool
 	level    int // zoom: 1 legs, 2 waypoints, 3 the conversation
+
+	// prTracker asks Gitea whose move each session's pull request is, off
+	// the render loop; prs is its answer as of the last poll, by session
+	// key. A nil tracker is the feature off.
+	prTracker *prstate.Tracker
+	prs       map[string][]prstate.Status
+	reviews   []prstate.Status
 
 	// cursor is the Lv2 selection: an index into TrailRows(trail, level), or -1
 	// before the level is entered. narrated is the trail the last narration was
@@ -432,8 +446,9 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, build func(notify func()) Narrator) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, build func(notify func()) Narrator, prs *prstate.Tracker) error {
 	m := New(mgr)
+	m.prTracker = prs
 	m.readonly = readonly
 	m.showMirror = mirror
 	m.hook = hook
@@ -534,6 +549,19 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 	m.clampSelection()
 }
 
+// SetPRs gives the model each session's pull request, by session key
+// (exported so a harness can render one).
+func (m *Model) SetPRs(prs map[string][]prstate.Status) {
+	m.retireTrailMemo()
+	m.prs = prs
+}
+
+// SetReviews gives the model the pull requests you review (a harness's way in).
+func (m *Model) SetReviews(reviews []prstate.Status) {
+	m.retireTrailMemo()
+	m.reviews = reviews
+}
+
 // SetPanes gives the model the key → pane mapping: the location line in the
 // fleet, the source of the mirror, and the pane Enter attaches to.
 func (m *Model) SetPanes(panes map[string]tmuxop.Pane) {
@@ -629,10 +657,24 @@ func (m *Model) refresh() tea.Cmd {
 	for _, t := range targets {
 		agentPaths[t.key] = t.path
 	}
+	prs := m.prTracker
 	return func() tea.Msg {
 		now := time.Now()
 		sessions, err := mgr.Refresh(now)
 		msg := fleetMsg{sessions: sessions, err: err, at: now, paired: paired}
+		if prs != nil {
+			// The tracker polls in its own goroutine when a poll is due;
+			// this only reads what it last learned.
+			work := map[string]prstate.Work{}
+			for _, s := range sessions {
+				if s.Live {
+					work[s.Info.Key()] = WorkOf(s)
+				}
+			}
+			prs.Kick(work, now)
+			msg.prs = prs.States(now)
+			msg.reviews = prs.Reviews(now)
+		}
 		// The agents' own files, for every open lane of every trail polled:
 		// paired by the call's id, never by its name.
 		pollAgents := func(key string, tr journey.Trail) {
@@ -810,6 +852,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and the mirror falls back to the transcript — until the 5s pane tick.
 		first := !m.loaded
 		m.sessions, m.err, m.now, m.loaded = msg.sessions, msg.err, msg.at, true
+		m.prs, m.reviews = msg.prs, msg.reviews
 		if msg.agents != nil || msg.hasTrail {
 			m.agents = msg.agents // a poll that read the lanes' files replaces what was known
 		}
@@ -4171,6 +4214,9 @@ func (m *Model) statusChips() string {
 		// on the board — the number `X` clears in one key.
 		parts = append(parts, dimStyle.Render(fmt.Sprintf("%s%d unanswered %s", fleet.GlyphNeedsYou, waits, m.age(waitSince))))
 	}
+	// The pull requests: yours a session works on, and the ones you review,
+	// which may have no session at all — this chip is where they show.
+	parts = append(parts, m.prChips()...)
 	for _, st := range []state.State{state.Working, state.Idle} {
 		if n := counts[st]; n > 0 {
 			parts = append(parts, stateStyle(st).Render(fmt.Sprintf("%s%d", fleet.Glyph(st), n)))
