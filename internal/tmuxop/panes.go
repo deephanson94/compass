@@ -146,7 +146,31 @@ func safeLabel(s string) string {
 // Returns SessionInfo.Key() → Pane. Keying by the transcript path rather than
 // the session id is what keeps two same-id sessions from sharing one pane —
 // the pane belongs to the transcript that won it (docs/dev/M6-CONTRACT.md).
+//
+// All of that is a guess from addresses, and a guess is all it can be when
+// several sessions share a directory and all have written since every pane
+// started: three panes, three sessions, one cwd, and recency picks the
+// order (#71). MapSessionsBy asks Claude Code's own registry instead.
 func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]Pane {
+	return MapSessionsBy(sessions, panes, p, nil)
+}
+
+// MapSessionsBy is MapSessions with Claude Code's registry of running
+// processes (fleet.RunningPIDs: pid → session id). The registry is the
+// identity a cwd is not, so it decides first:
+//
+//   - a pane whose process tree holds a registered pid is that session's,
+//     whatever any other session's cwd or recency says;
+//   - a session the registry places in a process is that process's, and is
+//     never handed some other pane by the cwd rules below — a session
+//     running outside tmux, or in a pane already decided, stays unpaired
+//     rather than wearing a neighbour's pane.
+//
+// Panes and sessions the registry does not speak for — an older Claude
+// Code, an OpenCode pane, a process whose registry entry has not been
+// written yet — are paired by the cwd rules, as before. A nil registry is
+// MapSessions.
+func MapSessionsBy(sessions []fleet.SessionInfo, panes []Pane, p Proc, byPID map[int]string) map[string]Pane {
 	out := make(map[string]Pane)
 	if len(sessions) == 0 || len(panes) == 0 {
 		return out
@@ -164,6 +188,9 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 			continue // a pane with no claude in it is not a location
 		}
 		cp := claudePane{pane: pane, cwd: cwd, since: p.StartTime(pid), tool: toolOf(p, pid)}
+		if len(byPID) > 0 {
+			cp.id = registeredIn(p, pane.PID, byPID)
+		}
 		found = append(found, cp)
 		byCwd[cwd] = append(byCwd[cwd], cp)
 	}
@@ -204,10 +231,47 @@ func MapSessions(sessions []fleet.SessionInfo, panes []Pane, p Proc) map[string]
 	sort.SliceStable(byAge, func(i, j int) bool { return byAge[j].since.Before(byAge[i].since) })
 
 	taken := map[string]bool{}
+
+	// The registry first. Among transcripts sharing the registered id, the
+	// one written most recently is the live one.
+	registered := map[string]bool{} // session ids the registry places in some process
+	for _, id := range byPID {
+		registered[id] = true
+	}
+	var rest []claudePane
+	for _, cp := range byAge {
+		if cp.id == "" {
+			rest = append(rest, cp)
+			continue
+		}
+		var best *fleet.SessionInfo
+		for i := range sessions {
+			s := &sessions[i]
+			if s.ID != cp.id || taken[s.Key()] {
+				continue
+			}
+			if best == nil || s.LastEventAt.After(best.LastEventAt) ||
+				(s.LastEventAt.Equal(best.LastEventAt) && s.Key() < best.Key()) {
+				best = s
+			}
+		}
+		if best == nil {
+			// The registry names a session the fleet has no transcript for
+			// yet — one opened a moment ago. The pane is still its, not a
+			// neighbour's: no other session may take it.
+			continue
+		}
+		out[best.Key()], taken[best.Key()] = cp.pane, true
+	}
+	byAge = rest
+
 	claim := func(cp claudePane, plausible bool) bool {
 		for _, s := range contenders[cp.cwd] {
 			if taken[s.Key()] {
 				continue
+			}
+			if registered[s.ID] {
+				continue // the registry has it in another process: not this pane
 			}
 			if cp.tool != "" && s.ToolName() != cp.tool {
 				continue // a claude session never lives in an opencode's pane, nor the reverse
@@ -260,6 +324,35 @@ type claudePane struct {
 	cwd   string // the cwd of the claude inside it, as /proc reports it
 	since time.Time
 	tool  string // "claude" or "opencode": which CLI the pane is running
+	id    string // the session id the registry says this pane's process runs; "" unknown
+}
+
+// registeredIn is the session id the registry gives any process in a pane's
+// tree — the pane's own process and its descendants, as deep as the claude
+// walk goes. The registered pid is the CLI's own, which is the claude
+// ClaudeIn finds in the usual shape, but a wrapper can sit between them, so
+// every pid in the tree is asked rather than that one.
+func registeredIn(p Proc, panePID int, byPID map[int]string) string {
+	if id, ok := byPID[panePID]; ok {
+		return id
+	}
+	seen := map[int]bool{panePID: true}
+	frontier := p.Children(panePID)
+	for depth := 1; depth <= claudeDepth && len(frontier) > 0; depth++ {
+		var next []int
+		for _, kid := range frontier {
+			if seen[kid] {
+				continue
+			}
+			seen[kid] = true
+			if id, ok := byPID[kid]; ok {
+				return id
+			}
+			next = append(next, p.Children(kid)...)
+		}
+		frontier = next
+	}
+	return ""
 }
 
 // procSlack forgives the last tick of arithmetic between a transcript's own

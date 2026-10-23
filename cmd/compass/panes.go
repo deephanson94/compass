@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -33,7 +34,8 @@ func printPanes(w io.Writer, mgr *fleet.Manager, root string, now time.Time) {
 		fmt.Fprintln(w, "discover:", err)
 		return
 	}
-	mapped := tmuxop.MapSessions(infos, panes, proc)
+	byPID := fleet.RunningPIDs(root)
+	mapped := tmuxop.MapSessionsBy(infos, panes, proc, byPID)
 
 	// The pairing is keyed by transcript path (M6 contract); the report names
 	// each session by its id, which is the label a human recognises and what
@@ -65,6 +67,14 @@ func printPanes(w io.Writer, mgr *fleet.Manager, root string, now time.Time) {
 	tw.Flush()
 
 	fmt.Fprintf(w, "\n%d panes · %d transcripts · %d paired\n", len(panes), len(infos), len(mapped))
+	// Where Claude Code's registry can be read, a pane is paired with the
+	// session its own process runs; where it cannot, by directory alone —
+	// which cannot tell apart sessions started in one directory (#71).
+	if byPID == nil {
+		fmt.Fprintf(w, "Claude Code's session registry (%s) is unreadable: panes are paired by directory alone\n", filepath.Join(root, "sessions"))
+	} else {
+		fmt.Fprintf(w, "paired by Claude Code's session registry: %d running processes listed\n", len(byPID))
+	}
 	if len(mapped) == 0 {
 		fmt.Fprintln(w, "\nnothing paired. compass finds a session by looking for a claude")
 		fmt.Fprintln(w, "process under each pane and matching its cwd to the transcript's.")
