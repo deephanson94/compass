@@ -69,11 +69,11 @@ func main() {
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
 	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: enter no longer attaches")
 	mirror := fs.Bool("mirror", cfg.Mirror, "open the live mirror of the selected pane at Lv1 (m toggles it)")
-	boardDefault := "columns"
+	boardDefault := "cards"
 	if cfg.Board != "" {
 		boardDefault = cfg.Board
 	}
-	board := fs.String("board", boardDefault, `the board's shape: "columns" (every trail, oldest first) or "cards" (today, newest first, with the session's goal)`)
+	board := fs.String("board", boardDefault, `the board's shape: "cards" (today, newest first, with the session's goal) or "columns" (every trail, oldest first)`)
 	cardTint := fs.String("card-tint", cfg.CardTint, `a card's ground on the card board, "#rrggbb" (empty = compass's own)`)
 	cardsRow := fs.Int("cards-per-row", cfg.CardsRow, "cards in a row on the card board (0 = as many as card-width allows; + and - change it live)")
 	cardWidth := fs.Int("card-width", cfg.CardWidth, "a card's least width on the card board (0 = compass's own, 84)")
