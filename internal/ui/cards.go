@@ -80,7 +80,7 @@ const (
 	cardColMax  = 140
 	cardHead    = 3  // the fleet row, the goal row, the tally row
 	cardRowsMin = 5  // a card with a quiet today still shows its last five moments
-	cardRowsMax = 12 // the latest dozen moments: a card is a glance, the trail is one tab away
+	cardRowsMax = 60 // a card fills the rows the board shares it; past this a day is the trail's
 )
 
 // boardColBounds is the board's column width floor and cap, by board.
@@ -113,6 +113,9 @@ func cardItems(tr journey.Trail, now time.Time) []cardItem {
 		add(cardItem{at: p.At, prompt: i, leg: -1, lane: -1})
 	}
 	for i, l := range tr.Legs {
+		if tinyLeg(l) {
+			continue
+		}
 		at := l.End
 		if l.Current || at.IsZero() {
 			at = now
@@ -134,6 +137,18 @@ func cardItems(tr journey.Trail, now time.Time) []cardItem {
 	})
 	return out
 }
+
+// tinyLeg is a leg too slight for a card: closed in under ten seconds,
+// touching no file, with no result — "closing thanks, no edits", "pass,
+// no files". The trail keeps it; a card has better rows to spend.
+func tinyLeg(l journey.Leg) bool {
+	return !l.Current && len(l.Files) == 0 && legBadge(l) == "" && l.Class != journey.Ship &&
+		!l.End.IsZero() && l.End.Sub(l.Start) < tinyLegSpan
+}
+
+// tinyLegSpan is how short a leg with nothing to show for it must be to
+// stay off a card.
+const tinyLegSpan = 10 * time.Second
 
 // dayStart is the local midnight of t.
 func dayStart(t time.Time) time.Time {
@@ -279,7 +294,13 @@ func (m *Model) cardStatusText(key string, s fleet.Session, tr journey.Trail, w 
 	}
 	// The goal is short and changes least; what it is doing now is the
 	// half the eye scans the board for, so it keeps the room.
-	gw := min(lipgloss.Width(goal), max(18, w/3))
+	// The goal is the narrator's best line and at most 32 cells: it is
+	// drawn whole, and the clauses after it take what is left. A quoted
+	// prompt standing in for one is clipped to a third.
+	gw := min(lipgloss.Width(goal), w-12)
+	if !narrated {
+		gw = min(lipgloss.Width(goal), max(18, w/3))
+	}
 	goal = clip(goal, gw)
 	styled := dimStyle.Render(goal)
 	if narrated {
@@ -383,7 +404,39 @@ func (m *Model) cardNow(s fleet.Session, tr journey.Trail) string {
 	if s.Snap.State == state.Working {
 		return ""
 	}
-	return boardVerdictWith(s, tr, m.now, m.agentsFor(s.Info.Key()))
+	return m.cardVerdict(s, tr)
+}
+
+// cardVerdict is how a finished session came out, as the card says it:
+// the board's verdict without what the badge beside it already says (the
+// red), without the day's wait on you (the tally's to say), and with a
+// last leg named once — "build build" was a class with no label, said twice.
+func (m *Model) cardVerdict(s fleet.Session, tr journey.Trail) string {
+	var parts []string
+	for _, p := range verdictPartsWith(tr, m.now, s.Snap.State != state.Idle, m.agentsFor(s.Info.Key())) {
+		if strings.HasPrefix(p, "✗ red") && redNow(tr) {
+			continue
+		}
+		parts = append(parts, p)
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " · ")
+	}
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		l := tr.Legs[i]
+		if l.Current {
+			continue
+		}
+		label := strings.Trim(l.Label, " .")
+		if label == "" && len(l.Files) > 0 {
+			label = strings.Join(l.Files[:min(2, len(l.Files))], ", ")
+		}
+		if label == "" || label == l.Class.String() {
+			return "last: " + l.Class.String()
+		}
+		return "last: " + l.Class.String() + " " + label
+	}
+	return ""
 }
 
 // cardTally is the third row's left half: today in clauses, shed last
@@ -614,9 +667,10 @@ type goalNarrator interface {
 	RequestGoal(key string, tr journey.Trail) bool
 }
 
-// requestGoals asks for the goal of every card whose turn is over: a
+// requestGoals asks for the goal of every card whose turn is over — a
 // working session's goal is still moving, and asking it on every turn
-// would be the cost the goal is meant not to have.
+// would be the cost the goal is meant not to have — and for a working
+// session's first goal, once.
 func (m *Model) requestGoals(trails map[string]journey.Trail) {
 	g, ok := m.narrator.(goalNarrator)
 	if !ok || !cardBoard {
@@ -624,12 +678,18 @@ func (m *Model) requestGoals(trails map[string]journey.Trail) {
 	}
 	for _, i := range m.viewOrder() {
 		s := m.sessions[i]
-		if s.Snap.State == state.Working {
+		tr, ok := trails[s.Info.Key()]
+		if !ok || len(tr.Prompts) == 0 {
 			continue
 		}
-		if tr, ok := trails[s.Info.Key()]; ok && len(tr.Prompts) > 0 {
-			g.RequestGoal(s.Info.Key(), tr)
+		if s.Snap.State == state.Working {
+			// Mid-turn, a session is asked only for its first goal: one
+			// that never stops working would otherwise never have one.
+			if _, has := g.Goal(s.Info.Key(), tr); has {
+				continue
+			}
 		}
+		g.RequestGoal(s.Info.Key(), tr)
 	}
 }
 

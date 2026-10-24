@@ -358,7 +358,7 @@ func TestCardGoalIsNarratedAndAskedOnlyAtTurnEnd(t *testing.T) {
 	withCards(t)
 	forceASCII(t)
 	sc := sceneCards()
-	g := &goalFake{goals: map[string]string{sessionKey("harness"): "compass multi-session triage"}}
+	g := &goalFake{goals: map[string]string{sessionKey("harness"): "compass multi-session triage", sessionKey("api"): "port LFM2 runner to cmdline"}}
 	m := sceneModel(sc, 290, 80)
 	m.SetNarrator(g)
 	poll(m, sc)
@@ -368,9 +368,15 @@ func TestCardGoalIsNarratedAndAskedOnlyAtTurnEnd(t *testing.T) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	for _, id := range []string{"api", "stages", "gemma"} {
-		if g.asks[sessionKey(id)] > 0 {
-			t.Errorf("%s is working: its goal was asked mid-turn", id)
+	// Working with a goal already: not asked until its turn ends.
+	if g.asks[sessionKey("api")] > 0 {
+		t.Errorf("api is working and has a goal: it was asked again mid-turn")
+	}
+	// Working with none yet: asked once, so a session that never stops
+	// still gets one.
+	for _, id := range []string{"stages", "gemma"} {
+		if g.asks[sessionKey(id)] == 0 {
+			t.Errorf("%s is working and has no goal: its first was never asked", id)
 		}
 	}
 	for _, id := range []string{"harness", "flow", "s3"} {
@@ -519,7 +525,17 @@ func TestCardsShot(t *testing.T) {
 	if v := os.Getenv("COMPASS_CARDS_SIZE"); v != "" {
 		fmt.Sscanf(v, "%dx%d", &w, &h)
 	}
-	m := sceneModel(sceneCards(), w, h)
+	sc := sceneCards()
+	for _, id := range []string{"api", "stages"} {
+		sc.trails[sessionKey(id)] = dayLongTrail(id, 120, sceneNow.Add(-10*time.Hour), true)
+	}
+	m := sceneModel(sc, w, h)
+	m.SetNarrator(&goalFake{goals: map[string]string{
+		sessionKey("harness"): "compass multi-session triage", sessionKey("flow"): "polish tinker flow view diagram",
+		sessionKey("api"): "port LFM2 runner to cmdline", sessionKey("s3"): "add retries to the s3 client",
+		sessionKey("demo"): "run LFM2 demo with avatar",
+	}})
+	poll(m, sc)
 	if err := os.WriteFile(out, []byte(m.View()), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -538,5 +554,70 @@ func TestCardsStandApartOnWhitespaceAndABar(t *testing.T) {
 	bar := cardBar("x", 10, false)
 	if !strings.Contains(bar, "48;") || lipgloss.Width(bar) != 10 {
 		t.Fatalf("a card's first row has no tinted bar across its width: %q", bar)
+	}
+}
+
+func TestCardSaysEachThingOnce(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	sc := sceneCards()
+	// An idle session that stopped red, its last leg unnamed.
+	key := sessionKey("s3")
+	tr := sc.trails[key]
+	tr.Legs = append(tr.Legs[:len(tr.Legs)-1:len(tr.Legs)-1], journey.Leg{Class: journey.Test, Label: "pytest", Start: sceneNow.Add(-4*time.Hour - 5*time.Minute), End: sceneNow.Add(-4 * time.Hour),
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "40 passed · 4 failed", Short: "40✓ 4✗", At: sceneNow.Add(-4 * time.Hour)}}})
+	sc.trails[key] = tr
+	g := &goalFake{goals: map[string]string{key: "add retries to the s3 client"}}
+	m := sceneModel(sc, 290, 80)
+	m.SetNarrator(g)
+	poll(m, sc)
+	status := card(t, m, "s3")[1]
+	if strings.Count(status, "red") > 1 {
+		t.Errorf("the status row says red twice: %q", status)
+	}
+	if !strings.Contains(status, "add retries to the s3 client") {
+		t.Errorf("a narrated goal is clipped: %q", status)
+	}
+	// The verdict's fallback names a last leg once.
+	if v := m.cardVerdict(fleet.Session{Snap: state.Snapshot{State: state.Idle}}, journey.Trail{Legs: []journey.Leg{{Class: journey.Build, Label: "build", Start: sceneNow, End: sceneNow.Add(time.Minute)}}}); strings.Contains(v, "build build") {
+		t.Errorf("the fallback says the class twice: %q", v)
+	}
+}
+
+func TestCardDropsTinyLegs(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	sc := sceneCards()
+	key := sessionKey("stages")
+	tr := sc.trails[key]
+	at := sceneNow.Add(-90 * time.Minute)
+	tr.Legs = append([]journey.Leg{{Class: journey.Build, Label: "closing thanks, no edits", Start: at, End: at.Add(3 * time.Second)}}, tr.Legs...)
+	sc.trails[key] = tr
+	m := sceneModel(sc, 290, 80)
+	if rows := strings.Join(card(t, m, "stages"), "\n"); strings.Contains(rows, "closing thanks") {
+		t.Fatalf("a three-second leg with nothing to show is on the card:\n%s", rows)
+	}
+}
+
+func TestCardsFillATallScreen(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	sc := sceneCards()
+	for _, id := range []string{"api", "stages"} {
+		sc.trails[sessionKey(id)] = dayLongTrail(id, 120, sceneNow.Add(-10*time.Hour), true)
+	}
+	m := sceneModel(sc, 390, 105)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	used := 0
+	for i, l := range lines[:len(lines)-3] { // the rule and the footer are not cards
+		if strings.HasPrefix(strings.TrimSpace(l), "recent") || strings.HasPrefix(strings.TrimSpace(l), "+") {
+			break // the strip and the band under the cards
+		}
+		if strings.TrimSpace(l) != "" {
+			used = i
+		}
+	}
+	if used < 80 {
+		t.Fatalf("on a 4K screen the cards stop at row %d of 105:\n%s", used, strings.Join(lines, "\n"))
 	}
 }
