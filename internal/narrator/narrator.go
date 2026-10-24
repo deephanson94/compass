@@ -22,6 +22,9 @@ type Digest struct {
 	Files     []string // Leg.Files
 	Waypoints []string // Waypoint texts, in order
 	Prompt    string   // latest user prompt before the leg (context, ≤120 runes)
+	// Kind is "" for a leg and "goal" for a whole session (goal.go), whose
+	// waypoints are the session's prompts.
+	Kind string `json:",omitempty"`
 }
 
 // Label is one narrated result.
@@ -72,6 +75,13 @@ type Narrator struct {
 	// that tries again: a backoff of exactly one call, which is enough to keep
 	// a broken binary from being invoked on every frame.
 	cooling map[string]bool
+
+	// pendingGoals are the sessions' goals asked for while a batch was in
+	// flight, by goal key: the next batch carries them (goal.go). goals is
+	// the last goal that landed per session, for the card to wear while
+	// the next is asked.
+	pendingGoals map[string]Digest
+	goals        map[string]string
 }
 
 // New builds a narrator; notify is called (from the batch goroutine) after new
@@ -129,7 +139,7 @@ func (n *Narrator) Request(sessionID string, tr journey.Trail, prompt string) bo
 	cooling := n.cooling
 	n.cooling = nil
 
-	digests := n.digests(sessionID, tr, prompt, cooling)
+	digests := append(n.digests(sessionID, tr, prompt, cooling), n.takeGoals()...)
 	if len(digests) == 0 {
 		n.mu.Unlock()
 		return len(cooling) == 0 // all cached, or all cooling
@@ -206,6 +216,14 @@ func (n *Narrator) run(digests []Digest) {
 			}
 			if err := n.cache.Put(l.Key, l.Text); err == nil {
 				landed++
+				if session, ok := goalSession(l.Key); ok {
+					n.mu.Lock()
+					if n.goals == nil {
+						n.goals = map[string]string{}
+					}
+					n.goals[session] = l.Text
+					n.mu.Unlock()
+				}
 			}
 		}
 	}

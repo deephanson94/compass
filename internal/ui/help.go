@@ -33,6 +33,23 @@ var helpKeys = [][2]string{
 	{"q", "quit"},
 }
 
+// boardHelpKeys is the keymap the help lists: the card board adds `p`,
+// after `x`, the other key that moves a session on the board.
+func boardHelpKeys() [][2]string {
+	if !cardBoard {
+		return helpKeys
+	}
+	var out [][2]string
+	for _, k := range helpKeys {
+		out = append(out, k)
+		if k[0] == "x" {
+			out = append(out, [2]string{"p", "pin a card to the board's front · p again unpins; it leaves when the session does"})
+			out = append(out, [2]string{"+ / -", "one card more / fewer in a row (cards_per_row in the config keeps it)"})
+		}
+	}
+	return out
+}
+
 // helpTwoCol is the width at which the overlay splits: below it the keys would
 // be clipped to nonsense, so the legend goes compact instead.
 const helpTwoCol = 150
@@ -394,7 +411,7 @@ func helpKeyLinesFor(w int, board bool, refused ...string) []string {
 
 func helpKeyLinesIn(w int, board, reader bool, refused ...string) []string {
 	lines := []string{textStyle.Render("keys"), ""}
-	for _, k := range helpKeys {
+	for _, k := range boardHelpKeys() {
 		key, what := k[0], k[1]
 		// A key the deck would refuse still has a row where there is room:
 		// it refuses in words ("nothing archived yet", "the only session

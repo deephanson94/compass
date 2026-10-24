@@ -69,6 +69,19 @@ func main() {
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
 	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: enter no longer attaches")
 	mirror := fs.Bool("mirror", cfg.Mirror, "open the live mirror of the selected pane at Lv1 (m toggles it)")
+	boardDefault := "cards"
+	if cfg.Board != "" {
+		boardDefault = cfg.Board
+	}
+	board := fs.String("board", boardDefault, `the board's shape: "cards" (today, newest first, with the session's goal) or "columns" (every trail, oldest first)`)
+	cardTint := fs.String("card-tint", cfg.CardTint, `a card's ground on the card board, "#rrggbb" (empty = compass's own)`)
+	cardsRow := fs.Int("cards-per-row", cfg.CardsRow, "cards in a row on the card board (0 = as many as card-width allows; + and - change it live)")
+	cardWidth := fs.Int("card-width", cfg.CardWidth, "a card's least width on the card board (0 = compass's own, 84)")
+	hungDefault := "30m"
+	if _, err := time.ParseDuration(cfg.HungAfter); err == nil {
+		hungDefault = cfg.HungAfter
+	}
+	hungAfter := fs.String("hung-after", hungDefault, `how long a stuck session is silent before its card says hung`)
 	dim := fs.String("dim", cfg.Dim, `grey for the quiet rows: "#c0c0c0" or a palette index (empty = compass's own)`)
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
@@ -89,6 +102,17 @@ func main() {
 		// mod asks it before it ever runs `trail`.
 		fmt.Printf("compass %s (trail %d)\n", version, trailProtocol)
 		os.Exit(0)
+	}
+	switch *board {
+	case "cards", "columns":
+	default:
+		fmt.Fprintf(os.Stderr, "compass: -board %q is not a board (try cards or columns)\n", *board)
+		os.Exit(2)
+	}
+	hung, err := time.ParseDuration(*hungAfter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compass: -hung-after %q is not a duration (try 30m)\n", *hungAfter)
+		os.Exit(2)
 	}
 	window, err := time.ParseDuration(*liveWithin)
 	if err != nil {
@@ -155,6 +179,11 @@ func main() {
 		// The palette is set before the first frame is drawn: an unreadable
 		// value is ignored inside SetDim, so a typo costs nothing.
 		ui.SetDim(*dim)
+		ui.SetBoardCards(*board == "cards")
+		ui.SetHungAfter(hung)
+		ui.SetCardWidth(*cardWidth)
+		ui.SetCardsPerRow(*cardsRow)
+		ui.SetCardTint(*cardTint)
 		// The deck resumes where the last process — a deck or a status
 		// line — stopped reading, as `status` does: at launch every live
 		// session is otherwise replayed from its first byte, and the scan

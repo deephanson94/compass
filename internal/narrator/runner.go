@@ -40,6 +40,11 @@ Rules for each label:
 - lowercase, unless a word is a proper noun
 - name the work that was done, not the class it belongs to
 
+An entry whose Kind is "goal" is not a leg but a whole session: its
+waypoints are the user's prompts, oldest first. Its label says what the
+session as a whole is trying to achieve, in at most 6 words ("port the
+LFM2 runner to cmdline"), not what the latest prompt alone asked.
+
 LEGS:
 `
 

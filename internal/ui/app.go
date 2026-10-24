@@ -369,6 +369,8 @@ type Model struct {
 	digits      map[string]int       // each live session's number, kept from first sight
 	opened      map[string]bool      // sessions the person opened this run, by Key(): a look to commit on leaving
 	hiddenFile  string               // where they persist; "" = memory only
+	pins        []string             // sessions pinned to the board's front with `p`, by Key(), in pin order (cards.go)
+	pinFile     string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
 	seenFile    string               // where the seen-times persist; "" = memory only (harness)
 	boardForced bool                 // the deck left the board only because the terminal narrowed
@@ -461,6 +463,7 @@ func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook strin
 		// means unread" to mean anything across restarts.
 		m.LoadSeen(filepath.Join(base, "compass", "seen.json"))
 		m.LoadHidden(filepath.Join(base, "compass", "hidden.json"))
+		m.LoadPins(filepath.Join(base, "compass", "pins.json"))
 	}
 	m.inTmux = os.Getenv("TMUX") != ""
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -545,6 +548,7 @@ func (m *Model) SetSessions(sessions []fleet.Session, now time.Time) {
 	m.sessions = sessions
 	m.now = now
 	m.loaded = true
+	m.prunePins()
 	m.assignDigits()
 	m.clampSelection()
 }
@@ -1063,6 +1067,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "X":
 		m.sweepWaiting()
 		return m, nil
+	case "p":
+		if cardBoard {
+			m.togglePin()
+			return m, nil
+		}
+	case "+", "=":
+		if cardBoard && m.level == levelBoard {
+			m.stepCardsPerRow(1)
+			return m, nil
+		}
+	case "-":
+		if cardBoard && m.level == levelBoard {
+			m.stepCardsPerRow(-1)
+			return m, nil
+		}
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
 		// stays selected, per view, so coming back lands where you left. It is

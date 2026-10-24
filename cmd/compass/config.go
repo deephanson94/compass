@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,11 @@ type config struct {
 	Readonly   bool   // readonly = true (enter no longer attaches)
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
+	Board      string // board = "cards" | "columns" (the default)
+	HungAfter  string // hung_after = "30m": the silence a card calls hung
+	CardWidth  int    // card_width = "84": a card's least width
+	CardsRow   int    // cards_per_row = "3": cards in a row (0 = by the width)
+	CardTint   string // card_tint = "#2c3640": a card's ground; its bar is lit from it
 
 	// Dim is the grey the quiet rows are drawn in: `dim = "#c0c0c0"`, or a
 	// palette index. compass picks a neutral grey that clears 4.4:1 against
@@ -82,6 +88,20 @@ func loadConfig() (c config) {
 			c.LiveWithin = value
 		case "mirror":
 			c.Mirror = value == "true"
+		case "board":
+			c.Board = value
+		case "hung_after":
+			c.HungAfter = value
+		case "card_tint":
+			c.CardTint = value
+		case "cards_per_row":
+			if n, err := strconv.Atoi(value); err == nil {
+				c.CardsRow = n
+			}
+		case "card_width":
+			if n, err := strconv.Atoi(value); err == nil {
+				c.CardWidth = n
+			}
 		case "reply":
 			if len(c.Replies) < 9 {
 				c.Replies = append(c.Replies, value)

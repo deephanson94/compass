@@ -127,9 +127,20 @@ go install github.com/deephanson94/compass/cmd/compass@latest   # the newest tag
 
 | Level | Keys | Shows |
 |-------|------|-------|
-| **Board** | opens here | Every session's trail side by side, urgent first. `h`/`l` across, numbers jump, `Enter` attaches |
+| **Board** | opens here | Every session as a card, urgent first: its badge, its goal, today's work newest first. `h`/`l` across, numbers jump, `Enter` attaches |
 | **Session** | `Tab` | That column expanded: its header card, the journey as a git graph with a cursor on the present, and beside it the conversation following the cursor — or the live tmux pane, with `m`. `j`/`k` walk the legs, `h`/`l` slide to the next session, `[ ]` step your prompts |
 | **Reader** | `Tab` `Tab` | The keys move into the conversation: scroll, unfold tool output, search, `[ ]` between your turns. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
+
+The board is drawn as cards, for a wide screen with many sessions: each card a
+bordered panel at least 84 cells wide (`card_width`), the rows shared evenly
+(`cards_per_row`, or `+`/`-` live), as tall as the screen gives it. A card is the
+fleet row; a coloured badge (needs you, hung, stuck, looping, dead, working,
+done, red, idle), the session's goal (one line the narrator writes once a turn is
+over, the first prompt until then) and what it is doing now; today's tally; and
+today's work newest first, grouped by turn, so the breathing HEAD row is right
+under the goal. `p` pins a card to the board's front; the pin goes when the
+session leaves the live fleet. `board = "columns"` (or `-board columns`) is the
+board as it was: every session's whole trail side by side, oldest first.
 
 Below 110 columns there is no board: the deck is the fleet list beside one trail, `Tab` puts a cursor on it, and a third `Tab` gives the reader the whole width.
 
@@ -141,6 +152,7 @@ go build -o compass ./cmd/compass    # Go 1.24+; a single static binary
 compass                              # the deck, full screen — run it in its own terminal tab
 compass -readonly                    # observe only: Enter no longer attaches
 compass -narrator off                # heuristic labels only, no claude calls
+compass -board columns               # the column board: every trail whole, oldest first
 compass -live-within 0               # only sessions tmux is holding count as live
                                      #   (an unanswered question stops holding one too)
 compass -opencode-db ""              # leave OpenCode's sessions out (default: its store, if present)
@@ -186,6 +198,11 @@ Everything is optional configuration — compass runs with none. `~/.config/comp
 ```toml
 root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root override)
 narrator = "haiku"      # narration model; "off" disables
+board = "cards"         # the default; "columns" for every trail whole, oldest first
+hung_after = "30m"      # a card calls a stuck session hung after this much silence
+card_width = "84"       # a card's least width; lower it for more cards across
+cards_per_row = "3"     # or say how many cards a row; + and - change it live
+card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live
