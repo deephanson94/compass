@@ -127,8 +127,10 @@ func card(t *testing.T, m *Model, name string) []string {
 			continue
 		}
 		var out []string
-		for _, l := range m.boardCard(key, r, cw, 200) {
-			out = append(out, strings.TrimRight(ansi.Strip(l), " "))
+		drawn := m.boardCard(key, r, cw, 200)
+		for _, l := range drawn[1 : len(drawn)-1] { // inside the border
+			l = strings.TrimSuffix(strings.TrimPrefix(ansi.Strip(l), "│"), "│")
+			out = append(out, strings.TrimRight(l, " "))
 		}
 		return out
 	}
@@ -558,8 +560,8 @@ func TestCardsStandApartOnWhitespaceAndABar(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneCards(), 290, 80)
 	for _, l := range strings.Split(ansi.Strip(m.View()), "\n")[3:] {
-		if strings.Contains(l, "│") {
-			t.Fatalf("cards are drawn apart by a hairline, not by space: %q", l)
+		if strings.Contains(l, "│ │ │") { // a border, the board's hairline, a border
+			t.Fatalf("cards are drawn apart by the board's hairline: %q", l)
 		}
 	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -714,9 +716,13 @@ func TestACardIsAPanel(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	key := sessionKey("s3")
 	r := m.boardRows()[key]
-	for i, row := range m.boardCard(key, r, 100, 12) {
-		if !strings.HasPrefix(row, "\x1b[48;") || lipgloss.Width(row) != 100 {
-			t.Fatalf("row %d of a card is not on the card's ground, the card's width across: %q", i, row)
+	rows := m.boardCard(key, r, 100, 12)
+	if top, bottom := ansi.Strip(rows[0]), ansi.Strip(rows[len(rows)-1]); !strings.HasPrefix(top, "╭") || !strings.HasSuffix(bottom, "╯") {
+		t.Fatalf("a card has no border: %q … %q", top, bottom)
+	}
+	for i, row := range rows[1 : len(rows)-1] {
+		if !strings.Contains(row, "\x1b[48;") || lipgloss.Width(row) != 100 || !strings.HasPrefix(ansi.Strip(row), "│") {
+			t.Fatalf("row %d of a card is not on the card's ground inside its border: %q", i+1, row)
 		}
 	}
 }

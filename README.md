@@ -200,7 +200,7 @@ board = "cards"         # the board as cards (default "columns"); p pins a card 
 hung_after = "30m"      # a card calls a stuck session hung after this much silence
 card_width = "84"       # a card's least width; lower it for more cards across
 cards_per_row = "3"     # or say how many cards a row; + and - change it live
-card_tint = "#2c3640"   # a card's ground; pick one a step lighter than your terminal's
+card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live

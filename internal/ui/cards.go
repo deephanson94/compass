@@ -546,18 +546,18 @@ func (m *Model) cardOpts(key string, s fleet.Session, tr journey.Trail, w int) T
 func (m *Model) cardRows(key string, w int) int {
 	tr, ok := m.trails[key]
 	if !ok {
-		return cardHead + 1
+		return cardFrame + cardHead + 1
 	}
 	r, ok := m.boardRows()[key]
 	if !ok {
-		return cardHead + 1
+		return cardFrame + cardHead + 1
 	}
-	return cardHead + len(m.cardWork(tr, m.cardOpts(key, m.sessions[r.sess], tr, max(1, w-2*cardPad))))
+	return cardFrame + cardHead + len(m.cardWork(tr, m.cardOpts(key, m.sessions[r.sess], tr, max(1, w-2-2*cardPad))))
 }
 
 // cardMinRows is the least a band of cards is drawn at: the head and
 // four rows of work, which is HEAD and the three moments before it.
-const cardMinRows = cardHead + 4
+const cardMinRows = cardFrame + cardHead + 4
 
 // cardBands packs the cards into bands: as many bands as the body holds at
 // the least height a card is worth, and the rows shared out between them —
@@ -620,19 +620,42 @@ func (m *Model) cardKeys(n int) []string {
 
 // boardCard draws one card w×h.
 func (m *Model) boardCard(key string, r fleetRow, w, h int) []string {
-	inner := max(1, w-2*cardPad)
-	rows := fit(m.cardContent(key, r, inner, h), h)
-	pad := strings.Repeat(" ", cardPad)
 	selected := key == m.selectedKey
-	for i, row := range rows {
-		if i == 0 {
-			rows[i] = cardFill(pad+row, w, cardBarColor(selected))
-			continue
-		}
-		rows[i] = cardFill(pad+row, w, cardPanel)
+	edge := cardEdge
+	if selected {
+		edge = cardEdgeSelected
 	}
-	return rows
+	line := lipgloss.NewStyle().Foreground(edge)
+	if w < 2+2*cardPad+trailMinLabel || h < 3 {
+		return fit(m.cardContent(key, r, w, h), h)
+	}
+	body := w - 2 // inside the border
+	inner := body - 2*cardPad
+	rows := fit(m.cardContent(key, r, inner, h-2), h-2)
+	pad := strings.Repeat(" ", cardPad)
+	out := make([]string, 0, h)
+	out = append(out, line.Render("╭"+strings.Repeat("─", body)+"╮"))
+	for i, row := range rows {
+		bg := cardPanel
+		if i == 0 {
+			bg = cardBarColor(selected)
+		}
+		out = append(out, line.Render("│")+cardFill(pad+row, body, bg)+line.Render("│"))
+	}
+	out = append(out, line.Render("╰"+strings.Repeat("─", body)+"╯"))
+	return out
 }
+
+// cardFrame is the rows a card's border takes: its top and its bottom.
+const cardFrame = 2
+
+// cardEdge is the colour of a card's border, and cardEdgeSelected the
+// selected card's: the outline the first sketch drew, a step off the
+// card's ground, and the selection lit along it.
+var (
+	cardEdge         = lipgloss.AdaptiveColor{Light: "#b8c2cc", Dark: "#4a5d66"}
+	cardEdgeSelected = lipgloss.AdaptiveColor{Light: "#5b7a90", Dark: "#9fbccc"}
+)
 
 // cardPad is the space inside a card's panel, left and right.
 const cardPad = 1
@@ -640,15 +663,16 @@ const cardPad = 1
 // cardPanel is the card's own ground: a panel a step off the terminal's,
 // so a card is a block with edges, as the first sketch drew it, rather
 // than rows that happen to stand near each other.
-// The default is lit well clear of the dark themes people run — a slate
-// ground like #1b2b30 swallowed #1e252d whole — and `card_tint` sets it.
-var cardPanel = lipgloss.AdaptiveColor{Light: "#e6eaee", Dark: "#2c3640"}
+// The default is the owner's pick, a hair off their slate terminal: the
+// border is what sets a card off now, the ground only quiets it. `card_tint`
+// sets it.
+var cardPanel = lipgloss.AdaptiveColor{Light: "#e6eaee", Dark: "#1f2b30"}
 
 // cardBarLit is the first row's ground, and cardBarSelected the selected
 // card's: steps brighter than the panel, set with it by `card_tint`.
 var (
-	cardBarLit      = lipgloss.AdaptiveColor{Light: "#d2d9e0", Dark: "#3b4754"}
-	cardBarSelected = lipgloss.AdaptiveColor{Light: "#b4c0cc", Dark: "#4f6478"}
+	cardBarLit      = lipgloss.AdaptiveColor{Light: "#d2d9e0", Dark: "#313d42"}
+	cardBarSelected = lipgloss.AdaptiveColor{Light: "#b4c0cc", Dark: "#475359"}
 )
 
 // SetCardTint sets a card's ground from one "#rrggbb", and lights its bar
