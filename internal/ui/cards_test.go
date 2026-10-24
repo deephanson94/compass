@@ -224,12 +224,12 @@ func TestCardOlderPromptsAreDim(t *testing.T) {
 func TestCardsAreWideAndFewAcross(t *testing.T) {
 	withCards(t)
 	// A 32-inch screen: six cards across at 60 still clipped every row.
-	n, w := boardColumns(390-2*edgePad, 9)
+	n, w := boardColumns(390-2*edgePad, 8)
 	if n != 4 || w < cardColMin {
 		t.Fatalf("a 390-column board holds %d cards %d wide; want 4 of at least %d", n, w, cardColMin)
 	}
 	cardBoard = false
-	if n, _ := boardColumns(390-2*edgePad, 9); n <= 4 {
+	if n, _ := boardColumns(390-2*edgePad, 8); n <= 4 {
 		t.Fatalf("the column board should still fit more than four columns, got %d", n)
 	}
 }
@@ -526,8 +526,19 @@ func TestCardsShot(t *testing.T) {
 		fmt.Sscanf(v, "%dx%d", &w, &h)
 	}
 	sc := sceneCards()
-	for _, id := range []string{"api", "stages"} {
-		sc.trails[sessionKey(id)] = dayLongTrail(id, 120, sceneNow.Add(-10*time.Hour), true)
+	if os.Getenv("COMPASS_CARDS_SET") == "six" {
+		// The owner's own afternoon: six sessions, a light day each.
+		var keep []fleet.Session
+		for _, s := range sc.sessions {
+			if id := s.Info.ID; id != "gemma" && id != "etl" {
+				keep = append(keep, s)
+			}
+		}
+		sc.sessions = keep
+	} else {
+		for _, id := range []string{"api", "stages"} {
+			sc.trails[sessionKey(id)] = dayLongTrail(id, 120, sceneNow.Add(-10*time.Hour), true)
+		}
 	}
 	m := sceneModel(sc, w, h)
 	m.SetNarrator(&goalFake{goals: map[string]string{
@@ -619,5 +630,15 @@ func TestCardsFillATallScreen(t *testing.T) {
 	}
 	if used < 80 {
 		t.Fatalf("on a 4K screen the cards stop at row %d of 105:\n%s", used, strings.Join(lines, "\n"))
+	}
+}
+
+func TestCardsShareTheirRowsEvenly(t *testing.T) {
+	withCards(t)
+	inner := 390 - 2*edgePad
+	for _, c := range []struct{ count, across int }{{6, 3}, {8, 4}, {9, 3}, {5, 3}, {4, 4}, {3, 3}} {
+		if n, w := boardColumns(inner, c.count); n != c.across || w < cardColMin {
+			t.Errorf("%d cards at 390: %d across %d wide, want %d across", c.count, n, w, c.across)
+		}
 	}
 }

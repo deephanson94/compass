@@ -71,6 +71,13 @@ func boardColumns(inner, count int) (n, w int) {
 	if n > count {
 		n = count
 	}
+	if cardBoard && n > 0 {
+		// Cards fill their rows evenly: six cards are two rows of three,
+		// not four and two, so each card takes the width a short row
+		// would have left blank.
+		rows := (count + n - 1) / n
+		n = (count + rows - 1) / rows
+	}
 	w = (inner - (n-1)*gutterWidth) / n
 	if w > hi && n >= 2 {
 		// The cap is for a row of columns; a lone column takes the
