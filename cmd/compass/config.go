@@ -23,6 +23,7 @@ type config struct {
 	HungAfter  string // hung_after = "30m": the silence a card calls hung
 	CardWidth  int    // card_width = "84": a card's least width
 	CardsRow   int    // cards_per_row = "3": cards in a row (0 = by the width)
+	CardTint   string // card_tint = "#2c3640": a card's ground; its bar is lit from it
 
 	// Dim is the grey the quiet rows are drawn in: `dim = "#c0c0c0"`, or a
 	// palette index. compass picks a neutral grey that clears 4.4:1 against
@@ -91,6 +92,8 @@ func loadConfig() (c config) {
 			c.Board = value
 		case "hung_after":
 			c.HungAfter = value
+		case "card_tint":
+			c.CardTint = value
 		case "cards_per_row":
 			if n, err := strconv.Atoi(value); err == nil {
 				c.CardsRow = n

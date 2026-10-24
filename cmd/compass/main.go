@@ -74,6 +74,7 @@ func main() {
 		boardDefault = cfg.Board
 	}
 	board := fs.String("board", boardDefault, `the board's shape: "columns" (every trail, oldest first) or "cards" (today, newest first, with the session's goal)`)
+	cardTint := fs.String("card-tint", cfg.CardTint, `a card's ground on the card board, "#rrggbb" (empty = compass's own)`)
 	cardsRow := fs.Int("cards-per-row", cfg.CardsRow, "cards in a row on the card board (0 = as many as card-width allows; + and - change it live)")
 	cardWidth := fs.Int("card-width", cfg.CardWidth, "a card's least width on the card board (0 = compass's own, 84)")
 	hungDefault := "30m"
@@ -182,6 +183,7 @@ func main() {
 		ui.SetHungAfter(hung)
 		ui.SetCardWidth(*cardWidth)
 		ui.SetCardsPerRow(*cardsRow)
+		ui.SetCardTint(*cardTint)
 		// The deck resumes where the last process — a deck or a status
 		// line — stopped reading, as `status` does: at launch every live
 		// session is otherwise replayed from its first byte, and the scan

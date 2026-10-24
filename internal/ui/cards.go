@@ -640,15 +640,50 @@ const cardPad = 1
 // cardPanel is the card's own ground: a panel a step off the terminal's,
 // so a card is a block with edges, as the first sketch drew it, rather
 // than rows that happen to stand near each other.
-var cardPanel = lipgloss.AdaptiveColor{Light: "#eef1f4", Dark: "#1e252d"}
+// The default is lit well clear of the dark themes people run — a slate
+// ground like #1b2b30 swallowed #1e252d whole — and `card_tint` sets it.
+var cardPanel = lipgloss.AdaptiveColor{Light: "#e6eaee", Dark: "#2c3640"}
 
-// cardBarColor is the ground of a card's first row, a step brighter than
-// the panel; the selected card's is brighter still.
+// cardBarLit is the first row's ground, and cardBarSelected the selected
+// card's: steps brighter than the panel, set with it by `card_tint`.
+var (
+	cardBarLit      = lipgloss.AdaptiveColor{Light: "#d2d9e0", Dark: "#3b4754"}
+	cardBarSelected = lipgloss.AdaptiveColor{Light: "#b4c0cc", Dark: "#4f6478"}
+)
+
+// SetCardTint sets a card's ground from one "#rrggbb", and lights its bar
+// two steps from it; anything else keeps the default.
+func SetCardTint(hex string) {
+	r, g, b, ok := parseHex(hex)
+	if !ok {
+		return
+	}
+	step := func(d int) string {
+		c := func(v int) int { return min(255, max(0, v+d)) }
+		return fmt.Sprintf("#%02x%02x%02x", c(r), c(g), c(b))
+	}
+	cardPanel = lipgloss.AdaptiveColor{Light: hex, Dark: hex}
+	cardBarLit = lipgloss.AdaptiveColor{Light: step(-18), Dark: step(18)}
+	cardBarSelected = lipgloss.AdaptiveColor{Light: step(-40), Dark: step(40)}
+}
+
+// parseHex reads "#rrggbb".
+func parseHex(hex string) (r, g, b int, ok bool) {
+	if len(hex) != 7 || hex[0] != '#' {
+		return 0, 0, 0, false
+	}
+	if _, err := fmt.Sscanf(hex[1:], "%02x%02x%02x", &r, &g, &b); err != nil {
+		return 0, 0, 0, false
+	}
+	return r, g, b, true
+}
+
+// cardBarColor is the ground of a card's first row.
 func cardBarColor(selected bool) lipgloss.AdaptiveColor {
 	if selected {
-		return lipgloss.AdaptiveColor{Light: "#c3ccd6", Dark: "#3f5163"}
+		return cardBarSelected
 	}
-	return lipgloss.AdaptiveColor{Light: "#dde3e9", Dark: "#2e3742"}
+	return cardBarLit
 }
 
 // cardContent is a card's rows, w wide, before the panel is laid under them.

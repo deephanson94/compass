@@ -720,3 +720,16 @@ func TestACardIsAPanel(t *testing.T) {
 		}
 	}
 }
+
+func TestCardTintSetsTheGroundAndLightsTheBar(t *testing.T) {
+	panel, lit, sel := cardPanel, cardBarLit, cardBarSelected
+	t.Cleanup(func() { cardPanel, cardBarLit, cardBarSelected = panel, lit, sel })
+	SetCardTint("#203040")
+	if cardPanel.Dark != "#203040" || cardBarLit.Dark != "#324252" || cardBarSelected.Dark != "#485868" {
+		t.Fatalf("card_tint #203040 gave panel %s bar %s selected %s", cardPanel.Dark, cardBarLit.Dark, cardBarSelected.Dark)
+	}
+	SetCardTint("teal")
+	if cardPanel.Dark != "#203040" {
+		t.Fatal("a tint that is not #rrggbb changed the ground")
+	}
+}
