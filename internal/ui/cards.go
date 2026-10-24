@@ -99,7 +99,7 @@ func SetCardWidth(w int) {
 
 const (
 	cardColMax  = 140
-	cardHead    = 3  // the fleet row, the goal row, the tally row
+	cardHead    = 4  // the fleet row, the goal row, the tally row, and a row of air before the work
 	cardRowsMin = 5  // a card with a quiet today still shows its last five moments
 	cardRowsMax = 60 // a card fills the rows the board shares it; past this a day is the trail's
 )
@@ -208,10 +208,19 @@ func (m *Model) cardWork(tr journey.Trail, o TrailOpts) []string {
 	for i, it := range items[:n] {
 		day := dayStart(it.at)
 		if i > 0 && day.Before(prevDay) || i == 0 && day.Before(today) {
+			if len(rows) > 0 && rows[len(rows)-1] == "" {
+				rows = rows[:len(rows)-1] // the rule is the gap
+			}
 			rows = append(rows, dayRule(day, o.Now, o.Width))
 		}
 		prevDay = day
 		rows = append(rows, m.cardRow(tr, it, o)...)
+		if it.prompt >= 0 && i < n-1 {
+			// A turn is your prompt and the work it led to; newest first,
+			// the work stands above its prompt, and a row of air closes
+			// the turn so the card reads as turns, not as one list.
+			rows = append(rows, "")
+		}
 	}
 	if earlier > 0 {
 		rows = append(rows, dimStyle.Render(clip(fmt.Sprintf("↓ %d earlier today · tab opens the trail", earlier), o.Width)))
@@ -727,7 +736,7 @@ func (m *Model) cardContent(key string, r fleetRow, w, h int) []string {
 		room := w - lipgloss.Width(tag) - 2
 		third = pad(dimStyle.Render(shedClauses(tally, max(0, room))), w-lipgloss.Width(tag)) + dimStyle.Render(tag)
 	}
-	rows = append(rows, third)
+	rows = append(rows, third, "") // the head, then air before the work
 	work := m.cardWork(tr, m.cardOpts(key, s, tr, w))
 	if room := h - cardHead; len(work) > room && room > 0 {
 		// The card is cut short: its last row says how much it left out

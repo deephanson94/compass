@@ -140,10 +140,9 @@ func card(t *testing.T, m *Model, name string) []string {
 
 // cardUntilBlank cuts a card's rows at its first blank row: the band's end.
 func cardUntilBlank(rows []string) []string {
-	for i, r := range rows {
-		if strings.TrimSpace(r) == "" {
-			return rows[:i]
-		}
+	// The card's own rows of air stay; the padding under its last row goes.
+	for len(rows) > 0 && strings.TrimSpace(rows[len(rows)-1]) == "" {
+		rows = rows[:len(rows)-1]
 	}
 	return rows
 }
@@ -193,7 +192,13 @@ func TestCardShowsTheLatestDozenAndDimsOlderPrompts(t *testing.T) {
 	forceASCII(t)
 	m := sceneModel(sceneVeryLong(), 220, 80)
 	rows := cardUntilBlank(card(t, m, "auth"))
-	if len(rows) > cardHead+cardRowsMax+1 {
+	drawn := 0
+	for _, r := range rows {
+		if strings.TrimSpace(r) != "" {
+			drawn++
+		}
+	}
+	if drawn > cardHead+cardRowsMax+1 {
 		t.Fatalf("a busy day's card has %d rows, want at most %d:\n%s", len(rows), cardHead+cardRowsMax+1, strings.Join(rows, "\n"))
 	}
 	if !strings.Contains(rows[len(rows)-1], "earlier today") {
@@ -737,5 +742,21 @@ func TestCardTintSetsTheGroundAndLightsTheBar(t *testing.T) {
 	SetCardTint("teal")
 	if cardPanel.Dark != "#203040" {
 		t.Fatal("a tint that is not #rrggbb changed the ground")
+	}
+}
+
+func TestCardGroupsItsRowsWithAir(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	m := sceneModel(sceneCards(), 390, 105)
+	rows := cardUntilBlank(card(t, m, "harness"))
+	if strings.TrimSpace(rows[cardHead-1]) != "" {
+		t.Fatalf("no air between the card's head and its work: %q", rows[cardHead-1])
+	}
+	// Each turn — the work, then the prompt it answered — closes on air.
+	for i, r := range rows[cardHead : len(rows)-1] {
+		if strings.Contains(r, "◉ 2/2") && strings.TrimSpace(rows[cardHead+i+1]) != "" {
+			t.Fatalf("a turn's prompt is not followed by air:\n%s", strings.Join(rows, "\n"))
+		}
 	}
 }
