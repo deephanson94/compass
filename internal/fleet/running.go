@@ -41,6 +41,23 @@ type runningSession struct {
 // between "none are running" and "I cannot say", and only the first of
 // those is allowed to archive anything.
 func readRunning(root string) map[string]bool {
+	byPID := RunningPIDs(root)
+	if byPID == nil {
+		return nil
+	}
+	live := make(map[string]bool, len(byPID))
+	for _, id := range byPID {
+		live[id] = true
+	}
+	return live
+}
+
+// RunningPIDs is the registry read the other way round: the pid of every
+// live Claude Code process, and the session id it is running. It is the one
+// thing on the machine that says which session a process is — a cwd says
+// only where it was started, and three sessions started in one directory
+// share it (#71). nil where the registry cannot be read at all.
+func RunningPIDs(root string) map[int]string {
 	if root == "" {
 		return nil
 	}
@@ -48,7 +65,7 @@ func readRunning(root string) map[string]bool {
 	if err != nil {
 		return nil
 	}
-	live := map[string]bool{}
+	live := map[int]string{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue // the peer key files sit here too
@@ -64,7 +81,7 @@ func readRunning(root string) map[string]bool {
 		if !processAlive(s.PID, s.ProcStart) {
 			continue // the entry outlived the process that wrote it
 		}
-		live[s.SessionID] = true
+		live[s.PID] = s.SessionID
 	}
 	return live
 }

@@ -760,7 +760,13 @@ func (m *Model) relistPanes() tea.Cmd {
 			markMapped(mgr, nil)
 			return panesMsg{panes: map[string]tmuxop.Pane{}, against: len(infos)}
 		}
-		mapped := tmuxop.MapSessions(infos, panes, proc)
+		// Claude Code's registry says which session each process is; a
+		// harness has no Manager and pairs by directory alone.
+		var byPID map[int]string
+		if mgr != nil {
+			byPID = fleet.RunningPIDs(mgr.Root())
+		}
+		mapped := tmuxop.MapSessionsBy(infos, panes, proc, byPID)
 		markMapped(mgr, mapped)
 		return panesMsg{panes: mapped, list: panes, against: len(infos)}
 	}

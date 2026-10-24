@@ -127,7 +127,7 @@ func livePaned(mgr *fleet.Manager, now time.Time) ([]fleet.Session, error) {
 		infos = append(infos, s.Info)
 	}
 	keys := map[string]bool{}
-	for key := range tmuxop.MapSessions(infos, panes, tmuxop.RealProc{}) {
+	for key := range tmuxop.MapSessionsBy(infos, panes, tmuxop.RealProc{}, fleet.RunningPIDs(mgr.Root())) {
 		keys[key] = true
 	}
 	mgr.MarkPaneMapped(keys)
