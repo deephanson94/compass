@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -114,31 +113,25 @@ func sceneCards() scene {
 	return scene{name: "cards", story: "A day into eight sessions on a 32-inch screen.", sessions: ss, trails: tr, panes: panes, order: order}
 }
 
-// card returns the rows of one session's card on a frame, found by its
-// fleet row — the state glyph and the name — and read down its column.
-func card(t *testing.T, frame, name string) []string {
+// card returns the rows of one session's card, found by its name, drawn
+// at the width the board gives it and tall enough to stand whole, with
+// the styling taken off.
+func card(t *testing.T, m *Model, name string) []string {
 	t.Helper()
-	lines := strings.Split(ansi.Strip(frame), "\n")
-	head := regexp.MustCompile(`[▲◍↻●○⊘] ` + regexp.QuoteMeta(name) + `( |$)`)
-	for y, line := range lines {
-		cols := strings.Split(line, "│")
-		for c, col := range cols {
-			if !head.MatchString(col) {
-				continue
-			}
-			var out []string
-			for _, l := range lines[y:] {
-				parts := strings.Split(l, "│")
-				if len(parts) != len(cols) {
-					out = append(out, "")
-					continue
-				}
-				out = append(out, strings.TrimSpace(parts[c]))
-			}
-			return out
+	m.View() // the frame's own bookkeeping: digits, the poll's trails
+	_, cw := boardColumns(m.width-2*edgePad, m.drawnCount(m.viewOrder()))
+	rowOf := m.boardRows()
+	for key, r := range rowOf {
+		if sessionName(m.sessions[r.sess].Info) != name {
+			continue
 		}
+		var out []string
+		for _, l := range m.boardCard(key, r, cw, 200) {
+			out = append(out, strings.TrimRight(ansi.Strip(l), " "))
+		}
+		return out
 	}
-	t.Fatalf("no card named %s on the frame:\n%s", name, ansi.Strip(frame))
+	t.Fatalf("no card named %s", name)
 	return nil
 }
 
@@ -196,7 +189,7 @@ func TestCardShowsTheLatestDozenAndDimsOlderPrompts(t *testing.T) {
 	withCards(t)
 	forceASCII(t)
 	m := sceneModel(sceneVeryLong(), 220, 80)
-	rows := cardUntilBlank(card(t, m.View(), "auth"))
+	rows := cardUntilBlank(card(t, m, "auth"))
 	if len(rows) > cardHead+cardRowsMax+1 {
 		t.Fatalf("a busy day's card has %d rows, want at most %d:\n%s", len(rows), cardHead+cardRowsMax+1, strings.Join(rows, "\n"))
 	}
@@ -245,7 +238,7 @@ func TestCardNewestFirstHeadOnTop(t *testing.T) {
 	withCards(t)
 	forceASCII(t)
 	m := sceneModel(sceneCards(), 290, 80)
-	rows := cardUntilBlank(card(t, m.View(), "api"))
+	rows := cardUntilBlank(card(t, m, "api"))
 	if len(rows) < cardHead+3 {
 		t.Fatalf("card too short: %q", rows)
 	}
@@ -277,10 +270,10 @@ func TestCardTodayOnlyAndYesterdayRule(t *testing.T) {
 	withCards(t)
 	forceASCII(t)
 	m := sceneModel(sceneCards(), 290, 80)
-	frame := m.View()
+	m.View()
 	// A day-old trail: nothing today, so its last moments under a rule
 	// that says which day they are, and a tally that says when it worked.
-	rows := cardUntilBlank(card(t, frame, "demo"))
+	rows := cardUntilBlank(card(t, m, "demo"))
 	joined := strings.Join(rows, "\n")
 	if !strings.Contains(joined, "── yesterday") {
 		t.Fatalf("a card of yesterday's work has no day rule:\n%s", joined)
@@ -290,7 +283,7 @@ func TestCardTodayOnlyAndYesterdayRule(t *testing.T) {
 	}
 	// The hung session's day began yesterday: today's tally counts nothing
 	// from before midnight.
-	rows = cardUntilBlank(card(t, frame, "flow"))
+	rows = cardUntilBlank(card(t, m, "flow"))
 	if strings.Contains(rows[2], "today 20h") {
 		t.Fatalf("the tally reaches back before midnight: %q", rows[2])
 	}
@@ -300,7 +293,7 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 	withCards(t)
 	forceASCII(t)
 	m := sceneModel(sceneCards(), 290, 80)
-	frame := m.View()
+	m.View()
 	cases := []struct{ name, want, not string }{
 		{"flow", "◍ hung  ", ""},   // past hung_after
 		{"etl", "", "hung"},        // stuck, but not for long: HEAD's "silent 6m" says it
@@ -309,7 +302,7 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 		{"harness", "", "Re-read"}, // the question is HEAD's row, not said twice
 	}
 	for _, c := range cases {
-		rows := card(t, frame, c.name)
+		rows := card(t, m, c.name)
 		if c.want != "" && !strings.Contains(rows[1], c.want) {
 			t.Errorf("%s: status row %q does not say %q", c.name, rows[1], c.want)
 		}
@@ -318,7 +311,7 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 		}
 	}
 	// No goal narrated: the first prompt stands in, quoted.
-	rows := card(t, frame, "harness")
+	rows := card(t, m, "harness")
 	if !strings.Contains(rows[1], `"i have many claude session ongoing at once"`) {
 		t.Errorf("without a goal the status row should quote the first prompt whole: %q", rows[1])
 	}
@@ -330,7 +323,7 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 	SetHungAfter(24 * time.Hour)
 	t.Cleanup(func() { hungAfter = 30 * time.Minute })
 	m.retireTrailMemo()
-	if rows := card(t, m.View(), "flow"); strings.Contains(rows[1], "hung") || !strings.Contains(rows[1], "stuck") {
+	if rows := card(t, m, "flow"); strings.Contains(rows[1], "hung") || !strings.Contains(rows[1], "stuck") {
 		t.Errorf("hung_after of a day still calls 17h hung: %q", rows[1])
 	}
 }
@@ -369,7 +362,7 @@ func TestCardGoalIsNarratedAndAskedOnlyAtTurnEnd(t *testing.T) {
 	m := sceneModel(sc, 290, 80)
 	m.SetNarrator(g)
 	poll(m, sc)
-	rows := card(t, m.View(), "harness")
+	rows := card(t, m, "harness")
 	if !strings.HasSuffix(strings.TrimSpace(rows[1]), "▲ needs you  compass multi-session triage") {
 		t.Fatalf("the narrated goal does not lead the status row: %q", rows[1])
 	}
@@ -405,7 +398,7 @@ func TestCardPinHoldsThePlaceAndLeavesWithTheSession(t *testing.T) {
 	if first() != "s3" {
 		t.Fatalf("a pinned card is not first: %s is", first())
 	}
-	if rows := card(t, m.View(), "s3"); !strings.HasPrefix(strings.TrimSpace(rows[2]), "pinned") {
+	if rows := card(t, m, "s3"); !strings.HasPrefix(strings.TrimSpace(rows[2]), "pinned") {
 		t.Fatalf("a pinned card does not say so: %q", rows[2])
 	}
 	// The pin outlives a state change: the session that asks still stands behind it.
@@ -487,7 +480,7 @@ func TestCardLeavesYesterdayToTheTrailWhenTodayIsFull(t *testing.T) {
 	tr.Legs = append(yesterday.Legs, tr.Legs...)
 	sc.trails[key] = tr
 	m := sceneModel(sc, 290, 80)
-	rows := strings.Join(cardUntilBlank(card(t, m.View(), "s3")), "\n")
+	rows := strings.Join(cardUntilBlank(card(t, m, "s3")), "\n")
 	if strings.Contains(rows, "last night") || strings.Contains(rows, "yesterday") {
 		t.Fatalf("a card with a full today draws yesterday too:\n%s", rows)
 	}
@@ -532,19 +525,14 @@ func TestCardsShot(t *testing.T) {
 	}
 }
 
-func TestCardRowsAreRuledAndCardsHaveABar(t *testing.T) {
+func TestCardsStandApartOnWhitespaceAndABar(t *testing.T) {
 	withCards(t)
 	forceASCII(t)
 	m := sceneModel(sceneCards(), 290, 80)
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	ruled := false
-	for i, l := range lines {
-		if i > 3 && strings.HasPrefix(strings.TrimSpace(l), strings.Repeat("─", 40)) && i+1 < len(lines) && strings.Contains(lines[i+1], "│") {
-			ruled = true // a rule with a row of cards under it, not the footer's
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n")[3:] {
+		if strings.Contains(l, "│") {
+			t.Fatalf("cards are drawn apart by a hairline, not by space: %q", l)
 		}
-	}
-	if !ruled {
-		t.Fatalf("two rows of cards have no rule between them:\n%s", strings.Join(lines, "\n"))
 	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	bar := cardBar("x", 10, false)

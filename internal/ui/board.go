@@ -478,13 +478,7 @@ func (m *Model) boardLines(w, h int) []string {
 			break
 		}
 		if b > 0 {
-			if cardBoard {
-				// Cards stand in rows: the row of air between two is a rule,
-				// or the second row of cards reads as more of the first.
-				lines = append(lines, rule(w))
-			} else {
-				lines = append(lines, "")
-			}
+			lines = append(lines, "")
 		}
 		// A working column shows its HEAD row anyway, so a card that fell
 		// back to the present says what a trail row below says (#107) —
@@ -517,7 +511,17 @@ func (m *Model) boardLines(w, h int) []string {
 			}
 			x += c.width + 3
 		}
-		lines = append(lines, joinColumns(bh, cols)...)
+		joined := joinColumns(bh, cols)
+		if cardBoard {
+			// Cards stand apart on space, not on a hairline: each opens
+			// on its own bar, and the bars' edges are the cards' edges.
+			hair := " " + ruleStyle.Render("│")
+			for i, l := range joined {
+				l = strings.ReplaceAll(l, hair+" ", "   ")
+				joined[i] = strings.TrimSuffix(l, hair)
+			}
+		}
+		lines = append(lines, joined...)
 	}
 	// The strip sits under the last band, not on the screen's floor: a
 	// calm board is a short board, and the strip is where the eye is.

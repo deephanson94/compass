@@ -319,10 +319,11 @@ func (m *Model) cardBadge(s fleet.Session, tr journey.Trail) string {
 	style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#111111")).Background(col)
 	if col == colDim {
 		// Grey on grey read as no badge at all: the quiet ones get a
-		// darker block with light text, still a block the eye can count.
+		// light grey block with dark text, quieter than a colour and
+		// still a block the eye can count.
 		style = lipgloss.NewStyle().Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#f5f5f5", Dark: "#e5e5e5"}).
-			Background(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#4a4a4a"})
+			Foreground(lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#111111"}).
+			Background(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#a0a0a0"})
 	}
 	return style.Render(" " + glyph + " " + word + " ")
 }
@@ -588,9 +589,9 @@ func (m *Model) boardCard(key string, r fleetRow, w, h int) []string {
 // so where one card begins is seen before anything on it is read. The
 // selected card's bar is the brighter one.
 func cardBar(row string, w int, selected bool) string {
-	bg := lipgloss.AdaptiveColor{Light: "#e4e8ec", Dark: "#20262e"}
+	bg := lipgloss.AdaptiveColor{Light: "#dfe4ea", Dark: "#2b323c"}
 	if selected {
-		bg = lipgloss.AdaptiveColor{Light: "#cfd6dd", Dark: "#33404d"}
+		bg = lipgloss.AdaptiveColor{Light: "#c3ccd6", Dark: "#3f5163"}
 	}
 	probe := lipgloss.NewStyle().Background(bg).Render("x")
 	on := probe[:strings.Index(probe, "x")]
