@@ -63,19 +63,20 @@ func (m *Model) boardShown() bool {
 // over goes to all of them evenly, up to the cap past which a row is padding
 // rather than information.
 func boardColumns(inner, count int) (n, w int) {
-	if count <= 0 || inner < boardColMin {
+	lo, hi := boardColBounds()
+	if count <= 0 || inner < lo {
 		return 0, 0
 	}
-	n = (inner + gutterWidth) / (boardColMin + gutterWidth)
+	n = (inner + gutterWidth) / (lo + gutterWidth)
 	if n > count {
 		n = count
 	}
 	w = (inner - (n-1)*gutterWidth) / n
-	if w > boardColMax && n >= 2 {
+	if w > hi && n >= 2 {
 		// The cap is for a row of columns; a lone column takes the
 		// width, since a filtered column at 65 of 220 was cutting its
 		// prompt beside a field of nothing.
-		w = boardColMax
+		w = hi
 	}
 	return n, w
 }
@@ -111,7 +112,7 @@ func (m *Model) liveOrder(searched bool) []int {
 	// By obligation, then the fleet's own order within a rank (the longest
 	// wait first among the alarms, the freshest first among the calm).
 	sort.SliceStable(out, func(a, b int) bool {
-		return m.obligation(m.sessions[out[a]]) < m.obligation(m.sessions[out[b]])
+		return m.boardRank(m.sessions[out[a]]) < m.boardRank(m.sessions[out[b]])
 	})
 	return out
 }
@@ -131,12 +132,12 @@ func (m *Model) boardKeys(n int) []string {
 	// everything, as before.
 	owed := 0
 	for _, i := range order {
-		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+		if m.archiveView || m.boardRank(m.sessions[i]) <= owedRank {
 			owed++
 		}
 	}
 	for _, i := range order {
-		if owed > 0 && !m.archiveView && m.obligation(m.sessions[i]) > owedRank {
+		if owed > 0 && !m.archiveView && m.boardRank(m.sessions[i]) > owedRank {
 			break
 		}
 		keys = append(keys, m.sessions[i].Info.Key())
@@ -169,13 +170,13 @@ func (m *Model) owedKeys() []string {
 	order := m.viewOrder()
 	owed := 0
 	for _, i := range order {
-		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+		if m.archiveView || m.boardRank(m.sessions[i]) <= owedRank {
 			owed++
 		}
 	}
 	var keys []string
 	for _, i := range order {
-		if owed > 0 && !m.archiveView && m.obligation(m.sessions[i]) > owedRank {
+		if owed > 0 && !m.archiveView && m.boardRank(m.sessions[i]) > owedRank {
 			break
 		}
 		keys = append(keys, m.sessions[i].Info.Key())
@@ -220,8 +221,12 @@ func (m *Model) boardTargets() []boardTarget {
 		return nil
 	}
 	n, _ := boardColumns(m.width-2*edgePad, len(m.viewOrder()))
+	keys := m.boardKeys(n)
+	if cardBoard {
+		keys = m.cardKeys(n)
+	}
 	var out []boardTarget
-	for _, key := range m.boardKeys(n) {
+	for _, key := range keys {
 		if s, ok := m.session(key); ok && s.Info.TranscriptPath != "" {
 			out = append(out, boardTarget{key: key, path: s.Info.TranscriptPath})
 		}
@@ -356,7 +361,7 @@ func (m *Model) boardLines(w, h int) []string {
 					whole = false
 				}
 			}
-			if blocks && whole {
+			if blocks && whole && !cardBoard { // a card has no counts block to open
 				heights[b]++
 				seams[b] = true
 				spare--
@@ -482,7 +487,7 @@ func (m *Model) boardLines(w, h int) []string {
 		y := len(lines)
 		x := 0
 		for ci, c := range cols {
-			if len(c.rows) > 3 {
+			if len(c.rows) > 3 && !cardBoard { // a column's header rows; a card says each thing once already
 				second := oneSpace(strings.TrimRight(ansi.Strip(c.rows[1]), " "))
 				blanked := false
 				for k := 3; k < len(c.rows) && k < bh; k++ {
@@ -603,7 +608,10 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 			}
 		}
 	}
-	for pos := 0; pos < len(all); pos += n {
+	if cardBoard {
+		bands, heights = m.cardBands(all, n, cw, body)
+	}
+	for pos := 0; pos < len(all) && !cardBoard; pos += n {
 		band := all[pos:min(pos+n, len(all))]
 		// Measured at the width the band will actually be drawn at: a
 		// short band's columns are widened (bandWidth), and measuring
@@ -724,8 +732,8 @@ func bandWidth(w, k, cw int) int {
 		return cw
 	}
 	_, bw := boardColumns(w, k)
-	if k == 1 && bw > boardColMax && cw <= boardColMax {
-		bw = boardColMax // a lone column under a full band: wider, capped like any other
+	if _, hi := boardColBounds(); k == 1 && bw > hi && cw <= hi {
+		bw = hi // a lone column under a full band: wider, capped like any other
 	}
 	if k > 1 && bw > cw+boardBandSlack {
 		// A short band keeps the board a grid: the idlest columns were
@@ -746,7 +754,7 @@ func bandWidth(w, k, cw int) int {
 func (m *Model) drawnCount(order []int) int {
 	drawn := 0
 	for _, i := range order {
-		if m.archiveView || m.obligation(m.sessions[i]) <= owedRank {
+		if m.archiveView || m.boardRank(m.sessions[i]) <= owedRank {
 			drawn++
 		}
 	}
@@ -772,6 +780,9 @@ const boardBandFloor = 5
 // boardColumnRows is how many rows a column would take to show its whole
 // trail: the header and the document.
 func (m *Model) boardColumnRows(key string, w int) int {
+	if cardBoard {
+		return m.cardRows(key, w)
+	}
 	tr, ok := m.trails[key]
 	if !ok {
 		return 4
@@ -838,6 +849,9 @@ func (m *Model) boardColumnOpts(key string, s fleet.Session, tr journey.Trail, w
 // columns; this one decides the rows the bands are paid back, so a column
 // dead on the quota is owed the `dead` row it draws (#385).
 func (m *Model) boardColumnDrawRows(key string, w int) int {
+	if cardBoard {
+		return m.cardRows(key, w)
+	}
 	tr, ok := m.trails[key]
 	if !ok {
 		return 4
@@ -1299,6 +1313,9 @@ func (m *Model) boardColumn(key string, r fleetRow, w, h int) []string {
 // boardColumnIn is boardColumn with the band's word on the seam over the
 // counts: drawn where every column of the band has the row to spare (#393).
 func (m *Model) boardColumnIn(key string, r fleetRow, w, h int, seam bool) []string {
+	if cardBoard {
+		return m.boardCard(key, r, w, h)
+	}
 	s := m.sessions[r.sess]
 	rows := m.columnHeader(key, r, w)
 	if h <= 3 {
@@ -2507,6 +2524,7 @@ func (m *Model) refreshBoard(trails map[string]journey.Trail) {
 			m.narrator.Request(key, tr, "")
 		}
 	}
+	m.requestGoals(trails)
 }
 
 // toolTag is which CLI runs the session and which model last answered —

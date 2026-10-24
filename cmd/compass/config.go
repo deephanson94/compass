@@ -18,6 +18,8 @@ type config struct {
 	Readonly   bool   // readonly = true (enter no longer attaches)
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
+	Board      string // board = "cards" | "columns" (the default)
+	HungAfter  string // hung_after = "30m": the silence a card calls hung
 
 	// Dim is the grey the quiet rows are drawn in: `dim = "#c0c0c0"`, or a
 	// palette index. compass picks a neutral grey that clears 4.4:1 against
@@ -82,6 +84,10 @@ func loadConfig() (c config) {
 			c.LiveWithin = value
 		case "mirror":
 			c.Mirror = value == "true"
+		case "board":
+			c.Board = value
+		case "hung_after":
+			c.HungAfter = value
 		case "reply":
 			if len(c.Replies) < 9 {
 				c.Replies = append(c.Replies, value)
