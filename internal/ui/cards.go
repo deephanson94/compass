@@ -580,7 +580,30 @@ func (m *Model) boardCard(key string, r fleetRow, w, h int) []string {
 			rows[1] = badge + " " + dimStyle.Render(ansi.Strip(m.cardStatusText(key, s, tr, w-bw-1)))
 		}
 	}
+	rows[0] = cardBar(rows[0], w, key == m.selectedKey)
 	return fit(rows, h)
+}
+
+// cardBar tints a card's first row across the card's width: a title bar,
+// so where one card begins is seen before anything on it is read. The
+// selected card's bar is the brighter one.
+func cardBar(row string, w int, selected bool) string {
+	bg := lipgloss.AdaptiveColor{Light: "#e4e8ec", Dark: "#20262e"}
+	if selected {
+		bg = lipgloss.AdaptiveColor{Light: "#cfd6dd", Dark: "#33404d"}
+	}
+	probe := lipgloss.NewStyle().Background(bg).Render("x")
+	on := probe[:strings.Index(probe, "x")]
+	if on == "" {
+		return row // no colour: the bar has nothing to draw with
+	}
+	// Every reset inside the row would end the tint where a styled word
+	// ends; the tint goes back on after each one.
+	row = strings.ReplaceAll(row, "\x1b[0m", "\x1b[0m"+on)
+	if gap := w - lipgloss.Width(row); gap > 0 {
+		row += strings.Repeat(" ", gap)
+	}
+	return on + row + "\x1b[0m"
 }
 
 // goalNarrator is the narrator's goal half (narrator/goal.go): a narrator

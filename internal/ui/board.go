@@ -478,7 +478,13 @@ func (m *Model) boardLines(w, h int) []string {
 			break
 		}
 		if b > 0 {
-			lines = append(lines, "")
+			if cardBoard {
+				// Cards stand in rows: the row of air between two is a rule,
+				// or the second row of cards reads as more of the first.
+				lines = append(lines, rule(w))
+			} else {
+				lines = append(lines, "")
+			}
 		}
 		// A working column shows its HEAD row anyway, so a card that fell
 		// back to the present says what a trail row below says (#107) —

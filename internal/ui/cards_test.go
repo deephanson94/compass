@@ -531,3 +531,24 @@ func TestCardsShot(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCardRowsAreRuledAndCardsHaveABar(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	m := sceneModel(sceneCards(), 290, 80)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	ruled := false
+	for i, l := range lines {
+		if i > 3 && strings.HasPrefix(strings.TrimSpace(l), strings.Repeat("─", 40)) && i+1 < len(lines) && strings.Contains(lines[i+1], "│") {
+			ruled = true // a rule with a row of cards under it, not the footer's
+		}
+	}
+	if !ruled {
+		t.Fatalf("two rows of cards have no rule between them:\n%s", strings.Join(lines, "\n"))
+	}
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	bar := cardBar("x", 10, false)
+	if !strings.Contains(bar, "48;") || lipgloss.Width(bar) != 10 {
+		t.Fatalf("a card's first row has no tinted bar across its width: %q", bar)
+	}
+}
