@@ -86,6 +86,11 @@ type Manager struct {
 	// not be read at all, which is not the same as "none" (#374, asking).
 	running map[string]bool
 
+	// seenRunning is every session id this Manager has seen in the
+	// registry: a session it saw running and no longer does has exited,
+	// which closes the recency door on it (exited).
+	seenRunning map[string]bool
+
 	// resume, when set, lets a live session be picked up where an earlier
 	// process stopped reading rather than replayed from byte zero.
 	resume *ResumeCache
@@ -171,7 +176,22 @@ func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
 	if m.liveWindow <= 0 {
 		return false
 	}
+	if m.exited(info) {
+		return false
+	}
 	return m.asking(info) || m.inWindow(info, now)
+}
+
+// exited says this session was seen running and is running no more: `/exit`,
+// Ctrl+C twice, a closed terminal. The recency door kept such a session on
+// the board for five more minutes because its transcript had just moved —
+// and it moved because the person was quitting it. Only an exit this
+// Manager watched happen counts: a session it never saw in the registry (a
+// headless run, an older Claude Code, one that quit before compass started)
+// keeps the door as it was, so a registry that does not list a session can
+// never take a running one off the board. Caller holds the mutex.
+func (m *Manager) exited(info SessionInfo) bool {
+	return m.running != nil && m.seenRunning[info.ID] && !m.running[info.ID]
 }
 
 // asking is the ask door itself: a question nobody has answered, in a
@@ -303,6 +323,12 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	// Which sessions still have a process. Read once per refresh, because
 	// the ask door asks it of every row (#374).
 	m.running = readRunning(m.root)
+	for id := range m.running {
+		if m.seenRunning == nil {
+			m.seenRunning = map[string]bool{}
+		}
+		m.seenRunning[id] = true
+	}
 	if err != nil {
 		return nil, err
 	}

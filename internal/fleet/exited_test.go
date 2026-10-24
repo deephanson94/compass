@@ -125,3 +125,34 @@ func deadPID(t *testing.T) int {
 	t.Skip("no free pid to test with")
 	return 0
 }
+
+// TestASessionYouExitLeavesTheBoardAtOnce: `/exit` moves the transcript —
+// the person was typing into it — so the recency door kept the session on
+// the board for its whole window afterwards. A session the Manager saw in
+// the registry and then sees gone has exited, and the door closes on it.
+// One the registry never listed keeps the door as it was.
+func TestASessionYouExitLeavesTheBoardAtOnce(t *testing.T) {
+	mine := os.Getpid()
+	root := t.TempDir()
+	stalledCallAt(t, root, slugAlpha, idWaitingDay, time.Minute) // written a minute ago: inside the window
+	writeRegistry(t, root, mine, idWaitingDay, procStartOf(t, mine))
+	m := fleet.NewManager(root)
+	if s := pick(t, mustRefresh(t, m, fleetNow), idWaitingDay); !s.Live {
+		t.Fatal("a running session that just wrote is not live")
+	}
+	// The process goes; Claude Code's entry goes with it.
+	if err := os.Remove(filepath.Join(root, "sessions", fmt.Sprintf("%d.json", mine))); err != nil {
+		t.Fatal(err)
+	}
+	writeRegistry(t, root, mine, "some-other-session", procStartOf(t, mine)) // the registry is still readable
+	if s := pick(t, mustRefresh(t, m, fleetNow), idWaitingDay); s.Live {
+		t.Fatal("a session that exited a minute ago is still live on the recency door")
+	}
+	// Never listed at all: the recency door is untouched.
+	other := t.TempDir()
+	stalledCallAt(t, other, slugAlpha, idWaitingDay, time.Minute)
+	writeRegistry(t, other, mine, "some-other-session", procStartOf(t, mine))
+	if s := pick(t, mustRefresh(t, fleet.NewManager(other), fleetNow), idWaitingDay); !s.Live {
+		t.Fatal("a session the registry never listed lost the recency door")
+	}
+}
