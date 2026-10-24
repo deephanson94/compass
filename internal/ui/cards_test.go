@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
@@ -191,14 +192,51 @@ func TestCardsWidthDisciplineAndDump(t *testing.T) {
 	}
 }
 
+func TestCardShowsTheLatestDozenAndDimsOlderPrompts(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	m := sceneModel(sceneVeryLong(), 220, 80)
+	rows := cardUntilBlank(card(t, m.View(), "auth"))
+	if len(rows) > cardHead+cardRowsMax+1 {
+		t.Fatalf("a busy day's card has %d rows, want at most %d:\n%s", len(rows), cardHead+cardRowsMax+1, strings.Join(rows, "\n"))
+	}
+	if !strings.Contains(rows[len(rows)-1], "earlier today") {
+		t.Fatalf("a capped card does not say how much it left out: %q", rows[len(rows)-1])
+	}
+}
+
+func TestCardOlderPromptsAreDim(t *testing.T) {
+	withCards(t)
+	m := sceneModel(sceneCards(), 290, 80)
+	tr := m.trails[sessionKey("harness")]
+	o := m.cardOpts(sessionKey("harness"), m.sessions[0], tr, 80)
+	items := cardItems(tr, m.now)
+	var older, latest string
+	for _, it := range items {
+		if it.prompt == 0 {
+			older = m.cardRow(tr, it, o)[0]
+		}
+		if it.prompt == 1 {
+			latest = m.cardRow(tr, it, o)[0]
+		}
+	}
+	if older != dimStyle.Render(ansi.Strip(older)) {
+		t.Errorf("an older prompt is drawn at full brightness: %q", older)
+	}
+	if latest == dimStyle.Render(ansi.Strip(latest)) && dimStyle.Render("x") != "x" {
+		t.Errorf("the latest prompt is dimmed: %q", latest)
+	}
+}
+
 func TestCardsAreWideAndFewAcross(t *testing.T) {
 	withCards(t)
-	n, w := boardColumns(290-2*edgePad, 8)
+	// A 32-inch screen: six cards across at 60 still clipped every row.
+	n, w := boardColumns(390-2*edgePad, 9)
 	if n != 4 || w < cardColMin {
-		t.Fatalf("a 290-column board holds %d cards %d wide; want 4 of at least %d", n, w, cardColMin)
+		t.Fatalf("a 390-column board holds %d cards %d wide; want 4 of at least %d", n, w, cardColMin)
 	}
 	cardBoard = false
-	if n, _ := boardColumns(290-2*edgePad, 8); n <= 4 {
+	if n, _ := boardColumns(390-2*edgePad, 9); n <= 4 {
 		t.Fatalf("the column board should still fit more than four columns, got %d", n)
 	}
 }
@@ -264,11 +302,11 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 	m := sceneModel(sceneCards(), 290, 80)
 	frame := m.View()
 	cases := []struct{ name, want, not string }{
-		{"flow", "hung · no output past 30m", ""}, // past hung_after
-		{"etl", "", "hung"},                       // stuck, but not for long: HEAD's "silent 6m" says it
-		{"api", "looping on test_refresh", ""},    // the loop, which HEAD's "fix tokens.py" cannot say
-		{"s3", "shipped", ""},                     // how a finished session came out
-		{"harness", "", "Re-read"},                // the question is HEAD's row, not said twice
+		{"flow", "◍ hung  ", ""},   // past hung_after
+		{"etl", "", "hung"},        // stuck, but not for long: HEAD's "silent 6m" says it
+		{"api", "↻ looping  ", ""}, // the loop, which HEAD's "fix tokens.py" cannot say
+		{"s3", "✓ done  ", ""},     // how a finished session came out
+		{"harness", "", "Re-read"}, // the question is HEAD's row, not said twice
 	}
 	for _, c := range cases {
 		rows := card(t, frame, c.name)
@@ -292,7 +330,7 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 	SetHungAfter(24 * time.Hour)
 	t.Cleanup(func() { hungAfter = 30 * time.Minute })
 	m.retireTrailMemo()
-	if rows := card(t, m.View(), "flow"); strings.Contains(rows[1], "hung") {
+	if rows := card(t, m.View(), "flow"); strings.Contains(rows[1], "hung") || !strings.Contains(rows[1], "stuck") {
 		t.Errorf("hung_after of a day still calls 17h hung: %q", rows[1])
 	}
 }
@@ -332,7 +370,7 @@ func TestCardGoalIsNarratedAndAskedOnlyAtTurnEnd(t *testing.T) {
 	m.SetNarrator(g)
 	poll(m, sc)
 	rows := card(t, m.View(), "harness")
-	if strings.TrimSpace(rows[1]) != "compass multi-session triage" {
+	if !strings.HasSuffix(strings.TrimSpace(rows[1]), "▲ needs you  compass multi-session triage") {
 		t.Fatalf("the narrated goal does not lead the status row: %q", rows[1])
 	}
 	g.mu.Lock()
@@ -460,7 +498,7 @@ func TestCardLeavesYesterdayToTheTrailWhenTodayIsFull(t *testing.T) {
 
 func TestCardPollReadsEveryBandNotJustTheFirst(t *testing.T) {
 	withCards(t)
-	m := sceneModel(sceneCards(), 152, 40) // two across, four bands
+	m := sceneModel(sceneCards(), 290, 80) // three across, three bands
 	polled := map[string]bool{}
 	for _, tg := range m.boardTargets() {
 		polled[tg.key] = true
@@ -469,5 +507,27 @@ func TestCardPollReadsEveryBandNotJustTheFirst(t *testing.T) {
 		if !polled[sessionKey(id)] {
 			t.Errorf("%s has a card on the board but its transcript is never polled", id)
 		}
+	}
+}
+
+// TestCardsShot writes the card board in colour, for a person to look at:
+// COMPASS_CARDS_SHOT=/tmp/shot.ans go test ./internal/ui -run CardsShot
+func TestCardsShot(t *testing.T) {
+	out := os.Getenv("COMPASS_CARDS_SHOT")
+	if out == "" {
+		t.Skip("COMPASS_CARDS_SHOT names the file")
+	}
+	withCards(t)
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	w, h := 390, 64
+	if v := os.Getenv("COMPASS_CARDS_SIZE"); v != "" {
+		fmt.Sscanf(v, "%dx%d", &w, &h)
+	}
+	m := sceneModel(sceneCards(), w, h)
+	if err := os.WriteFile(out, []byte(m.View()), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

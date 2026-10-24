@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +21,7 @@ type config struct {
 	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
 	Board      string // board = "cards" | "columns" (the default)
 	HungAfter  string // hung_after = "30m": the silence a card calls hung
+	CardWidth  int    // card_width = "84": a card's least width
 
 	// Dim is the grey the quiet rows are drawn in: `dim = "#c0c0c0"`, or a
 	// palette index. compass picks a neutral grey that clears 4.4:1 against
@@ -88,6 +90,10 @@ func loadConfig() (c config) {
 			c.Board = value
 		case "hung_after":
 			c.HungAfter = value
+		case "card_width":
+			if n, err := strconv.Atoi(value); err == nil {
+				c.CardWidth = n
+			}
 		case "reply":
 			if len(c.Replies) < 9 {
 				c.Replies = append(c.Replies, value)

@@ -132,8 +132,9 @@ go install github.com/deephanson94/compass/cmd/compass@latest   # the newest tag
 | **Reader** | `Tab` `Tab` | The keys move into the conversation: scroll, unfold tool output, search, `[ ]` between your turns. `a` at any level hands you **ask the trail** — a Claude grounded in this session's full history |
 
 `board = "cards"` draws the board as cards instead of columns, for a wide screen
-with many sessions: at least 60 cells each, so fewer across and nothing clipped,
-and as tall as the screen shares out. A card is the fleet row; the session's goal
+with many sessions: at least 84 cells each (`card_width`), so four across a
+32-inch screen, and no more than the latest dozen rows. A card is the fleet row; a coloured badge (needs you, hung, stuck, looping,
+dead, working, done, red, idle), the session's goal
 (one line the narrator writes once a turn is over, the first prompt until then)
 and what it is doing now; today's tally; and today's work newest first, so the
 breathing HEAD row is right under the goal. `p` pins a card to the board's front;
@@ -197,6 +198,7 @@ root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root ov
 narrator = "haiku"      # narration model; "off" disables
 board = "cards"         # the board as cards (default "columns"); p pins a card to the front
 hung_after = "30m"      # a card calls a stuck session hung after this much silence
+card_width = "84"       # a card's least width; lower it for more cards across
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live

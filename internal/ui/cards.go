@@ -64,12 +64,23 @@ func SetHungAfter(d time.Duration) {
 	}
 }
 
+// cardColMin is a card's least width: from here a row carries its label,
+// its badge and its figure whole. 84 puts four across a 32-inch screen,
+// where 60 put six and every row still clipped.
+var cardColMin = 84
+
+// SetCardWidth sets a card's least width; below 60 it keeps the default.
+func SetCardWidth(w int) {
+	if w >= 60 {
+		cardColMin = w
+	}
+}
+
 const (
-	cardColMin  = 60 // a card's row carries a label and its figure whole from here
-	cardColMax  = 120
+	cardColMax  = 140
 	cardHead    = 3  // the fleet row, the goal row, the tally row
 	cardRowsMin = 5  // a card with a quiet today still shows its last five moments
-	cardRowsMax = 40 // a frantic day is still a card, not a trail
+	cardRowsMax = 12 // the latest dozen moments: a card is a glance, the trail is one tab away
 )
 
 // boardColBounds is the board's column width floor and cap, by board.
@@ -189,7 +200,14 @@ func (m *Model) cardRow(tr journey.Trail, it cardItem, o TrailOpts) []string {
 	switch {
 	case it.prompt >= 0:
 		nth, total := promptNumber(tr, it.prompt)
-		return []string{promptRow(tr.Prompts[it.prompt], o.Now, o.Width, nth, total, promptWait(tr, it.prompt), o.PromptLinks[it.prompt])}
+		row := promptRow(tr.Prompts[it.prompt], o.Now, o.Width, nth, total, promptWait(tr, it.prompt), o.PromptLinks[it.prompt])
+		if nth != total {
+			// Your latest prompt is what the work above it answers; the
+			// ones before it are context, and in a card of a busy day they
+			// were half its rows at full brightness.
+			row = dimStyle.Render(ansi.Strip(row))
+		}
+		return []string{row}
 	case it.leg >= 0:
 		l := tr.Legs[it.leg]
 		o.Ask = askBefore(tr, l.Start)
@@ -200,6 +218,11 @@ func (m *Model) cardRow(tr journey.Trail, it cardItem, o TrailOpts) []string {
 			}
 		}
 		label, narrated := legLabel(l, o)
+		if t := strings.Trim(label, " ."); t == "" && len(l.Files) > 0 {
+			// A leg whose heuristic found no name ("build ."): the files
+			// it touched are the most it can say.
+			label = strings.Join(l.Files[:min(2, len(l.Files))], ", ")
+		}
 		out := []string{legRow(l, label, narrated, o)}
 		if l.Current && o.HeadState == state.NeedsYou && o.Head != "" && label != o.Head {
 			rest := strings.TrimSpace(strings.TrimPrefix(o.Head, label))
@@ -233,6 +256,16 @@ func dayRule(day, now time.Time, w int) string {
 // it is doing — or stuck on, or asking — now. The goal is the narrator's;
 // the rest is the state machine's and the trail's.
 func (m *Model) cardStatus(key string, s fleet.Session, tr journey.Trail, w int) string {
+	badge := m.cardBadge(s, tr)
+	bw := lipgloss.Width(badge)
+	if bw+1 >= w {
+		return badge
+	}
+	return badge + " " + m.cardStatusText(key, s, tr, w-bw-1)
+}
+
+// cardStatusText is the status row after its badge.
+func (m *Model) cardStatusText(key string, s fleet.Session, tr journey.Trail, w int) string {
 	goal, narrated := m.cardGoal(key, tr)
 	now := m.cardNow(s, tr)
 	if goal == "" {
@@ -253,6 +286,55 @@ func (m *Model) cardStatus(key string, s fleet.Session, tr journey.Trail, w int)
 		styled = titleStyle.Render(goal)
 	}
 	return styled + dimStyle.Render(" · ") + textStyle.Render(clip(now, max(0, w-gw-3)))
+}
+
+// cardBadge is the card's health at a glance: a block of colour the eye
+// finds across a wall of cards before it reads a word — amber for a
+// question, red for a hang, a loop or a dead API, green for work and for
+// a finished session that shipped green, grey for the rest. The glyph and
+// the word say it again for monochrome.
+func (m *Model) cardBadge(s fleet.Session, tr journey.Trail) string {
+	glyph, word, col := "○", "idle", colDim
+	_, _, loop := circling(tr)
+	switch {
+	case s.Snap.APIError:
+		glyph, word, col = glyphAPIError, "dead", colStuck
+	case s.Waiting:
+		glyph, word, col = fleet.Glyph(state.NeedsYou), "unanswered", colNeedsYou
+	case s.Snap.State == state.NeedsYou:
+		glyph, word, col = fleet.Glyph(state.NeedsYou), "needs you", colNeedsYou
+	case s.Snap.State == state.Stuck && m.now.Sub(headSince(s)) >= hungAfter:
+		glyph, word, col = fleet.Glyph(state.Stuck), "hung", colStuck
+	case s.Snap.State == state.Stuck:
+		glyph, word, col = fleet.Glyph(state.Stuck), "stuck", colStuck
+	case loop:
+		glyph, word, col = glyphCircling, "looping", colStuck
+	case s.Snap.State == state.Working:
+		glyph, word, col = fleet.Glyph(state.Working), "working", colWorking
+	case redNow(tr):
+		glyph, word = "✗", "red"
+	case shippedLast(tr):
+		glyph, word, col = "✓", "done", colWorking
+	}
+	style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#111111")).Background(col)
+	if col == colDim {
+		// Grey on grey read as no badge at all: the quiet ones get a
+		// darker block with light text, still a block the eye can count.
+		style = lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#f5f5f5", Dark: "#e5e5e5"}).
+			Background(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#4a4a4a"})
+	}
+	return style.Render(" " + glyph + " " + word + " ")
+}
+
+// shippedLast says whether a finished trail's last leg shipped.
+func shippedLast(tr journey.Trail) bool {
+	for i := len(tr.Legs) - 1; i >= 0; i-- {
+		if l := tr.Legs[i]; !l.Current {
+			return l.Class == journey.Ship
+		}
+	}
+	return false
 }
 
 // cardGoal is the session's goal and whether a model wrote it: the
@@ -290,12 +372,12 @@ func (m *Model) cardNow(s fleet.Session, tr journey.Trail) string {
 		return ""
 	case s.Snap.State == state.Stuck:
 		if quiet := m.now.Sub(headSince(s)); quiet >= hungAfter {
-			return "hung · no output past " + relDuration(hungAfter)
+			return "no output past " + relDuration(hungAfter)
 		}
 		return ""
 	}
 	if test, runs, ok := circling(tr); ok {
-		return fmt.Sprintf("looping on %s · red %d runs running", test, runs)
+		return fmt.Sprintf("on %s · red %d runs running", test, runs)
 	}
 	if s.Snap.State == state.Working {
 		return ""
@@ -490,6 +572,12 @@ func (m *Model) boardCard(key string, r fleetRow, w, h int) []string {
 	if m.boardMuted(s) {
 		for i, line := range rows {
 			rows[i] = dimStyle.Render(ansi.Strip(line))
+		}
+		// History is dim, but its badge still says how it ended: the
+		// block is what a wall of cards is counted by.
+		badge := m.cardBadge(s, tr)
+		if bw := lipgloss.Width(badge); bw+1 < w {
+			rows[1] = badge + " " + dimStyle.Render(ansi.Strip(m.cardStatusText(key, s, tr, w-bw-1)))
 		}
 	}
 	return fit(rows, h)
