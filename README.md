@@ -199,6 +199,7 @@ narrator = "haiku"      # narration model; "off" disables
 board = "cards"         # the board as cards (default "columns"); p pins a card to the front
 hung_after = "30m"      # a card calls a stuck session hung after this much silence
 card_width = "84"       # a card's least width; lower it for more cards across
+cards_per_row = "3"     # or say how many cards a row; + and - change it live
 readonly = false        # true keeps compass's hands off tmux entirely
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live

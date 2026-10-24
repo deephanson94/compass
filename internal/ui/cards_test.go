@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,7 @@ import (
 func withCards(t *testing.T) {
 	t.Helper()
 	cardBoard = true
-	t.Cleanup(func() { cardBoard = false })
+	t.Cleanup(func() { cardBoard, cardsPerRow = false, 0 })
 }
 
 // sceneCards is the fleet from the person's own screen, a day into it:
@@ -639,6 +640,83 @@ func TestCardsShareTheirRowsEvenly(t *testing.T) {
 	for _, c := range []struct{ count, across int }{{6, 3}, {8, 4}, {9, 3}, {5, 3}, {4, 4}, {3, 3}} {
 		if n, w := boardColumns(inner, c.count); n != c.across || w < cardColMin {
 			t.Errorf("%d cards at 390: %d across %d wide, want %d across", c.count, n, w, c.across)
+		}
+	}
+}
+
+func TestCardsPerRowIsThePersonsToSet(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	inner := 390 - 2*edgePad
+	SetCardsPerRow(2)
+	if n, w := boardColumns(inner, 6); n != 2 || w < 180 {
+		t.Fatalf("cards_per_row 2: %d across %d wide", n, w)
+	}
+	SetCardsPerRow(20)
+	if n, w := boardColumns(inner, 30); w < cardColFloor || n*(w+gutterWidth)-gutterWidth > inner {
+		t.Fatalf("cards_per_row past the width: %d across %d wide", n, w)
+	}
+	// + and - on the board, live.
+	SetCardsPerRow(0)
+	m := sceneModel(sceneCards(), 390, 105)
+	before, _ := boardColumns(inner, m.drawnCount(m.viewOrder()))
+	pressKey(m, "-")
+	if after, _ := boardColumns(inner, m.drawnCount(m.viewOrder())); after != before-1 {
+		t.Fatalf("- went from %d to %d cards a row", before, after)
+	}
+	pressKey(m, "+")
+	pressKey(m, "+")
+	if after, _ := boardColumns(inner, m.drawnCount(m.viewOrder())); after != before+1 {
+		t.Fatalf("+ + went to %d cards a row, want %d", after, before+1)
+	}
+}
+
+func TestCardsStandUnderEachOther(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	SetCardsPerRow(4) // six cards: four, then a short row of two
+	sc := sceneCards()
+	var keep []fleet.Session
+	for _, s := range sc.sessions {
+		if id := s.Info.ID; id != "gemma" && id != "etl" {
+			keep = append(keep, s)
+		}
+	}
+	sc.sessions = keep
+	m := sceneModel(sc, 390, 105)
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	var heads [][]int
+	head := regexp.MustCompile(`[▸ ]\d [▲◍↻●○⊘] `)
+	for _, l := range lines {
+		if idx := head.FindAllStringIndex(l, -1); len(idx) > 1 {
+			var xs []int
+			for _, p := range idx {
+				xs = append(xs, len([]rune(l[:p[0]])))
+			}
+			heads = append(heads, xs)
+		}
+	}
+	if len(heads) < 2 {
+		t.Fatalf("want two rows of cards, found %d", len(heads))
+	}
+	for i, x := range heads[1] {
+		if x != heads[0][i] {
+			t.Fatalf("card %d of the second row starts at %d, the one above it at %d", i+1, x, heads[0][i])
+		}
+	}
+}
+
+func TestACardIsAPanel(t *testing.T) {
+	withCards(t)
+	m := sceneModel(sceneCards(), 390, 105)
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	key := sessionKey("s3")
+	r := m.boardRows()[key]
+	for i, row := range m.boardCard(key, r, 100, 12) {
+		if !strings.HasPrefix(row, "\x1b[48;") || lipgloss.Width(row) != 100 {
+			t.Fatalf("row %d of a card is not on the card's ground, the card's width across: %q", i, row)
 		}
 	}
 }

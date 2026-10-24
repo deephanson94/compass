@@ -44,6 +44,7 @@ func boardHelpKeys() [][2]string {
 		out = append(out, k)
 		if k[0] == "x" {
 			out = append(out, [2]string{"p", "pin a card to the board's front · p again unpins; it leaves when the session does"})
+			out = append(out, [2]string{"+ / -", "one card more / fewer in a row (cards_per_row in the config keeps it)"})
 		}
 	}
 	return out

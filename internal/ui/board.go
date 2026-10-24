@@ -64,6 +64,12 @@ func (m *Model) boardShown() bool {
 // rather than information.
 func boardColumns(inner, count int) (n, w int) {
 	lo, hi := boardColBounds()
+	if cardBoard && cardsPerRow > 0 && count > 0 {
+		// The person's own count: as many across as they asked, as wide
+		// as that makes them, down to a card that still reads.
+		n = min(cardsPerRow, count, max(1, (inner+gutterWidth)/(cardColFloor+gutterWidth)))
+		return n, (inner - (n-1)*gutterWidth) / n
+	}
 	if count <= 0 || inner < lo {
 		return 0, 0
 	}
@@ -745,7 +751,9 @@ func (m *Model) boardBandAt(w int) (x, y, bh int, last, ok bool) {
 // column width, or wider when the band is short of columns — a lone
 // column under a full band was 38 wide beside 80 columns of nothing.
 func bandWidth(w, k, cw int) int {
-	if k <= 0 {
+	if k <= 0 || cardBoard {
+		// Cards are a grid: a short last row keeps the full row's width,
+		// so every card stands under the one above it.
 		return cw
 	}
 	_, bw := boardColumns(w, k)

@@ -69,6 +69,27 @@ func SetHungAfter(d time.Duration) {
 // where 60 put six and every row still clipped.
 var cardColMin = 84
 
+// cardsPerRow is how many cards stand in a row when the person has said
+// (`cards_per_row`, or + and - on the board); 0 leaves it to the width.
+var cardsPerRow int
+
+// cardColFloor is the narrowest a card is drawn however many are asked for.
+const cardColFloor = 40
+
+// SetCardsPerRow sets how many cards stand in a row; 0 or less is automatic.
+func SetCardsPerRow(n int) { cardsPerRow = max(0, n) }
+
+// stepCardsPerRow is + and - on the card board: one card more or fewer in
+// a row, starting from what the board drew, and the note says how many.
+func (m *Model) stepCardsPerRow(delta int) {
+	inner := m.width - 2*edgePad
+	n, _ := boardColumns(inner, m.drawnCount(m.viewOrder()))
+	maxN := max(1, (inner+gutterWidth)/(cardColFloor+gutterWidth))
+	cardsPerRow = min(max(1, n+delta), maxN)
+	m.retireTrailMemo()
+	m.note = fmt.Sprintf("%d cards a row · + and - change it · cards_per_row in the config keeps it", cardsPerRow)
+}
+
 // SetCardWidth sets a card's least width; below 60 it keeps the default.
 func SetCardWidth(w int) {
 	if w >= 60 {
@@ -531,7 +552,7 @@ func (m *Model) cardRows(key string, w int) int {
 	if !ok {
 		return cardHead + 1
 	}
-	return cardHead + len(m.cardWork(tr, m.cardOpts(key, m.sessions[r.sess], tr, w)))
+	return cardHead + len(m.cardWork(tr, m.cardOpts(key, m.sessions[r.sess], tr, max(1, w-2*cardPad))))
 }
 
 // cardMinRows is the least a band of cards is drawn at: the head and
@@ -599,6 +620,39 @@ func (m *Model) cardKeys(n int) []string {
 
 // boardCard draws one card w×h.
 func (m *Model) boardCard(key string, r fleetRow, w, h int) []string {
+	inner := max(1, w-2*cardPad)
+	rows := fit(m.cardContent(key, r, inner, h), h)
+	pad := strings.Repeat(" ", cardPad)
+	selected := key == m.selectedKey
+	for i, row := range rows {
+		if i == 0 {
+			rows[i] = cardFill(pad+row, w, cardBarColor(selected))
+			continue
+		}
+		rows[i] = cardFill(pad+row, w, cardPanel)
+	}
+	return rows
+}
+
+// cardPad is the space inside a card's panel, left and right.
+const cardPad = 1
+
+// cardPanel is the card's own ground: a panel a step off the terminal's,
+// so a card is a block with edges, as the first sketch drew it, rather
+// than rows that happen to stand near each other.
+var cardPanel = lipgloss.AdaptiveColor{Light: "#eef1f4", Dark: "#1e252d"}
+
+// cardBarColor is the ground of a card's first row, a step brighter than
+// the panel; the selected card's is brighter still.
+func cardBarColor(selected bool) lipgloss.AdaptiveColor {
+	if selected {
+		return lipgloss.AdaptiveColor{Light: "#c3ccd6", Dark: "#3f5163"}
+	}
+	return lipgloss.AdaptiveColor{Light: "#dde3e9", Dark: "#2e3742"}
+}
+
+// cardContent is a card's rows, w wide, before the panel is laid under them.
+func (m *Model) cardContent(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
 	tag := m.columnTag(key, s, w)
 	rows := []string{m.entryLinesUnder(r, w, tag)[0]}
@@ -634,30 +688,27 @@ func (m *Model) boardCard(key string, r fleetRow, w, h int) []string {
 			rows[1] = badge + " " + dimStyle.Render(ansi.Strip(m.cardStatusText(key, s, tr, w-bw-1)))
 		}
 	}
-	rows[0] = cardBar(rows[0], w, key == m.selectedKey)
-	return fit(rows, h)
+	return rows
 }
 
-// cardBar tints a card's first row across the card's width: a title bar,
-// so where one card begins is seen before anything on it is read. The
-// selected card's bar is the brighter one.
-func cardBar(row string, w int, selected bool) string {
-	bg := lipgloss.AdaptiveColor{Light: "#dfe4ea", Dark: "#2b323c"}
-	if selected {
-		bg = lipgloss.AdaptiveColor{Light: "#c3ccd6", Dark: "#3f5163"}
-	}
+// cardFill lays a ground under a row across the card's width. Every reset
+// inside the row would end the ground where a styled word ends, so it goes
+// back on after each one. Without colour it is the row, padded.
+func cardFill(row string, w int, bg lipgloss.AdaptiveColor) string {
 	probe := lipgloss.NewStyle().Background(bg).Render("x")
 	on := probe[:strings.Index(probe, "x")]
-	if on == "" {
-		return row // no colour: the bar has nothing to draw with
-	}
-	// Every reset inside the row would end the tint where a styled word
-	// ends; the tint goes back on after each one.
-	row = strings.ReplaceAll(row, "\x1b[0m", "\x1b[0m"+on)
 	if gap := w - lipgloss.Width(row); gap > 0 {
 		row += strings.Repeat(" ", gap)
 	}
-	return on + row + "\x1b[0m"
+	if on == "" {
+		return row
+	}
+	return on + strings.ReplaceAll(row, "\x1b[0m", "\x1b[0m"+on) + "\x1b[0m"
+}
+
+// cardBar is a card's first row on its bar's ground.
+func cardBar(row string, w int, selected bool) string {
+	return cardFill(row, w, cardBarColor(selected))
 }
 
 // goalNarrator is the narrator's goal half (narrator/goal.go): a narrator

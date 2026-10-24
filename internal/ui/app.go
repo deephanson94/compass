@@ -1072,6 +1072,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.togglePin()
 			return m, nil
 		}
+	case "+", "=":
+		if cardBoard && m.level == levelBoard {
+			m.stepCardsPerRow(1)
+			return m, nil
+		}
+	case "-":
+		if cardBoard && m.level == levelBoard {
+			m.stepCardsPerRow(-1)
+			return m, nil
+		}
 	case "A":
 		// The archive is a view of the same fleet, at any depth: what is selected
 		// stays selected, per view, so coming back lands where you left. It is
