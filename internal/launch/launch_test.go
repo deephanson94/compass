@@ -1,12 +1,15 @@
 package launch
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
 func TestArgvFillsAndDropsPlaceholders(t *testing.T) {
@@ -64,7 +67,7 @@ func TestHarnessesOverride(t *testing.T) {
 	}
 }
 
-func TestWindowName(t *testing.T) {
+func TestTaskName(t *testing.T) {
 	claude, shell := Builtin[0], Builtin[1]
 	for _, c := range []struct {
 		r    Request
@@ -75,8 +78,8 @@ func TestWindowName(t *testing.T) {
 		{Request{Harness: claude, Prompt: "日本語だけ"}, "claude"},
 		{Request{Harness: shell, Prompt: "a prompt a shell never sees"}, "shell"},
 	} {
-		if got := c.r.WindowName(); got != c.want {
-			t.Errorf("WindowName(%+v) = %q, want %q", c.r, got, c.want)
+		if got := c.r.TaskName(); got != c.want {
+			t.Errorf("TaskName(%+v) = %q, want %q", c.r, got, c.want)
 		}
 	}
 }
@@ -87,10 +90,23 @@ func TestSlugIsBounded(t *testing.T) {
 	}
 }
 
-// fakeTmux records the one new-window call and says where it landed.
+// fakeTmux is a server with the session "dev" and its pane %2. It answers
+// the questions Launch asks first, and records what Launch opened in calls.
 type fakeTmux struct{ calls [][]string }
 
 func (f *fakeTmux) Output(args ...string) ([]byte, error) {
+	switch args[0] {
+	case "has-session":
+		if args[2] == "=dev" {
+			return nil, nil
+		}
+		return nil, errors.New("can't find session")
+	case "display-message":
+		if args[3] == "%2" {
+			return []byte("%2\n"), nil
+		}
+		return nil, errors.New("can't find pane")
+	}
 	f.calls = append(f.calls, args)
 	return []byte("%9 dev:3.0\n"), nil
 }
@@ -98,7 +114,7 @@ func (f *fakeTmux) Output(args ...string) ([]byte, error) {
 func TestLaunchOpensTheWindowWhereAsked(t *testing.T) {
 	dir := t.TempDir()
 	tm := &fakeTmux{}
-	res, err := Launch(tm, RealGit{}, Request{Session: "dev", Dir: dir, Harness: Builtin[0], Prompt: "  fix the 401  "})
+	res, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: dir, Harness: Builtin[0], Prompt: "  fix the 401  "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +129,7 @@ func TestLaunchOpensTheWindowWhereAsked(t *testing.T) {
 
 func TestLaunchRefusesAMissingDirectory(t *testing.T) {
 	tm := &fakeTmux{}
-	if _, err := Launch(tm, RealGit{}, Request{Session: "dev", Dir: filepath.Join(t.TempDir(), "gone"), Harness: Builtin[1]}); err == nil {
+	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: filepath.Join(t.TempDir(), "gone"), Harness: Builtin[1]}); err == nil {
 		t.Fatal("want an error")
 	}
 	if len(tm.calls) != 0 {
@@ -148,7 +164,7 @@ func TestLaunchInAWorktree(t *testing.T) {
 	}
 
 	tm := &fakeTmux{}
-	res, err := Launch(tm, RealGit{}, Request{Session: "dev", Dir: sub, Name: "rate", Harness: Builtin[1], Worktree: true})
+	res, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: sub, Name: "rate", Harness: Builtin[1], Worktree: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +181,7 @@ func TestLaunchInAWorktree(t *testing.T) {
 	}
 
 	// From inside that worktree, the next one is its sibling.
-	res2, err := Launch(tm, RealGit{}, Request{Session: "dev", Dir: res.Dir, Name: "next", Harness: Builtin[1], Worktree: true})
+	res2, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: res.Dir, Name: "next", Harness: Builtin[1], Worktree: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +191,7 @@ func TestLaunchInAWorktree(t *testing.T) {
 
 	// The same branch twice is git's refusal, and no window.
 	n := len(tm.calls)
-	if _, err := Launch(tm, RealGit{}, Request{Session: "dev", Dir: repo, Name: "rate", Harness: Builtin[1], Worktree: true}); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: repo, Name: "rate", Harness: Builtin[1], Worktree: true}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("err = %v, want git's word on the branch", err)
 	}
 	if len(tm.calls) != n {
@@ -189,5 +205,44 @@ func TestWorktreeOutsideARepository(t *testing.T) {
 	}
 	if _, err := Worktree(RealGit{}, t.TempDir(), "x"); err == nil || !strings.Contains(err.Error(), "not in a git repository") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Each place opens with its own tmux verb, and a place tmux would refuse
+// is refused before anything is made — a worktree included.
+func TestLaunchPlaces(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		r       Request
+		verb    string
+		refused string
+	}{
+		{Request{Place: tmuxop.PlacePane, Target: "%2"}, "split-window", ""},
+		{Request{Place: tmuxop.PlaceSession, Name: "rate"}, "new-session", ""},
+		{Request{Place: tmuxop.PlaceSession, Name: "dev"}, "", `session "dev" already exists`},
+		{Request{Place: tmuxop.PlacePane, Target: "%404"}, "", "no pane %404"},
+		{Request{Place: tmuxop.PlaceWindow, Target: "gone"}, "", `no tmux session "gone"`},
+	} {
+		tm := &fakeTmux{}
+		c.r.Dir, c.r.Harness = dir, Builtin[1]
+		if c.refused != "" {
+			// dir is no repository, so a worktree tried would fail with
+			// git's word, not the refusal's.
+			c.r.Worktree = true
+			_, err := Launch(tm, RealGit{}, c.r)
+			if err == nil || !strings.Contains(err.Error(), c.refused) {
+				t.Errorf("%v %q: err = %v, want %q", c.r.Place, c.r.Target+c.r.Name, err, c.refused)
+			}
+			if len(tm.calls) != 0 {
+				t.Errorf("%v: opened %q after a refusal", c.r.Place, tm.calls)
+			}
+			continue
+		}
+		if _, err := Launch(tm, RealGit{}, c.r); err != nil {
+			t.Fatalf("%v: %v", c.r.Place, err)
+		}
+		if got := tm.calls[0][0]; got != c.verb {
+			t.Errorf("%v opened with %q, want %q", c.r.Place, got, c.verb)
+		}
 	}
 }

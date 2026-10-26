@@ -1,8 +1,9 @@
 // Package tmuxop talks to a tmux server the user already runs. compass creates
-// no sessions or panes: it lists what is there, mirrors one pane's screen, and
-// — only on a keypress — moves the user's focus to it, hands the terminal over
-// to it, types into it, or opens a new window in a session that already exists
-// (window.go). What it opens it never manages afterwards.
+// nothing there on its own: it lists what is there, mirrors one pane's screen,
+// and — only on a keypress — moves the user's focus to it, hands the terminal
+// over to it, types into it, or opens new work where the person asked: a
+// window, a split or a session (window.go). What it opens it never manages
+// afterwards.
 //
 // Everything reaches the outside world through two seams, Runner (the tmux
 // binary) and Proc (the process table), so the rest of compass and its tests

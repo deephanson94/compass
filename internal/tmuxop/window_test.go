@@ -11,9 +11,9 @@ import (
 // The window opens in the named session, beside the user's focus rather
 // than over it, and the command reaches tmux as argv: the prompt is one
 // argument however many quotes and spaces it carries.
-func TestNewWindowPassesTheCommandAsArgv(t *testing.T) {
+func TestOpenWindowPassesTheCommandAsArgv(t *testing.T) {
 	f := &fakeRunner{outputs: [][]byte{[]byte("%17 dev:4.0\n")}}
-	pane, err := tmuxop.NewWindow(f, "dev", "/home/u/api", "rate", []string{"claude", "-n", "rate", `it's "quoted" $HOME`})
+	pane, err := tmuxop.Open(f, tmuxop.PlaceWindow, "dev", "/home/u/api", "rate", []string{"claude", "-n", "rate", `it's "quoted" $HOME`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,18 +25,18 @@ func TestNewWindowPassesTheCommandAsArgv(t *testing.T) {
 }
 
 // No command is the user's own shell, and no name is tmux's to give.
-func TestNewWindowWithNoCommandIsAShell(t *testing.T) {
+func TestOpenWindowWithNoCommandIsAShell(t *testing.T) {
 	f := &fakeRunner{outputs: [][]byte{[]byte("%3 ops:2.0\n")}}
-	if _, err := tmuxop.NewWindow(f, "ops", "/srv", "", nil); err != nil {
+	if _, err := tmuxop.Open(f, tmuxop.PlaceWindow, "ops", "/srv", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	f.assertCalls(t, []string{"new-window", "-d", "-P", "-F", "#{pane_id} #{session_name}:#{window_index}.#{pane_index}",
 		"-t", "=ops:", "-c", "/srv"})
 }
 
-func TestNewWindowNeedsASession(t *testing.T) {
+func TestOpenWindowNeedsASession(t *testing.T) {
 	f := &fakeRunner{}
-	if _, err := tmuxop.NewWindow(f, "", "/srv", "", nil); err == nil {
+	if _, err := tmuxop.Open(f, tmuxop.PlaceWindow, "", "/srv", "", nil); err == nil {
 		t.Fatal("no session: want an error")
 	}
 	if len(f.calls) != 0 {
@@ -44,9 +44,9 @@ func TestNewWindowNeedsASession(t *testing.T) {
 	}
 }
 
-func TestNewWindowSurfacesTmuxErrors(t *testing.T) {
+func TestOpenWindowSurfacesTmuxErrors(t *testing.T) {
 	f := &fakeRunner{errs: []error{errors.New("can't find session: nope")}}
-	if _, err := tmuxop.NewWindow(f, "nope", "", "", nil); err == nil {
+	if _, err := tmuxop.Open(f, tmuxop.PlaceWindow, "nope", "", "", nil); err == nil {
 		t.Fatal("want tmux's error")
 	}
 }
@@ -58,5 +58,52 @@ func TestSessions(t *testing.T) {
 	}
 	if got := tmuxop.Sessions(&fakeRunner{errs: []error{errors.New("no server running")}}); got != nil {
 		t.Errorf("no server: Sessions = %q, want none", got)
+	}
+}
+
+// A pane splits beside the one named, side by side, and takes no name: the
+// window it joins has one.
+func TestOpenPaneSplitsBeside(t *testing.T) {
+	f := &fakeRunner{outputs: [][]byte{[]byte("%8 dev:1.1\n")}}
+	pane, err := tmuxop.Open(f, tmuxop.PlacePane, "%2", "/home/u/api", "rate", []string{"claude", "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertCalls(t, []string{"split-window", "-d", "-h", "-P", "-F", "#{pane_id} #{session_name}:#{window_index}.#{pane_index}",
+		"-t", "%2", "-c", "/home/u/api", "--", "claude", "go"})
+	if pane.ID != "%8" || pane.Target != "dev:1.1" || pane.Window != "" {
+		t.Errorf("pane = %+v", pane)
+	}
+	if _, err := tmuxop.Open(&fakeRunner{}, tmuxop.PlacePane, "", "", "", nil); err == nil {
+		t.Error("a split with nothing to split beside: want an error")
+	}
+}
+
+// A session is new, detached, and named after the work; its first window
+// carries the same name.
+func TestOpenSessionIsNamed(t *testing.T) {
+	f := &fakeRunner{outputs: [][]byte{[]byte("%11 rate:0.0\n")}}
+	pane, err := tmuxop.Open(f, tmuxop.PlaceSession, "ignored", "/srv", "rate", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertCalls(t, []string{"new-session", "-d", "-P", "-F", "#{pane_id} #{session_name}:#{window_index}.#{pane_index}",
+		"-s", "rate", "-c", "/srv", "-n", "rate"})
+	if pane.Target != "rate:0.0" {
+		t.Errorf("pane = %+v", pane)
+	}
+	if _, err := tmuxop.Open(&fakeRunner{}, tmuxop.PlaceSession, "", "", "", nil); err == nil {
+		t.Error("an unnamed session: want an error")
+	}
+}
+
+func TestParsePlace(t *testing.T) {
+	for _, p := range tmuxop.Places {
+		if got, ok := tmuxop.ParsePlace(p.String()); !ok || got != p {
+			t.Errorf("ParsePlace(%q) = %v, %v", p, got, ok)
+		}
+	}
+	if _, ok := tmuxop.ParsePlace("tab"); ok {
+		t.Error("tab is no place")
 	}
 }

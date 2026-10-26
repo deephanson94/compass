@@ -11,10 +11,10 @@ import (
 )
 
 // runNew is `compass new`: the deck's `n` panel as a command, for a tmux
-// binding or a script. It opens one window and prints where.
+// binding or a script. It opens one window, pane or session and prints where.
 //
 //	compass new -C ~/work/api -n rate explore per-tenant rate limits
-//	compass new -with shell -C ~/work/api
+//	compass new -with shell -as pane -C ~/work/api
 func runNew(args []string, cfg config) int {
 	harnesses := launch.Harnesses(cfg.Harnesses)
 	var names []string
@@ -22,10 +22,11 @@ func runNew(args []string, cfg config) int {
 		names = append(names, h.Name)
 	}
 	fs := flag.NewFlagSet("compass new", flag.ContinueOnError)
-	dir := fs.String("C", ".", "the project directory the window opens in")
-	session := fs.String("t", "", "the tmux session the window opens in (default: the one you are in, else the first)")
-	name := fs.String("n", "", "the window's name, and the worktree's branch (default: the prompt's first words)")
-	with := fs.String("with", harnesses[0].Name, "what the window runs: "+strings.Join(names, ", "))
+	dir := fs.String("C", ".", "the project directory the work opens in")
+	as := fs.String("as", "window", "where the work opens: window (in an existing session), pane (split beside one) or session (a new one)")
+	target := fs.String("t", "", "for a window, the session it opens in (default: the one you are in, else the first);\nfor a pane, the pane it splits beside (default: the one you are in)")
+	name := fs.String("n", "", "the window's name, a new session's, and the worktree's branch (default: the prompt's first words)")
+	with := fs.String("with", harnesses[0].Name, "what the work runs: "+strings.Join(names, ", "))
 	worktree := fs.Bool("worktree", false, "check out a new branch in a worktree beside the repository and open there")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: compass new [flags] [prompt…]")
@@ -44,12 +45,22 @@ func runNew(args []string, cfg config) int {
 		fmt.Fprintf(os.Stderr, "compass new: %s takes no prompt\n", h.Name)
 		return 2
 	}
+	place, ok := tmuxop.ParsePlace(*as)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "compass new: -as %q is no place (try window, pane or session)\n", *as)
+		return 2
+	}
 	runner := tmuxop.RealRunner{}
-	if *session == "" {
-		*session = currentSession(runner)
+	if *target == "" {
+		switch place {
+		case tmuxop.PlaceWindow:
+			*target = currentSession(runner)
+		case tmuxop.PlacePane:
+			*target = currentPane(runner)
+		}
 	}
 	res, err := launch.Launch(runner, launch.RealGit{}, launch.Request{
-		Session: *session, Dir: *dir, Name: *name, Harness: h, Prompt: prompt, Worktree: *worktree,
+		Place: place, Target: *target, Dir: *dir, Name: *name, Harness: h, Prompt: prompt, Worktree: *worktree,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "compass new:", firstLineOf(err.Error()))
@@ -73,4 +84,17 @@ func currentSession(r tmuxop.Runner) string {
 		return all[0]
 	}
 	return ""
+}
+
+// currentPane is the pane this command runs in, or none outside tmux: a
+// split has no sensible default anywhere else.
+func currentPane(r tmuxop.Runner) string {
+	if os.Getenv("TMUX") == "" {
+		return ""
+	}
+	out, err := r.Output("display-message", "-p", "#{pane_id}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

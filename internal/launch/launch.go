@@ -1,5 +1,5 @@
 // Package launch starts new work: a window in one of the user's tmux
-// sessions, in a project directory, running a harness — Claude Code, a bare
+// sessions (or a split, or a session of its own), in a project directory, running a harness — Claude Code, a bare
 // shell, or any CLI the config names — with the first prompt already handed
 // to it. Optionally the work gets a git worktree of its own first.
 //
@@ -18,7 +18,7 @@ import (
 	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
-// Harness is what a new window runs. Command is an argv template: a token
+// Harness is what new work runs. Command is an argv template: a token
 // that holds {prompt} or {name} has the value put in its place, and a token
 // whose placeholder has no value is dropped whole — so `claude {prompt}`
 // with no prompt is `claude`, and `tool --prompt={prompt}` is `tool`. An
@@ -105,18 +105,19 @@ func Find(hs []Harness, name string) (Harness, bool) {
 
 // Request is one launch, as a person asked for it.
 type Request struct {
-	Session  string // the tmux session the window opens in; it must exist
-	Dir      string // the project directory; "~" is the home directory
-	Name     string // the window's name, the worktree's branch; "" = from the prompt
+	Place    tmuxop.Place // a window (the default), a pane, or a tmux session of its own
+	Target   string       // for a window, the existing session; for a pane, the pane to split beside
+	Dir      string       // the project directory; "~" is the home directory
+	Name     string       // the window's, a new session's and the worktree branch's name; "" = from the prompt
 	Harness  Harness
 	Prompt   string
 	Worktree bool // give the work a git worktree of its own, off Dir's HEAD
 }
 
-// WindowName is the name the window, the session and the worktree's branch
-// share: the one asked for, else the prompt's first words, else the
-// harness's own name.
-func (r Request) WindowName() string {
+// TaskName is the name the window, a new session, the worktree's branch and
+// a claude session share: the one asked for, else the prompt's first words,
+// else the harness's own name.
+func (r Request) TaskName() string {
 	if n := strings.TrimSpace(r.Name); n != "" {
 		return n
 	}
@@ -131,11 +132,14 @@ func (r Request) WindowName() string {
 // Result is where a launch landed.
 type Result struct {
 	Pane tmuxop.Pane
-	Dir  string // the directory the window opened in: the worktree's, if one was made
+	Dir  string // the directory the work opened in: the worktree's, if one was made
 	Name string
 }
 
-// Launch makes the worktree, when asked for one, and opens the window.
+// Launch makes the worktree, when asked for one, and opens the work where
+// the request places it. Where tmux would refuse is asked first: a worktree
+// is a branch on disk, and one made for a session name already taken would
+// be left behind with nothing in it.
 func Launch(t tmuxop.Runner, g Git, r Request) (Result, error) {
 	dir, err := ExpandHome(r.Dir)
 	if err != nil {
@@ -144,17 +148,47 @@ func Launch(t tmuxop.Runner, g Git, r Request) (Result, error) {
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return Result{}, fmt.Errorf("%s is not a directory", r.Dir)
 	}
-	name := r.WindowName()
+	name := r.TaskName()
+	if err := placeable(t, r.Place, r.Target, name); err != nil {
+		return Result{}, err
+	}
 	if r.Worktree {
 		if dir, err = Worktree(g, dir, name); err != nil {
 			return Result{}, err
 		}
 	}
-	pane, err := tmuxop.NewWindow(t, r.Session, dir, name, r.Harness.Argv(name, strings.TrimSpace(r.Prompt)))
+	pane, err := tmuxop.Open(t, r.Place, r.Target, dir, name, r.Harness.Argv(name, strings.TrimSpace(r.Prompt)))
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Pane: pane, Dir: dir, Name: name}, nil
+}
+
+// placeable asks tmux whether the place is there to be used: the session a
+// window opens in, the pane a split goes beside, and — the other way round —
+// no session already by the name a new one would take.
+func placeable(t tmuxop.Runner, place tmuxop.Place, target, name string) error {
+	switch place {
+	case tmuxop.PlaceWindow:
+		if target == "" {
+			return fmt.Errorf("no tmux session to open a window in")
+		}
+		if _, err := t.Output("has-session", "-t", "="+target); err != nil {
+			return fmt.Errorf("no tmux session %q", target)
+		}
+	case tmuxop.PlacePane:
+		if target == "" {
+			return fmt.Errorf("no pane to split beside")
+		}
+		if _, err := t.Output("display-message", "-p", "-t", target, "#{pane_id}"); err != nil {
+			return fmt.Errorf("no pane %s to split beside", target)
+		}
+	case tmuxop.PlaceSession:
+		if _, err := t.Output("has-session", "-t", "="+name); err == nil {
+			return fmt.Errorf("a tmux session %q already exists", name)
+		}
+	}
+	return nil
 }
 
 // Slug is a prompt's first words as a name: lower case, letters and digits,

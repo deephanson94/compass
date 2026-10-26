@@ -58,9 +58,10 @@ real CLI render, but compass owns no PTY. When you want to *type*, `Enter` hands
 outside tmux compass suspends and attaches, so the pane is a real PTY with a real
 keyboard and your own prefix + `d` brings the deck back; inside tmux your client
 just switches. `g` grabs whichever session has been waiting on you longest and
-attaches to it. Nothing to manage: compass never creates or owns tmux sessions
-or panes. The one thing it opens is a window, when you ask for one with `n`
-(below), and from then on that window is yours like any other.
+attaches to it. Nothing to manage: compass creates nothing in tmux on its
+own. The one thing it opens is new work, when you ask for it with `n` (below):
+a window by default, a split pane or a tmux session if you choose. From then
+on it is yours like anything else in tmux.
 
 A session that ended its turn on a question — *which of these should I do next?*
 — keeps its place on the board until you answer it, however long that takes and
@@ -110,8 +111,8 @@ go install github.com/deephanson94/compass/cmd/compass@latest   # the newest tag
    creates or manages tmux sessions — it only observes, plus the keypress-gated
    writes: `Enter`, which hands you the session's own terminal; `r`, which
    types a line, a menu's digit, or the escape that stop is, into its pane; and
-   `n`, which opens a new window in a session you already have and leaves it
-   to you.
+   `n`, which opens new work (a window, a split pane or a tmux session) and
+   leaves it to you.
 2. **Three keypresses, max.** Any session, any zoom level, any answer — reachable in
    ≤3 keypresses from anywhere. This is a hard constraint, tested in CI.
 3. **Zero config, read-only.** compass watches the JSONL transcripts Claude Code
@@ -166,7 +167,7 @@ compass prs                          # diagnostic: poll Gitea now — each sessi
 compass panes                        # diagnostic: which pane holds which session
 compass new -C ~/work/api explore per-tenant rate limits
                                      # a new tmux window running claude with that prompt
-                                     #   (-with shell, -worktree, -n NAME, -t SESSION; see below)
+                                     #   (-as pane|session, -with shell, -worktree, -n NAME, -t TARGET; see below)
 ```
 
 ### Starting new work
@@ -177,6 +178,7 @@ everything else arrives filled in from the selected card.
 ```
 ┌ new window ──────────────────────────────────────────────────────┐
 │   run       ‹ claude ›                                           │
+│   as        ‹ window ›                                           │
 │   in tmux   ‹ dev ›                                              │
 │   dir       ~/work/api                                           │
 │   name      explore-per-tenant-rate                              │
@@ -189,9 +191,15 @@ everything else arrives filled in from the selected card.
 ```
 
 - **run**: `claude`, a `shell`, or any harness the config names (below). ←/→ cycles.
-- **in tmux**: the tmux session the window opens in. It defaults to the selected
-  card's session, and ←/→ cycles through the others. compass opens a *window*
-  there and creates nothing else: no session, no pane split.
+- **as**: where the work opens. ←/→ cycles.
+  - `window` (default): a new window in an existing tmux session.
+  - `pane`: a side-by-side split beside the selected card's own pane. A card
+    with no pane can't be split, and the panel says so.
+  - `session`: a new detached tmux session, named like the window.
+- **in tmux**: for a window, the session it opens in. It defaults to the
+  selected card's session, and ←/→ cycles through the others. For a pane the
+  row shows the pane being split; for a session, the new session's name.
+  With no tmux session running at all, the panel starts on `session`.
 - **dir**: where the selected card works. ←/→ walks the directories the fleet has
   worked in, most recent first, or you can type a path.
 - **name**: the window's name. It is also passed as `claude -n`, so the card is
@@ -203,13 +211,16 @@ everything else arrives filled in from the selected card.
   picked. It works the same for every harness.
 
 The prompt goes to the harness as an argument, not typed into the pane, so it
-arrives whole: quotes, `$` and all. The window opens in the background and the
-deck stays where it was. When the new session joins the fleet, the deck selects it,
+arrives whole: quotes, `$` and all. The work opens in the background, and the
+deck stays where it was. compass checks the tmux target before it makes a
+worktree: a session name already taken or a pane that is gone is refused
+before anything is written to disk. When the new session joins the fleet, the deck selects it,
 unless you have moved the selection in the meantime. `Enter` takes you there.
 `readonly` turns `n` off. In the reader, `n` keeps its search meaning.
 
-`compass new` is the same launch from a shell or a tmux binding. Inside tmux
-it opens in the session you are in:
+`compass new` is the same launch from a shell or a tmux binding. `-as pane` or
+`-as session` picks the place. `-t` is the session for a window and the pane
+for a split. Inside tmux, both default to where you are:
 
 ```
 bind N command-prompt -p "prompt:" "run-shell -b 'compass new -C \"#{pane_current_path}\" -- \"%%%\"'"
@@ -317,7 +328,7 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail (your prompts; a teammate's relayed report is drawn but is no chapter); in the counts, the previous / next group; in the reader, your turns, marked and named as it lands on them |
-| `n` | new window: a panel to open `claude` with a prompt, a shell, or a configured harness in a new window of one of your tmux sessions, optionally in a fresh git worktree. Defaults come from the selected card; `enter` opens, `esc` closes |
+| `n` | new work: a panel to open `claude` with a prompt, a shell, or a configured harness as a new window in one of your tmux sessions (the default), a split beside the selected card's pane, or a new tmux session, optionally in a fresh git worktree. Defaults come from the selected card; `enter` opens, `esc` closes |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `Space` | in a session: the counts above the trail (`◆ build  6 legs`) open into their legs — `k` off the trail's first row climbs onto them, `Space` opens the class or the lanes under the cursor and folds it again. A leg there is that leg: the conversation follows it, `Tab` reads it, `Enter` attaches |

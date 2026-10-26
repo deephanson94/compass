@@ -25,7 +25,7 @@ var helpKeys = [][2]string{
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
 	{"a", "ask: a claude grounded in this session's transcript"},
-	{"n", "new window in a tmux session: claude with a prompt, a shell, or a harness · a worktree if asked"},
+	{"n", "new work: claude with a prompt, a shell, or a harness · a window, a split or a session · a worktree if asked"},
 	{"s", "the counts above the trail, and back — each side keeps the row you left"},
 	{"space", "reader: fold / unfold a tool output · legs: open a count into its rows (k off the first row climbs to them)"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},

@@ -4918,7 +4918,7 @@ func (m *Model) keymapOnce() string {
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
 	case m.launching != nil:
-		keys = "new window · tab next · ←/→ choose · enter opens · esc closes"
+		keys = "new " + m.launching.placeOf().String() + " · tab next · ←/→ choose · enter opens · esc closes"
 	case m.replying && m.replyTyping:
 		keys = "type the line · enter sends · esc back"
 	case m.replying:

@@ -16,15 +16,19 @@ import (
 	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
-// launchForm is the `n` panel: what a new window runs, which tmux session
-// it opens in, where, under what name, in a worktree or not, and the first
-// prompt. Everything but the prompt arrives filled in from the selected
-// session, so the common launch is `n`, the prompt, enter.
+// launchForm is the `n` panel: what the new work runs, whether it is a
+// window, a pane or a tmux session of its own, where, under what name, in a
+// worktree or not, and the first prompt. Everything but the prompt arrives
+// filled in from the selected session, so the common launch is `n`, the
+// prompt, enter.
 type launchForm struct {
 	field    int
 	harness  int      // into Model.harnesses
+	place    int      // into tmuxop.Places
 	sessions []string // the tmux sessions, the selected card's first
 	session  int
+	pane     tmuxop.Pane // the selected card's pane, which a split goes beside
+	hasPane  bool
 	dirs     []string // the directories the fleet has worked in, the selected card's first
 	dir      int      // the candidate ←/→ last landed on
 	dirText  string   // the directory as it stands: a candidate, or typed
@@ -36,6 +40,7 @@ type launchForm struct {
 // The panel's rows, top to bottom; tab walks them in this order.
 const (
 	launchWith = iota
+	launchPlace
 	launchSession
 	launchDir
 	launchName
@@ -53,7 +58,7 @@ const launchDirsMax = 20
 // joins; a claude that has not written by then is not one to jump to.
 const launchLandFor = 2 * time.Minute
 
-// launchDoneMsg says a window opened, or did not.
+// launchDoneMsg says the work opened, or did not.
 type launchDoneMsg struct {
 	res     launch.Result
 	harness string
@@ -63,6 +68,10 @@ type launchDoneMsg struct {
 // offerLaunch is `n`: the panel opens over the deck. Nothing runs until
 // enter. It is compass's third write, and like the other two it is gated
 // on a keypress and switched off by read-only.
+//
+// It opens on a window in the selected card's tmux session. With no tmux
+// session anywhere it opens on a session of its own instead: that is the
+// one place there is room for.
 func (m *Model) offerLaunch() {
 	if m.readonly {
 		m.note = "read-only · launch is off"
@@ -71,17 +80,16 @@ func (m *Model) offerLaunch() {
 	if len(m.harnesses) == 0 {
 		m.harnesses = launch.Harnesses(nil)
 	}
-	sessions := tmuxop.Sessions(m.runner)
-	if len(sessions) == 0 {
-		m.note = "launch needs a tmux session to open a window in"
-		return
+	f := &launchForm{sessions: tmuxop.Sessions(m.runner), dirs: m.launchDirs()}
+	if len(f.sessions) == 0 {
+		f.place = indexOfPlace(tmuxop.PlaceSession)
 	}
-	f := &launchForm{sessions: sessions, dirs: m.launchDirs()}
 	if pane, ok := m.selectedPane(); ok {
 		// The selected card's tmux session: a new task most often joins
 		// the work it sits beside.
+		f.pane, f.hasPane = pane, true
 		if i := strings.LastIndexByte(pane.Target, ':'); i > 0 {
-			f.session = indexOf(sessions, pane.Target[:i])
+			f.session = indexOf(f.sessions, pane.Target[:i])
 		}
 	}
 	if len(f.dirs) > 0 {
@@ -137,6 +145,18 @@ func sessionDir(cwd, origin string) string {
 	return origin
 }
 
+func indexOfPlace(p tmuxop.Place) int {
+	for i, q := range tmuxop.Places {
+		if q == p {
+			return i
+		}
+	}
+	return 0
+}
+
+// placeOf is the place the panel stands on.
+func (f *launchForm) placeOf() tmuxop.Place { return tmuxop.Places[f.place] }
+
 func indexOf(list []string, s string) int {
 	for i, v := range list {
 		if v == s {
@@ -170,6 +190,8 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 		switch f.field {
 		case launchWith:
 			f.harness = wrapIndex(f.harness+d, len(m.harnesses))
+		case launchPlace:
+			f.place = wrapIndex(f.place+d, len(tmuxop.Places))
 		case launchSession:
 			f.session = wrapIndex(f.session+d, len(f.sessions))
 		case launchDir:
@@ -211,20 +233,33 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		}
 	}
-	if m.launching != nil && !m.harnesses[m.launching.harness].TakesPrompt() && m.launching.field == launchPrompt {
-		m.launching.field = launchWorktree // the harness changed under the prompt row
-	}
 	return nil
 }
 
-// launchStep moves the panel's focus, past the prompt row when the harness
-// takes no prompt.
+// launchStep moves the panel's focus over the rows that have a choice to
+// make: past the prompt when the harness takes none, and past the session
+// row unless the place is a window — a pane's is the card's, a new
+// session's is its name.
 func (m *Model) launchStep(d int) {
 	f := m.launching
-	f.field = wrapIndex(f.field+d, launchFields)
-	if f.field == launchPrompt && !m.harnesses[f.harness].TakesPrompt() {
+	for i := 0; i < launchFields; i++ {
 		f.field = wrapIndex(f.field+d, launchFields)
+		if m.launchRowOpen(f.field) {
+			return
+		}
 	}
+}
+
+// launchRowOpen says whether the row has anything to choose or type.
+func (m *Model) launchRowOpen(field int) bool {
+	f := m.launching
+	switch field {
+	case launchPrompt:
+		return m.harnesses[f.harness].TakesPrompt()
+	case launchSession:
+		return f.placeOf() == tmuxop.PlaceWindow && len(f.sessions) > 1
+	}
+	return true
 }
 
 // text is the row being typed into, nil on a row of choices.
@@ -247,14 +282,30 @@ func wrapIndex(i, n int) int {
 	return ((i % n) + n) % n
 }
 
-// submitLaunch closes the panel and opens the window off the render loop:
-// a worktree is a git checkout, which can take a moment.
+// submitLaunch closes the panel and opens the work off the render loop:
+// a worktree is a git checkout, which can take a moment. A split needs the
+// card's pane, so without one the panel stays up and says so.
 func (m *Model) submitLaunch() tea.Cmd {
 	f := m.launching
+	place := f.placeOf()
+	target := ""
+	switch place {
+	case tmuxop.PlaceWindow:
+		if len(f.sessions) > 0 {
+			target = f.sessions[f.session]
+		}
+	case tmuxop.PlacePane:
+		if !f.hasPane {
+			m.note = "a split needs a card with a pane · choose window or session"
+			return nil
+		}
+		target = f.pane.ID
+	}
 	m.launching = nil
 	h := m.harnesses[f.harness]
 	req := launch.Request{
-		Session:  f.sessions[f.session],
+		Place:    place,
+		Target:   target,
 		Dir:      strings.TrimSpace(f.dirText),
 		Name:     f.name,
 		Harness:  h,
@@ -267,7 +318,7 @@ func (m *Model) submitLaunch() tea.Cmd {
 	if git == nil {
 		git = launch.RealGit{}
 	}
-	m.note = "opening " + req.WindowName() + " in " + req.Session + "…"
+	m.note = "opening " + req.TaskName() + " as a " + place.String() + "…"
 	return func() tea.Msg {
 		res, err := launch.Launch(runner, git, req)
 		return launchDoneMsg{res: res, harness: h.Name, err: err}
@@ -286,7 +337,7 @@ func (m *Model) launched(msg launchDoneMsg) {
 	m.landing = landing{pane: msg.res.Pane.ID, from: m.selectedKey, until: m.now.Add(launchLandFor)}
 }
 
-// landing is a launched window the deck is waiting to see join the fleet.
+// landing is launched work the deck is waiting to see join the fleet.
 type landing struct {
 	pane  string    // its tmux pane id
 	from  string    // the selection when it was launched
@@ -345,13 +396,30 @@ func (m *Model) launchPanel(inner int) []string {
 		return ""
 	}
 
+	task := launch.Request{Harness: h, Prompt: f.prompt, Name: f.name}.TaskName()
 	row(launchWith, "run", choice(h.Name), "")
-	row(launchSession, "in tmux", choice(f.sessions[f.session]), "a new window")
+	row(launchPlace, "as", choice(f.placeOf().String()), "")
+	switch f.placeOf() {
+	case tmuxop.PlaceWindow:
+		if len(f.sessions) == 0 {
+			row(launchSession, "in tmux", "no session to open it in", "")
+		} else {
+			row(launchSession, "in tmux", choice(f.sessions[f.session]), "")
+		}
+	case tmuxop.PlacePane:
+		if f.hasPane {
+			row(launchSession, "beside", mirrorMark+" "+f.pane.Target+" · the card's pane", "")
+		} else {
+			row(launchSession, "beside", "this card has no pane to split", "")
+		}
+	case tmuxop.PlaceSession:
+		row(launchSession, "in tmux", "a new session · "+task, "")
+	}
 	dir := homeShort(f.dirText) + cursor(launchDir)
 	row(launchDir, "dir", dir, dirHint(f))
 	name := f.name + cursor(launchName)
 	if f.name == "" && f.field != launchName {
-		name = launch.Request{Harness: h, Prompt: f.prompt}.WindowName()
+		name = task
 	}
 	row(launchName, "name", name, "")
 	wt := "off"
@@ -375,7 +443,7 @@ func (m *Model) launchPanel(inner int) []string {
 	rows = append(rows, readerLine{kind: readerBlank},
 		readerLine{text: "tab next · ←/→ choose · enter opens · esc closes", kind: readerBody})
 
-	title := " new window "
+	title := " new " + f.placeOf().String() + " "
 	box := func(s string, style lipgloss.Style) string {
 		return " " + ruleStyle.Render("│") + " " + style.Render(pad(clip(s, body), body)) + " " + ruleStyle.Render("│") + " "
 	}
