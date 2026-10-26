@@ -118,3 +118,24 @@ func TestLoadConfigReplies(t *testing.T) {
 		t.Errorf("Replies = %q, want the first nine in order", c.Replies)
 	}
 }
+
+// Each harness line is one more thing `n` can run; a line compass cannot
+// read is ignored like any other.
+func TestLoadConfigHarnesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `harness = "opencode: opencode run {prompt}"
+harness = "not a harness"
+harness = "claude: claude --model opus -n {name} {prompt}"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COMPASS_CONFIG", path)
+	c := loadConfig()
+	if len(c.Harnesses) != 2 || c.Harnesses[0].Name != "opencode" || c.Harnesses[1].Name != "claude" {
+		t.Fatalf("Harnesses = %+v", c.Harnesses)
+	}
+	if got := strings.Join(c.Harnesses[1].Command, " "); got != "claude --model opus -n {name} {prompt}" {
+		t.Errorf("claude = %q", got)
+	}
+}

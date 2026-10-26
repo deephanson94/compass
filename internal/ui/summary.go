@@ -1041,7 +1041,7 @@ func (m *Model) blockLeave() {
 // block, `trail` in the block, "" where the key refuses.
 func (m *Model) blockJumpWord() string {
 	switch {
-	case m.level != levelWaypoints || m.showHelp || m.searching || m.replying:
+	case m.level != levelWaypoints || m.showHelp || m.typing():
 		return ""
 	case m.inBlock():
 		return "trail"

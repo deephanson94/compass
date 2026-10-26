@@ -25,6 +25,7 @@ var helpKeys = [][2]string{
 	{"r", "reply: options, stock lines, a typed line, stop; a dead session's remedy"},
 	{"x", "hide a session — A lists it, x there brings it back · X, every unanswered one"},
 	{"a", "ask: a claude grounded in this session's transcript"},
+	{"n", "new window in a tmux session: claude with a prompt, a shell, or a harness · a worktree if asked"},
 	{"s", "the counts above the trail, and back — each side keeps the row you left"},
 	{"space", "reader: fold / unfold a tool output · legs: open a count into its rows (k off the first row climbs to them)"},
 	{"/ n N", "search: the fleet from a list or the deck; the text in the reader"},
@@ -94,7 +95,7 @@ func helpOffered(key, keymap string) bool {
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
 		"G": {"G is the present"}, "? / q": {"? help"}, "x X A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},
-		"a": {"a ask"}, "space": {"space unfold", "space open", "space close"}, "/ n N": {"/ search", "n/N"},
+		"a": {"a ask"}, "n": {"n new"}, "space": {"space unfold", "space open", "space close"}, "/ n N": {"/ search", "n/N"},
 		"s": {"s counts", "s trail"},
 		"A": {"A live fleet", "A fleet", "A browses", "A, then x"},
 	}[key] {
@@ -154,6 +155,11 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		legend = kept
 	}
 	if h > 0 && len(lines)+1+len(legend) > h {
+		// The launch key's row goes first: `n` is the one key that acts on
+		// no session on screen, and a short help is for reading the deck.
+		lines = dropKeyRow(lines, "n")
+	}
+	if h > 0 && len(lines)+1+len(legend) > h {
 		// Too short for the whole legend: keep what a reader cannot infer —
 		// the glyphs and the class names — and drop the sentences around
 		// them and the line of air, before any key is cut. A reader who
@@ -203,7 +209,7 @@ func helpLinesWith(w, h int, o helpOpts) []string {
 		// while `a`, `space` and the search — named on nine between them —
 		// were cut for the room. The order is how guessable the key is
 		// without its row.
-		order := append(append([]string(nil), o.refused...), "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "s", "[ ]", "space")
+		order := append(append([]string(nil), o.refused...), "n", "A", "g", "/ n N", "G", "ctrl+d/u", "⇧ tab", "m", "tab", "tab/⇧tab", "x", "x X A", "r", "a", "s", "[ ]", "space")
 		if !o.board {
 			// Below the board's width `m` is refused ("needs 110 columns"):
 			// a refused key's row is the first cut when rows are short,
@@ -786,6 +792,16 @@ func withoutRecent(lines []string, recent bool) []string {
 	for i, l := range lines {
 		if strings.Contains(l, "a digit under recent") {
 			lines[i] = strings.Replace(l, " · a digit under recent opens that finished one", "", 1)
+		}
+	}
+	return lines
+}
+
+// dropKeyRow takes the row for key out of the key lines.
+func dropKeyRow(lines []string, key string) []string {
+	for i, l := range lines {
+		if plain := ansi.Strip(l); len(plain) > 10 && strings.TrimSpace(plain[:10]) == key {
+			return append(lines[:i:i], lines[i+1:]...)
 		}
 	}
 	return lines

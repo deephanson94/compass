@@ -1,7 +1,8 @@
 // Package tmuxop talks to a tmux server the user already runs. compass creates
-// no sessions, windows or panes: it lists what is there, mirrors one pane's
-// screen, and — only on a keypress — moves the user's focus to it or hands the
-// terminal over to it.
+// no sessions or panes: it lists what is there, mirrors one pane's screen, and
+// — only on a keypress — moves the user's focus to it, hands the terminal over
+// to it, types into it, or opens a new window in a session that already exists
+// (window.go). What it opens it never manages afterwards.
 //
 // Everything reaches the outside world through two seams, Runner (the tmux
 // binary) and Proc (the process table), so the rest of compass and its tests
@@ -9,6 +10,7 @@
 package tmuxop
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 )
@@ -23,9 +25,14 @@ type RealRunner struct{}
 
 // Output runs tmux with the given arguments. A missing binary or a non-zero
 // exit both surface as errors; deciding what they mean is the caller's job —
-// for ListPanes they simply mean "no tmux here".
+// for ListPanes they simply mean "no tmux here". A non-zero exit carries what
+// tmux said ("can't find session: api"), which is what a person reads.
 func (RealRunner) Output(args ...string) ([]byte, error) {
-	return exec.Command("tmux", args...).Output()
+	out, err := exec.Command("tmux", args...).Output()
+	if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+		return out, errors.New(strings.TrimSpace(string(ee.Stderr)))
+	}
+	return out, err
 }
 
 // Capture runs: capture-pane -p -e -J -t <paneID>  and returns the raw

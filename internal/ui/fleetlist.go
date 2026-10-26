@@ -95,7 +95,7 @@ func (m *Model) fleetColumn(w, h int) []string {
 // the archive is still discovered and the box still steps off it (#62,
 // #64, #126): what goes is the key, not the count.
 func (m *Model) archiveDoorKey() string {
-	if m.searching || m.replying {
+	if m.typing() {
 		return ""
 	}
 	return " · A browses"
@@ -118,7 +118,7 @@ func (m *Model) archiveDoorKey() string {
 // footer names neither key in these states already, so no footer moves.
 // What goes is the key, not the count (#285).
 func (m *Model) hiddenDoorKey() string {
-	if m.searching || m.replying {
+	if m.typing() {
 		return ""
 	}
 	return " · A, then x"
@@ -345,7 +345,7 @@ func (m *Model) foldKey(k string) string {
 	if m.focus() != panelFleet {
 		return ""
 	}
-	if m.searching || m.replying {
+	if m.typing() {
 		return ""
 	}
 	return " · " + k
@@ -678,7 +678,7 @@ const hiddenGroupWord = "hidden"
 // header: what goes is the key, not the group (#285, #288). The footer
 // names `x unhide` only where the deck holds the key, so no footer moves.
 func (m *Model) groupLabel(name string) string {
-	if name == hiddenGroup && (m.searching || m.replying) {
+	if name == hiddenGroup && m.typing() {
 		return hiddenGroupWord
 	}
 	return name
