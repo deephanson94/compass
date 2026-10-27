@@ -296,7 +296,12 @@ func ParseLine(line []byte) (Event, error) {
 		ev.Text = string(raw.Content)
 	}
 
-	if msg := raw.Message; msg != nil {
+	// Only the conversation's own lines are read for what was said. Claude
+	// Code also writes copies of what it sent the API ("api-request-blob",
+	// no timestamp), whose message repeats earlier turns' calls: read as
+	// calls, each one reopened a call long answered, and the session sat
+	// mid-turn under its own finished reply.
+	if msg := raw.Message; msg != nil && (ev.Type == EventUser || ev.Type == EventAssistant) {
 		parseContent(&ev, msg.Content)
 		// Every shape the failure has been written in: the flag on
 		// the message, the flag on the line, the synthetic model,

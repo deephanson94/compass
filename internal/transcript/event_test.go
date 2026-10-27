@@ -386,3 +386,15 @@ func TestEscsBlockLineIsAnInterrupt(t *testing.T) {
 		t.Errorf("a user block array's other text = %q, want it left empty by contract", other.Text)
 	}
 }
+
+// A copy of an API request is not the conversation: the calls it repeats
+// were made, and answered, on lines of their own.
+func TestAnAPIRequestBlobSaysNothing(t *testing.T) {
+	ev, err := transcript.ParseLine([]byte(`{"type":"api-request-blob","sessionId":"s","hash":"h","message":{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"tool_use","id":"toolu_x","name":"SendMessage","input":{}}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Type != transcript.EventUnknown || len(ev.ToolUses) != 0 || ev.Text != "" {
+		t.Errorf("api-request-blob = %s, %d calls, %q; want unknown with nothing said", ev.Type, len(ev.ToolUses), ev.Text)
+	}
+}
