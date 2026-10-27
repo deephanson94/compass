@@ -914,6 +914,11 @@ func (m *Model) entryLinesUnder(r fleetRow, w int, tag string) []string {
 		age = padLeft(m.age(at), ageWidth)
 	}
 	head := headline(s)
+	if m.inCard {
+		// A card's badge says the state in its own words — "needs attn",
+		// not "stuck" — so its first row does not say it again.
+		head = ""
+	}
 	if head == "" && m.unread(s) {
 		// Unread is a word, not only a brightness: monochrome has to read
 		// it, and below the board's width there is no brightness at all.

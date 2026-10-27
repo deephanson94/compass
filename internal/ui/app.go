@@ -330,6 +330,7 @@ type Model struct {
 	noLaneHeads  bool // the board packed tighter than its lanes' heads (round 47)
 	blockInTrail bool // the board packed its blocks out of their trails' rows, not the board's (#380)
 	askBelow     bool // the card below this row draws its ask on its own ◉ row (#107)
+	inCard       bool // the row is a card's first, under the card's own badge
 	readonly     bool
 
 	// The board's data: one trail per column, and each column's narrated

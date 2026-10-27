@@ -779,7 +779,9 @@ func cardBarColor(selected bool) lipgloss.AdaptiveColor {
 func (m *Model) cardContent(key string, r fleetRow, w, h int) []string {
 	s := m.sessions[r.sess]
 	tag := m.columnTag(key, s, w)
+	m.inCard = true
 	rows := []string{m.entryLinesUnder(r, w, tag)[0]}
+	m.inCard = false
 	tr, loaded := m.trails[key]
 	if !loaded {
 		return fit(append(rows, dimStyle.Render(clip(glyphGhost+" reading its transcript…", w))), h)
