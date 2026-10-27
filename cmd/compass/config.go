@@ -20,7 +20,8 @@ type config struct {
 	LiveWithin string // live_within = "5m" ("0" = tmux panes only)
 	Mirror     bool   // mirror = true (the live mirror opens at Lv1; m toggles it)
 	Board      string // board = "cards" | "columns" (the default)
-	HungAfter  string // hung_after = "30m": the silence a card calls hung
+	StillAfter string // still_after = "10m": the silence a card calls still working
+	AttnAfter  string // attn_after = "1h": the silence a card calls needs attn
 	CardWidth  int    // card_width = "84": a card's least width
 	CardsRow   int    // cards_per_row = "3": cards in a row (0 = by the width)
 	CardTint   string // card_tint = "#2c3640": a card's ground; its bar is lit from it
@@ -90,8 +91,10 @@ func loadConfig() (c config) {
 			c.Mirror = value == "true"
 		case "board":
 			c.Board = value
-		case "hung_after":
-			c.HungAfter = value
+		case "still_after":
+			c.StillAfter = value
+		case "attn_after", "hung_after": // hung_after is attn_after's old name
+			c.AttnAfter = value
 		case "card_tint":
 			c.CardTint = value
 		case "cards_per_row":

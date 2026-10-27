@@ -51,19 +51,6 @@ var cardBoard bool
 // SetBoardCards turns the card board on or off.
 func SetBoardCards(on bool) { cardBoard = on }
 
-// hungAfter is how long a stuck session's silence lasts before its card
-// calls it hung rather than silent: stuck is ninety seconds into a quiet
-// call, which a long build is; half an hour is a call that is not coming
-// back.
-var hungAfter = 30 * time.Minute
-
-// SetHungAfter sets the silence a card calls hung; zero or less keeps the default.
-func SetHungAfter(d time.Duration) {
-	if d > 0 {
-		hungAfter = d
-	}
-}
-
 // cardColMin is a card's least width: from here a row carries its label,
 // its badge and its figure whole. 84 puts four across a 32-inch screen,
 // where 60 put six and every row still clipped.
@@ -339,34 +326,13 @@ func (m *Model) cardStatusText(key string, s fleet.Session, tr journey.Trail, w 
 	return styled + dimStyle.Render(" · ") + textStyle.Render(clip(now, max(0, w-gw-3)))
 }
 
-// cardBadge is the card's health at a glance: a block of colour the eye
-// finds across a wall of cards before it reads a word — amber for a
-// question, red for a hang, a loop or a dead API, green for work and for
-// a finished session that shipped green, grey for the rest. The glyph and
-// the word say it again for monochrome.
+// cardBadge is the card's health at a glance, in two levels: the main
+// status, one of six words on a block of colour the eye finds across a wall
+// of cards before it reads a word — and after it, dim, the sub-status: the
+// one short reason it is that colour ("approve", "API 403", "timeout"),
+// when there is one to give.
 func (m *Model) cardBadge(s fleet.Session, tr journey.Trail) string {
-	glyph, word, col := "○", "idle", colDim
-	_, _, loop := circling(tr)
-	switch {
-	case s.Snap.APIError:
-		glyph, word, col = glyphAPIError, "dead", colStuck
-	case s.Waiting:
-		glyph, word, col = fleet.Glyph(state.NeedsYou), "unanswered", colNeedsYou
-	case s.Snap.State == state.NeedsYou:
-		glyph, word, col = fleet.Glyph(state.NeedsYou), "needs you", colNeedsYou
-	case s.Snap.State == state.Stuck && m.now.Sub(headSince(s)) >= hungAfter:
-		glyph, word, col = fleet.Glyph(state.Stuck), "hung", colStuck
-	case s.Snap.State == state.Stuck:
-		glyph, word, col = fleet.Glyph(state.Stuck), "stuck", colStuck
-	case loop:
-		glyph, word, col = glyphCircling, "looping", colStuck
-	case s.Snap.State == state.Working:
-		glyph, word, col = fleet.Glyph(state.Working), "working", colWorking
-	case redNow(tr):
-		glyph, word = "✗", "red"
-	case shippedLast(tr):
-		glyph, word, col = "✓", "done", colWorking
-	}
+	word, sub, col := m.cardState(s, tr)
 	style := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#111111")).Background(col)
 	if col == colDim {
 		// Grey on grey read as no badge at all: the quiet ones get a
@@ -376,7 +342,96 @@ func (m *Model) cardBadge(s fleet.Session, tr journey.Trail) string {
 			Foreground(lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#111111"}).
 			Background(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#a0a0a0"})
 	}
-	return style.Render(" " + glyph + " " + word + " ")
+	badge := style.Render(" " + word + " ")
+	if sub != "" {
+		badge += " " + dimStyle.Render(sub)
+	}
+	return badge
+}
+
+// The card's six main statuses.
+const (
+	cardWorking      = "working"
+	cardStillWorking = "still working"
+	cardNeedsYou     = "needs you"
+	cardNeedsAttn    = "needs attn"
+	cardExited       = "exited"
+	cardIdle         = "idle"
+)
+
+// cardState is the card's main status, its sub-status and its colour. The
+// first that applies wins: exited, needs you, needs attn, still working,
+// working, idle. The silence that makes an open turn still working (from
+// ten minutes) or needs attn (from an hour) is the state machine's, so the
+// fleet, the trail and the card agree on it.
+func (m *Model) cardState(s fleet.Session, tr journey.Trail) (word, sub string, col lipgloss.TerminalColor) {
+	snap := s.Snap
+	_, runs, loop := circling(tr)
+	switch {
+	case snap.Exited:
+		return cardExited, "mid-turn", colDim
+	case snap.APIError:
+		if snap.APIStatus != 0 {
+			return cardNeedsAttn, fmt.Sprintf("API %d", snap.APIStatus), colStuck
+		}
+		return cardNeedsAttn, "API", colStuck
+	case s.Waiting, snap.State == state.NeedsYou:
+		// A question is what needs you means; only another reason says itself.
+		if snap.Pending == state.PendingApprove {
+			return cardNeedsYou, "approve", colNeedsYou
+		}
+		return cardNeedsYou, "", colNeedsYou
+	case snap.State == state.Stuck:
+		if snap.Pending == state.PendingBash {
+			return cardNeedsAttn, "timeout", colStuck
+		}
+		return cardNeedsAttn, pendingSub(snap.Pending), colStuck
+	case loop:
+		return cardNeedsAttn, fmt.Sprintf("loop ×%d", runs), colStuck
+	case snap.State == state.Working && snap.Late:
+		return cardStillWorking, pendingSub(snap.Pending), colStill
+	case snap.State == state.Working:
+		// Working is fine and says nothing more — but for a subagent, which
+		// is why the session's own transcript is quiet.
+		if snap.Pending == state.PendingSubagent {
+			return cardWorking, "subagent", colWorking
+		}
+		return cardWorking, "", colWorking
+	}
+	switch {
+	case snap.Interrupted:
+		return cardIdle, "cancel", colDim
+	case m.backgroundAgent(s, tr):
+		return cardIdle, "bg job", colDim
+	case shippedLast(tr):
+		return cardIdle, "✓ shipped", colDim
+	case snap.Reason == "no activity yet":
+		return cardIdle, "new", colDim
+	}
+	return cardIdle, "", colDim
+}
+
+// pendingSub is what a slow open turn waits on, as its sub-status says it.
+func pendingSub(pending string) string {
+	if pending == state.PendingTool {
+		return ""
+	}
+	return pending
+}
+
+// backgroundAgent says a finished turn left an agent working: a lane still
+// out whose own file was written inside the first tier.
+func (m *Model) backgroundAgent(s fleet.Session, tr journey.Trail) bool {
+	agents := m.agentsFor(s.Info.Key())
+	for _, b := range tr.Branches {
+		if b.Done {
+			continue
+		}
+		if a, ok := agents[b.ToolUseID]; ok && !a.Wrote.IsZero() && m.now.Sub(a.Wrote) < state.StillAfter {
+			return true
+		}
+	}
+	return false
 }
 
 // shippedLast says whether a finished trail's last leg shipped.
@@ -422,14 +477,11 @@ func (m *Model) cardNow(s fleet.Session, tr journey.Trail) string {
 		return "dead on the API"
 	case s.Snap.State == state.NeedsYou:
 		return ""
-	case s.Snap.State == state.Stuck:
-		if quiet := m.now.Sub(headSince(s)); quiet >= hungAfter {
-			return "no output past " + relDuration(hungAfter)
-		}
+	case s.Snap.State == state.Stuck, s.Snap.Exited:
 		return ""
 	}
-	if test, runs, ok := circling(tr); ok {
-		return fmt.Sprintf("on %s · red %d runs running", test, runs)
+	if test, _, ok := circling(tr); ok {
+		return "on " + test // the badge's "loop ×4" says how many runs
 	}
 	if s.Snap.State == state.Working {
 		return ""
@@ -438,14 +490,15 @@ func (m *Model) cardNow(s fleet.Session, tr journey.Trail) string {
 }
 
 // cardVerdict is how a finished session came out, as the card says it:
-// the board's verdict without what the badge beside it already says (the
-// red), without the day's wait on you (the tally's to say), and with a
-// last leg named once — "build build" was a class with no label, said twice.
+// the board's verdict without its test result (the card does not carry
+// one: the trail's legs do, for whoever opens it), without the day's wait
+// on you (the tally's to say), and with a last leg named once — "build
+// build" was a class with no label, said twice.
 func (m *Model) cardVerdict(s fleet.Session, tr journey.Trail) string {
 	var parts []string
 	for _, p := range verdictPartsWith(tr, m.now, s.Snap.State != state.Idle, m.agentsFor(s.Info.Key())) {
-		if strings.HasPrefix(p, "✗ red") && redNow(tr) {
-			continue
+		if strings.HasPrefix(p, "✗ red") || strings.HasPrefix(p, "✓ green") || strings.HasPrefix(p, "✓ shipped") {
+			continue // the shipped is the badge's to say
 		}
 		parts = append(parts, p)
 	}
@@ -456,6 +509,9 @@ func (m *Model) cardVerdict(s fleet.Session, tr journey.Trail) string {
 		l := tr.Legs[i]
 		if l.Current {
 			continue
+		}
+		if l.Class == journey.Ship {
+			return "" // "✓ shipped" beside the badge says it
 		}
 		label := strings.Trim(l.Label, " .")
 		if label == "" && len(l.Files) > 0 {

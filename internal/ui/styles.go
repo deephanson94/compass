@@ -85,6 +85,10 @@ var (
 	colWorking  = lipgloss.AdaptiveColor{Light: "#15803d", Dark: "#4ade80"}
 	colNeedsYou = lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"}
 	colStuck    = lipgloss.AdaptiveColor{Light: "#b91c1c", Dark: "#f87171"}
+
+	// colStill is working's green, muted: a turn quiet past the first tier
+	// is still fine, and one step nearer needing a look.
+	colStill = lipgloss.AdaptiveColor{Light: "#4d7c5a", Dark: "#86b896"}
 )
 
 // SetDim overrides the grey, for a terminal or a pair of eyes the default

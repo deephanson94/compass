@@ -134,13 +134,28 @@ go install github.com/deephanson94/compass/cmd/compass@latest   # the newest tag
 The board is drawn as cards, for a wide screen with many sessions: each card a
 bordered panel at least 84 cells wide (`card_width`), the rows shared evenly
 (`cards_per_row`, or `+`/`-` live), as tall as the screen gives it. A card is the
-fleet row; a coloured badge (needs you, hung, stuck, looping, dead, working,
-done, red, idle), the session's goal (one line the narrator writes once a turn is
-over, the first prompt until then) and what it is doing now; today's tally; and
+fleet row; a coloured badge with a short reason beside it (below), the session's
+goal (one line the narrator writes once a turn is over, the first prompt until
+then) and what it is doing now; today's tally; and
 today's work newest first, grouped by turn, so the breathing HEAD row is right
 under the goal. `p` pins a card to the board's front; the pin goes when the
 session leaves the live fleet. `board = "columns"` (or `-board columns`) is the
 board as it was: every session's whole trail side by side, oldest first.
+
+A card's badge is one of six statuses, and the dim word after it says why:
+
+| Status | Means | Reason beside it |
+|---|---|---|
+| **working** | a turn is in flight and writing | `subagent` when the work is a subagent's |
+| **still working** | a turn silent 10m–1h (`still_after`) | what it waits on: `subagent`, `MCP`, `web`, `workflow`, `think` (the model owes a reply), `start` (the prompt has no reply yet) |
+| **needs you** | a question, or a call held for your permission | `approve` for the permission prompt |
+| **needs attn** | silent past 1h (`attn_after`), a shell command past its timeout, a loop, or an API error | the same words, or `timeout`, `loop ×4`, `API 403` |
+| **exited** | a turn in flight whose Claude Code process is gone | `mid-turn` |
+| **idle** | the turn is over | `✓ shipped`, `cancel` (Esc), `bg job` (an agent still writing), `new` |
+
+Silence counts from the session's last line, or its subagent's. An Edit, Write or
+Read out for 90 seconds is held behind a permission prompt; a shell command is
+judged by its own timeout. Test results are the trail's to show, not the card's.
 
 Below 110 columns there is no board: the deck is the fleet list beside one trail, `Tab` puts a cursor on it, and a third `Tab` gives the reader the whole width.
 
@@ -199,7 +214,8 @@ Everything is optional configuration — compass runs with none. `~/.config/comp
 root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root override)
 narrator = "haiku"      # narration model; "off" disables
 board = "cards"         # the default; "columns" for every trail whole, oldest first
-hung_after = "30m"      # a card calls a stuck session hung after this much silence
+still_after = "10m"     # a card calls an open turn still working after this much silence
+attn_after = "1h"       # and needs attn after this much (hung_after is its old name)
 card_width = "84"       # a card's least width; lower it for more cards across
 cards_per_row = "3"     # or say how many cards a row; + and - change it live
 card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
@@ -254,7 +270,7 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail (your prompts; a teammate's relayed report is drawn but is no chapter); in the counts, the previous / next group; in the reader, your turns, marked and named as it lands on them |
-| `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, hung, circling or dead on the API stays, and the footer says so |
+| `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, needs attn, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
 | `Space` | in a session: the counts above the trail (`◆ build  6 legs`) open into their legs — `k` off the trail's first row climbs onto them, `Space` opens the class or the lanes under the cursor and folds it again. A leg there is that leg: the conversation follows it, `Tab` reads it, `Enter` attaches |
 | `s` | in a session: jump to the counts, and back to the trail — each side keeps the row you left |

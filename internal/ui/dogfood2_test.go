@@ -1287,15 +1287,18 @@ func TestCalmPanelsAndLiveSearch(t *testing.T) {
 	forceASCII(t)
 	m := boardModel(152, 40)
 	key := sessionKey("s-api")
+	// Its plan has a step left. A red test run alone no longer owes you:
+	// the card does not carry test results, so the order does not either.
 	m.trails[key] = journey.Trail{Legs: []journey.Leg{{Class: journey.Test, Label: "pytest", Start: fixtureBase, End: fixtureBase.Add(time.Minute),
-		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 failed", Short: "1✗"}}}}}
+		Waypoints: []journey.Waypoint{{Kind: journey.WaypointTestRun, Text: "1 failed", Short: "1✗"}}}},
+		Tasks: []journey.Task{{ID: "1", Subject: "Fix the token refresh", Status: "pending"}}}
 	for i := range m.sessions {
 		if m.sessions[i].Live {
 			m.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: fixtureBase}
 		}
 	}
 	if chips := ansi.Strip(m.statusChips()); strings.Contains(chips, "all calm") || !strings.Contains(chips, "owe you") {
-		t.Errorf("a red idle session owes you; the header should say so, not calm: %q", chips)
+		t.Errorf("an idle session with steps left owes you; the header should say so, not calm: %q", chips)
 	}
 
 	m = followModel(152, 40)
