@@ -241,6 +241,7 @@ Global keys (work at every level):
 | `Space` | Lv3 reader: fold/unfold a tool output. Lv2 legs: the counts above the trail are the cursor's too — `k` off the trail's first row climbs into them, `space` on a class or the lanes opens it into its rows and folds it again; a leg or lane row there is that leg or lane, so the reader follows it and `tab` and `enter` do what they do on the trail's own row (#393) |
 | `s` | Lv2 legs: the counts, and back — the cursor jumps between the block and the trail, each side keeping the row it left (#393) |
 | `/`, `n`/`N` | on the board, a list or the archive: search the fleet as it is typed (the footer echoes the query, `enter` keeps it, `esc` cancels); in the Lv3 reader: search the text, walk the matches |
+| `n` | new work (below Lv3; the reader keeps `n` for its matches): a panel over the deck — run (`claude`, `shell`, or a configured harness), as (window, pane, session), tmux target, directory, name, worktree, prompt — defaulting to a window in the selected card's session and directory. `enter` opens it detached (`new-window -d` in an existing session, `split-window -d -h` beside the card's pane, or `new-session -d`), the harness's argv after `--` with the prompt as one argument; `esc` closes. A tmux write, keypress-gated, off under `readonly` |
 | `r` | reply: a panel names the selected session and its pane and offers the question's options (the menu's own digit), the stock lines (typed and entered), or stop (escape); `t` types a line. On a session dead on the API (`⊘`) the panel offers the remedy (`/login`, typed into the pane) under its own head and names a stock line as the turn it would start. A tmux write, keypress-gated, off under `readonly` |
 | `x` | hide the selected session from the board; the archive lists it, `x` there brings it back. What owes an alarm stays, and says so — except a session held there by a question you walked away from, which `x` puts down for good (#344) |
 | `X` | the same key for the pile: every session waiting on an old question off the board at once; in the archive it brings every hidden session back. It never sweeps the board empty (#344) |
@@ -250,8 +251,10 @@ Global keys (work at every level):
 | `q` | quit compass, at every level |
 
 Note what's *absent*: no "new session" key, no kill, no rename — compass doesn't
-manage sessions or tmux (§2.5). `Enter` (and the `g` that ends in one) and `r`
-(#26) are its tmux writes, behind an explicit keypress and disableable with
+manage sessions or tmux (§2.5). `n` opens new work where the person says,
+a window by default, a split or a tmux session if chosen, and never touches
+it again: nothing closed, renamed or rearranged. `Enter` (and the `g` that ends in one), `r`
+(#26) and `n` are its tmux writes, behind an explicit keypress and disableable with
 `-readonly` / `readonly = true`; the event hook (#27) is the one action with
 nobody at the keyboard, runs only when the config names it, and is not a tmux
 write, so `readonly` leaves it be.
@@ -319,9 +322,11 @@ fourth level. From the board the trail is one `Tab`, the legs two, the reader th
 
 - Not a session manager that owns your processes — tmux owns them; compass only
   observes (plus the keypress-gated actions: `Enter`, `r` — send-keys of a line, a
-  menu's digit, or the escape that stop is — and ask; and the event hook, which runs
-  only when the config names it).
-- Not a tmux layout tool — it never creates sessions, windows, or panes for itself.
+  menu's digit, or the escape that stop is — `n`, and ask; and the event hook, which
+  runs only when the config names it).
+- Not a tmux layout tool — it never creates sessions, windows or panes for
+  itself. What it opens with `n` is what the person asked for, and once open
+  it is theirs.
 - Not a replacement chat UI — input always happens in the real CLI.
 - Not a metrics dashboard — no token graphs, cost meters, or charts in v1. The trail
   is a narrative, not analytics.

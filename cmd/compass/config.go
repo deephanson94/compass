@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/deephanson94/compass/internal/launch"
 )
 
 // config is what ~/.config/compass/config.toml may set. Every entry has a
@@ -40,6 +42,20 @@ type config struct {
 	// COMPASS_EVENT is needs_you, api_error, stuck, circling or agents_back;
 	// COMPASS_SESSION, COMPASS_TMUX and COMPASS_DETAIL say which and what.
 	Hook string
+
+	// Harnesses are what `n` and `compass new` can run besides Claude Code
+	// and a shell, one `harness = "name: command {prompt}"` line each; a
+	// line naming a built-in replaces it (launch.Harnesses).
+	Harnesses []launch.Harness
+
+	// Dirs are the directories `n` offers right after the selected card's,
+	// one `dir = "~/work/api"` line each, in order.
+	Dirs []string
+}
+
+// launchConfig is what the launch panel and `compass new` take from the file.
+func (c config) launchConfig() launch.Config {
+	return launch.Config{Harnesses: launch.Harnesses(c.Harnesses), Dirs: c.Dirs}
 }
 
 // loadConfig reads the config file if there is one. $COMPASS_CONFIG overrides
@@ -108,6 +124,12 @@ func loadConfig() (c config) {
 			}
 		case "hook":
 			c.Hook = value
+		case "dir":
+			c.Dirs = append(c.Dirs, value)
+		case "harness":
+			if h, ok := launch.ParseHarness(value); ok {
+				c.Harnesses = append(c.Harnesses, h)
+			}
 		case "dim":
 			c.Dim = value
 		}
