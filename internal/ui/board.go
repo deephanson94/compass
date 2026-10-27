@@ -1673,21 +1673,9 @@ func unfinished(tr journey.Trail) bool {
 	return false
 }
 
-// redNow reports whether the trail's newest verdict is red.
-func redNow(tr journey.Trail) bool {
-	for i := len(tr.Legs) - 1; i >= 0; i-- {
-		badge := legBadge(tr.Legs[i])
-		if badge == "" || badge == "?" {
-			continue
-		}
-		return strings.Contains(badge, "✗")
-	}
-	return false
-}
-
 // obligation ranks a live session by what it owes you, for the board's
 // order: a question, a hang, a loop, work in flight, an idle session that
-// stopped red or with steps left, one you have not read, and the rest.
+// stopped with steps left, one you have not read, and the rest.
 // The header's alarms sort first; among the calm, what stopped short of
 // done comes before what shipped clean — "all calm" should mean nothing
 // owes you, not merely nothing is amber.
@@ -1732,9 +1720,9 @@ func (m *Model) ownObligation(s fleet.Session) int {
 		return rankWorking
 	}
 	if !s.Info.LastEventAt.IsZero() && m.now.Sub(s.Info.LastEventAt) > boardFresh {
-		return rankRest // a day old owes nothing today, red or not
+		return rankRest // a day old owes nothing today
 	}
-	if redNow(tr) || unfinished(tr) {
+	if unfinished(tr) {
 		return rankOwed
 	}
 	if m.unread(s) {

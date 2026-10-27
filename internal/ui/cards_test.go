@@ -30,7 +30,8 @@ func withCards(t *testing.T) {
 }
 
 // sceneCards is the fleet from the person's own screen, a day into it:
-// one asking, one hung for hours, one stuck for minutes, one looping, one
+// one asking, one silent for hours past its command's timeout, one past its
+// timeout by minutes, one looping, one
 // working with agents out, one finished today and unread, one whose work
 // was all yesterday, and one that only just started.
 func sceneCards() scene {
@@ -57,16 +58,18 @@ func sceneCards() scene {
 		legSpec{journey.Build, "flow view rebuild", 50 * time.Minute, []string{"flow.go"}, "", nil},
 		legSpec{journey.Test, "pytest: sheet and MTP sample", 5 * time.Minute, nil, "103✓ 2✗", []string{"test_sheet"}},
 		legSpec{journey.Scout, "skill script", 2 * time.Minute, nil, "", nil})
-	s := sess("flow", "feat-flow-view", "/home/user/flow", "feat/flow", "flow view rebuild", state.Stuck, n.Add(-17*time.Hour), journey.Scout, "", "no output for 17h mid-turn", "Bash: python3 ~/.claude/skills/render.py")
+	s := sess("flow", "feat-flow-view", "/home/user/flow", "feat/flow", "flow view rebuild", state.Stuck, n.Add(-17*time.Hour), journey.Scout, "", "no result past the Bash timeout", "Bash: python3 ~/.claude/skills/render.py")
 	s.Info.LastEventAt = n.Add(-17 * time.Hour)
+	s.Snap.Open, s.Snap.Pending = true, state.PendingBash
 	add(s, hung)
 
-	// Stuck for minutes: silent, not hung.
+	// Past its command's timeout by minutes.
 	short := trailOf(n.Add(-40*time.Minute), "backfill last week's shards", true,
 		legSpec{journey.Scout, "the shard layout", 8 * time.Minute, []string{"shards.py"}, "", nil},
 		legSpec{journey.Build, "backfill.py", 20 * time.Minute, []string{"backfill.py"}, "", nil})
-	s = sess("etl", "etl", "/home/user/etl", "main", "backfill last week's shards", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no output for 6m mid-turn", "Bash: python backfill.py --all")
+	s = sess("etl", "etl", "/home/user/etl", "main", "backfill last week's shards", state.Stuck, n.Add(-6*time.Minute), journey.Build, "", "no result past the Bash timeout", "Bash: python backfill.py --all")
 	s.Info.LastEventAt = n.Add(-6 * time.Minute)
+	s.Snap.Open, s.Snap.Pending = true, state.PendingBash
 	add(s, short)
 
 	// Looping: the same test red four runs running.
@@ -289,7 +292,7 @@ func TestCardTodayOnlyAndYesterdayRule(t *testing.T) {
 	if !strings.Contains(rows[2], "last worked") {
 		t.Fatalf("a card with nothing today says no when in its tally: %q", rows[2])
 	}
-	// The hung session's day began yesterday: today's tally counts nothing
+	// The silent session's day began yesterday: today's tally counts nothing
 	// from before midnight.
 	rows = cardUntilBlank(card(t, m, "flow"))
 	if strings.Contains(rows[2], "today 20h") {
@@ -303,11 +306,12 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 	m := sceneModel(sceneCards(), 290, 80)
 	m.View()
 	cases := []struct{ name, want, not string }{
-		{"flow", "◍ hung  ", ""},   // past hung_after
-		{"etl", "", "hung"},        // stuck, but not for long: HEAD's "silent 6m" says it
-		{"api", "↻ looping  ", ""}, // the loop, which HEAD's "fix tokens.py" cannot say
-		{"s3", "✓ done  ", ""},     // how a finished session came out
-		{"harness", "", "Re-read"}, // the question is HEAD's row, not said twice
+		{"flow", " needs attn  timeout ", ""},    // a command past its timeout
+		{"etl", " needs attn  timeout ", "hung"}, // however recently
+		{"api", " needs attn  loop ×4 ", ""},     // the loop, which HEAD's "fix tokens.py" cannot say
+		{"s3", " idle  ✓ shipped ", "40✓"},       // how it came out, and no test result
+		{"harness", " needs you ", "Re-read"},    // the question is HEAD's row, not said twice
+		{"stages", " working ", "still"},         // working says nothing more
 	}
 	for _, c := range cases {
 		rows := card(t, m, c.name)
@@ -327,12 +331,72 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 	if got := strings.Join(cardUntilBlank(rows), " "); !strings.Contains(got, "[always / when grown]") {
 		t.Errorf("the question is clipped on the card:\n%s", strings.Join(rows, "\n"))
 	}
-	// The hung threshold is the config's.
-	SetHungAfter(24 * time.Hour)
-	t.Cleanup(func() { hungAfter = 30 * time.Minute })
-	m.retireTrailMemo()
-	if rows := card(t, m, "flow"); strings.Contains(rows[1], "hung") || !strings.Contains(rows[1], "stuck") {
-		t.Errorf("hung_after of a day still calls 17h hung: %q", rows[1])
+}
+
+// TestCardStateTwoLevels is the card's badge, scenario by scenario: the
+// main status, one of six, and the sub-status that gives its reason.
+func TestCardStateTwoLevels(t *testing.T) {
+	n := sceneNow
+	open := func(st state.State, pending string) fleet.Session {
+		s := sess("x", "x", "/home/user/x", "main", "x", st, n.Add(-time.Minute), journey.Build, "", "", "")
+		s.Snap.Open, s.Snap.Pending = true, pending
+		return s
+	}
+	late := func(pending string) fleet.Session {
+		s := open(state.Working, pending)
+		s.Snap.Late = true
+		return s
+	}
+	closed := func(reason string) fleet.Session {
+		return sess("x", "x", "/home/user/x", "main", "x", state.Idle, n.Add(-time.Minute), journey.Build, "", reason, "idle")
+	}
+	exited := closed("exited mid-turn")
+	exited.Snap.Exited = true
+	api := sess("x", "x", "/home/user/x", "main", "x", state.NeedsYou, n.Add(-time.Minute), journey.Build, "", "api error 403", "quota")
+	api.Snap.APIError, api.Snap.APIStatus = true, 403
+	bare := api
+	bare.Snap.APIStatus = 0
+	waiting := sess("x", "x", "/home/user/x", "main", "x", state.NeedsYou, n.Add(-48*time.Hour), journey.Build, "", "turn ended with a question", "")
+	waiting.Waiting = true
+	interrupted := closed("interrupted")
+	interrupted.Snap.Interrupted = true
+	shipped := trailOf(n.Add(-time.Hour), "x", false,
+		legSpec{journey.Test, "go test", time.Minute, nil, "3✓ 1✗", []string{"TestX"}},
+		legSpec{journey.Ship, "commit", time.Minute, nil, "", nil})
+
+	m := sceneModel(sceneCards(), 290, 80)
+	for _, c := range []struct {
+		name      string
+		s         fleet.Session
+		tr        journey.Trail
+		word, sub string
+	}{
+		{"exited mid-turn", exited, journey.Trail{}, "exited", "mid-turn"},
+		{"API error", api, journey.Trail{}, "needs attn", "API 403"},
+		{"API error, no status", bare, journey.Trail{}, "needs attn", "API"},
+		{"question", sess("x", "x", "/x", "main", "x", state.NeedsYou, n, journey.Build, "", "turn ended with a question", ""), journey.Trail{}, "needs you", ""},
+		{"question left for days", waiting, journey.Trail{}, "needs you", ""},
+		{"approval", open(state.NeedsYou, state.PendingApprove), journey.Trail{}, "needs you", "approve"},
+		{"Bash past its timeout", open(state.Stuck, state.PendingBash), journey.Trail{}, "needs attn", "timeout"},
+		{"subagent silent an hour", open(state.Stuck, state.PendingSubagent), journey.Trail{}, "needs attn", "subagent"},
+		{"model silent an hour", open(state.Stuck, state.PendingThink), journey.Trail{}, "needs attn", "think"},
+		{"MCP still working", late(state.PendingMCP), journey.Trail{}, "still working", "MCP"},
+		{"web still working", late(state.PendingWeb), journey.Trail{}, "still working", "web"},
+		{"prompt unanswered 10m", late(state.PendingStart), journey.Trail{}, "still working", "start"},
+		{"Bash in its timeout", open(state.Working, state.PendingBash), journey.Trail{}, "working", ""},
+		{"subagent writing", open(state.Working, state.PendingSubagent), journey.Trail{}, "working", "subagent"},
+		{"finished", closed("turn complete"), journey.Trail{}, "idle", ""},
+		{"finished red, shipped", closed("turn complete"), shipped, "idle", "✓ shipped"},
+		{"interrupted", interrupted, journey.Trail{}, "idle", "cancel"},
+		{"new", closed("no activity yet"), journey.Trail{}, "idle", "new"},
+	} {
+		word, sub, _ := m.cardState(c.s, c.tr)
+		if word != c.word || sub != c.sub {
+			t.Errorf("%s: %q · %q, want %q · %q", c.name, word, sub, c.word, c.sub)
+		}
+		if len([]rune(sub)) >= 10 {
+			t.Errorf("%s: sub-status %q is ten characters or more", c.name, sub)
+		}
 	}
 }
 
@@ -371,7 +435,7 @@ func TestCardGoalIsNarratedAndAskedOnlyAtTurnEnd(t *testing.T) {
 	m.SetNarrator(g)
 	poll(m, sc)
 	rows := card(t, m, "harness")
-	if !strings.HasSuffix(strings.TrimSpace(rows[1]), "▲ needs you  compass multi-session triage") {
+	if !strings.HasSuffix(strings.TrimSpace(rows[1]), "needs you  compass multi-session triage") {
 		t.Fatalf("the narrated goal does not lead the status row: %q", rows[1])
 	}
 	g.mu.Lock()

@@ -296,7 +296,12 @@ func ParseLine(line []byte) (Event, error) {
 		ev.Text = string(raw.Content)
 	}
 
-	if msg := raw.Message; msg != nil {
+	// Only the conversation's own lines are read for what was said. Claude
+	// Code also writes copies of what it sent the API ("api-request-blob",
+	// no timestamp), whose message repeats earlier turns' calls: read as
+	// calls, each one reopened a call long answered, and the session sat
+	// mid-turn under its own finished reply.
+	if msg := raw.Message; msg != nil && (ev.Type == EventUser || ev.Type == EventAssistant) {
 		parseContent(&ev, msg.Content)
 		// Every shape the failure has been written in: the flag on
 		// the message, the flag on the line, the synthetic model,
@@ -346,8 +351,13 @@ func parseContent(ev *Event, content contentField) {
 		switch b.Type {
 		case "text":
 			// Only assistant turns contribute Text; a user block array is
-			// tool results, whose Text stays empty by contract.
+			// tool results, whose Text stays empty by contract — but for
+			// Esc's line, which Claude Code writes as a text block and
+			// which closes the turn (Event.Interrupt).
 			if ev.Type == EventAssistant && b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+			if ev.Type == EventUser && strings.HasPrefix(strings.TrimSpace(b.Text), interruptMarker) {
 				texts = append(texts, b.Text)
 			}
 		case "tool_use":

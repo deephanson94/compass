@@ -1,6 +1,8 @@
 package fleet
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -45,6 +47,10 @@ type entry struct {
 	// remembers rather than replaying it every second. `merge` clears it
 	// the moment the transcript grows (round 60).
 	askDenied bool
+
+	// agentFiles pairs the Agent calls this session has made with their
+	// subagents' own transcripts (agentWrote).
+	agentFiles map[string]string
 
 	// dirs is where the session's own tool calls worked (workDirs), most
 	// recent last. Live sessions only, like the class.
@@ -192,6 +198,94 @@ func (m *Manager) isLive(info SessionInfo, now time.Time) bool {
 // never take a running one off the board. Caller holds the mutex.
 func (m *Manager) exited(info SessionInfo) bool {
 	return m.running != nil && m.seenRunning[info.ID] && !m.running[info.ID]
+}
+
+// Fold is the state machine's facts for one tracked session, by its key:
+// the calls it holds open and the last beat it counted as someone speaking.
+// It is for diagnostics (`compass why`); false when the session is not
+// tracked live.
+func (m *Manager) Fold(key string) (state.Fold, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e := m.sessions[key]
+	if e == nil || e.machine == nil || e.tailer == nil {
+		return state.Fold{}, false
+	}
+	return e.machine.Fold(), true
+}
+
+// diedMidTurn says a session with a turn in flight has no process to finish
+// it: the registry is readable and does not list it. Killed by Ctrl+C twice,
+// a closed terminal or a crash, the transcript keeps the open call forever,
+// and read alone it went from working to hung on nothing but the clock.
+//
+// A session this Manager saw running and then lost is gone at once. One it
+// never saw — compass started after it, or a run the registry does not list
+// — is gone only once its file has been quiet past the approval threshold, so
+// a headless run that is writing is never called exited. OpenCode sessions
+// are not in Claude Code's registry and never are. Caller holds the mutex.
+func (m *Manager) diedMidTurn(info SessionInfo, now time.Time) bool {
+	if m.running == nil || m.running[info.ID] || (info.Tool != "" && info.Tool != "claude") {
+		return false
+	}
+	return m.seenRunning[info.ID] || now.Sub(info.LastEventAt) >= state.ApproveAfter
+}
+
+// exitedSnap is an open turn whose process is gone: idle, since nothing will
+// happen in it, and Exited, so the card can say the work stopped unfinished.
+func exitedSnap(info SessionInfo, open state.Snapshot) state.Snapshot {
+	since := info.LastEventAt
+	if since.IsZero() {
+		since = open.Since
+	}
+	return state.Snapshot{State: state.Idle, Since: since, Reason: "exited mid-turn", Activity: "idle", Pending: open.Pending, Exited: true}
+}
+
+// agentWrote is the newest write by the subagent files that answer the
+// given Agent calls. Claude Code writes each subagent beside the lead's
+// transcript, under <session-id>/subagents/agent-<id>.jsonl, with a
+// meta.json naming the call it answers. The pairing is kept on the entry, so
+// a refresh reads a meta file once and then only stats the transcript.
+func (e *entry) agentWrote(ids []string) time.Time {
+	dir := filepath.Join(strings.TrimSuffix(e.info.TranscriptPath, ".jsonl"), "subagents")
+	if e.agentFiles == nil {
+		e.agentFiles = map[string]string{}
+	}
+	var newest time.Time
+	for _, id := range ids {
+		path, ok := e.agentFiles[id]
+		if !ok {
+			e.agentFiles = pairSubagents(dir, e.agentFiles)
+			path = e.agentFiles[id]
+		}
+		if path == "" {
+			continue
+		}
+		if st, err := os.Stat(path); err == nil && st.ModTime().After(newest) {
+			newest = st.ModTime()
+		}
+	}
+	return newest
+}
+
+// pairSubagents reads the meta files in dir into known, call id to the
+// subagent's transcript. An unreadable directory pairs nothing.
+func pairSubagents(dir string, known map[string]string) map[string]string {
+	metas, _ := filepath.Glob(filepath.Join(dir, "agent-*.meta.json"))
+	for _, meta := range metas {
+		raw, err := os.ReadFile(meta)
+		if err != nil {
+			continue
+		}
+		var mf struct {
+			ToolUseID string `json:"toolUseId"`
+		}
+		if json.Unmarshal(raw, &mf) != nil || mf.ToolUseID == "" {
+			continue
+		}
+		known[mf.ToolUseID] = strings.TrimSuffix(meta, ".meta.json") + ".jsonl"
+	}
+	return known
 }
 
 // asking is the ask door itself: a question nobody has answered, in a
@@ -401,7 +495,13 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 		}
 
 		if live {
+			if ids := e.machine.PendingAgents(); len(ids) > 0 {
+				e.machine.NoteAgentWrite(e.agentWrote(ids))
+			}
 			snap := e.machine.Evaluate(now)
+			if snap.Open && m.diedMidTurn(e.info, now) {
+				snap = exitedSnap(e.info, snap)
+			}
 			waiting := m.isWaiting(e.info, now)
 			// The mark is recorded whichever way the guard goes: a denied
 			// session that is read again next run must not replay its

@@ -260,8 +260,10 @@ func TestTheDigestDropsTheLookItsDividerDrawsAnyway(t *testing.T) {
 	if !strings.Contains(view, "↳ 1 red") || !strings.Contains(view, "↳ 1 ship") {
 		t.Errorf("a clause the divider does not draw left the row:\n%s", view)
 	}
-	// And the selected list row at a hundred, the fold's other half (#151).
+	// And the selected list row at a hundred, the fold's other half (#151):
+	// webapp's, third now that a red run alone no longer ranks it ahead.
 	n := sceneModel(sceneManyIdle(), 100, 30)
+	pressKey(n, "j")
 	pressKey(n, "j")
 	list := ansi.Strip(n.View())
 	if strings.Contains(list, "new leg · 1 red") {
@@ -973,6 +975,12 @@ func TestTheMarkSaysWhatThisColumnLost(t *testing.T) {
 		}
 	}
 
+	bareFrames := 0
+	t.Cleanup(func() {
+		if bareFrames == 0 && !t.Failed() {
+			t.Error("many-idle: no frame had a row the box cut nothing from — the bare side went untested")
+		}
+	})
 	for _, tc := range []struct{ w, h int }{{220, 48}, {152, 40}, {120, 34}} {
 		sc := sceneManyIdle()
 		m := sceneModel(sc, tc.w, tc.h)
@@ -1039,10 +1047,15 @@ func TestTheMarkSaysWhatThisColumnLost(t *testing.T) {
 				break
 			}
 		}
-		if checked == 0 || marked == 0 || bare == 0 {
-			t.Fatalf("many-idle %dx%d: the frame does not carry both sides (checked %d, marked %d, bare %d):\n%s",
+		// Every frame has a column the box cut. Not every frame has one it
+		// left whole beside it — at 120 the column under the box's edge is
+		// the shipped session's full trail — so the bare side is asked of
+		// the sizes together, below.
+		if checked == 0 || marked == 0 {
+			t.Fatalf("many-idle %dx%d: the frame has no column the box cut (checked %d, marked %d, bare %d):\n%s",
 				tc.w, tc.h, checked, marked, bare, strings.Join(got, "\n"))
 		}
+		bareFrames += bare
 
 		// The mark stands on the row whose column the box cut down to its
 		// rail — #75's own case — and never on the box's closing border.

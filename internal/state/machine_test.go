@@ -168,7 +168,7 @@ func TestT03NeedsYouPendingAskUserQuestion(t *testing.T) {
 // Precedence: rule 2 outranks rule 3, so a long-unanswered question is still
 // NeedsYou and never decays into Stuck.
 func TestT03AskUserQuestionBeatsQuietTimeout(t *testing.T) {
-	for _, quiet := range []time.Duration{0, state.StuckAfter, 10 * time.Minute, 3 * time.Hour} {
+	for _, quiet := range []time.Duration{0, state.ApproveAfter, 10 * time.Minute, 3 * time.Hour} {
 		now := at(4*time.Second + quiet)
 		snap := evaluateScenario(t, "t03-ask-user-question.jsonl", now)
 
@@ -196,18 +196,15 @@ func TestT05StuckPendingBash(t *testing.T) {
 
 	assertState(t, snap, state.Stuck)
 	assertSince(t, snap, at(4*time.Second)) // the tool_use that opened the wait
-
-	if !strings.HasPrefix(snap.Reason, "no output for ") || !strings.HasSuffix(snap.Reason, " mid-turn") {
-		t.Errorf("Reason = %q, want the shape %q", snap.Reason, "no output for <dur> mid-turn")
-	}
-	if !strings.Contains(snap.Reason, "2m") {
-		t.Errorf("Reason = %q, want it to report the 2m of silence", snap.Reason)
+	assertReason(t, snap, "no result past the Bash timeout")
+	if snap.Pending != state.PendingBash {
+		t.Errorf("Pending = %q, want %q", snap.Pending, state.PendingBash)
 	}
 }
 
 // T18 — a tool_result has landed but the model's next message has not been
 // written yet: the turn is still in flight, never idle (contract rule 4,
-// amended). At 5s this is Working; at 120s it is Stuck.
+// amended). At 5s this is Working; at 11m still working; at an hour Stuck.
 func TestT18ProcessingResultsIsNotIdle(t *testing.T) {
 	m := machineWith(
 		userPrompt(0, "fix the failing test"),
@@ -221,15 +218,20 @@ func TestT18ProcessingResultsIsNotIdle(t *testing.T) {
 	assertActivity(t, snap, "thinking…")
 	assertSince(t, snap, at(10*time.Second)) // the result that reopened the wait
 
-	snap = m.Evaluate(at(130 * time.Second))
+	snap = m.Evaluate(at(11 * time.Minute))
+	assertState(t, snap, state.Working)
+	if !snap.Late || snap.Pending != state.PendingThink {
+		t.Errorf("Late/Pending = %v/%q, want true/%q", snap.Late, snap.Pending, state.PendingThink)
+	}
+	snap = m.Evaluate(at(time.Hour + 10*time.Second))
 	assertState(t, snap, state.Stuck)
 	if !strings.HasPrefix(snap.Reason, "no output for ") {
 		t.Errorf("Reason = %q, want a stuck reason", snap.Reason)
 	}
 
 	// The model's next message closes the window: back to plain turn-complete.
-	m.Observe(assistantText(140*time.Second, "All tests pass now."))
-	snap = m.Evaluate(at(150 * time.Second))
+	m.Observe(assistantText(2*time.Hour, "All tests pass now."))
+	snap = m.Evaluate(at(2*time.Hour + 10*time.Second))
 	assertState(t, snap, state.Idle)
 	assertReason(t, snap, "turn complete")
 }
@@ -243,9 +245,10 @@ func TestT06WorkingStartingTurn(t *testing.T) {
 	assertSince(t, snap, base) // the prompt opened the wait
 }
 
-// T7 — the same lone prompt, 120s old.
+// T7 — the same lone prompt, an hour old. At 120s it is still only early.
 func TestT07StuckLonePrompt(t *testing.T) {
-	snap := evaluateScenario(t, "t06-lone-prompt.jsonl", at(120*time.Second))
+	assertState(t, evaluateScenario(t, "t06-lone-prompt.jsonl", at(120*time.Second)), state.Working)
+	snap := evaluateScenario(t, "t06-lone-prompt.jsonl", at(time.Hour))
 
 	assertState(t, snap, state.Stuck)
 	assertSince(t, snap, base)
@@ -305,45 +308,160 @@ func TestQuestionDetectionTrimsMarkdownDecoration(t *testing.T) {
 
 // ---------------------------------------------------------------- thresholds
 
-func TestStuckAfterIsNinetySeconds(t *testing.T) {
-	if state.StuckAfter != 90*time.Second {
-		t.Fatalf("StuckAfter = %v, want 90s", state.StuckAfter)
+func TestTheTiersAreTenMinutesAndAnHour(t *testing.T) {
+	if state.StillAfter != 10*time.Minute || state.AttnAfter != time.Hour || state.ApproveAfter != 90*time.Second {
+		t.Fatalf("tiers = %v / %v / %v, want 10m / 1h / 90s", state.StillAfter, state.AttnAfter, state.ApproveAfter)
 	}
 }
 
-// The boundary is strict: `now - lastEventAt < StuckAfter` is Working, and the
-// exact threshold is already Stuck.
-func TestStuckAfterBoundary(t *testing.T) {
+// An open turn with no budget of its own is judged by its silence: working
+// under ten minutes, still working (Late) under an hour, Stuck from the
+// hour. The boundaries are strict: the exact threshold is already the next
+// tier.
+func TestTheTiersJudgeAnOpenTurnBySilence(t *testing.T) {
 	tests := []struct {
 		name  string
 		quiet time.Duration
 		want  state.State
+		late  bool
 	}{
-		{"1s", time.Second, state.Working},
-		{"89s", 89 * time.Second, state.Working},
-		{"90s exactly", 90 * time.Second, state.Stuck},
-		{"91s", 91 * time.Second, state.Stuck},
+		{"1s", time.Second, state.Working, false},
+		{"9m59s", 10*time.Minute - time.Second, state.Working, false},
+		{"10m exactly", 10 * time.Minute, state.Working, true},
+		{"59m59s", time.Hour - time.Second, state.Working, true},
+		{"1h exactly", time.Hour, state.Stuck, false},
+		{"3h", 3 * time.Hour, state.Stuck, false},
 	}
 
 	for _, tc := range tests {
-		t.Run("pending tool "+tc.name, func(t *testing.T) {
-			// A Read has no budget of its own; a Bash does (see
-			// TestABashInsideItsTimeoutIsWorking).
+		check := func(t *testing.T, snap state.Snapshot, pending string) {
+			t.Helper()
+			assertState(t, snap, tc.want)
+			if snap.Late != tc.late || !snap.Open || snap.Pending != pending {
+				t.Errorf("Late/Open/Pending = %v/%v/%q, want %v/true/%q", snap.Late, snap.Open, snap.Pending, tc.late, pending)
+			}
+		}
+		t.Run("subagent "+tc.name, func(t *testing.T) {
 			m := machineWith(
-				userPrompt(0, "build it"),
-				assistantTool(0, "toolu_x", "Read", `{"file_path":"main.go"}`),
+				userPrompt(0, "refactor the parser"),
+				assistantTool(0, "toolu_a", "Agent", `{"prompt":"refactor"}`),
 			)
-			assertState(t, m.Evaluate(at(tc.quiet)), tc.want)
+			check(t, m.Evaluate(at(tc.quiet)), state.PendingSubagent)
 		})
-
+		t.Run("mcp "+tc.name, func(t *testing.T) {
+			m := machineWith(
+				userPrompt(0, "file the issue"),
+				assistantTool(0, "toolu_m", "mcp__github__issue_write", `{}`),
+			)
+			check(t, m.Evaluate(at(tc.quiet)), state.PendingMCP)
+		})
 		t.Run("lone prompt "+tc.name, func(t *testing.T) {
 			m := machineWith(userPrompt(0, "build it"))
-			snap := m.Evaluate(at(tc.quiet))
-			assertState(t, snap, tc.want)
-			if tc.want == state.Working {
-				assertReason(t, snap, "starting turn")
-			}
+			check(t, m.Evaluate(at(tc.quiet)), state.PendingStart)
 		})
+	}
+}
+
+// The tiers are the config's.
+func TestSetTiers(t *testing.T) {
+	t.Cleanup(func() { state.StillAfter, state.AttnAfter = 10*time.Minute, time.Hour })
+	state.SetTiers(5*time.Minute, 0)
+	if state.StillAfter != 5*time.Minute || state.AttnAfter != time.Hour {
+		t.Errorf("SetTiers(5m, 0) = %v/%v, want 5m/1h", state.StillAfter, state.AttnAfter)
+	}
+	state.SetTiers(2*time.Hour, 30*time.Minute)
+	if state.AttnAfter != 2*time.Hour {
+		t.Errorf("an attn budget under the still one = %v, want it raised to 2h", state.AttnAfter)
+	}
+}
+
+// A call that answers at once and has been out ninety seconds is held
+// behind a permission prompt: it needs you, not patience.
+func TestAFastCallOutNinetySecondsAwaitsApproval(t *testing.T) {
+	for _, tool := range []string{"Edit", "Write", "Read", "Grep", "ExitPlanMode"} {
+		m := machineWith(
+			userPrompt(0, "fix it"),
+			assistantTool(10*time.Second, "toolu_e", tool, `{"file_path":"auth.go"}`),
+		)
+		assertState(t, m.Evaluate(at(10*time.Second+89*time.Second)), state.Working)
+		snap := m.Evaluate(at(10*time.Second + state.ApproveAfter))
+		assertState(t, snap, state.NeedsYou)
+		assertReason(t, snap, "awaiting your approval")
+		assertSince(t, snap, at(10*time.Second))
+		if snap.Pending != state.PendingApprove || snap.APIError {
+			t.Errorf("%s: Pending = %q, want %q", tool, snap.Pending, state.PendingApprove)
+		}
+	}
+}
+
+// An Edit issued beside an Agent call is not what the turn waits on: the
+// quiet is the agent's.
+func TestAFastCallBesideAnAgentIsNotApproval(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "fix it"),
+		assistantTools(0, tool("toolu_a", "Agent", `{"prompt":"x"}`), tool("toolu_e", "Read", `{"file_path":"a.go"}`)),
+	)
+	snap := m.Evaluate(at(5 * time.Minute))
+	assertState(t, snap, state.Working)
+	if snap.Pending != state.PendingSubagent {
+		t.Errorf("Pending = %q, want %q", snap.Pending, state.PendingSubagent)
+	}
+}
+
+// While an Agent call is out, the subagent's own file is the session's
+// clock: the lead's transcript is silent, and the agent writing is the
+// session working. A write by an agent while none is out counts for nothing.
+func TestASubagentWritingKeepsTheSessionWorking(t *testing.T) {
+	m := machineWith(
+		userPrompt(0, "refactor the parser"),
+		assistantTool(0, "toolu_a", "Agent", `{"prompt":"refactor"}`),
+	)
+	if ids := m.PendingAgents(); len(ids) != 1 || ids[0] != "toolu_a" {
+		t.Fatalf("PendingAgents = %v, want [toolu_a]", ids)
+	}
+	m.NoteAgentWrite(at(50 * time.Minute))
+	snap := m.Evaluate(at(55 * time.Minute))
+	if snap.State != state.Working || snap.Late {
+		t.Errorf("an agent that wrote 5m ago = %v late=%v, want working", snap.State, snap.Late)
+	}
+	assertState(t, m.Evaluate(at(115*time.Minute)), state.Stuck)
+
+	idle := machineWith(
+		userPrompt(0, "build it"),
+		assistantTool(0, "toolu_m", "mcp__db__query", `{}`),
+	)
+	idle.NoteAgentWrite(at(50 * time.Minute))
+	if snap := idle.Evaluate(at(55 * time.Minute)); !snap.Late {
+		t.Errorf("an MCP call with a stray agent write = late %v, want the MCP call's own 55m", snap.Late)
+	}
+}
+
+// Esc closes the turn. Claude Code writes "[Request interrupted by user]"
+// as a user line, and read as a prompt it opened a turn nobody would
+// answer: an hour on, the session a person had stopped read as hung.
+func TestAnInterruptClosesTheTurn(t *testing.T) {
+	streaming := machineWith(
+		userPrompt(0, "fix the login bug"),
+		userPrompt(5*time.Second, "[Request interrupted by user]"),
+	)
+	duringTool := machineWith(
+		userPrompt(0, "run the tests"),
+		assistantTool(2*time.Second, "toolu_b", "Bash", `{"command":"npm test"}`),
+		toolResult(9*time.Second, "toolu_b"),
+		userPrompt(9*time.Second, "[Request interrupted by user for tool use]"),
+	)
+	for name, m := range map[string]*state.Machine{"streaming": streaming, "during a tool": duringTool} {
+		snap := m.Evaluate(at(time.Hour))
+		assertState(t, snap, state.Idle)
+		assertReason(t, snap, "interrupted")
+		if !snap.Interrupted || snap.Open {
+			t.Errorf("%s: Interrupted/Open = %v/%v, want true/false", name, snap.Interrupted, snap.Open)
+		}
+		// The next prompt is a turn again.
+		m.Observe(userPrompt(time.Hour, "try again"))
+		if snap := m.Evaluate(at(time.Hour + time.Second)); snap.State != state.Working || snap.Interrupted {
+			t.Errorf("%s: the next prompt = %v interrupted=%v, want working", name, snap.State, snap.Interrupted)
+		}
 	}
 }
 
@@ -753,5 +871,78 @@ func TestTheBudgetsClockIsItsOwnCalls(t *testing.T) {
 	assertState(t, snap, state.Working)
 	if !snap.Since.Equal(at(40 * time.Minute)) {
 		t.Errorf("Since = %v, want the sleep's own start %v", snap.Since, at(40*time.Minute))
+	}
+}
+
+// parsed builds a machine from raw transcript lines, the way Claude Code
+// writes them, so the tests below see the parser's reading and not a
+// helper's.
+func parsed(t *testing.T, lines ...string) *state.Machine {
+	t.Helper()
+	m := state.NewMachine()
+	for _, l := range lines {
+		ev, err := transcript.ParseLine([]byte(l))
+		if err != nil {
+			t.Fatalf("parse %s: %v", l, err)
+		}
+		m.Observe(ev)
+	}
+	return m
+}
+
+// Claude Code writes Esc's line as a text block in a block array — the shape
+// the parser leaves Text empty for — and that is the shape a real session
+// has.
+func TestAnInterruptInClaudeCodesOwnShapeClosesTheTurn(t *testing.T) {
+	for name, lines := range map[string][]string{
+		"while the model streams": {
+			`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"fix the login bug"}}`,
+			`{"type":"user","timestamp":"2026-08-30T12:00:05Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+		},
+		"during a tool": {
+			`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"run the tests"}}`,
+			`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"npm test"}}]}}`,
+			`{"type":"user","timestamp":"2026-08-30T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"The user doesn't want to proceed with this tool use."}]}}`,
+			`{"type":"user","timestamp":"2026-08-30T12:00:09Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+		},
+	} {
+		snap := parsed(t, lines...).Evaluate(at(time.Hour))
+		if snap.State != state.Idle || !snap.Interrupted {
+			t.Errorf("%s: %s interrupted=%v (%q), want idle and interrupted", name, snap.State, snap.Interrupted, snap.Reason)
+		}
+	}
+}
+
+// A call whose result never reached the file — SendMessage's, in the
+// sessions this was found in — is answered all the same once the model
+// speaks in a new message: it does not go on past a call it waits for.
+// Calls of the message being written stand.
+func TestANewMessageClosesTheCallsOfEarlierOnes(t *testing.T) {
+	m := parsed(t,
+		`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"tell the other sessions"}}`,
+		`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu_a","name":"SendMessage","input":{"to":"a"}}]}}`,
+		`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu_b","name":"SendMessage","input":{"to":"b"}}]}}`,
+	)
+	if snap := m.Evaluate(at(3 * time.Second)); snap.State != state.Working {
+		t.Fatalf("two calls of one message in flight = %s, want working", snap.State)
+	}
+	if f := m.Fold(); len(f.Pending) != 2 {
+		t.Fatalf("one message's parallel calls closed each other: %d pending, want 2", len(f.Pending))
+	}
+	next := `{"type":"assistant","timestamp":"2026-08-30T12:00:10Z","message":{"role":"assistant","id":"msg_2","content":[{"type":"text","text":"Both sessions have been told."}]}}`
+	ev, _ := transcript.ParseLine([]byte(next))
+	m.Observe(ev)
+	snap := m.Evaluate(at(8 * time.Hour))
+	assertState(t, snap, state.Idle)
+	assertReason(t, snap, "turn complete")
+
+	// A subagent's message closes nothing of the lead's.
+	lead := parsed(t,
+		`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"refactor"}}`,
+		`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu_t","name":"Task","input":{"prompt":"x"}}]}}`,
+		`{"type":"assistant","isSidechain":true,"timestamp":"2026-08-30T12:00:30Z","message":{"role":"assistant","id":"msg_sub","content":[{"type":"text","text":"Reading the parser."}]}}`,
+	)
+	if f := lead.Fold(); len(f.Pending) != 1 {
+		t.Errorf("a subagent's message closed the lead's Task call: %d pending, want 1", len(f.Pending))
 	}
 }

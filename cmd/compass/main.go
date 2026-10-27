@@ -14,6 +14,7 @@ import (
 	"github.com/deephanson94/compass/internal/narrator"
 	"github.com/deephanson94/compass/internal/opencode"
 	"github.com/deephanson94/compass/internal/prstate"
+	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/ui"
 )
 
@@ -48,7 +49,7 @@ func main() {
 	// deck: a reader probing for a subcommand (a mod asking for `trail`)
 	// must get an error back, never a full-screen deck with no terminal.
 	switch sub {
-	case "", "status", "panes", "prs", "help":
+	case "", "status", "panes", "prs", "why", "help":
 	default:
 		fmt.Fprintf(os.Stderr, "compass: unknown command %q (try compass help)\n", sub)
 		os.Exit(2)
@@ -82,11 +83,18 @@ func main() {
 	cardTint := fs.String("card-tint", cfg.CardTint, `a card's ground on the card board, "#rrggbb" (empty = compass's own)`)
 	cardsRow := fs.Int("cards-per-row", cfg.CardsRow, "cards in a row on the card board (0 = as many as card-width allows; + and - change it live)")
 	cardWidth := fs.Int("card-width", cfg.CardWidth, "a card's least width on the card board (0 = compass's own, 84)")
-	hungDefault := "30m"
-	if _, err := time.ParseDuration(cfg.HungAfter); err == nil {
-		hungDefault = cfg.HungAfter
+	stillDefault, attnDefault := "10m", "1h"
+	if _, err := time.ParseDuration(cfg.StillAfter); err == nil {
+		stillDefault = cfg.StillAfter
 	}
-	hungAfter := fs.String("hung-after", hungDefault, `how long a stuck session is silent before its card says hung`)
+	if _, err := time.ParseDuration(cfg.AttnAfter); err == nil {
+		attnDefault = cfg.AttnAfter
+	}
+	stillAfter := fs.String("still-after", stillDefault, `how long a turn is silent before its card says still working`)
+	attnAfter := fs.String("attn-after", attnDefault, `how long a turn is silent before its card says needs attn`)
+	// -hung-after is the old name of -attn-after, kept so a script that
+	// passes it still starts.
+	fs.StringVar(attnAfter, "hung-after", attnDefault, `the old name of -attn-after`)
 	dim := fs.String("dim", cfg.Dim, `grey for the quiet rows: "#c0c0c0" or a palette index (empty = compass's own)`)
 	model := fs.String("narrator", narratorDefault, `narration model for leg labels ("off" disables)`)
 	liveWithin := fs.String("live-within", liveDefault,
@@ -114,11 +122,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "compass: -board %q is not a board (try cards or columns)\n", *board)
 		os.Exit(2)
 	}
-	hung, err := time.ParseDuration(*hungAfter)
+	still, err := time.ParseDuration(*stillAfter)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "compass: -hung-after %q is not a duration (try 30m)\n", *hungAfter)
+		fmt.Fprintf(os.Stderr, "compass: -still-after %q is not a duration (try 10m)\n", *stillAfter)
 		os.Exit(2)
 	}
+	attn, err := time.ParseDuration(*attnAfter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compass: -attn-after %q is not a duration (try 1h)\n", *attnAfter)
+		os.Exit(2)
+	}
+	// Every reader of a session's state shares the tiers — the deck, the
+	// card, `compass status` — so they are set before any of them runs.
+	state.SetTiers(still, attn)
 	window, err := time.ParseDuration(*liveWithin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "compass: -live-within %q is not a duration (try 5m, 90s, 0)\n", *liveWithin)
@@ -164,6 +180,14 @@ func main() {
 		}
 		fmt.Println(line)
 		resume.Save()
+	case "why":
+		now := time.Now()
+		sessions, err := livePaned(mgr, now)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "compass:", err)
+			os.Exit(1)
+		}
+		printWhy(os.Stdout, mgr, sessions, now)
 	case "panes":
 		printPanes(os.Stdout, mgr, *root, time.Now())
 		fmt.Println()
@@ -185,7 +209,6 @@ func main() {
 		// value is ignored inside SetDim, so a typo costs nothing.
 		ui.SetDim(*dim)
 		ui.SetBoardCards(*board == "cards")
-		ui.SetHungAfter(hung)
 		ui.SetCardWidth(*cardWidth)
 		ui.SetCardsPerRow(*cardsRow)
 		ui.SetCardTint(*cardTint)
@@ -315,6 +338,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
 		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass prs       poll Gitea now: each session's checkouts and pull requests (diagnostic)")
+		fmt.Fprintln(fs.Output(), "  compass why       each live session's state and the lines it was read from (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "  compass new       a new tmux window running claude, a shell or a harness (compass new -h)")
 		fmt.Fprintln(fs.Output(), "\nflags:")
