@@ -954,8 +954,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case launchDoneMsg:
-		m.launched(msg)
-		return m, nil
+		return m, m.launched(msg)
 	case replyDoneMsg:
 		if msg.err != nil {
 			m.note = "could not send: " + firstLine(msg.err.Error())
@@ -2928,6 +2927,12 @@ func (m *Model) attach() tea.Cmd {
 		return nil
 	}
 	m.markSeen(m.selectedKey)
+	return m.attachPane(pane)
+}
+
+// attachPane hands the terminal to one pane: the selected session's for
+// Enter, the one `n` just opened for a launch that goes there.
+func (m *Model) attachPane(pane tmuxop.Pane) tea.Cmd {
 	cmd := tmuxop.Attach(pane.Target, pane.ID, m.inTmux)
 	done := func(err error) tea.Msg {
 		return attachDoneMsg{target: pane.Target, inside: m.inTmux, err: err}

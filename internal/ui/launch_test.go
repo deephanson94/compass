@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -125,6 +126,7 @@ func TestLaunchChoices(t *testing.T) {
 		t.Fatalf("dirs = %q (now %q), want the selected card's first", f.dirs, f.dirText)
 	}
 	typeText(m, "leftover")
+	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // then
 	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // worktree
 	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
 	if !f.worktree {
@@ -256,6 +258,7 @@ func TestLaunchPasteKeepsLinesOnlyInThePrompt(t *testing.T) {
 	m, tm, api, _ := launchModel(t)
 	press(m, "n")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("first\nsecond"), Paste: true})
+	m.launchStep(-1) // then
 	m.launchStep(-1) // worktree
 	m.launchStep(-1) // name
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("two\nlines"), Paste: true})
@@ -362,5 +365,60 @@ func TestLaunchMakesANewDir(t *testing.T) {
 	}
 	if got := tm.opened(); got == nil || !strings.Contains(strings.Join(got, "|"), "-c|"+dir+"|") {
 		t.Errorf("opened %q, want it in %s", got, dir)
+	}
+}
+
+// then: go hands the terminal to the new pane the way Enter hands over a
+// card's. It is the default for what will never be a card — a shell — and
+// not for claude, whose card the deck selects once it joins; a choice the
+// person made outlives a change of harness.
+func TestLaunchThenGoAttaches(t *testing.T) {
+	var handed []string
+	spy := func(m *Model) {
+		m.spawn = func(cmd *exec.Cmd, inside bool, done func(error) tea.Msg) tea.Cmd {
+			handed = cmd.Args
+			return nil
+		}
+	}
+
+	m, _, _, _ := launchModel(t)
+	spy(m)
+	press(m, "n")
+	if m.launching.goThere {
+		t.Error("claude defaults to go")
+	}
+	m.launching.field = launchWith
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // shell
+	if !m.launching.goThere {
+		t.Fatal("a shell does not default to go")
+	}
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); !strings.Contains(panel, "‹ go ›  takes you there") {
+		t.Errorf("the then row does not say go:\n%s", panel)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, next := m.Update(cmd())
+	if next != nil {
+		next()
+	}
+	if want := "%42"; !strings.Contains(strings.Join(handed, " "), want) || !strings.Contains(strings.Join(handed, " "), "attach-session") {
+		t.Errorf("handed %q, want an attach to %s", handed, want)
+	}
+
+	// Chosen stay, then the harness changed: still stay, and nothing is handed.
+	handed = nil
+	m, _, _, _ = launchModel(t)
+	spy(m)
+	press(m, "n")
+	m.launching.field = launchThen
+	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}) // go
+	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}) // stay, chosen
+	m.launching.field = launchWith
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // shell
+	if m.launching.goThere {
+		t.Fatal("a harness change overrode the person's stay")
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if _, next := m.Update(cmd()); next != nil || handed != nil {
+		t.Errorf("stay handed the terminal over: %q", handed)
 	}
 }
