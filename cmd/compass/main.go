@@ -44,7 +44,7 @@ func main() {
 	// deck: a reader probing for a subcommand (a mod asking for `trail`)
 	// must get an error back, never a full-screen deck with no terminal.
 	switch sub {
-	case "", "status", "panes", "prs", "help":
+	case "", "status", "panes", "prs", "why", "help":
 	default:
 		fmt.Fprintf(os.Stderr, "compass: unknown command %q (try compass help)\n", sub)
 		os.Exit(2)
@@ -175,6 +175,14 @@ func main() {
 		}
 		fmt.Println(line)
 		resume.Save()
+	case "why":
+		now := time.Now()
+		sessions, err := livePaned(mgr, now)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "compass:", err)
+			os.Exit(1)
+		}
+		printWhy(os.Stdout, mgr, sessions, now)
 	case "panes":
 		printPanes(os.Stdout, mgr, *root, time.Now())
 		fmt.Println()
@@ -325,6 +333,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
 		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass prs       poll Gitea now: each session's checkouts and pull requests (diagnostic)")
+		fmt.Fprintln(fs.Output(), "  compass why       each live session's state and the lines it was read from (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()

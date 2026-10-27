@@ -200,6 +200,20 @@ func (m *Manager) exited(info SessionInfo) bool {
 	return m.running != nil && m.seenRunning[info.ID] && !m.running[info.ID]
 }
 
+// Fold is the state machine's facts for one tracked session, by its key:
+// the calls it holds open and the last beat it counted as someone speaking.
+// It is for diagnostics (`compass why`); false when the session is not
+// tracked live.
+func (m *Manager) Fold(key string) (state.Fold, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e := m.sessions[key]
+	if e == nil || e.machine == nil || e.tailer == nil {
+		return state.Fold{}, false
+	}
+	return e.machine.Fold(), true
+}
+
 // diedMidTurn says a session with a turn in flight has no process to finish
 // it: the registry is readable and does not list it. Killed by Ctrl+C twice,
 // a closed terminal or a crash, the transcript keeps the open call forever,
