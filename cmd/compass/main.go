@@ -40,6 +40,11 @@ func main() {
 	if sub == "trail" {
 		os.Exit(runTrail(args))
 	}
+	// new opens a window and leaves: it needs the config's harnesses and
+	// nothing of the fleet.
+	if sub == "new" {
+		os.Exit(runNew(args, loadConfig()))
+	}
 	// A word compass does not know is a mistake, not a request for the
 	// deck: a reader probing for a subcommand (a mod asking for `trail`)
 	// must get an error back, never a full-screen deck with no terminal.
@@ -214,7 +219,7 @@ func main() {
 		// way out; a deck that is killed leaves the last save, which the
 		// next start replays forward from.
 		resume := openResume(mgr, *root)
-		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, build, prs)
+		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, cfg.launchConfig(), build, prs)
 		resume.Save()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
@@ -335,6 +340,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "  compass prs       poll Gitea now: each session's checkouts and pull requests (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass why       each live session's state and the lines it was read from (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
+		fmt.Fprintln(fs.Output(), "  compass new       a new tmux window running claude, a shell or a harness (compass new -h)")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()
 	}

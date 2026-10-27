@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/fleet"
 	"github.com/deephanson94/compass/internal/journey"
+	"github.com/deephanson94/compass/internal/launch"
 	"github.com/deephanson94/compass/internal/prstate"
 	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
@@ -317,6 +318,11 @@ type Model struct {
 	replyTyping bool                 // …and a line is being typed into it
 	replyDraft  string               // the line so far
 	replies     []string             // the stock lines `r` offers, in order
+	launching   *launchForm          // the `n` panel, nil while it is down (launch.go)
+	harnesses   []launch.Harness     // what `n` can run, the default first
+	favDirs     []string             // the config's own directories, offered after the selected card's
+	landing     landing              // a launched window the deck will select once it joins
+	git         launch.Git           // the worktree's seam; nil is the git on PATH
 	sent        map[string]sentReply // the last line sent to each session, by Key()
 
 	// The event hook: a command the config names, run on the moments that
@@ -449,8 +455,9 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, build func(notify func()) Narrator, prs *prstate.Tracker) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, lc launch.Config, build func(notify func()) Narrator, prs *prstate.Tracker) error {
 	m := New(mgr)
+	m.harnesses, m.favDirs = lc.Harnesses, lc.Dirs
 	m.prTracker = prs
 	m.readonly = readonly
 	m.showMirror = mirror
@@ -938,6 +945,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.paired = true // from here every poll's liveness is the whole rule
 		}
 		m.clampSelection()
+		m.land()
 		return m, nil
 
 	case captureMsg:
@@ -946,6 +954,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case launchDoneMsg:
+		return m, m.launched(msg)
 	case replyDoneMsg:
 		if msg.err != nil {
 			m.note = "could not send: " + firstLine(msg.err.Error())
@@ -1022,6 +1032,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.note = ""
 		return m, m.replyKey(msg)
 	}
+	// The launch panel likewise: what is typed is the prompt, and a key
+	// that meant something on the deck means nothing here.
+	if m.launching != nil {
+		m.note = ""
+		return m, m.launchKey(msg)
+	}
 
 	m.note, m.noteYields = "", false // a keypress answers the last note
 
@@ -1062,6 +1078,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.offerReplies()
 		return m, nil
+	case "n":
+		if m.level < levelReader { // the reader keeps n for its matches
+			m.offerLaunch()
+			return m, nil
+		}
 	case "x":
 		m.toggleHidden()
 		return m, nil
@@ -2907,6 +2928,12 @@ func (m *Model) attach() tea.Cmd {
 		return nil
 	}
 	m.markSeen(m.selectedKey)
+	return m.attachPane(pane)
+}
+
+// attachPane hands the terminal to one pane: the selected session's for
+// Enter, the one `n` just opened for a launch that goes there.
+func (m *Model) attachPane(pane tmuxop.Pane) tea.Cmd {
 	cmd := tmuxop.Attach(pane.Target, pane.ID, m.inTmux)
 	done := func(err error) tea.Msg {
 		return attachDoneMsg{target: pane.Target, inside: m.inTmux, err: err}
@@ -3523,7 +3550,11 @@ func (m *Model) viewOnce() string {
 	m.bodyRows = body // the footer is composed against the rows the frame drew
 	out = append(out, m.footerLine(inner))
 
-	if m.replying {
+	if m.launching != nil {
+		// The launch panel floats over the deck too, centred: it is about
+		// no one column, so it stands over none in particular.
+		overlayCentered(out[3:3+bodyHeight], m.launchPanel(inner), inner)
+	} else if m.replying {
 		// The quick replies float over the deck as a small panel: a line
 		// of footer was too easy to miss, and the person pressing `r`
 		// expected something to pop up.
@@ -4893,6 +4924,8 @@ func (m *Model) keymapOnce() string {
 		keys = "/" + m.draft + "▏ · enter keeps it · esc cancels"
 	case m.searching:
 		keys = "type to search · enter finds · esc cancels"
+	case m.launching != nil:
+		keys = "new " + m.launching.placeOf().String() + " · tab next · ←/→ choose · enter opens · esc closes"
 	case m.replying && m.replyTyping:
 		keys = "type the line · enter sends · esc back"
 	case m.replying:
@@ -4965,7 +4998,7 @@ func (m *Model) keymapOnce() string {
 	case m.level >= levelWaypoints:
 		keys = "j/k rows · ctrl+d/u half page · [ ] chapters · r reply · " + m.enterKeymap() + " · tab deeper · a ask · / search · " + m.hideKeymap() + " · esc back · ? help · q quit"
 	}
-	if m.archiveView && m.level < levelReader && !m.showHelp && !m.searching && !m.replying && !strings.Contains(keys, " · g grab") {
+	if m.archiveView && m.level < levelReader && !m.showHelp && !m.typing() && !strings.Contains(keys, " · g grab") {
 		// `g` is the fleet's key and it acts in the archive too: pressed
 		// on any of the archive's three levels it finds the session
 		// waiting on you, leaves the archive for the live fleet standing
@@ -4989,14 +5022,14 @@ func (m *Model) keymapOnce() string {
 			keys = strings.Replace(keys, " · ? help", " · g grab · ? help", 1)
 		}
 	}
-	if m.inBlock() && !m.showHelp && !m.searching && !m.replying {
+	if m.inBlock() && !m.showHelp && !m.typing() {
 		// The cursor is in the block: `space` opens or closes the group
 		// its row belongs to, and the row names it beside the keys that
 		// walk the rows (#393). It stands where the reader stands its own
 		// `space unfold`, and sheds at that rank.
 		keys = strings.Replace(keys, "ctrl+d/u half page · ", "ctrl+d/u half page · space "+m.blockFoldWord()+" · ", 1)
 	}
-	if m.level == levelTrail && !m.showHelp && !m.searching && !m.replying {
+	if m.level == levelTrail && !m.showHelp && !m.typing() {
 		// At Lv1 the page keys drive the trail beside the list (§3); on a
 		// frame whose trail fits, they do nothing, and a footer naming
 		// them beside "j/k move" read as though they paged the list (#83).
@@ -5004,7 +5037,7 @@ func (m *Model) keymapOnce() string {
 			keys = pageKeyGone(keys)
 		}
 	}
-	if m.level == levelWaypoints && !m.showHelp && !m.searching && !m.replying {
+	if m.level == levelWaypoints && !m.showHelp && !m.typing() {
 		// #220's rule at what the keys actually do here. At Lv1 and in the
 		// reader `ctrl+d/u` move the viewport, so a page that fits leaves
 		// them nothing (#83, #200); at Lv2 they move the *cursor* half a
@@ -5020,7 +5053,7 @@ func (m *Model) keymapOnce() string {
 			keys = pageKeyGone(keys)
 		}
 	}
-	if m.level >= levelReader && !m.showHelp && !m.searching && !m.replying {
+	if m.level >= levelReader && !m.showHelp && !m.typing() {
 		// #83 one level down, at what the keys do here now. #83 shed both
 		// keys from a page all on screen because "the keys that move the
 		// viewport move nothing" and the app says so itself the moment
@@ -5050,7 +5083,7 @@ func (m *Model) keymapOnce() string {
 			keys = pageKeyGone(keys)
 		}
 	}
-	if m.level >= levelWaypoints && !m.showHelp && !m.searching && !m.replying && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
+	if m.level >= levelWaypoints && !m.showHelp && !m.typing() && m.archivedCount() > 0 && !m.archiveView && !m.rowNamesTheArchive() {
 		// Where no band or fleet row names the archive, the footer does
 		// (#62). The question is what the frame drew, not how wide it is:
 		// below the board's width the reader takes the whole screen and
