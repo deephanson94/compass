@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,9 +42,48 @@ func (s State) String() string {
 	}
 }
 
-// StuckAfter is how long a mid-turn silence may last before a session is called
-// stuck rather than working.
-const StuckAfter = 90 * time.Second
+// The silence budgets of an open turn. Silence is the time since the session
+// last wrote — the session or one of its subagents. Under StillAfter it is
+// working; from StillAfter it is still working (Snapshot.Late); from
+// AttnAfter it is Stuck, which the card calls "needs attn". They are vars
+// so the config can set them (SetTiers).
+var (
+	StillAfter = 10 * time.Minute
+	AttnAfter  = time.Hour
+)
+
+// SetTiers sets the two budgets; a value of zero or less keeps its default,
+// and an attn budget below the still one is raised to it.
+func SetTiers(still, attn time.Duration) {
+	if still > 0 {
+		StillAfter = still
+	}
+	if attn > 0 {
+		AttnAfter = attn
+	}
+	if AttnAfter < StillAfter {
+		AttnAfter = StillAfter
+	}
+}
+
+// ApproveAfter is how long a call that answers at once — an Edit, a Read —
+// may stay out before its silence means Claude Code is holding it for your
+// permission. It is also the grace a Bash call gets past its own timeout
+// before the missing result counts.
+const ApproveAfter = 90 * time.Second
+
+// What an open turn is waiting on, as Snapshot.Pending names it.
+const (
+	PendingBash     = "bash"
+	PendingSubagent = "subagent"
+	PendingMCP      = "MCP"
+	PendingWeb      = "web"
+	PendingWorkflow = "workflow"
+	PendingThink    = "think"   // tool results are in; the model has not answered
+	PendingStart    = "start"   // a prompt is in; the model has not answered
+	PendingApprove  = "approve" // a call that answers at once is held: a permission prompt
+	PendingTool     = "tool"    // any other call
+)
 
 // Snapshot is the machine's verdict at one instant.
 type Snapshot struct {
@@ -63,6 +103,24 @@ type Snapshot struct {
 	// session's last good result, so the fleet lets this override its usual
 	// preference for outcome over activity.
 	APIError bool
+	// APIStatus is the refused call's HTTP status, 0 when it carried none.
+	APIStatus int
+
+	// Open says a turn is in flight: a call is out, or the model owes a
+	// reply. Pending names what it waits on (the Pending* constants); ""
+	// when the turn is closed.
+	Open    bool
+	Pending string
+
+	// Late is a working turn past StillAfter of silence: "still working".
+	Late bool
+
+	// Interrupted is a turn closed by Esc rather than by the model.
+	Interrupted bool
+
+	// Exited is an open turn whose process is gone (set by the fleet, which
+	// reads the process registry; the machine only reads the transcript).
+	Exited bool
 }
 
 // askUserQuestion is the tool whose pending call means "the model is literally
@@ -108,6 +166,15 @@ type Machine struct {
 	// assistant event: no tool is pending, but the turn is not over either.
 	awaitingModel bool
 	awaitingSince time.Time
+
+	// interrupted is a turn Esc closed: set by the interrupt line, cleared
+	// by the next thing anyone says.
+	interrupted bool
+
+	// agentWrote is the newest write by a subagent's own file, which the
+	// fleet reads (NoteAgentWrite): while an Agent call is out, the lead's
+	// transcript is silent and the agent's is the session's clock.
+	agentWrote time.Time
 }
 
 // NewMachine returns an empty machine: no events, no opinions.
@@ -124,6 +191,18 @@ func (m *Machine) Observe(ev transcript.Event) {
 	// not drag lastEventAt backwards to the zero time.
 	if !ev.Timestamp.IsZero() && ev.Timestamp.After(m.lastEventAt) {
 		m.lastEventAt = ev.Timestamp
+	}
+
+	if ev.Interrupt() {
+		// Esc: the harness abandoned whatever was out, and the turn is
+		// over until somebody speaks again.
+		m.interrupted = true
+		m.awaitingModel = false
+		clear(m.pending)
+		return
+	}
+	if substantive(ev) || len(ev.ToolUses) > 0 {
+		m.interrupted = false
 	}
 
 	for _, res := range ev.ToolResults {
@@ -171,11 +250,16 @@ func substantive(ev transcript.Event) bool {
 	}
 }
 
-// Evaluate applies the five state rules, in precedence order, as of now.
+// Evaluate applies the state rules, in precedence order, as of now.
 func (m *Machine) Evaluate(now time.Time) Snapshot {
 	// 1. Nothing has happened yet.
 	if !m.sawSubstantive {
 		return Snapshot{State: Idle, Since: m.lastEventAt, Reason: "no activity yet", Activity: "idle"}
+	}
+
+	// 1b. Esc closed the turn: nothing is coming until somebody speaks.
+	if m.interrupted {
+		return Snapshot{State: Idle, Since: m.lastEventAt, Reason: "interrupted", Activity: "idle", Interrupted: true}
 	}
 
 	// 2. The model is holding a question open.
@@ -185,36 +269,48 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 			Since:    m.since(ask.at),
 			Reason:   "waiting on your answer",
 			Activity: activityFor(ask.use),
+			Open:     true,
 		}
 	}
 
 	// 3. Some other tool call is still in flight.
 	if oldest, ok := m.oldestPending(); ok {
-		quiet := now.Sub(m.lastEventAt)
+		quiet := now.Sub(m.lastActivity())
 		act := activityFor(WithoutCD(oldest.use, m.cwd))
 		if m.hasLastUse {
 			act = activityFor(WithoutCD(m.lastUse, m.cwd))
 		}
-		// A shell command is allowed its own budget before its silence means
-		// anything: the harness gives Bash a timeout (two minutes unless the
-		// call names one, up to ten) and kills the command when it runs out,
-		// so a `sleep 420` under a ten-minute budget is a session doing what
-		// it said, not one that has hung. The person reading "stuck" over a
-		// deliberate wait stopped trusting the word. The budget is the
-		// latest of every call in flight: Claude Code batches calls, and a
-		// Read issued beside the sleep is the oldest pending one.
-		allow, deadline, at := m.budget(now)
-		since := m.since(oldest.at)
-		if allow > 0 {
-			since = at // "for 2m of 10m" counts from the call the budget belongs to
+		// A shell command is allowed its own budget before its silence
+		// means anything: the harness gives Bash a timeout (two minutes
+		// unless the call names one, up to ten) and kills the command when
+		// it runs out, so a `sleep 420` under a ten-minute budget is a
+		// session doing what it said. The budget is the latest of every
+		// call in flight: Claude Code batches calls, and a Read issued
+		// beside the sleep is the oldest pending one.
+		if allow, _, at := m.budget(now); allow > 0 {
+			// "for 2m of 10m" counts from the call the budget belongs to.
+			return Snapshot{State: Working, Since: at, Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow, Open: true, Pending: PendingBash}
 		}
-		if quiet < StuckAfter {
-			return Snapshot{State: Working, Since: since, Reason: "tool call in flight", Activity: act, Allowed: allow}
+		if quiet < ApproveAfter {
+			return Snapshot{State: Working, Since: m.since(oldest.at), Reason: "tool call in flight", Activity: act, Open: true, Pending: m.pendingKind()}
 		}
-		if allow > 0 && now.Before(deadline) {
-			return Snapshot{State: Working, Since: since, Reason: "Bash allowed " + ShortDuration(allow), Activity: act, Allowed: allow}
+		// A call that answers at once and has not: Claude Code is holding
+		// it behind a permission prompt. Nothing else keeps an Edit out
+		// for ninety seconds, and the transcript has no line that says so.
+		if held, ok := m.heldForApproval(); ok {
+			return Snapshot{
+				State: NeedsYou, Since: m.since(held.at), Reason: "awaiting your approval",
+				Activity: activityFor(WithoutCD(held.use, m.cwd)), Open: true, Pending: PendingApprove,
+			}
 		}
-		return Snapshot{State: Stuck, Since: m.since(oldest.at), Reason: stuckReason(quiet), Activity: act}
+		// Past its budget the harness should have written the command's
+		// result; a Bash call still out is one the tiers do not excuse.
+		if kind := m.pendingKind(); kind == PendingBash {
+			return Snapshot{State: Stuck, Since: m.since(oldest.at), Reason: "no result past the Bash timeout", Activity: act, Open: true, Pending: kind}
+		}
+		snap := m.tiered(quiet, m.since(oldest.at), "tool call in flight")
+		snap.Activity, snap.Pending = act, m.pendingKind()
+		return snap
 	}
 
 	// 4. The last substantive beat was the model's.
@@ -222,12 +318,9 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 		// Results came back and the model has not spoken since: the turn is
 		// still in flight, not idle.
 		if m.awaitingModel {
-			quiet := now.Sub(m.lastEventAt)
-			since := m.since(m.awaitingSince)
-			if quiet < StuckAfter {
-				return Snapshot{State: Working, Since: since, Reason: "processing results", Activity: "thinking…"}
-			}
-			return Snapshot{State: Stuck, Since: since, Reason: stuckReason(quiet), Activity: "thinking…"}
+			snap := m.tiered(now.Sub(m.lastEventAt), m.since(m.awaitingSince), "processing results")
+			snap.Activity, snap.Pending = "thinking…", PendingThink
+			return snap
 		}
 		since := m.since(m.substantiveAt)
 
@@ -243,7 +336,7 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 		// puts it where `g` can reach it, which is the whole point of knowing.
 		if m.substantiveAPIError {
 			return Snapshot{
-				State: NeedsYou, Since: since, APIError: true,
+				State: NeedsYou, Since: since, APIError: true, APIStatus: m.substantiveStatus,
 				Reason: apiErrorReason(m.substantiveStatus, m.substantiveErrorKey),
 				// The error's own words are what a person recognises; the
 				// status and key above are what a program should key on.
@@ -257,12 +350,124 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 	}
 
 	// 5. A prompt is in, the model has not spoken yet.
-	quiet := now.Sub(m.lastEventAt)
-	since := m.since(m.substantiveAt)
-	if quiet < StuckAfter {
-		return Snapshot{State: Working, Since: since, Reason: "starting turn", Activity: "thinking…"}
+	snap := m.tiered(now.Sub(m.lastEventAt), m.since(m.substantiveAt), "starting turn")
+	snap.Activity, snap.Pending = "thinking…", PendingStart
+	return snap
+}
+
+// tiered judges an open turn by its silence: working under StillAfter, still
+// working (Late) under AttnAfter, Stuck past it.
+func (m *Machine) tiered(quiet time.Duration, since time.Time, reason string) Snapshot {
+	switch {
+	case quiet < StillAfter:
+		return Snapshot{State: Working, Since: since, Reason: reason, Open: true}
+	case quiet < AttnAfter:
+		return Snapshot{State: Working, Since: since, Reason: "silent " + ShortDuration(quiet) + " mid-turn", Open: true, Late: true}
 	}
-	return Snapshot{State: Stuck, Since: since, Reason: stuckReason(quiet), Activity: "thinking…"}
+	return Snapshot{State: Stuck, Since: since, Reason: stuckReason(quiet), Open: true}
+}
+
+// lastActivity is the session's clock: its own last line, or — while an
+// Agent call is out — its subagent's last write, whichever is newer.
+func (m *Machine) lastActivity() time.Time {
+	if !m.agentWrote.After(m.lastEventAt) || len(m.PendingAgents()) == 0 {
+		return m.lastEventAt
+	}
+	return m.agentWrote
+}
+
+// NoteAgentWrite tells the machine a subagent's own file was written at t.
+// Only the newest write counts, and only while an Agent call is out.
+func (m *Machine) NoteAgentWrite(t time.Time) {
+	if t.After(m.agentWrote) {
+		m.agentWrote = t
+	}
+}
+
+// PendingAgents is the ids of the Agent calls still out, oldest first: the
+// keys a subagent's meta file pairs its transcript by.
+func (m *Machine) PendingAgents() []string {
+	var ps []pendingUse
+	for _, p := range m.pending {
+		if isAgentTool(p.use.Name) {
+			ps = append(ps, p)
+		}
+	}
+	sort.Slice(ps, func(i, j int) bool { return ps[i].seq < ps[j].seq })
+	ids := make([]string, len(ps))
+	for i, p := range ps {
+		ids[i] = p.use.ID
+	}
+	return ids
+}
+
+// pendingKind names what the turn waits on, from its calls in flight: the
+// slowest kind among them, so a Read issued beside an Agent call or a
+// command reads as the agent or the command it waits for.
+func (m *Machine) pendingKind() string {
+	rank := map[string]int{PendingSubagent: 6, PendingWorkflow: 5, PendingMCP: 4, PendingWeb: 3, PendingTool: 2, PendingBash: 1}
+	best, fast := "", false
+	for _, p := range m.pending {
+		if answersAtOnce(p.use.Name) {
+			fast = true
+			continue
+		}
+		if k := toolKind(p.use.Name); rank[k] > rank[best] {
+			best = k
+		}
+	}
+	if best == "" && fast {
+		return PendingTool
+	}
+	return best
+}
+
+// heldForApproval is the newest call in flight that answers at once, when
+// nothing slower is out beside it: with a command, an agent or a server out,
+// the quiet is theirs.
+func (m *Machine) heldForApproval() (pendingUse, bool) {
+	var best pendingUse
+	found := false
+	for _, p := range m.pending {
+		if !answersAtOnce(p.use.Name) {
+			return pendingUse{}, false
+		}
+		if !found || p.seq > best.seq {
+			best, found = p, true
+		}
+	}
+	return best, found
+}
+
+// answersAtOnce is the tools that return in well under a second unless
+// Claude Code is holding them for you: a permission prompt, or — for
+// ExitPlanMode — the plan waiting on your yes.
+func answersAtOnce(tool string) bool {
+	switch tool {
+	case "Edit", "MultiEdit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "LS", "ExitPlanMode":
+		return true
+	}
+	return false
+}
+
+// isAgentTool is the subagent call, by both the names it has had.
+func isAgentTool(tool string) bool { return tool == "Agent" || tool == "Task" }
+
+// toolKind is a call's kind as Snapshot.Pending names it.
+func toolKind(tool string) string {
+	switch {
+	case tool == "Bash":
+		return PendingBash
+	case isAgentTool(tool):
+		return PendingSubagent
+	case strings.HasPrefix(tool, "mcp__"):
+		return PendingMCP
+	case tool == "WebFetch" || tool == "WebSearch":
+		return PendingWeb
+	case tool == "Workflow":
+		return PendingWorkflow
+	}
+	return PendingTool
 }
 
 // since falls back to the last event's timestamp when the establishing event

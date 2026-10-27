@@ -477,8 +477,8 @@ func TestT55ArchiveToLiveCrossingReplaysTheTranscript(t *testing.T) {
 	if !crossed.Snap.Since.Equal(calledAt) {
 		t.Errorf("Since = %v, want the call's instant %v", crossed.Snap.Since, calledAt)
 	}
-	if !strings.Contains(crossed.Snap.Reason, "mid-turn") {
-		t.Errorf("Reason = %q, want the silence mid-turn", crossed.Snap.Reason)
+	if crossed.Snap.Reason != "no result past the Bash timeout" {
+		t.Errorf("Reason = %q, want the Bash call past its timeout", crossed.Snap.Reason)
 	}
 	if !strings.Contains(crossed.Snap.Activity, "go build") {
 		t.Errorf("Activity = %q, want the call that never came back", crossed.Snap.Activity)

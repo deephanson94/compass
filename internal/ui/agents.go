@@ -30,8 +30,9 @@ type agentLive struct {
 	Events []transcript.Event
 }
 
-// agentSilent says the agent's file has gone quiet past the threshold.
-func (a agentLive) silent() bool { return a.Snap.State == state.Stuck }
+// silent says the agent's file has gone quiet past the first tier: its own
+// machine calls it still working, or needs attn.
+func (a agentLive) silent() bool { return a.Snap.State == state.Stuck || a.Snap.Late }
 
 // agentDir is where a session's subagent transcripts live: beside the
 // transcript, under a directory named by its id.
@@ -217,7 +218,7 @@ func lanesLive(agents map[string]agentLive, lanes []journey.Branch, now time.Tim
 func laneSilence(a agentLive, b journey.Branch, now time.Time) (time.Duration, bool) {
 	if a.Wrote.IsZero() {
 		d := now.Sub(b.Start)
-		return d, !b.Start.IsZero() && d >= state.StuckAfter
+		return d, !b.Start.IsZero() && d >= state.StillAfter
 	}
 	return now.Sub(a.Wrote), a.silent()
 }

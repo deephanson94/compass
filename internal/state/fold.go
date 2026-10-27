@@ -34,6 +34,8 @@ type Fold struct {
 
 	AwaitingModel bool      `json:"awaiting_model,omitempty"`
 	AwaitingSince time.Time `json:"awaiting_since,omitempty"`
+
+	Interrupted bool `json:"interrupted,omitempty"`
 }
 
 // PendingUse is one tool call the machine is still waiting on.
@@ -58,6 +60,7 @@ func (m *Machine) Fold() Fold {
 		HasLastUse:      m.hasLastUse,
 		AwaitingModel:   m.awaitingModel,
 		AwaitingSince:   m.awaitingSince,
+		Interrupted:     m.interrupted,
 	}
 	for id, p := range m.pending {
 		use := p.use
@@ -82,6 +85,7 @@ func RestoreMachine(f Fold) *Machine {
 	m.hasLastUse = f.HasLastUse
 	m.awaitingModel = f.AwaitingModel
 	m.awaitingSince = f.AwaitingSince
+	m.interrupted = f.Interrupted
 	for _, p := range f.Pending {
 		m.pending[p.Use.ID] = pendingUse{use: p.Use, at: p.At, seq: p.Seq}
 	}

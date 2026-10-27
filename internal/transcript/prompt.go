@@ -254,6 +254,19 @@ func (e Event) Compaction() bool {
 	return e.Type == EventUser && strings.HasPrefix(strings.TrimSpace(e.Text), compactionPreamble)
 }
 
+// interruptMarker opens the line Claude Code writes when you press Esc: the
+// bare "[Request interrupted by user]" over a reply, and the same with " for
+// tool use]" over a call it rejected.
+const interruptMarker = "[Request interrupted by user"
+
+// Interrupt reports whether a user turn is that line. It reads like a
+// prompt, but nobody typed it: it closes the turn rather than opening one,
+// and a machine that took it for a prompt waited for a reply that never
+// comes and called the session hung.
+func (e Event) Interrupt() bool {
+	return e.Type == EventUser && strings.HasPrefix(strings.TrimSpace(e.Text), interruptMarker)
+}
+
 // Machinery reports whether a user turn is the harness talking to Claude
 // rather than a person talking to either. A relayed message is neither: it
 // is another session talking, and the ask it carries opens a chapter and
@@ -269,7 +282,7 @@ func (e Event) Machinery() bool {
 		// session sends another vanished from the trail (#399).
 		return false
 	}
-	if e.IsMeta {
+	if e.IsMeta || e.Interrupt() {
 		return true
 	}
 	return EnvelopeText(e.Text)
