@@ -183,6 +183,7 @@ everything else arrives filled in from the selected card.
 │   dir       ~/work/api                                           │
 │   name      explore-per-tenant-rate                              │
 │   worktree  off                                                  │
+│   then      ‹ stay ›  opens in the background                    │
 │                                                                  │
 │ › explore per-tenant rate limits in the middleware; map it first▏│
 │                                                                  │
@@ -215,9 +216,17 @@ everything else arrives filled in from the selected card.
   The window then opens at the same depth in that worktree as the directory you
   picked. It works the same for every harness.
 
+- **then**: `stay` opens the work in the background and keeps you on the
+  board. `go` hands you the new pane right away, the way `Enter` hands over a
+  card's: outside tmux compass suspends and attaches, inside tmux your client
+  switches, and `prefix d` brings the board back. It defaults to `go` for
+  anything that never gets a card (a shell, a harness other than `claude`)
+  and to `stay` for `claude`. Space or ←/→ changes it, and a choice you make
+  sticks when you change `run`.
+
 The prompt goes to the harness as an argument, not typed into the pane, so it
-arrives whole: quotes, `$` and all. The work opens in the background, and the
-deck stays where it was. compass checks the tmux target before it makes a
+arrives whole: quotes, `$` and all. With `then: stay` the work opens in the
+background, and the deck stays where it was. compass checks the tmux target before it makes a
 worktree: a session name already taken or a pane that is gone is refused
 before anything is written to disk. When the new session joins the fleet, the deck selects it,
 unless you have moved the selection in the meantime. `Enter` takes you there.

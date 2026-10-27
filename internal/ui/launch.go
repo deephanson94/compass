@@ -35,6 +35,8 @@ type launchForm struct {
 	dirText  string          // the directory as it stands: a candidate, or typed
 	name     string
 	worktree bool
+	goThere  bool // then: go — attach to the new pane once it opens
+	goSet    bool // …and the person chose it, so a harness change leaves it be
 	prompt   string
 }
 
@@ -46,6 +48,7 @@ const (
 	launchDir
 	launchName
 	launchWorktree
+	launchThen
 	launchPrompt
 	launchFields
 )
@@ -63,8 +66,14 @@ const launchLandFor = 2 * time.Minute
 type launchDoneMsg struct {
 	res     launch.Result
 	harness string
+	goThere bool // hand the terminal to the new pane
 	err     error
 }
+
+// goesThere is the then row's default: go to what will never be a card on
+// the board — a shell, a harness the fleet does not read — and stay for
+// claude, whose card the deck selects once it joins.
+func goesThere(h launch.Harness) bool { return h.Name != "claude" }
 
 // offerLaunch is `n`: the panel opens over the deck. Nothing runs until
 // enter. It is compass's third write, and like the other two it is gated
@@ -99,6 +108,7 @@ func (m *Model) offerLaunch() {
 	} else if wd, err := os.Getwd(); err == nil {
 		f.dirText = wd
 	}
+	f.goThere = goesThere(m.harnesses[0])
 	f.field = launchPrompt
 	if !m.harnesses[0].TakesPrompt() {
 		f.field = launchDir
@@ -211,6 +221,11 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 		switch f.field {
 		case launchWith:
 			f.harness = wrapIndex(f.harness+d, len(m.harnesses))
+			if !f.goSet {
+				f.goThere = goesThere(m.harnesses[f.harness])
+			}
+		case launchThen:
+			f.goThere, f.goSet = !f.goThere, true
 		case launchPlace:
 			f.place = wrapIndex(f.place+d, len(tmuxop.Places))
 		case launchSession:
@@ -238,6 +253,8 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 	case " ", "space":
 		if f.field == launchWorktree {
 			f.worktree = !f.worktree
+		} else if f.field == launchThen {
+			f.goThere, f.goSet = !f.goThere, true
 		} else if t := f.text(); t != nil {
 			*t += " "
 		}
@@ -336,27 +353,32 @@ func (m *Model) submitLaunch() tea.Cmd {
 	if h.TakesPrompt() {
 		req.Prompt = f.prompt
 	}
-	runner, git := m.runner, m.git
+	runner, git, goThere := m.runner, m.git, f.goThere
 	if git == nil {
 		git = launch.RealGit{}
 	}
 	m.note = "opening " + req.TaskName() + " as a " + place.String() + "…"
 	return func() tea.Msg {
 		res, err := launch.Launch(runner, git, req)
-		return launchDoneMsg{res: res, harness: h.Name, err: err}
+		return launchDoneMsg{res: res, harness: h.Name, goThere: goThere, err: err}
 	}
 }
 
-// launched is where a window landed: the footer says so, and the deck
+// launched is where the work landed: the footer says so, and the deck
 // means to select its session once it joins the fleet — unless the person
-// has moved on by then.
-func (m *Model) launched(msg launchDoneMsg) {
+// has moved on by then. With then: go, the terminal goes to the new pane
+// at once, the way Enter hands over a card's.
+func (m *Model) launched(msg launchDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		m.note = "could not launch: " + firstLine(msg.err.Error())
-		return
+		return nil
 	}
 	m.note = "↪ opened " + msg.res.Name + " · " + msg.harness + " " + mirrorMark + " " + msg.res.Pane.Target
 	m.landing = landing{pane: msg.res.Pane.ID, from: m.selectedKey, until: m.now.Add(launchLandFor)}
+	if msg.goThere {
+		return m.attachPane(msg.res.Pane)
+	}
+	return nil
 }
 
 // landing is launched work the deck is waiting to see join the fleet.
@@ -475,6 +497,11 @@ func (m *Model) launchPanel(inner int) []string {
 		wt = "on · a new branch beside the repo"
 	}
 	row(launchWorktree, "worktree", wt, "")
+	then := choice("stay") + "  opens in the background"
+	if f.goThere {
+		then = choice("go") + "  takes you there · prefix d returns"
+	}
+	row(launchThen, "then", then, "")
 	rows = append(rows, readerLine{kind: readerBlank})
 	if h.TakesPrompt() {
 		kind := readerText
