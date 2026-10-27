@@ -320,6 +320,7 @@ type Model struct {
 	replies     []string             // the stock lines `r` offers, in order
 	launching   *launchForm          // the `n` panel, nil while it is down (launch.go)
 	harnesses   []launch.Harness     // what `n` can run, the default first
+	favDirs     []string             // the config's own directories, offered after the selected card's
 	landing     landing              // a launched window the deck will select once it joins
 	git         launch.Git           // the worktree's seam; nil is the git on PATH
 	sent        map[string]sentReply // the last line sent to each session, by Key()
@@ -453,9 +454,9 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, harnesses []launch.Harness, build func(notify func()) Narrator, prs *prstate.Tracker) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, lc launch.Config, build func(notify func()) Narrator, prs *prstate.Tracker) error {
 	m := New(mgr)
-	m.harnesses = harnesses
+	m.harnesses, m.favDirs = lc.Harnesses, lc.Dirs
 	m.prTracker = prs
 	m.readonly = readonly
 	m.showMirror = mirror

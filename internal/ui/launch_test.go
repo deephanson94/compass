@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -318,5 +320,47 @@ func TestLaunchPaneNeedsACardWithAPane(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.launching == nil || !strings.Contains(m.note, "needs a card with a pane") || tm.opened() != nil {
 		t.Errorf("panel %v, note %q, opened %q", m.launching != nil, m.note, tm.opened())
+	}
+}
+
+// The dir row walks the selected card's directory, the config's favourites
+// in their order — one not made yet included — and then the fleet's.
+func TestLaunchOffersFavouriteDirs(t *testing.T) {
+	m, _, api, web := launchModel(t)
+	fav, later := t.TempDir(), filepath.Join(t.TempDir(), "not-yet")
+	m.favDirs = []string{fav, later, api}
+	press(m, "n")
+	f := m.launching
+	if want := []string{api, fav, later, web}; strings.Join(f.dirs, "|") != strings.Join(want, "|") {
+		t.Fatalf("dirs = %q, want %q", f.dirs, want)
+	}
+	if !f.favs[api] || !f.favs[fav] || f.favs[web] {
+		t.Errorf("favs = %v", f.favs)
+	}
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); !strings.Contains(panel, " ★") {
+		t.Errorf("the selected card's dir is a favourite and the row does not say so:\n%s", panel)
+	}
+}
+
+// A directory that is not there says it will be made, before enter; enter
+// then makes it, empty, and opens there.
+func TestLaunchMakesANewDir(t *testing.T) {
+	m, tm, _, _ := launchModel(t)
+	dir := filepath.Join(t.TempDir(), "fresh")
+	press(m, "n")
+	typeText(m, "start here")
+	m.launching.field = launchDir
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	typeText(m, dir)
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); !strings.Contains(panel, "↳ new · enter creates it") {
+		t.Fatalf("the panel does not warn that the dir is new:\n%s", panel)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	run(m, cmd)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("not made: %v (note %q)", err, m.note)
+	}
+	if got := tm.opened(); got == nil || !strings.Contains(strings.Join(got, "|"), "-c|"+dir+"|") {
+		t.Errorf("opened %q, want it in %s", got, dir)
 	}
 }

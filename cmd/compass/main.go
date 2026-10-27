@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/deephanson94/compass/internal/fleet"
-	"github.com/deephanson94/compass/internal/launch"
 	"github.com/deephanson94/compass/internal/narrator"
 	"github.com/deephanson94/compass/internal/opencode"
 	"github.com/deephanson94/compass/internal/prstate"
@@ -197,7 +196,7 @@ func main() {
 		// way out; a deck that is killed leaves the last save, which the
 		// next start replays forward from.
 		resume := openResume(mgr, *root)
-		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, launch.Harnesses(cfg.Harnesses), build, prs)
+		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, cfg.launchConfig(), build, prs)
 		resume.Save()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)

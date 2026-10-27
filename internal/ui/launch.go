@@ -29,9 +29,10 @@ type launchForm struct {
 	session  int
 	pane     tmuxop.Pane // the selected card's pane, which a split goes beside
 	hasPane  bool
-	dirs     []string // the directories the fleet has worked in, the selected card's first
-	dir      int      // the candidate ←/→ last landed on
-	dirText  string   // the directory as it stands: a candidate, or typed
+	dirs     []string        // the selected card's directory, the favourites, then where the fleet has worked
+	favs     map[string]bool // which of dirs the config names
+	dir      int             // the candidate ←/→ last landed on
+	dirText  string          // the directory as it stands: a candidate, or typed
 	name     string
 	worktree bool
 	prompt   string
@@ -80,7 +81,8 @@ func (m *Model) offerLaunch() {
 	if len(m.harnesses) == 0 {
 		m.harnesses = launch.Harnesses(nil)
 	}
-	f := &launchForm{sessions: tmuxop.Sessions(m.runner), dirs: m.launchDirs()}
+	f := &launchForm{sessions: tmuxop.Sessions(m.runner)}
+	f.dirs, f.favs = m.launchDirs()
 	if len(f.sessions) == 0 {
 		f.place = indexOfPlace(tmuxop.PlaceSession)
 	}
@@ -104,9 +106,12 @@ func (m *Model) offerLaunch() {
 	m.launching = f
 }
 
-// launchDirs is where the fleet has been working, most recent first, the
-// selected session's directory leading. Only directories still on disk.
-func (m *Model) launchDirs() []string {
+// launchDirs is what ←/→ walks on the dir row: the selected session's
+// directory, then the config's favourites in their order, then where the
+// fleet has been working, most recent first. A favourite stays though it is
+// not there yet — the person named it, and the panel will offer to make it;
+// a directory only the fleet remembers is offered only while it is on disk.
+func (m *Model) launchDirs() ([]string, map[string]bool) {
 	var first string
 	if s, ok := m.selected(); ok {
 		first = sessionDir(s.Info.CWD, s.Info.OriginCWD)
@@ -118,23 +123,39 @@ func (m *Model) launchDirs() []string {
 	sort.SliceStable(order, func(a, b int) bool {
 		return m.sessions[order[a]].Info.LastEventAt.After(m.sessions[order[b]].Info.LastEventAt)
 	})
-	seen := map[string]bool{}
+	seen, favs := map[string]bool{}, map[string]bool{}
 	var out []string
-	add := func(d string) {
-		if d == "" || seen[d] || len(out) >= launchDirsMax {
+	add := func(d string, fav bool) {
+		d = filepath.Clean(d)
+		if d == "." || len(out) >= launchDirsMax {
+			return
+		}
+		if fav {
+			favs[d] = true // the selected card's directory can be a favourite too
+		}
+		if seen[d] {
 			return
 		}
 		seen[d] = true
-		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+		if missing, err := launch.Missing(d); err == nil && (fav || !missing) {
 			out = append(out, d)
 		}
 	}
-	add(first)
+	if first != "" {
+		add(first, false)
+	}
+	for _, d := range m.favDirs {
+		if d, err := launch.ExpandHome(d); err == nil && d != "" {
+			add(d, true)
+		}
+	}
 	for _, i := range order {
 		s := m.sessions[i].Info
-		add(sessionDir(s.CWD, s.OriginCWD))
+		if d := sessionDir(s.CWD, s.OriginCWD); d != "" {
+			add(d, false)
+		}
 	}
-	return out
+	return out, favs
 }
 
 // sessionDir is where a session works: where it is now, else where it began.
@@ -310,6 +331,7 @@ func (m *Model) submitLaunch() tea.Cmd {
 		Name:     f.name,
 		Harness:  h,
 		Worktree: f.worktree,
+		MakeDir:  true, // the dir row has said "new · will be created" since it was typed
 	}
 	if h.TakesPrompt() {
 		req.Prompt = f.prompt
@@ -415,8 +437,34 @@ func (m *Model) launchPanel(inner int) []string {
 	case tmuxop.PlaceSession:
 		row(launchSession, "in tmux", "a new session · "+task, "")
 	}
-	dir := homeShort(f.dirText) + cursor(launchDir)
-	row(launchDir, "dir", dir, dirHint(f))
+	// The path keeps its tail where the row is short: the end of a path is
+	// what tells two directories apart.
+	hint := dirHint(f)
+	room := body - 2 - labelW - 1
+	if hint != "" && f.field == launchDir {
+		room -= lipgloss.Width(hint) + 3
+	}
+	dir, warn := keepTail(homeShort(f.dirText), room), ""
+	if d, err := launch.ExpandHome(strings.TrimSpace(f.dirText)); err == nil && strings.TrimSpace(f.dirText) != "" {
+		missing, err := launch.Missing(d)
+		switch {
+		case err != nil:
+			warn = "not a directory"
+		case missing && f.worktree:
+			warn = "new · there is no repo to make a worktree of"
+		case missing:
+			// Its own row, whatever the path's length and wherever the
+			// focus is: the warning is the confirmation, so it has to be
+			// on screen when enter is pressed.
+			warn = "new · enter creates it, empty"
+		case f.favs[filepath.Clean(d)] && f.field != launchDir:
+			dir += " ★"
+		}
+	}
+	row(launchDir, "dir", dir+cursor(launchDir), hint)
+	if warn != "" {
+		rows = append(rows, readerLine{text: strings.Repeat(" ", 2+labelW) + "↳ " + warn, kind: readerSaid})
+	}
 	name := f.name + cursor(launchName)
 	if f.name == "" && f.field != launchName {
 		name = task
@@ -454,12 +502,17 @@ func (m *Model) launchPanel(inner int) []string {
 	return append(out, " "+ruleStyle.Render("└"+strings.Repeat("─", body+2)+"┘")+" ")
 }
 
-// dirHint says where ←/→ stands among the fleet's directories.
+// dirHint says where ←/→ stands among the directories, and whether the one
+// it stands on is a favourite.
 func dirHint(f *launchForm) string {
-	if len(f.dirs) < 2 {
-		return ""
+	if len(f.dirs) < 2 || f.dirText != f.dirs[f.dir] {
+		return "" // a typed path stands on no candidate
 	}
-	return "←/→ " + strconv.Itoa(f.dir+1) + " of " + strconv.Itoa(len(f.dirs))
+	hint := "←/→ " + strconv.Itoa(f.dir+1) + " of " + strconv.Itoa(len(f.dirs))
+	if f.favs[f.dirs[f.dir]] {
+		hint += " ★"
+	}
+	return hint
 }
 
 // homeShort writes the home directory as "~".
@@ -511,4 +564,16 @@ func overlayCentered(rows, panel []string, width int) {
 		}
 		rows[top+i] = strings.TrimRight(before+p+ansi.TruncateLeft(line, left+pw, ""), " ")
 	}
+}
+
+// keepTail fits a path into w cells by its end: "…/work/api/pkg".
+func keepTail(p string, w int) string {
+	if w < 2 || lipgloss.Width(p) <= w {
+		return p
+	}
+	r := []rune(p)
+	for len(r) > 0 && lipgloss.Width(string(r))+1 > w {
+		r = r[1:]
+	}
+	return "…" + string(r)
 }

@@ -200,8 +200,13 @@ everything else arrives filled in from the selected card.
   selected card's session, and ←/→ cycles through the others. For a pane the
   row shows the pane being split; for a session, the new session's name.
   With no tmux session running at all, the panel starts on `session`.
-- **dir**: where the selected card works. ←/→ walks the directories the fleet has
-  worked in, most recent first, or you can type a path.
+- **dir**: where the selected card works. ←/→ walks your favourites (`dir`
+  lines in the config, marked ★), then the directories the fleet has worked
+  in, most recent first. You can also type a path (`ctrl+u` clears the row).
+  A path that doesn't exist yet gets a line of its own under the row,
+  `↳ new · enter creates it, empty`, and Enter makes it with `mkdir -p`.
+  Nothing is created if tmux refuses the launch, and a new folder can't take
+  a worktree because there is no repo to branch from.
 - **name**: the window's name. It is also passed as `claude -n`, so the card is
   called the same thing, and it is the worktree's branch. Left empty, it is the
   prompt's first words.
@@ -219,7 +224,8 @@ unless you have moved the selection in the meantime. `Enter` takes you there.
 `readonly` turns `n` off. In the reader, `n` keeps its search meaning.
 
 `compass new` is the same launch from a shell or a tmux binding. `-as pane` or
-`-as session` picks the place. `-t` is the session for a window and the pane
+`-as session` picks the place. `-mkdir` creates a `-C` directory that isn't
+there yet; without it, a missing directory is refused. `-t` is the session for a window and the pane
 for a split. Inside tmux, both default to where you are:
 
 ```
@@ -291,6 +297,9 @@ dim = "#9a9a9a"         # the grey the quiet rows are drawn in — ages, leg cou
                         # push the quiet rows further back. A `#rrggbb`, a `#rgb`
                         # or a palette index 0–255; anything else is ignored.
                         # $COMPASS_DIM and -dim override it.
+dir = "~/work/api"      # a favourite for n's dir row, one line each, offered in
+dir = "~/scratch"       #   this order after the selected card's directory (★);
+                        #   one that doesn't exist yet is offered as a new folder
 harness = "opencode: opencode run {prompt}"
                         # what `n` and `compass new` can run besides claude and a
                         # shell, one line each: a name, a colon, the command.

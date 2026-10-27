@@ -139,3 +139,15 @@ harness = "claude: claude --model opus -n {name} {prompt}"
 		t.Errorf("claude = %q", got)
 	}
 }
+
+// Each dir line is one favourite for `n`, in the file's order.
+func TestLoadConfigDirs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("dir = \"~/work/api\"\ndir = '/srv/infra'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COMPASS_CONFIG", path)
+	if got := loadConfig().launchConfig().Dirs; !reflect.DeepEqual(got, []string{"~/work/api", "/srv/infra"}) {
+		t.Errorf("Dirs = %q", got)
+	}
+}

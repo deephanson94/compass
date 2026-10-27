@@ -246,3 +246,40 @@ func TestLaunchPlaces(t *testing.T) {
 		}
 	}
 }
+
+// A directory that is not there is refused unless asked for; asked for, it
+// is made — but only once tmux has agreed, and never under a worktree.
+func TestLaunchMakesADirectoryOnlyWhenAsked(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "new", "thing")
+	tm := &fakeTmux{}
+	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: dir, Harness: Builtin[1]}); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("err = %v, want a refusal", err)
+	}
+	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: dir, Harness: Builtin[1], MakeDir: true, Worktree: true}); err == nil || !strings.Contains(err.Error(), "no repository") {
+		t.Errorf("err = %v, want the worktree refused", err)
+	}
+	if _, err := Launch(tm, RealGit{}, Request{Target: "gone", Dir: dir, Harness: Builtin[1], MakeDir: true}); err == nil {
+		t.Error("a refused target: want an error")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("a refused launch left %s behind", dir)
+	}
+	res, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: dir, Harness: Builtin[1], MakeDir: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() || res.Dir != dir {
+		t.Errorf("dir not made: %v (res %+v)", err, res)
+	}
+
+	file := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: file, Harness: Builtin[1], MakeDir: true}); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("a file: err = %v", err)
+	}
+	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: "  ", Harness: Builtin[1], MakeDir: true}); err == nil {
+		t.Error("no directory: want an error")
+	}
+}

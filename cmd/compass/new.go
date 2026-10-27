@@ -16,7 +16,7 @@ import (
 //	compass new -C ~/work/api -n rate explore per-tenant rate limits
 //	compass new -with shell -as pane -C ~/work/api
 func runNew(args []string, cfg config) int {
-	harnesses := launch.Harnesses(cfg.Harnesses)
+	harnesses := cfg.launchConfig().Harnesses
 	var names []string
 	for _, h := range harnesses {
 		names = append(names, h.Name)
@@ -28,6 +28,7 @@ func runNew(args []string, cfg config) int {
 	name := fs.String("n", "", "the window's name, a new session's, and the worktree's branch (default: the prompt's first words)")
 	with := fs.String("with", harnesses[0].Name, "what the work runs: "+strings.Join(names, ", "))
 	worktree := fs.Bool("worktree", false, "check out a new branch in a worktree beside the repository and open there")
+	mkdir := fs.Bool("mkdir", false, "create the -C directory, empty, if it is not there")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: compass new [flags] [prompt…]")
 		fs.PrintDefaults()
@@ -60,7 +61,7 @@ func runNew(args []string, cfg config) int {
 		}
 	}
 	res, err := launch.Launch(runner, launch.RealGit{}, launch.Request{
-		Place: place, Target: *target, Dir: *dir, Name: *name, Harness: h, Prompt: prompt, Worktree: *worktree,
+		Place: place, Target: *target, Dir: *dir, Name: *name, Harness: h, Prompt: prompt, Worktree: *worktree, MakeDir: *mkdir,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "compass new:", firstLineOf(err.Error()))

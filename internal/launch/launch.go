@@ -103,6 +103,13 @@ func Find(hs []Harness, name string) (Harness, bool) {
 	return Harness{}, false
 }
 
+// Config is what the config file says about launching: the harnesses
+// beyond the built-ins, and the directories to offer first.
+type Config struct {
+	Harnesses []Harness
+	Dirs      []string // favourites, as written ("~" allowed), in order
+}
+
 // Request is one launch, as a person asked for it.
 type Request struct {
 	Place    tmuxop.Place // a window (the default), a pane, or a tmux session of its own
@@ -112,6 +119,7 @@ type Request struct {
 	Harness  Harness
 	Prompt   string
 	Worktree bool // give the work a git worktree of its own, off Dir's HEAD
+	MakeDir  bool // create Dir, empty, when it is not there
 }
 
 // TaskName is the name the window, a new session, the worktree's branch and
@@ -136,21 +144,36 @@ type Result struct {
 	Name string
 }
 
-// Launch makes the worktree, when asked for one, and opens the work where
-// the request places it. Where tmux would refuse is asked first: a worktree
-// is a branch on disk, and one made for a session name already taken would
-// be left behind with nothing in it.
+// Launch makes the directory or the worktree, when asked for one, and opens
+// the work where the request places it. Everything that can refuse is asked
+// before anything is written: a directory or a worktree made for a session
+// name already taken would be left behind with nothing in it.
 func Launch(t tmuxop.Runner, g Git, r Request) (Result, error) {
+	if strings.TrimSpace(r.Dir) == "" {
+		return Result{}, fmt.Errorf("no directory to open in")
+	}
 	dir, err := ExpandHome(r.Dir)
 	if err != nil {
 		return Result{}, err
 	}
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		return Result{}, fmt.Errorf("%s is not a directory", r.Dir)
+	missing, err := Missing(dir)
+	if err != nil {
+		return Result{}, err
+	}
+	if missing && !r.MakeDir {
+		return Result{}, fmt.Errorf("%s does not exist", r.Dir)
+	}
+	if missing && r.Worktree {
+		return Result{}, fmt.Errorf("%s is new: there is no repository to make a worktree of", r.Dir)
 	}
 	name := r.TaskName()
 	if err := placeable(t, r.Place, r.Target, name); err != nil {
 		return Result{}, err
+	}
+	if missing {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return Result{}, err
+		}
 	}
 	if r.Worktree {
 		if dir, err = Worktree(g, dir, name); err != nil {
@@ -162,6 +185,21 @@ func Launch(t tmuxop.Runner, g Git, r Request) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Pane: pane, Dir: dir, Name: name}, nil
+}
+
+// Missing says whether dir is not there yet. Something there that is not a
+// directory is an error, not a directory to make.
+func Missing(dir string) (bool, error) {
+	fi, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return true, nil
+	case err != nil:
+		return false, err
+	case !fi.IsDir():
+		return false, fmt.Errorf("%s is not a directory", dir)
+	}
+	return false, nil
 }
 
 // placeable asks tmux whether the place is there to be used: the session a
