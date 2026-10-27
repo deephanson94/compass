@@ -136,6 +136,7 @@ type pendingUse struct {
 	use transcript.ToolUse
 	at  time.Time
 	seq int
+	msg string // the assistant message that made the call
 }
 
 // Machine folds a session's events into a Snapshot. Feed it events in file
@@ -208,6 +209,23 @@ func (m *Machine) Observe(ev transcript.Event) {
 	for _, res := range ev.ToolResults {
 		delete(m.pending, res.ToolUseID)
 	}
+	// A new message from the model means every call of an earlier one was
+	// answered: the model does not go on past calls it is still waiting
+	// for. Their results are not always in the file — SendMessage's were
+	// not — and a call kept open on that account held a finished turn
+	// open for good, needs attn over a session waiting on you. One
+	// message's lines share its id, so its own parallel calls stand. A
+	// subagent's lines are its own conversation, and close nothing here;
+	// nor does a line with nothing said on it (thinking only), which the
+	// fleet's walk of a file's tail does not count either.
+	said := strings.TrimSpace(ev.Text) != "" || len(ev.ToolUses) > 0
+	if ev.Type == transcript.EventAssistant && !ev.IsSidechain && ev.MessageID != "" && said {
+		for id, p := range m.pending {
+			if p.msg != ev.MessageID {
+				delete(m.pending, id)
+			}
+		}
+	}
 	if ev.Type == transcript.EventUser && len(ev.ToolResults) > 0 {
 		m.awaitingModel = true
 		m.awaitingSince = ev.Timestamp
@@ -217,7 +235,7 @@ func (m *Machine) Observe(ev transcript.Event) {
 	}
 	for _, use := range ev.ToolUses {
 		m.seq++
-		m.pending[use.ID] = pendingUse{use: use, at: ev.Timestamp, seq: m.seq}
+		m.pending[use.ID] = pendingUse{use: use, at: ev.Timestamp, seq: m.seq, msg: ev.MessageID}
 		m.lastUse = use
 		m.hasLastUse = true
 	}

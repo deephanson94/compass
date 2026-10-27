@@ -873,3 +873,76 @@ func TestTheBudgetsClockIsItsOwnCalls(t *testing.T) {
 		t.Errorf("Since = %v, want the sleep's own start %v", snap.Since, at(40*time.Minute))
 	}
 }
+
+// parsed builds a machine from raw transcript lines, the way Claude Code
+// writes them, so the tests below see the parser's reading and not a
+// helper's.
+func parsed(t *testing.T, lines ...string) *state.Machine {
+	t.Helper()
+	m := state.NewMachine()
+	for _, l := range lines {
+		ev, err := transcript.ParseLine([]byte(l))
+		if err != nil {
+			t.Fatalf("parse %s: %v", l, err)
+		}
+		m.Observe(ev)
+	}
+	return m
+}
+
+// Claude Code writes Esc's line as a text block in a block array — the shape
+// the parser leaves Text empty for — and that is the shape a real session
+// has.
+func TestAnInterruptInClaudeCodesOwnShapeClosesTheTurn(t *testing.T) {
+	for name, lines := range map[string][]string{
+		"while the model streams": {
+			`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"fix the login bug"}}`,
+			`{"type":"user","timestamp":"2026-08-30T12:00:05Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+		},
+		"during a tool": {
+			`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"run the tests"}}`,
+			`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"npm test"}}]}}`,
+			`{"type":"user","timestamp":"2026-08-30T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"The user doesn't want to proceed with this tool use."}]}}`,
+			`{"type":"user","timestamp":"2026-08-30T12:00:09Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+		},
+	} {
+		snap := parsed(t, lines...).Evaluate(at(time.Hour))
+		if snap.State != state.Idle || !snap.Interrupted {
+			t.Errorf("%s: %s interrupted=%v (%q), want idle and interrupted", name, snap.State, snap.Interrupted, snap.Reason)
+		}
+	}
+}
+
+// A call whose result never reached the file — SendMessage's, in the
+// sessions this was found in — is answered all the same once the model
+// speaks in a new message: it does not go on past a call it waits for.
+// Calls of the message being written stand.
+func TestANewMessageClosesTheCallsOfEarlierOnes(t *testing.T) {
+	m := parsed(t,
+		`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"tell the other sessions"}}`,
+		`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu_a","name":"SendMessage","input":{"to":"a"}}]}}`,
+		`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu_b","name":"SendMessage","input":{"to":"b"}}]}}`,
+	)
+	if snap := m.Evaluate(at(3 * time.Second)); snap.State != state.Working {
+		t.Fatalf("two calls of one message in flight = %s, want working", snap.State)
+	}
+	if f := m.Fold(); len(f.Pending) != 2 {
+		t.Fatalf("one message's parallel calls closed each other: %d pending, want 2", len(f.Pending))
+	}
+	next := `{"type":"assistant","timestamp":"2026-08-30T12:00:10Z","message":{"role":"assistant","id":"msg_2","content":[{"type":"text","text":"Both sessions have been told."}]}}`
+	ev, _ := transcript.ParseLine([]byte(next))
+	m.Observe(ev)
+	snap := m.Evaluate(at(8 * time.Hour))
+	assertState(t, snap, state.Idle)
+	assertReason(t, snap, "turn complete")
+
+	// A subagent's message closes nothing of the lead's.
+	lead := parsed(t,
+		`{"type":"user","timestamp":"2026-08-30T12:00:00Z","message":{"role":"user","content":"refactor"}}`,
+		`{"type":"assistant","timestamp":"2026-08-30T12:00:02Z","message":{"role":"assistant","id":"msg_1","content":[{"type":"tool_use","id":"tu_t","name":"Task","input":{"prompt":"x"}}]}}`,
+		`{"type":"assistant","isSidechain":true,"timestamp":"2026-08-30T12:00:30Z","message":{"role":"assistant","id":"msg_sub","content":[{"type":"text","text":"Reading the parser."}]}}`,
+	)
+	if f := lead.Fold(); len(f.Pending) != 1 {
+		t.Errorf("a subagent's message closed the lead's Task call: %d pending, want 1", len(f.Pending))
+	}
+}

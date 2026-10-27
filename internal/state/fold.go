@@ -43,6 +43,7 @@ type PendingUse struct {
 	Use transcript.ToolUse `json:"use"`
 	At  time.Time          `json:"at"`
 	Seq int                `json:"seq"`
+	Msg string             `json:"msg,omitempty"`
 }
 
 // Fold returns the machine's whole state. The pending calls are ordered by the
@@ -65,7 +66,7 @@ func (m *Machine) Fold() Fold {
 	for id, p := range m.pending {
 		use := p.use
 		use.ID = id
-		f.Pending = append(f.Pending, PendingUse{Use: use, At: p.at, Seq: p.seq})
+		f.Pending = append(f.Pending, PendingUse{Use: use, At: p.at, Seq: p.seq, Msg: p.msg})
 	}
 	sortPending(f.Pending)
 	return f
@@ -87,7 +88,7 @@ func RestoreMachine(f Fold) *Machine {
 	m.awaitingSince = f.AwaitingSince
 	m.interrupted = f.Interrupted
 	for _, p := range f.Pending {
-		m.pending[p.Use.ID] = pendingUse{use: p.Use, at: p.At, seq: p.Seq}
+		m.pending[p.Use.ID] = pendingUse{use: p.Use, at: p.At, seq: p.Seq, msg: p.Msg}
 	}
 	return m
 }

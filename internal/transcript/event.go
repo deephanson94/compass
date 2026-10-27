@@ -346,8 +346,13 @@ func parseContent(ev *Event, content contentField) {
 		switch b.Type {
 		case "text":
 			// Only assistant turns contribute Text; a user block array is
-			// tool results, whose Text stays empty by contract.
+			// tool results, whose Text stays empty by contract — but for
+			// Esc's line, which Claude Code writes as a text block and
+			// which closes the turn (Event.Interrupt).
 			if ev.Type == EventAssistant && b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+			if ev.Type == EventUser && strings.HasPrefix(strings.TrimSpace(b.Text), interruptMarker) {
 				texts = append(texts, b.Text)
 			}
 		case "tool_use":

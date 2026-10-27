@@ -372,3 +372,17 @@ func TestParseLineCarriesTheSessionsName(t *testing.T) {
 		}
 	}
 }
+
+func TestEscsBlockLineIsAnInterrupt(t *testing.T) {
+	ev, err := transcript.ParseLine([]byte(`{"type":"user","timestamp":"2026-08-30T12:00:05Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ev.Interrupt() || !ev.Machinery() {
+		t.Errorf("Interrupt/Machinery = %v/%v, want true/true", ev.Interrupt(), ev.Machinery())
+	}
+	other, _ := transcript.ParseLine([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"a pasted note"}]}}`))
+	if other.Text != "" {
+		t.Errorf("a user block array's other text = %q, want it left empty by contract", other.Text)
+	}
+}
