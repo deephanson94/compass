@@ -341,6 +341,9 @@ func (m *Model) boardLines(w, h int) []string {
 			bw := bandWidth(m.width-2*edgePad, len(band), cw)
 			want := 0
 			for _, key := range band {
+				if key == "" {
+					continue // a slot pinRow left blank
+				}
 				rows := m.boardColumnDrawRows(key, bw)
 				want = max(want, rows)
 				if r, ok := rowOf[key]; ok && rows > heights[b] && m.boardMuted(m.sessions[r.sess]) {
@@ -367,6 +370,9 @@ func (m *Model) boardLines(w, h int) []string {
 			bw := bandWidth(m.width-2*edgePad, len(band), cw)
 			blocks, whole := false, true
 			for _, key := range band {
+				if key == "" {
+					continue
+				}
 				if tr, ok := m.trails[key]; ok && blockCounts(tr) {
 					blocks = true
 				}
@@ -632,6 +638,7 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 		}
 	}
 	if cardBoard {
+		all = m.pinRow(all, n)
 		bands, heights = m.cardBands(all, n, cw, body)
 	}
 	for pos := 0; pos < len(all) && !cardBoard; pos += n {

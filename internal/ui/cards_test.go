@@ -824,3 +824,43 @@ func TestCardGroupsItsRowsWithAir(t *testing.T) {
 		}
 	}
 }
+
+// Pins stand on a row of their own: the first unpinned card opens the next
+// row, and with nothing pinned the rows fill as before.
+func TestCardPinsTakeTheirOwnRow(t *testing.T) {
+	withCards(t)
+	forceASCII(t)
+	sc := sceneCards()
+	m := sceneModel(sc, 290, 80)
+	w := m.width - 2*edgePad
+	pack := func() ([]string, int) {
+		n, cw := boardColumns(w, m.drawnCount(m.viewOrder()))
+		keys, _ := m.boardPack(n, cw, m.height-5-2)
+		return keys, n
+	}
+	keys, n := pack()
+	if n < 3 {
+		t.Fatalf("fixture: %d cards a row, want room for a blank slot", n)
+	}
+	if contains(keys, "") {
+		t.Fatalf("nothing pinned, yet the board left a blank slot: %q", keys)
+	}
+	m.point(sessionKey("s3"))
+	pressKey(m, "p")
+	poll(m, sc)
+	keys, n = pack()
+	if keys[0] != sessionKey("s3") {
+		t.Fatalf("the pin is not first: %q", keys)
+	}
+	for i := 1; i < n; i++ {
+		if keys[i] != "" {
+			t.Fatalf("an unpinned card shares the pin's row at slot %d: %q", i, keys)
+		}
+	}
+	if len(keys) <= n || keys[n] == "" || m.pinned(keys[n]) {
+		t.Fatalf("the next row does not open on an unpinned card: %q", keys)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "pinned") {
+		t.Fatal("the pinned card is not drawn")
+	}
+}

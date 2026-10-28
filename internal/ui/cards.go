@@ -644,7 +644,9 @@ func (m *Model) cardBands(all []string, n, cw, body int) (bands [][]string, heig
 	for b, band := range bands {
 		bw := bandWidth(m.width-2*edgePad, len(band), cw)
 		for _, key := range band {
-			need[b] = max(need[b], m.cardRows(key, bw))
+			if key != "" {
+				need[b] = max(need[b], m.cardRows(key, bw))
+			}
 		}
 	}
 	heights = make([]int, len(bands))
@@ -670,12 +672,16 @@ func (m *Model) cardBands(all []string, n, cw, body int) (bands [][]string, heig
 func (m *Model) cardKeys(n int) []string {
 	body := m.height - 5 - 2
 	fits := max(1, (body+1)/(cardMinRows+1))
-	var keys []string
+	var order []string
 	for _, i := range m.viewOrder() {
-		if len(keys) == n*fits {
-			break
+		order = append(order, m.sessions[i].Info.Key())
+	}
+	order = m.pinRow(order, n)
+	var keys []string
+	for _, k := range order[:min(n*fits, len(order))] {
+		if k != "" {
+			keys = append(keys, k)
 		}
-		keys = append(keys, m.sessions[i].Info.Key())
 	}
 	if m.selectedKey != "" && !contains(keys, m.selectedKey) {
 		keys = append(keys, m.selectedKey)
@@ -962,6 +968,28 @@ func (m *Model) savePins() {
 		return
 	}
 	_ = os.WriteFile(m.pinFile, raw, 0o644)
+}
+
+// pinRow gives the pins a row of their own on the card board: the keys,
+// pins first as boardRank puts them, with blank slots ("") after the last
+// pin up to the row's end, so the first unpinned card opens the next row.
+// No pins, or no unpinned card after them, and the keys are as they were.
+func (m *Model) pinRow(keys []string, n int) []string {
+	if n <= 1 || m.archiveView {
+		return keys
+	}
+	pinned := 0
+	for pinned < len(keys) && m.pinned(keys[pinned]) {
+		pinned++
+	}
+	if pinned == 0 || pinned == len(keys) || pinned%n == 0 {
+		return keys
+	}
+	out := append([]string(nil), keys[:pinned]...)
+	for len(out)%n != 0 {
+		out = append(out, "")
+	}
+	return append(out, keys[pinned:]...)
 }
 
 // boardRank is a session's place in the board's order: a pinned session
