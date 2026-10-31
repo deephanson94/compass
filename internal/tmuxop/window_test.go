@@ -107,3 +107,17 @@ func TestParsePlace(t *testing.T) {
 		t.Error("tab is no place")
 	}
 }
+
+// Environment variables go to tmux as -e, before the command, one each:
+// the new pane's process has them and nothing else does.
+func TestOpenWithSetsTheEnvironment(t *testing.T) {
+	f := &fakeRunner{outputs: [][]byte{[]byte("%9 pr:3.0\n")}}
+	_, err := tmuxop.OpenWith(f, tmuxop.PlaceWindow, "pr", "/wt/130", "pr130_review",
+		[]string{"ATTENTION_NO_IDLE=1", "AWS_REGION=us-west-2"}, []string{"claude", "-n", "pr130_review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertCalls(t, []string{"new-window", "-d", "-P", "-F", "#{pane_id} #{session_name}:#{window_index}.#{pane_index}",
+		"-t", "=pr:", "-c", "/wt/130", "-n", "pr130_review",
+		"-e", "ATTENTION_NO_IDLE=1", "-e", "AWS_REGION=us-west-2", "--", "claude", "-n", "pr130_review"})
+}

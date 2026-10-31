@@ -376,6 +376,9 @@ type Model struct {
 	hookFired   map[string]time.Time // when each session+event last ran the hook, for the cool-off
 	hidden      map[string]bool      // sessions taken off the board with `x`, by Key()
 	digits      map[string]int       // each live session's number, kept from first sight
+	digitArmed  int                  // a digit that may be the first of two (12 is 1 then 2), 0 when none
+	digitAt     time.Time            // when it was pressed, by the wall clock
+	clock       func() time.Time     // the wall clock the two-digit window is read by; nil is time.Now
 	opened      map[string]bool      // sessions the person opened this run, by Key(): a look to commit on leaving
 	hiddenFile  string               // where they persist; "" = memory only
 	pins        []string             // sessions pinned to the board's front with `p`, by Key(), in pin order (cards.go)
@@ -1203,8 +1206,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.note = "the mirror shows beside the trail (esc to zoom out)"
 		}
 		return m, m.capture()
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		i := int(key[0] - '1')
+	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		num, ok := m.digitNumber(int(key[0] - '0'))
+		if !ok {
+			return m, nil // a lone 0: no session wears it
+		}
+		i := num - 1
 		was, wasArchive := m.selectedKey, m.archiveView
 		if found := m.selectIndex(i) || m.openRecent(i+1); found {
 			if m.selectedKey == was && m.archiveView == wasArchive {

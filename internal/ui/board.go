@@ -1008,7 +1008,8 @@ func (m *Model) assignDigits() {
 		if _, ok := m.digits[key]; ok {
 			continue
 		}
-		for d := 1; d <= 9; d++ {
+		// Past nine, numbers go on: 12 is two keys (digitNumber).
+		for d := 1; d <= 99; d++ {
 			if !taken[d] {
 				m.digits[key], taken[d] = d, true
 				break
@@ -2812,4 +2813,50 @@ func sameAsk(a, b string) bool {
 		return false
 	}
 	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
+
+// digitWindow is how long a digit waits for a second one: past nine
+// sessions, 12 is 1 then 2 inside it. 1 alone selects at once, as it always
+// did, and a second digit inside the window moves the selection on to 12.
+const digitWindow = 700 * time.Millisecond
+
+// digitNumber is the session number a digit key means: the digit, or the
+// number it finishes when it follows a digit that some two-digit number
+// starts with, inside digitWindow. It arms the window for the next key, and
+// is false for a 0 that finishes nothing.
+func (m *Model) digitNumber(d int) (int, bool) {
+	now := time.Now
+	if m.clock != nil {
+		now = m.clock
+	}
+	t := now()
+	first, at := m.digitArmed, m.digitAt
+	m.digitArmed = 0
+	if first > 0 && t.Sub(at) <= digitWindow && m.hasNumber(first*10+d) {
+		return first*10 + d, true
+	}
+	if d == 0 {
+		return 0, false
+	}
+	for second := 0; second <= 9; second++ {
+		if m.hasNumber(d*10 + second) {
+			m.digitArmed, m.digitAt = d, t // some two-digit number starts with d
+			break
+		}
+	}
+	return d, true
+}
+
+// hasNumber says whether any row wears number n: a live session's kept
+// digit, or in the archive the nth row.
+func (m *Model) hasNumber(n int) bool {
+	if m.archiveView {
+		return n >= 1 && n <= len(m.viewOrder())
+	}
+	for _, d := range m.digits {
+		if d == n {
+			return true
+		}
+	}
+	return false
 }
