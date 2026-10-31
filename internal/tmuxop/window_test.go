@@ -121,3 +121,20 @@ func TestOpenWithSetsTheEnvironment(t *testing.T) {
 		"-t", "=pr:", "-c", "/wt/130", "-n", "pr130_review",
 		"-e", "ATTENTION_NO_IDLE=1", "-e", "AWS_REGION=us-west-2", "--", "claude", "-n", "pr130_review"})
 }
+
+// The pane a person left tmux from: the active pane of the active window
+// in the session attached last — not the first session's, and not an
+// inactive pane beside it.
+func TestLastActivePane(t *testing.T) {
+	f := &fakeRunner{outputs: [][]byte{[]byte(
+		"1793437463 11 %0\n" + // alpha: attached first
+			"1793437465 11 %1\n" + // beta: attached last, its active pane
+			"1793437465 10 %2\n" + // beta: a pane beside it
+			" 11 %9\n")}} // a session never attached
+	if got := tmuxop.LastActivePane(f); got != "%1" {
+		t.Errorf("LastActivePane = %q, want %%1", got)
+	}
+	if got := tmuxop.LastActivePane(&fakeRunner{errs: []error{errors.New("no server")}}); got != "" {
+		t.Errorf("no server: %q, want none", got)
+	}
+}
