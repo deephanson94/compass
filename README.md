@@ -169,6 +169,22 @@ Silence counts from the session's last line, or its subagent's. An Edit, Write o
 Read out for 90 seconds is held behind a permission prompt; a shell command is
 judged by its own timeout. Test results are the trail's to show, not the card's.
 
+**Quiet cards.** A board that a PR watcher fills can hold ten finished reviews
+beside the three sessions you're working in. Set `compact_sessions = "pr"` (the
+tmux sessions whose idle sessions are quiet) and/or `idle_compact = "1d"`, and a
+quiet session draws as one row under the cards instead of a card:
+
+```
+quiet · 3 · 195 archived · A browses
+6 ○ pr130_review · ✓ done · ⌁ pr:0                                   2d
+7 ○ pr_review_gemma · idle · ⌁ pr:1                                  1d
+```
+
+It keeps its digit. Selecting it draws its card again, and so does anything it
+owes you: a ▲ question or verdict, a hang, a loop, work starting. A pinned
+session is never quiet. Where the screen is too short for the rows, the strip
+names them as it names any session without a card.
+
 Below 110 columns there is no board: the deck is the fleet list beside one trail, `Tab` puts a cursor on it, and a third `Tab` gives the reader the whole width.
 
 ## Using it
@@ -332,6 +348,9 @@ attn_after = "1h"       # and needs attn after this much (hung_after is its old 
 card_width = "84"       # a card's least width; lower it for more cards across
 cards_per_row = "3"     # or say how many cards a row; + and - change it live
 card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
+compact_sessions = "pr" # tmux sessions whose idle sessions give up their card for one
+                        #   row under the cards (comma-separated names)
+idle_compact = "1d"     # any session idle this long does the same; "0" (the default) never
 readonly = false        # true keeps compass's hands off tmux entirely
 mirror = false          # true opens the live tmux pane beside the trail; m toggles it
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only

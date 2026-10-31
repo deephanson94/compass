@@ -219,6 +219,8 @@ func main() {
 		ui.SetCardWidth(*cardWidth)
 		ui.SetCardsPerRow(*cardsRow)
 		ui.SetCardTint(*cardTint)
+		idleCompact, _ := time.ParseDuration(cfg.IdleCompact) // the config checked it; unset is 0, never
+		ui.SetQuiet(cfg.CompactSessions, idleCompact)
 		// The deck resumes where the last process — a deck or a status
 		// line — stopped reading, as `status` does: at launch every live
 		// session is otherwise replayed from its first byte, and the scan
