@@ -469,9 +469,10 @@ func TestLaunchOpensOnTheConfigsDefaults(t *testing.T) {
 	}
 }
 
-// t hands the terminal to tmux with the jump command up: outside tmux an
-// attach and the command in one invocation, inside just the command. The
-// config's own command goes through whole, for tmux to parse.
+// With a jump command of the person's own, t hands the terminal to tmux
+// with it up: outside tmux an attach and the command in one invocation,
+// inside just the command, whole, for tmux to parse. Without one, t is the
+// deck's own picker (picker_test.go).
 func TestTJumpsToAnyTmuxSession(t *testing.T) {
 	var handed []string
 	var inside bool
@@ -480,6 +481,7 @@ func TestTJumpsToAnyTmuxSession(t *testing.T) {
 		handed, inside = cmd.Args, in
 		return nil
 	}
+	m.jump = "choose-tree -Zs"
 	press(m, "t")
 	if want := []string{"tmux", "attach-session", ";", "run-shell", "-C", "choose-tree -Zs"}; strings.Join(handed, "|") != strings.Join(want, "|") || inside {
 		t.Errorf("handed %q (inside %v), want %q", handed, inside, want)

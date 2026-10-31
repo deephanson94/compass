@@ -395,10 +395,11 @@ new_as = "window"       #   as (window, pane or session), worktree (true or
 new_worktree = false    #   false) and then (go or stay; left out, it is go
 new_then = "go"         #   for a shell or a harness and stay for claude)
 jump = "choose-tree -Zs"
-                        # the tmux command `t` runs once the terminal is tmux's
-                        # (this is the default). Copy what your own prefix
-                        # binding runs to get the same picker from the board;
-                        # tmux parses it, quotes and `;` included (tmux 3.2+)
+                        # a tmux command `t` runs instead of compass's own
+                        # picker, once the terminal is tmux's. Copy what your
+                        # own prefix binding runs to get the same popup from
+                        # the board; tmux parses it, quotes and `;` included
+                        # (tmux 3.2+). Unset, `t` is compass's picker
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:
@@ -423,7 +424,7 @@ run and nothing else.
 | `j`/`k` | move — the trail's legs in a session (the conversation follows), the reader's lines once the keys are in it |
 | `h`/`l` | across the board's columns, or to the neighbouring session |
 | `m` | the live tmux pane beside the trail instead of the conversation; sticks until pressed again |
-| `t` | jump to any tmux session, not only the ones with a card: the terminal goes to tmux with its session tree up (`jump = "…"` in the config runs your own picker instead), and prefix + `d` returns. It is your `prefix` binding for a board that runs outside tmux, where tmux never sees the key. Off under `-readonly` |
+| `t` | jump to any tmux pane, not only the ones with a card: a picker over the board lists every pane as `session:window name`, with the card's glyph and state where a session has one and `—` for a shell. Type to filter (a card's name works too), ↑/↓ to move, Enter goes there, Esc stays on the board; prefix + `d` returns. `jump = "…"` in the config runs a tmux command of your own instead, such as your prefix binding's popup or `choose-tree -Zs`. Off under `-readonly` |
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project. `A` again comes back where it was pressed; `Shift+Tab` or `Esc` on the archive's list is the live board |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |

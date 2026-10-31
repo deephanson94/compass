@@ -201,8 +201,8 @@ var configKeys = []configKey{
 			}
 			return out
 		}},
-	{name: "jump", section: "new work (n, compass new)", def: tmuxop.DefaultJump,
-		help: "the tmux command t runs once tmux has the terminal; copy your own prefix binding's here",
+	{name: "jump", section: "new work (n, compass new)", example: tmuxop.DefaultJump,
+		help: "a tmux command t runs instead of compass's own picker, once tmux has the terminal: your prefix binding's, or choose-tree -Zs",
 		set:  func(c *config, v string) string { c.Jump = v; return "" },
 		get:  func(c config) []string { return one(c.Jump) }},
 }

@@ -635,7 +635,7 @@ func homeShort(p string) string {
 // typing says a line has the keyboard — a search, the quick replies, the
 // launch panel — so the deck's own keys are not the deck's to offer.
 func (m *Model) typing() bool {
-	return m.searching || m.replying || m.launching != nil
+	return m.searching || m.replying || m.launching != nil || m.picking != nil
 }
 
 // overlayCentered draws the panel over rows, centred across width, a row
