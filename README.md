@@ -146,7 +146,7 @@ under the goal. `p` pins a card to the board's front; the pin goes when the
 session leaves the live fleet. `board = "columns"` (or `-board columns`) is the
 board as it was: every session's whole trail side by side, oldest first.
 
-A card's badge is one of six statuses, and the dim word after it says why:
+A card's badge is one of seven statuses, and the dim word after it says why:
 
 | Status | Means | Reason beside it |
 |---|---|---|
@@ -155,15 +155,22 @@ A card's badge is one of six statuses, and the dim word after it says why:
 | **needs you** | a question, a call held for your permission, or a verdict that needs you | `approve` for the permission prompt, `verdict` for a verdict |
 | **needs attn** | silent past 1h (`attn_after`), a shell command past its timeout, a loop, or an API error | the same words, or `timeout`, `loop ×4`, `API 403` |
 | **exited** | a turn in flight whose Claude Code process is gone | `mid-turn` |
-| **idle** | the turn is over | `✓ shipped`, `✓ done` (a verdict that needs nothing), `cancel` (Esc), `bg job` (an agent still writing), `new` |
+| **done** | the turn is over and you haven't looked since, within 4h (`done_for`); its own colour, teal (`done_color`) | the same words as idle |
+| **idle** | the turn is over, and you have looked, or it finished longer ago than `done_for` | `✓ shipped`, `✓ ok` (a verdict that needs nothing), `cancel` (Esc), `bg job` (an agent still writing), `new` |
 
 A **verdict** is a closing line a session writes for a reader who isn't watching,
 such as a PR watcher's review: `VERDICT: needs-you: changes the public C header`
 or `VERDICT: auto-ok`. When the model's last message ends on one, needs-you is
 **needs you** with that reason on the card's ▲ row (and `g`, the hook and the
-status line count it), and auto-ok is **idle** `✓ done`. A session nothing is
+status line count it), and auto-ok is `✓ ok` beside **done** or **idle**. A session nothing is
 tailing that ended on needs-you stays on the board, as an unanswered question
 does. `verdict_pattern` in the config sets another form.
+
+**What counts as looking.** Opening a card (Enter, Tab, the `t` picker) reads
+it. So does being in its pane in tmux while the board is away: when you come back
+with prefix + `d`, every session you attached to or switched to with your own keys
+in the meantime is read as of your return. Inside tmux, where the board never gives
+up its terminal, only opening a card counts.
 
 Silence counts from the session's last line, or its subagent's. An Edit, Write or
 Read out for 90 seconds is held behind a permission prompt; a shell command is
@@ -176,7 +183,7 @@ quiet session draws as one row under the cards instead of a card:
 
 ```
 quiet · 3 · 195 archived · A browses
-6 ○ pr130_review · ✓ done · ⌁ pr:0                                   2d
+6 ○ pr130_review · done · ✓ ok · ⌁ pr:0                              12m
 7 ○ pr_review_gemma · idle · ⌁ pr:1                                  1d
 ```
 
@@ -350,6 +357,8 @@ attn_after = "1h"       # and needs attn after this much (hung_after is its old 
 card_width = "84"       # a card's least width; lower it for more cards across
 cards_per_row = "3"     # or say how many cards a row; + and - change it live
 card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
+done_for = "4h"         # how long a finish you haven't looked at stays done (teal)
+done_color = "#2dd4bf"  # done's colour; unset is compass's teal
 compact_sessions = "pr" # tmux sessions whose idle sessions give up their card for one
                         #   row under the cards (comma-separated names)
 idle_compact = "1d"     # any session idle this long does the same; "0" (the default) never

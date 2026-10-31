@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 )
 
 // backTmux answers list-panes with one line: the pane a person left from.
@@ -17,6 +18,8 @@ func (b backTmux) Output(args ...string) ([]byte, error) {
 // back is the deck getting its terminal back from tmux, as bubbletea
 // delivers it: the attach's end, then what tmux says.
 func back(m *Model) {
+	m.clock = func() time.Time { return time.Unix(1793437400, 0) }
+	m.handedAt = m.wallNow() // as handOver records it
 	_, cmd := m.Update(attachDoneMsg{target: "w:1.0"})
 	if cmd != nil {
 		m.Update(cmd())

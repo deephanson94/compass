@@ -128,9 +128,10 @@ type captureMsg struct {
 // attachDoneMsg comes back when compass has its terminal again — or, inside
 // tmux, when the client has finished moving. It names the pane, so the deck
 // can say where the user just went.
-// backFromTmuxMsg is where the person was in tmux when they detached and
-// the deck got its terminal back: the pane's id, "" when tmux cannot say.
-type backFromTmuxMsg struct{ pane string }
+// backFromTmuxMsg is where the person was in tmux while the deck was away:
+// every pane they were in, the one they detached from first. Empty when
+// tmux cannot say.
+type backFromTmuxMsg struct{ viewed []string }
 
 type attachDoneMsg struct {
 	target string
@@ -384,6 +385,7 @@ type Model struct {
 	digitArmed  int                  // a digit that may be the first of two (12 is 1 then 2), 0 when none
 	digitAt     time.Time            // when it was pressed, by the wall clock
 	clock       func() time.Time     // the wall clock the two-digit window is read by; nil is time.Now
+	handedAt    time.Time            // when the deck last gave tmux the terminal, by the wall clock
 	opened      map[string]bool      // sessions the person opened this run, by Key(): a look to commit on leaving
 	hiddenFile  string               // where they persist; "" = memory only
 	pins        []string             // sessions pinned to the board's front with `p`, by Key(), in pin order (cards.go)
@@ -1000,13 +1002,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// have taken them anywhere meanwhile — t, prefix j, a split —
 			// and what they act on next is most likely what they just left:
 			// the deck asks tmux where that was.
-			runner := m.runner
-			return m, func() tea.Msg { return backFromTmuxMsg{pane: tmuxop.LastActivePane(runner)} }
+			runner, since := m.runner, m.handedAt.Unix()-1
+			if m.handedAt.IsZero() {
+				return m, nil
+			}
+			return m, func() tea.Msg { return backFromTmuxMsg{viewed: tmuxop.ViewedPanes(runner, since)} }
 		}
 		return m, nil
 
 	case backFromTmuxMsg:
-		m.backFrom(msg.pane)
+		m.backFrom(msg.viewed)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -2972,23 +2977,37 @@ func (m *Model) attachPane(pane tmuxop.Pane) tea.Cmd {
 	return m.handOver(tmuxop.Attach(pane.Target, pane.ID, m.inTmux), pane.Target)
 }
 
-// backFrom selects the card whose pane the person left tmux from, so `r`,
-// enter and the rest act on the session they were just in. A pane with no
-// card on the board (a shell, a hidden session) leaves the selection
-// where it was.
-func (m *Model) backFrom(pane string) {
-	if pane == "" {
-		return
-	}
+// backFrom reads what the person did in tmux while the deck was away.
+// Every session they were in is read as of now — they saw its answer
+// there, so it is no longer done — and the card whose pane they left
+// from is selected, so `r`, enter and the rest act on the session they
+// were just in. A pane with no card on the board (a shell, a hidden
+// session) changes nothing.
+func (m *Model) backFrom(viewed []string) {
+	byID := map[string]string{}
 	for key, p := range m.panes {
-		if p.ID != pane {
+		byID[p.ID] = key
+	}
+	now := m.wallNow()
+	for i, pane := range viewed {
+		key, ok := byID[pane]
+		if !ok {
 			continue
 		}
-		if s, ok := m.session(key); ok && m.onBoard(s) && key != m.selectedKey {
+		m.markSeenAt(key, now)
+		if s, ok := m.session(key); i == 0 && ok && m.onBoard(s) && key != m.selectedKey {
 			m.point(key)
 		}
-		return
 	}
+}
+
+// wallNow is the wall clock: the two-digit window and a look taken in
+// tmux are measured by it, not by the deck's last poll.
+func (m *Model) wallNow() time.Time {
+	if m.clock != nil {
+		return m.clock()
+	}
+	return time.Now()
 }
 
 // jumpTmux is `t`: the terminal goes to tmux with the config's jump command
@@ -3018,6 +3037,7 @@ func (m *Model) jumpTmux() tea.Cmd {
 // deck suspends until the person detaches; inside, the client moves and the
 // command returns at once. where is what the footer calls the destination.
 func (m *Model) handOver(cmd *exec.Cmd, where string) tea.Cmd {
+	m.handedAt = m.wallNow() // what the person visits from here is read on the way back
 	done := func(err error) tea.Msg {
 		return attachDoneMsg{target: where, inside: m.inTmux, err: err}
 	}
