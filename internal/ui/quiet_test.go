@@ -106,8 +106,8 @@ func TestQuietRowsSayTheVerdictAndFallBackToTheStrip(t *testing.T) {
 	}
 	m := sceneModel(sc, 290, 80)
 	m.point(sessionKey("harness"))
-	if row := lineWith(boardText(m), " ○ demo · "); !strings.Contains(row, "✓ done") {
-		t.Errorf("an auto-ok review's quiet row should say ✓ done, got %q", row)
+	if row := lineWith(boardText(m), " ○ demo · "); !strings.Contains(row, "✓ ok") {
+		t.Errorf("an auto-ok review's quiet row should say ✓ ok, got %q", row)
 	}
 
 	m = sceneModel(sc, 290, 24)

@@ -69,6 +69,11 @@ type config struct {
 	// `prefix j` is bound to. tmux parses it, quotes and `;` included.
 	Jump string
 
+	// DoneFor and DoneColor shape the done status: how long an unread
+	// finish stays news, and its colour.
+	DoneFor   string
+	DoneColor string
+
 	// CompactSessions and IdleCompact say which idle sessions draw as one
 	// row under the cards instead of a card: those in these tmux sessions,
 	// and any idle this long ("0" or unset: never).

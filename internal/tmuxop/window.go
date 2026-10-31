@@ -2,6 +2,7 @@ package tmuxop
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -138,21 +139,42 @@ func OpenWith(r Runner, place Place, target, dir, name string, env, argv []strin
 // wherever their own keys took them meanwhile; this is where that was.
 // "" when tmux cannot say (no server, nothing ever attached).
 func LastActivePane(r Runner) string {
+	if panes := ViewedPanes(r, 0); len(panes) > 0 {
+		return panes[0]
+	}
+	return ""
+}
+
+// ViewedPanes is the pane each session was showing when the person was
+// last in it, for every session attached since since (unix seconds), the
+// most recent first. A switch-client counts as an attach, so a person who
+// hopped through three sessions with their own prefix binding is read as
+// having been in all three. The first is where they left from.
+func ViewedPanes(r Runner, since int64) []string {
 	out, err := r.Output("list-panes", "-a", "-F", "#{session_last_attached} #{window_active}#{pane_active} #{pane_id}")
 	if err != nil {
-		return ""
+		return nil
 	}
-	best, pane := int64(0), ""
+	type viewed struct {
+		at   int64
+		pane string
+	}
+	var vs []viewed
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) != 3 || f[1] != "11" {
 			continue
 		}
 		at, err := strconv.ParseInt(f[0], 10, 64)
-		if err != nil || at <= best {
+		if err != nil || at == 0 || at < since {
 			continue
 		}
-		best, pane = at, f[2]
+		vs = append(vs, viewed{at, f[2]})
 	}
-	return pane
+	sort.SliceStable(vs, func(i, j int) bool { return vs[i].at > vs[j].at })
+	panes := make([]string, len(vs))
+	for i, v := range vs {
+		panes[i] = v.pane
+	}
+	return panes
 }

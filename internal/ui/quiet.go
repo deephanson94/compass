@@ -51,8 +51,8 @@ func (m *Model) quiet(s fleet.Session) bool {
 	if key == m.selectedKey || m.pinned(key) || !s.Live {
 		return false
 	}
-	if word, _, _ := m.cardState(s, m.trails[key]); word != cardIdle {
-		return false
+	if word, _, _ := m.cardState(s, m.trails[key]); word != cardIdle && word != cardDone {
+		return false // done stays quiet: its row says done, in done's colour
 	}
 	if p, ok := m.panes[key]; ok && quietTmux[tmuxSessionName(p.Target)] {
 		return true
@@ -153,10 +153,19 @@ func (m *Model) quietRow(s fleet.Session, rowOf map[string]fleetRow, w int) stri
 		num = fmt.Sprintf("%d ", r.num)
 	}
 	left := num + m.rowGlyph(s) + " " + sessionName(s.Info)
+	word, sub, _ := m.cardState(s, m.trails[key])
 	var clauses []string
-	if _, sub, _ := m.cardState(s, m.trails[key]); sub != "" {
+	switch {
+	case word == cardDone:
+		// News, in done's colour, so a finished review is found among the
+		// rows the way its card would be found among the cards.
+		clauses = append(clauses, cardDone)
+		if sub != "" {
+			clauses = append(clauses, sub)
+		}
+	case sub != "":
 		clauses = append(clauses, sub)
-	} else {
+	default:
 		clauses = append(clauses, cardIdle)
 	}
 	if tag := m.boardTag(s); tag != "" {
@@ -166,5 +175,11 @@ func (m *Model) quietRow(s fleet.Session, rowOf map[string]fleetRow, w int) stri
 	room := w - lipgloss.Width(age) - 1
 	line := shedClauses(left+" · "+strings.Join(clauses, " · "), room)
 	pad := max(1, w-lipgloss.Width(line)-lipgloss.Width(age))
+	if word == cardDone {
+		if head, rest, ok := strings.Cut(line, " · "+cardDone); ok {
+			return dimStyle.Render(head+" · ") + lipgloss.NewStyle().Foreground(colDone).Render(cardDone) +
+				dimStyle.Render(rest+strings.Repeat(" ", pad)+age)
+		}
+	}
 	return dimStyle.Render(line + strings.Repeat(" ", pad) + age)
 }

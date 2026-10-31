@@ -309,7 +309,7 @@ func TestCardStatusSaysWhatNow(t *testing.T) {
 		{"flow", " needs attn  timeout ", ""},    // a command past its timeout
 		{"etl", " needs attn  timeout ", "hung"}, // however recently
 		{"api", " needs attn  loop ×4 ", ""},     // the loop, which HEAD's "fix tokens.py" cannot say
-		{"s3", " idle  ✓ shipped ", "40✓"},       // how it came out, and no test result
+		{"s3", " done  ✓ shipped ", "40✓"},       // how it came out, and no test result: finished 4h ago, unread
 		{"harness", " needs you ", "Re-read"},    // the question is HEAD's row, not said twice
 		{"stages", " working ", "still"},         // working says nothing more
 	}
@@ -385,8 +385,8 @@ func TestCardStateTwoLevels(t *testing.T) {
 		{"prompt unanswered 10m", late(state.PendingStart), journey.Trail{}, "still working", "start"},
 		{"Bash in its timeout", open(state.Working, state.PendingBash), journey.Trail{}, "working", ""},
 		{"subagent writing", open(state.Working, state.PendingSubagent), journey.Trail{}, "working", "subagent"},
-		{"finished", closed("turn complete"), journey.Trail{}, "idle", ""},
-		{"finished red, shipped", closed("turn complete"), shipped, "idle", "✓ shipped"},
+		{"finished, unread", closed("turn complete"), journey.Trail{}, "done", ""},
+		{"finished red, shipped, unread", closed("turn complete"), shipped, "done", "✓ shipped"},
 		{"interrupted", interrupted, journey.Trail{}, "idle", "cancel"},
 		{"new", closed("no activity yet"), journey.Trail{}, "idle", "new"},
 	} {
@@ -893,8 +893,8 @@ func TestCardShowsTheSessionsVerdict(t *testing.T) {
 		t.Errorf("the verdict's reason should be HEAD's, said once:\n%s", all)
 	}
 	rows = card(t, m, "demo")
-	if head := strings.Join(rows[:3], "\n"); !strings.Contains(head, "idle") || !strings.Contains(head, "✓ done") {
-		t.Errorf("a done verdict should read idle · ✓ done:\n%s", strings.Join(rows, "\n"))
+	if head := strings.Join(rows[:3], "\n"); !strings.Contains(head, "idle") || !strings.Contains(head, "✓ ok") {
+		t.Errorf("an auto-ok verdict a day old should read idle · ✓ ok:\n%s", strings.Join(rows, "\n"))
 	}
 }
 

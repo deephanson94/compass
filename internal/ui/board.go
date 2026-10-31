@@ -2825,11 +2825,7 @@ const digitWindow = 700 * time.Millisecond
 // starts with, inside digitWindow. It arms the window for the next key, and
 // is false for a 0 that finishes nothing.
 func (m *Model) digitNumber(d int) (int, bool) {
-	now := time.Now
-	if m.clock != nil {
-		now = m.clock
-	}
-	t := now()
+	t := m.wallNow()
 	first, at := m.digitArmed, m.digitAt
 	m.digitArmed = 0
 	if first > 0 && t.Sub(at) <= digitWindow && m.hasNumber(first*10+d) {

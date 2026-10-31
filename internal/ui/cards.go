@@ -415,6 +415,7 @@ const (
 	cardNeedsAttn    = "needs attn"
 	cardExited       = "exited"
 	cardIdle         = "idle"
+	cardDone         = "done" // idle, and news: finished, unread, within done_for (done.go)
 )
 
 // cardState is the card's main status, its sub-status and its colour. The
@@ -459,19 +460,26 @@ func (m *Model) cardState(s fleet.Session, tr journey.Trail) (word, sub string, 
 		}
 		return cardWorking, "", colWorking
 	}
+	// The turn is over. What it came to is the sub-status; whether you
+	// have seen it yet is the word: done in its own colour while it is
+	// news, idle once you have looked or it has gone stale.
+	word, col = cardIdle, colDim
+	if m.done(s) {
+		word, col = cardDone, colDone
+	}
 	switch {
 	case snap.Interrupted:
 		return cardIdle, "cancel", colDim
 	case m.backgroundAgent(s, tr):
-		return cardIdle, "bg job", colDim
+		return word, "bg job", col
 	case snap.Verdict == state.VerdictDone:
-		return cardIdle, "✓ done", colDim // the session said so itself
+		return word, "✓ ok", col // the session said so itself
 	case shippedLast(tr):
-		return cardIdle, "✓ shipped", colDim
+		return word, "✓ shipped", col
 	case snap.Reason == "no activity yet":
 		return cardIdle, "new", colDim
 	}
-	return cardIdle, "", colDim
+	return word, "", col
 }
 
 // pendingSub is what a slow open turn waits on, as its sub-status says it.
