@@ -897,3 +897,51 @@ func TestCardShowsTheSessionsVerdict(t *testing.T) {
 		t.Errorf("a done verdict should read idle · ✓ done:\n%s", strings.Join(rows, "\n"))
 	}
 }
+
+// A card says each moment once: a prompt sent again word for word folds
+// into one row that counts the sends, and legs with nothing to show that
+// share a class and a label fold into one row with their time together.
+// A leg with a name of its own keeps its row.
+func TestCardFoldsRepeatsIntoOneRow(t *testing.T) {
+	withCards(t)
+	n := sceneNow
+	tr := journey.Trail{
+		Prompts: []journey.Prompt{
+			{Text: "port the runner", At: n.Add(-5 * time.Hour)},
+			{Text: "have we built the runner? if not lets continue", At: n.Add(-4 * time.Hour)},
+			{Text: "have we built the runner? if not lets continue", At: n.Add(-3*time.Hour - 50*time.Minute)},
+			{Text: "have we built the runner? if not lets continue", At: n.Add(-3*time.Hour - 40*time.Minute)},
+		},
+		Legs: []journey.Leg{
+			{Class: journey.Build, Label: "step, no files logged", Start: n.Add(-3 * time.Hour), End: n.Add(-3*time.Hour + 44*time.Second)},
+			{Class: journey.Build, Label: "q3 v1 render", Start: n.Add(-2 * time.Hour), End: n.Add(-2*time.Hour + 27*time.Second)},
+			{Class: journey.Build, Label: "q3 final render", Start: n.Add(-90 * time.Minute), End: n.Add(-89 * time.Minute), Files: []string{"q3_final_p02.png"}},
+			{Class: journey.Build, Label: "step, no files logged", Start: n.Add(-60 * time.Minute), End: n.Add(-60*time.Minute + 43*time.Second)},
+		},
+	}
+	sc := sceneCards()
+	sc.trails[sessionKey("demo")] = tr
+	m := sceneModel(sc, 290, 80)
+	all := strings.Join(card(t, m, "demo"), "\n")
+
+	if got := strings.Count(all, "have we built the runner"); got != 1 {
+		t.Errorf("the repeated prompt stands %d times, want once:\n%s", got, all)
+	}
+	if !strings.Contains(all, "◉ 2–4/4 ") || !strings.Contains(all, " ×3 ") {
+		t.Errorf("the folded prompt should read 2–4/4 and ×3:\n%s", all)
+	}
+	// The work rows, under the card's three header rows: the status row
+	// may name the last leg ("last: build step, …"), which is not a row.
+	work := strings.Join(card(t, m, "demo")[3:], "\n")
+	if got := strings.Count(work, "step, no files logged"); got != 1 {
+		t.Errorf("the two empty legs should be one row, got %d:\n%s", got, all)
+	}
+	if row := lineWith(work, "×2 step, no files logged"); !strings.HasSuffix(strings.TrimSpace(row), "1m") {
+		t.Errorf("the ×2 row should carry the legs' time together (87s, 1m), got %q", row)
+	}
+	for _, kept := range []string{"q3 v1 render", "q3 final render"} {
+		if !strings.Contains(all, kept) {
+			t.Errorf("%q has a name of its own and lost its row:\n%s", kept, all)
+		}
+	}
+}

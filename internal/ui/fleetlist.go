@@ -1831,27 +1831,6 @@ func stateLabel(s state.State) string {
 	return s.String()
 }
 
-// location is the dim second line: where the session lives, then what it is
-// working on. The group header already names the tmux session, so the line
-// drops the prefix and says ":1.0" — window and pane, the rest of the address
-// (SPEC §2.5). A session with no pane says so plainly.
-func (m *Model) location(info fleet.SessionInfo) string {
-	where := "no pane"
-	if pane, ok := m.panes[info.Key()]; ok && pane.Target != "" {
-		where = paneSuffix(pane.Target)
-		// The window's name is what the user actually navigates by — they named
-		// it "porter-test", not ":4.0" — so it sits right after the coordinates
-		// and ahead of the branch, which is the part that may be clipped away.
-		if pane.Window != "" {
-			where += " " + pane.Window
-		}
-	}
-	if b := branchOf(info); b != "" {
-		return where + " · " + b
-	}
-	return where
-}
-
 // branchOf is the branch a session is on, or the project it lives in when git
 // has nothing to say.
 func branchOf(info fleet.SessionInfo) string {

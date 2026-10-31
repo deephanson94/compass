@@ -1509,6 +1509,12 @@ func withoutClassVerb(label, class string) string {
 // promptRow quotes the human turn — the only words on the trail that are not
 // ours.
 func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited time.Duration, link int) string {
+	return promptRowTimes(p, now, width, nth, nth, total, waited, link, 1)
+}
+
+// promptRowTimes is promptRow for a prompt sent times times running, word
+// for word: the chapter reads from–nth, and "×3" stands after the quote.
+func promptRowTimes(p journey.Prompt, now time.Time, width, from, nth, total int, waited time.Duration, link, times int) string {
 	// "2h ago", where a leg says "12m": the prompt is when, the leg is how
 	// long, and without the word a column of figures reads as one kind.
 	age := relAge(now, p.At) + " ago"
@@ -1524,7 +1530,11 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited ti
 	// trail with a dozen prompts it is the readout to steer by.
 	lead := glyphPrompt
 	if total > 1 && nth > 0 {
-		lead += fmt.Sprintf(" %d/%d", nth, total) // a teammate's report has no number: it is no chapter (#394)
+		if times > 1 && from > 0 && from < nth {
+			lead += fmt.Sprintf(" %d–%d/%d", from, nth, total)
+		} else {
+			lead += fmt.Sprintf(" %d/%d", nth, total) // a teammate's report has no number: it is no chapter (#394)
+		}
 	}
 	// The peer: a relayed message from a session on the board says which
 	// one, in the lane's own form (#67, #399). The mark is shed before the
@@ -1533,10 +1543,13 @@ func promptRow(p journey.Prompt, now time.Time, width, nth, total int, waited ti
 	if link > 0 {
 		mark = fmt.Sprintf(" →%d", link)
 	}
+	if times > 1 {
+		mark = fmt.Sprintf(" ×%d", times) + mark
+	}
 	textWidth := width - len([]rune(lead)) - 1 - 1 - len([]rune(age)) - len([]rune(mark))
 	if textWidth < trailMinLabel && mark != "" {
+		textWidth += len([]rune(mark))
 		mark = ""
-		textWidth += len([]rune(fmt.Sprintf(" →%d", link)))
 	}
 	if textWidth < trailMinLabel {
 		return dimStyle.Render(lead) + padLeft(dimStyle.Render(age), width-len([]rune(lead)))

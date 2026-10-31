@@ -106,6 +106,12 @@ type cardItem struct {
 	prompt int       // index into Prompts, else -1
 	leg    int       // index into Legs, else -1
 	lane   int       // index into Branches, else -1
+	// times is how many moments the row stands for (mergeCardItems): one,
+	// or the repeats folded into it. first is the oldest repeated prompt's
+	// index; span the merged legs' time together.
+	times int
+	first int
+	span  time.Duration
 }
 
 // cardItems is the trail's moments, newest first.
@@ -146,6 +152,49 @@ func cardItems(tr journey.Trail, now time.Time) []cardItem {
 	return out
 }
 
+// mergeCardItems folds the rows that say one thing more than once into one
+// row each, newest first, so a card's rows go to different moments:
+//
+//   - a prompt sent again, word for word, straight after itself: one row,
+//     "◉ 12–14/22 "have we built the runner?…" ×3";
+//   - legs with nothing to show — no file, no result, not HEAD, not a
+//     ship — that share a class and a label: one row at the newest's place,
+//     "◆ build  ×2 step, no files logged", with their time together. A leg
+//     with a name of its own ("q3 v1 render") keeps its row.
+func mergeCardItems(tr journey.Trail, items []cardItem, o TrailOpts) []cardItem {
+	out := make([]cardItem, 0, len(items))
+	empty := map[string]int{} // class and label → its row in out
+	for _, it := range items {
+		it.times, it.first = 1, it.prompt
+		switch {
+		case it.prompt >= 0 && len(out) > 0 && out[len(out)-1].prompt >= 0:
+			prev := &out[len(out)-1]
+			p, q := tr.Prompts[it.prompt], tr.Prompts[prev.first]
+			if p.Teammate == q.Teammate && p.Relayed == q.Relayed && strings.TrimSpace(p.Text) != "" &&
+				strings.TrimSpace(p.Text) == strings.TrimSpace(q.Text) {
+				prev.times++
+				prev.first = it.prompt // newest first: this one is older
+				continue
+			}
+		case it.leg >= 0:
+			l := tr.Legs[it.leg]
+			if !l.Current && len(l.Files) == 0 && legBadge(l) == "" && l.Class != journey.Ship && !l.End.IsZero() {
+				label, _ := legLabel(l, o)
+				key := l.Class.String() + "\x00" + strings.Trim(label, " .")
+				if at, ok := empty[key]; ok {
+					out[at].times++
+					out[at].span += l.End.Sub(l.Start)
+					continue
+				}
+				it.span = l.End.Sub(l.Start)
+				empty[key] = len(out)
+			}
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
 // tinyLeg is a leg too slight for a card: closed in under ten seconds,
 // touching no file, with no result — "closing thanks, no edits", "pass,
 // no files". The trail keeps it; a card has better rows to spend.
@@ -168,7 +217,7 @@ func dayStart(t time.Time) time.Time {
 // few moments when today has fewer, with a rule where the day turns, and
 // a closing row naming what the card leaves to the session view.
 func (m *Model) cardWork(tr journey.Trail, o TrailOpts) []string {
-	items := cardItems(tr, o.Now)
+	items := mergeCardItems(tr, cardItems(tr, o.Now), o)
 	if len(items) == 0 {
 		if bare := bareHeadRow(o, o.Width); bare != "" {
 			return []string{bare}
@@ -232,7 +281,11 @@ func (m *Model) cardRow(tr journey.Trail, it cardItem, o TrailOpts) []string {
 	switch {
 	case it.prompt >= 0:
 		nth, total := promptNumber(tr, it.prompt)
-		row := promptRow(tr.Prompts[it.prompt], o.Now, o.Width, nth, total, promptWait(tr, it.prompt), o.PromptLinks[it.prompt])
+		from := nth
+		if it.times > 1 {
+			from, _ = promptNumber(tr, it.first)
+		}
+		row := promptRowTimes(tr.Prompts[it.prompt], o.Now, o.Width, from, nth, total, promptWait(tr, it.first), o.PromptLinks[it.prompt], it.times)
 		if nth != total {
 			// Your latest prompt is what the work above it answers; the
 			// ones before it are context, and in a card of a busy day they
@@ -254,6 +307,11 @@ func (m *Model) cardRow(tr journey.Trail, it cardItem, o TrailOpts) []string {
 			// A leg whose heuristic found no name ("build ."): the files
 			// it touched are the most it can say.
 			label = strings.Join(l.Files[:min(2, len(l.Files))], ", ")
+		}
+		if it.times > 1 {
+			// The legs this row stands for, and their time together.
+			label = fmt.Sprintf("×%d %s", it.times, label)
+			l.Start = l.End.Add(-it.span)
 		}
 		out := []string{legRow(l, label, narrated, o)}
 		if l.Current && o.HeadState == state.NeedsYou && o.Head != "" && label != o.Head {
