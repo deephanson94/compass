@@ -418,7 +418,7 @@ run and nothing else.
 | Key | |
 |-----|---|
 | `1`–`9` | select a session. Past nine sessions the numbers go on: `12` is `1` then `2` within 0.7s. `1` alone still selects at once |
-| `Enter` | go to it: compass hands you the session's terminal (prefix + `d` returns) |
+| `Enter` | go to it: compass hands you the session's terminal (prefix + `d` returns). Back on the board, the card selected is the one whose pane you left from, wherever your own keys took you meanwhile; a pane with no card leaves the selection where it was |
 | `Tab` / `Shift+Tab` | zoom: board → session → the conversation itself |
 | `j`/`k` | move — the trail's legs in a session (the conversation follows), the reader's lines once the keys are in it |
 | `h`/`l` | across the board's columns, or to the neighbouring session |

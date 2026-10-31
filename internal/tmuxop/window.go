@@ -2,6 +2,7 @@ package tmuxop
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -128,4 +129,30 @@ func OpenWith(r Runner, place Place, target, dir, name string, env, argv []strin
 		return Pane{}, fmt.Errorf("tmux said %q, not where the %s opened", strings.TrimSpace(string(out)), place)
 	}
 	return Pane{Target: at, ID: id, Window: name}, nil
+}
+
+// LastActivePane is the pane a person was looking at when they last left
+// tmux: the active pane of the active window of the session attached most
+// recently. Outside tmux, compass hands the terminal over (Enter, t, a
+// launch that goes there) and gets it back when the person detaches,
+// wherever their own keys took them meanwhile; this is where that was.
+// "" when tmux cannot say (no server, nothing ever attached).
+func LastActivePane(r Runner) string {
+	out, err := r.Output("list-panes", "-a", "-F", "#{session_last_attached} #{window_active}#{pane_active} #{pane_id}")
+	if err != nil {
+		return ""
+	}
+	best, pane := int64(0), ""
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 || f[1] != "11" {
+			continue
+		}
+		at, err := strconv.ParseInt(f[0], 10, 64)
+		if err != nil || at <= best {
+			continue
+		}
+		best, pane = at, f[2]
+	}
+	return pane
 }

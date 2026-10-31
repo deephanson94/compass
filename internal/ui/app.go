@@ -128,6 +128,10 @@ type captureMsg struct {
 // attachDoneMsg comes back when compass has its terminal again — or, inside
 // tmux, when the client has finished moving. It names the pane, so the deck
 // can say where the user just went.
+// backFromTmuxMsg is where the person was in tmux when they detached and
+// the deck got its terminal back: the pane's id, "" when tmux cannot say.
+type backFromTmuxMsg struct{ pane string }
+
 type attachDoneMsg struct {
 	target string
 	inside bool // the client switched; compass never gave up its terminal
@@ -990,7 +994,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Nothing was suspended, so nothing announced its own return: the
 			// deck says where the client went instead.
 			m.note = "switched to " + msg.target
+		default:
+			// The person detached and the deck is back. Their own keys may
+			// have taken them anywhere meanwhile — t, prefix j, a split —
+			// and what they act on next is most likely what they just left:
+			// the deck asks tmux where that was.
+			runner := m.runner
+			return m, func() tea.Msg { return backFromTmuxMsg{pane: tmuxop.LastActivePane(runner)} }
 		}
+		return m, nil
+
+	case backFromTmuxMsg:
+		m.backFrom(msg.pane)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -2949,6 +2964,25 @@ func (m *Model) attach() tea.Cmd {
 // Enter, the one `n` just opened for a launch that goes there.
 func (m *Model) attachPane(pane tmuxop.Pane) tea.Cmd {
 	return m.handOver(tmuxop.Attach(pane.Target, pane.ID, m.inTmux), pane.Target)
+}
+
+// backFrom selects the card whose pane the person left tmux from, so `r`,
+// enter and the rest act on the session they were just in. A pane with no
+// card on the board (a shell, a hidden session) leaves the selection
+// where it was.
+func (m *Model) backFrom(pane string) {
+	if pane == "" {
+		return
+	}
+	for key, p := range m.panes {
+		if p.ID != pane {
+			continue
+		}
+		if s, ok := m.session(key); ok && m.onBoard(s) && key != m.selectedKey {
+			m.point(key)
+		}
+		return
+	}
 }
 
 // jumpTmux is `t`: the terminal goes to tmux with the config's jump command
