@@ -91,3 +91,22 @@ func TestDoneHasItsOwnColour(t *testing.T) {
 		t.Errorf("badge %q", badge)
 	}
 }
+
+// Done counts from the turn's end, the moment the card's age shows, not
+// from the transcript's last line: a session that finished three days ago
+// and had a line written to it since (a resume, an agent back) is idle.
+func TestDoneCountsFromTheTurnsEndNotTheLastLine(t *testing.T) {
+	withCards(t)
+	m := sceneModel(sceneCards(), 290, 80)
+	key := sessionKey("s3")
+	s, _ := m.session(key)
+	s.Snap.Since = sceneNow.Add(-72 * time.Hour)        // the model's last word, three days ago
+	s.Info.LastEventAt = sceneNow.Add(-5 * time.Minute) // a bookkeeping line, just now
+	if word, _, _ := m.cardState(s, m.trails[key]); word != cardIdle {
+		t.Errorf("finished 3d ago, a line written since: %q, want idle", word)
+	}
+	s.Snap.Since = sceneNow.Add(-10 * time.Minute)
+	if word, _, _ := m.cardState(s, m.trails[key]); word != cardDone {
+		t.Errorf("finished 10m ago: %q, want done", word)
+	}
+}

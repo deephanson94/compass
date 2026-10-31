@@ -878,7 +878,7 @@ func TestCardShowsTheSessionsVerdict(t *testing.T) {
 			sc.sessions[i].Snap = state.Snapshot{State: state.NeedsYou, Since: n.Add(-12 * time.Minute),
 				Reason: "verdict: needs you", Activity: "changes the public C header", Verdict: state.VerdictNeedsYou}
 		case "demo":
-			sc.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: n.Add(-time.Hour), Reason: "verdict: done", Activity: "idle", Verdict: state.VerdictDone}
+			sc.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: n.Add(-29 * time.Hour), Reason: "verdict: done", Activity: "idle", Verdict: state.VerdictDone}
 		}
 	}
 	m := sceneModel(sc, 290, 80)
