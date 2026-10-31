@@ -323,7 +323,7 @@ func (m *Model) boardLines(w, h int) []string {
 	// (#389): the last band's own row of air still stands off the rule.
 	noStrip := strings.TrimSpace(ansi.Strip(m.boardStrip(keys, rowOf, w))) == ""
 	seams := make([]bool, len(heights)) // the bands that took a row for the seam over their counts (#393)
-	if spare := body - func() int {
+	if spare := body - quietReserve(m.quietCount(), body) - func() int {
 		n := 0
 		for _, bh := range heights {
 			n += bh + 1
@@ -564,7 +564,13 @@ func (m *Model) boardLines(w, h int) []string {
 			lines = append(lines, "")
 		}
 	}
-	lines = append(lines, m.boardStrip(keys, rowOf, w))
+	if band := m.quietBand(keys, rowOf, w, h-len(lines)); band != nil {
+		// The strip as rows: every session without a card is quiet, and
+		// the rows they need were held back from the cards.
+		lines = append(lines, band...)
+	} else {
+		lines = append(lines, m.boardStrip(keys, rowOf, w))
+	}
 	// The rows the board leaves blank belong to sessions, not to air
 	// (#43, #47): where every live session already has a column, no
 	// further column can ever fill them, and the same band the list
@@ -638,8 +644,12 @@ func (m *Model) boardPack(n, cw, body int) (keys []string, heights []int) {
 		}
 	}
 	if cardBoard {
+		// A quiet session gives up its card for a row under the cards
+		// (quiet.go), and the cards leave the rows that band takes.
+		var quiet int
+		all, quiet = m.splitQuiet(all)
 		all = m.pinRow(all, n)
-		bands, heights = m.cardBands(all, n, cw, body)
+		bands, heights = m.cardBands(all, n, cw, body-quietReserve(quiet, body))
 	}
 	for pos := 0; pos < len(all) && !cardBoard; pos += n {
 		band := all[pos:min(pos+n, len(all))]
@@ -786,6 +796,9 @@ func bandWidth(w, k, cw int) int {
 func (m *Model) drawnCount(order []int) int {
 	drawn := 0
 	for _, i := range order {
+		if m.quiet(m.sessions[i]) {
+			continue // a row under the cards, not a card
+		}
 		if m.archiveView || m.boardRank(m.sessions[i]) <= owedRank {
 			drawn++
 		}

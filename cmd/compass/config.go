@@ -69,6 +69,12 @@ type config struct {
 	// `prefix j` is bound to. tmux parses it, quotes and `;` included.
 	Jump string
 
+	// CompactSessions and IdleCompact say which idle sessions draw as one
+	// row under the cards instead of a card: those in these tmux sessions,
+	// and any idle this long ("0" or unset: never).
+	CompactSessions []string
+	IdleCompact     string
+
 	// VerdictPattern is the closing line a session says how it came out on
 	// (state.DefaultVerdictPattern unless set; "off" ignores verdicts).
 	VerdictPattern string

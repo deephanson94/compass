@@ -121,6 +121,20 @@ var configKeys = []configKey{
 		help: "true opens the live tmux pane beside the trail (m toggles it)",
 		set:  boolInto(func(c *config) *bool { return &c.Mirror }),
 		get:  func(c config) []string { return oneBool(c.Mirror, c.has("mirror")) }},
+	{name: "compact_sessions", section: "board", example: "pr",
+		help: "tmux sessions whose idle sessions give up their card for one row under the cards (names, comma-separated); a ▲ or selected one stays a card",
+		set: func(c *config, v string) string {
+			c.CompactSessions = nil
+			for _, name := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
+				c.CompactSessions = append(c.CompactSessions, name)
+			}
+			return ""
+		},
+		get: func(c config) []string { return one(strings.Join(c.CompactSessions, ",")) }},
+	{name: "idle_compact", section: "board", def: "0",
+		help: `how long any session stays idle before it gives up its card for a row, like compact_sessions; "0" = never`,
+		set:  durationInto(func(c *config) *string { return &c.IdleCompact }),
+		get:  func(c config) []string { return one(c.IdleCompact) }},
 	{name: "reply", section: "board", repeat: true, example: "please continue",
 		help: "a stock line r offers, one line each, up to nine; any replace compass's own",
 		set: func(c *config, v string) string {
