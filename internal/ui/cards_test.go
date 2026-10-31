@@ -864,3 +864,36 @@ func TestCardPinsTakeTheirOwnRow(t *testing.T) {
 		t.Fatal("the pinned card is not drawn")
 	}
 }
+
+// A session that closed on a verdict says it on its card: needs-you is the
+// ▲ badge with the reason on the status row, done is a quiet idle that
+// says it finished by its own account.
+func TestCardShowsTheSessionsVerdict(t *testing.T) {
+	withCards(t)
+	n := sceneNow
+	sc := sceneCards()
+	for i, s := range sc.sessions {
+		switch sessionName(s.Info) {
+		case "s3":
+			sc.sessions[i].Snap = state.Snapshot{State: state.NeedsYou, Since: n.Add(-12 * time.Minute),
+				Reason: "verdict: needs you", Activity: "changes the public C header", Verdict: state.VerdictNeedsYou}
+		case "demo":
+			sc.sessions[i].Snap = state.Snapshot{State: state.Idle, Since: n.Add(-time.Hour), Reason: "verdict: done", Activity: "idle", Verdict: state.VerdictDone}
+		}
+	}
+	m := sceneModel(sc, 290, 80)
+
+	rows := card(t, m, "s3")
+	all := strings.Join(rows, "\n")
+	if head := strings.Join(rows[:3], "\n"); !strings.Contains(head, "needs you") || !strings.Contains(head, "verdict") {
+		t.Errorf("a needs-you verdict should be the ▲ badge, sub-status verdict:\n%s", all)
+	}
+	// The reason stands where a question would: on HEAD, once.
+	if strings.Count(all, "changes the public C header") != 1 || !strings.Contains(all, "▲ ship   changes the public C header") {
+		t.Errorf("the verdict's reason should be HEAD's, said once:\n%s", all)
+	}
+	rows = card(t, m, "demo")
+	if head := strings.Join(rows[:3], "\n"); !strings.Contains(head, "idle") || !strings.Contains(head, "✓ done") {
+		t.Errorf("a done verdict should read idle · ✓ done:\n%s", strings.Join(rows, "\n"))
+	}
+}

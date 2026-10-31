@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/deephanson94/compass/internal/launch"
+	"github.com/deephanson94/compass/internal/state"
 	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
@@ -76,6 +78,18 @@ var configKeys = []configKey{
 		help: "a command run when a session crosses a line while nobody is looking ($COMPASS_EVENT, $COMPASS_SESSION, $COMPASS_TMUX, $COMPASS_DETAIL)",
 		set:  func(c *config, v string) string { c.Hook = v; return "" },
 		get:  func(c config) []string { return one(c.Hook) }},
+	{name: "verdict_pattern", section: "fleet", def: state.DefaultVerdictPattern,
+		help: `a session's closing line that says how it came out: a match with a reason group is ▲ needs you, without one done; "off" ignores verdicts`,
+		set: func(c *config, v string) string {
+			if v != "off" {
+				if _, err := regexp.Compile(v); err != nil {
+					return "not a regular expression: " + err.Error()
+				}
+			}
+			c.VerdictPattern = v
+			return ""
+		},
+		get: func(c config) []string { return one(c.VerdictPattern) }},
 
 	{name: "board", section: "board", def: defaultBoard,
 		help: `the board's shape: "cards" (today, newest first) or "columns" (every trail, oldest first)`,
