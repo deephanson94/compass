@@ -224,8 +224,11 @@ everything else arrives filled in from the selected card.
   Nothing is created if tmux refuses the launch, and a new folder can't take
   a worktree because there is no repo to branch from.
 - **name**: the window's name. It is also passed as `claude -n`, so the card is
-  called the same thing, and it is the worktree's branch. Left empty, it is the
-  prompt's first words.
+  called the same thing, and it is the worktree's branch. It opens on the tmux
+  session the work goes into and an underscore (`build_`), and follows the
+  `in tmux` row until you change the part in front of it or clear it. Left as
+  just the prefix, or empty, the prompt's first words finish it
+  (`build_fix-the-flaky-test`). A new tmux session has no prefix.
 - **worktree**: off by default; space or ←/→ turns it on. On means a new branch
   checked out in `<repo>.worktrees/<name>` beside the main checkout, off its HEAD.
   The window then opens at the same depth in that worktree as the directory you
