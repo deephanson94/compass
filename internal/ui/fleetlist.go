@@ -795,9 +795,20 @@ func isEntryFirstLine(l string) bool {
 	// A mark or a space, a digit or a space, a space, the glyph: a second
 	// line's "◍ build …" after four spaces is not an entry, and a loop's ↻
 	// or a dead session's ⊘ is.
+	// Past nine the number is two digits, and the glyph a cell further on.
 	r := []rune(ansi.Strip(l))
-	return len(r) > 3 && (r[0] == ' ' || r[0] == '▸') && (r[1] == ' ' || (r[1] >= '0' && r[1] <= '9')) &&
-		r[2] == ' ' && strings.ContainsRune("●▲◍○↻⊘", r[3])
+	if len(r) < 4 || (r[0] != ' ' && r[0] != '▸') {
+		return false
+	}
+	i := 1
+	if r[i] == ' ' {
+		i++
+	} else {
+		for i < len(r) && i <= 2 && r[i] >= '0' && r[i] <= '9' {
+			i++
+		}
+	}
+	return i > 1 && i+1 < len(r) && r[i] == ' ' && strings.ContainsRune("●▲◍○↻⊘", r[i+1])
 }
 
 // countEntries counts the session rows among rendered fleet lines: the
@@ -1002,7 +1013,9 @@ func (m *Model) entryLinesUnder(r fleetRow, w int, tag string) []string {
 	// the names beside them are. Freeing this width is the point of not
 	// spelling "working": a name is what you are looking for, and "agentic_…"
 	// was costing ten columns to say "● " a second time.
-	avail := w - 5 - 1 - ageWidth
+	// The marker, the index, the glyph and their spaces: five cells, and
+	// one more for each digit past the first (session 12 has two).
+	avail := w - 4 - lipgloss.Width(index) - 1 - ageWidth
 	headW := lipgloss.Width(head)
 	if headW > 0 {
 		headW++ // a column of air before it

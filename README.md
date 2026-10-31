@@ -282,7 +282,9 @@ unless you have moved the selection in the meantime. `Enter` takes you there.
 `compass new` is the same launch from a shell or a tmux binding. `-as pane` or
 `-as session` picks the place. `-mkdir` creates a `-C` directory that isn't
 there yet; without it, a missing directory is refused. `-t` is the session for a window and the pane
-for a split. Inside tmux, both default to where you are:
+for a split. `-e KEY=VALUE`, repeatable, sets a variable in the new pane's
+environment only (tmux's own `-e`), for a harness that needs one your shell
+doesn't carry. Inside tmux, both default to where you are:
 
 ```
 bind N command-prompt -p "prompt:" "run-shell -b 'compass new -C \"#{pane_current_path}\" -- \"%%%\"'"
@@ -415,7 +417,7 @@ run and nothing else.
 
 | Key | |
 |-----|---|
-| `1`–`9` | select a session |
+| `1`–`9` | select a session. Past nine sessions the numbers go on: `12` is `1` then `2` within 0.7s. `1` alone still selects at once |
 | `Enter` | go to it: compass hands you the session's terminal (prefix + `d` returns) |
 | `Tab` / `Shift+Tab` | zoom: board → session → the conversation itself |
 | `j`/`k` | move — the trail's legs in a session (the conversation follows), the reader's lines once the keys are in it |

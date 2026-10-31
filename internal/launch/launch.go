@@ -123,8 +123,9 @@ type Request struct {
 	Name     string       // the window's, a new session's and the worktree branch's name; "" = from the prompt
 	Harness  Harness
 	Prompt   string
-	Worktree bool // give the work a git worktree of its own, off Dir's HEAD
-	MakeDir  bool // create Dir, empty, when it is not there
+	Worktree bool     // give the work a git worktree of its own, off Dir's HEAD
+	MakeDir  bool     // create Dir, empty, when it is not there
+	Env      []string // "KEY=value" set in the new pane's process (tmux -e)
 }
 
 // TaskName is the name the window, a new session, the worktree's branch and
@@ -185,7 +186,7 @@ func Launch(t tmuxop.Runner, g Git, r Request) (Result, error) {
 			return Result{}, err
 		}
 	}
-	pane, err := tmuxop.Open(t, r.Place, r.Target, dir, name, r.Harness.Argv(name, strings.TrimSpace(r.Prompt)))
+	pane, err := tmuxop.OpenWith(t, r.Place, r.Target, dir, name, r.Env, r.Harness.Argv(name, strings.TrimSpace(r.Prompt)))
 	if err != nil {
 		return Result{}, err
 	}

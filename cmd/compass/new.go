@@ -34,6 +34,8 @@ func runNew(args []string, cfg config) int {
 	with := fs.String("with", run, "what the work runs: "+strings.Join(names, ", "))
 	worktree := fs.Bool("worktree", lc.Worktree, "check out a new branch in a worktree beside the repository and open there")
 	mkdir := fs.Bool("mkdir", false, "create the -C directory, empty, if it is not there")
+	var env envFlag
+	fs.Var(&env, "e", "KEY=VALUE set in the new pane's environment (tmux -e); repeat for more")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: compass new [flags] [prompt…]")
 		fs.PrintDefaults()
@@ -66,7 +68,7 @@ func runNew(args []string, cfg config) int {
 		}
 	}
 	res, err := launch.Launch(runner, launch.RealGit{}, launch.Request{
-		Place: place, Target: *target, Dir: *dir, Name: *name, Harness: h, Prompt: prompt, Worktree: *worktree, MakeDir: *mkdir,
+		Place: place, Target: *target, Dir: *dir, Name: *name, Harness: h, Prompt: prompt, Worktree: *worktree, MakeDir: *mkdir, Env: env,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "compass new:", firstLineOf(err.Error()))
@@ -74,6 +76,23 @@ func runNew(args []string, cfg config) int {
 	}
 	fmt.Printf("%s · %s %s · %s\n", res.Name, h.Name, res.Pane.Target, res.Dir)
 	return 0
+}
+
+// envFlag is -e, given once per variable: KEY=VALUE, the key a shell
+// variable's name. A value may hold anything, "=" included.
+type envFlag []string
+
+func (e *envFlag) String() string { return strings.Join(*e, " ") }
+
+func (e *envFlag) Set(v string) error {
+	key, _, ok := strings.Cut(v, "=")
+	if !ok || key == "" || strings.IndexFunc(key, func(r rune) bool {
+		return !(r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	}) >= 0 || key[0] >= '0' && key[0] <= '9' {
+		return fmt.Errorf("want KEY=VALUE, got %q", v)
+	}
+	*e = append(*e, v)
+	return nil
 }
 
 // currentSession is the tmux session this command runs in, else the

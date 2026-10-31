@@ -77,6 +77,14 @@ const openFormat = "#{pane_id} #{session_name}:#{window_index}.#{pane_index}"
 // with no shell between, so a prompt's quotes and dollars arrive as typed.
 // No argv is the user's default shell.
 func Open(r Runner, place Place, target, dir, name string, argv []string) (Pane, error) {
+	return OpenWith(r, place, target, dir, name, nil, argv)
+}
+
+// OpenWith is Open with environment variables set in the new pane, one
+// "KEY=value" each, as tmux's own -e sets them: in the process tmux starts,
+// and nowhere else. A watcher's restricted claude needs a few of its own
+// (a model provider, a region) that the user's shell does not carry.
+func OpenWith(r Runner, place Place, target, dir, name string, env, argv []string) (Pane, error) {
 	var args []string
 	switch place {
 	case PlaceWindow:
@@ -103,6 +111,9 @@ func Open(r Runner, place Place, target, dir, name string, argv []string) (Pane,
 	}
 	if name != "" {
 		args = append(args, "-n", name)
+	}
+	for _, kv := range env {
+		args = append(args, "-e", kv)
 	}
 	if len(argv) > 0 {
 		args = append(args, "--")
