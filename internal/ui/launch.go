@@ -75,6 +75,18 @@ type launchDoneMsg struct {
 // claude, whose card the deck selects once it joins.
 func goesThere(h launch.Harness) bool { return h.Name != "claude" }
 
+// thenFor is the then row's default for a harness: the config's new_then
+// where it says one, else goesThere.
+func (m *Model) thenFor(h launch.Harness) bool {
+	switch m.newDefaults.Then {
+	case "go":
+		return true
+	case "stay":
+		return false
+	}
+	return goesThere(h)
+}
+
 // offerLaunch is `n`: the panel opens over the deck. Nothing runs until
 // enter. It is compass's third write, and like the other two it is gated
 // on a keypress and switched off by read-only.
@@ -92,9 +104,13 @@ func (m *Model) offerLaunch() {
 	}
 	f := &launchForm{sessions: tmuxop.Sessions(m.runner)}
 	f.dirs, f.favs = m.launchDirs()
-	if len(f.sessions) == 0 {
-		f.place = indexOfPlace(tmuxop.PlaceSession)
+	for i, h := range m.harnesses {
+		if h.Name == m.newDefaults.Run {
+			f.harness = i
+		}
 	}
+	f.place = indexOfPlace(m.newDefaults.Place)
+	f.worktree = m.newDefaults.Worktree
 	if pane, ok := m.selectedPane(); ok {
 		// The selected card's tmux session: a new task most often joins
 		// the work it sits beside.
@@ -103,14 +119,20 @@ func (m *Model) offerLaunch() {
 			f.session = indexOf(f.sessions, pane.Target[:i])
 		}
 	}
+	if f.placeOf() == tmuxop.PlacePane && !f.hasPane {
+		f.place = indexOfPlace(tmuxop.PlaceWindow) // nothing to split beside: the default place
+	}
+	if len(f.sessions) == 0 {
+		f.place = indexOfPlace(tmuxop.PlaceSession)
+	}
 	if len(f.dirs) > 0 {
 		f.dirText = f.dirs[0]
 	} else if wd, err := os.Getwd(); err == nil {
 		f.dirText = wd
 	}
-	f.goThere = goesThere(m.harnesses[0])
+	f.goThere = m.thenFor(m.harnesses[f.harness])
 	f.field = launchPrompt
-	if !m.harnesses[0].TakesPrompt() {
+	if !m.harnesses[f.harness].TakesPrompt() {
 		f.field = launchDir
 	}
 	m.launching = f
@@ -222,7 +244,7 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 		case launchWith:
 			f.harness = wrapIndex(f.harness+d, len(m.harnesses))
 			if !f.goSet {
-				f.goThere = goesThere(m.harnesses[f.harness])
+				f.goThere = m.thenFor(m.harnesses[f.harness])
 			}
 		case launchThen:
 			f.goThere, f.goSet = !f.goThere, true

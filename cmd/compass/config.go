@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/deephanson94/compass/internal/launch"
+	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
 // config is what ~/.config/compass/config.toml may set. Every entry has a
@@ -52,11 +53,28 @@ type config struct {
 	// Dirs are the directories `n` offers right after the selected card's,
 	// one `dir = "~/work/api"` line each, in order.
 	Dirs []string
+
+	// What the `n` panel opens on, and what `compass new` defaults to where
+	// it has the same flag: new_run = "claude", new_as = "window" | "pane" |
+	// "session", new_worktree = true, new_then = "go" | "stay". A value
+	// compass cannot read is ignored, so the built-in default stands.
+	NewRun      string
+	NewAs       tmuxop.Place
+	NewWorktree bool
+	NewThen     string
+
+	// Jump is the tmux command `t` runs once the terminal is tmux's:
+	// `jump = "choose-tree -Zs"` (the default), or whatever your own
+	// `prefix j` is bound to. tmux parses it, quotes and `;` included.
+	Jump string
 }
 
 // launchConfig is what the launch panel and `compass new` take from the file.
 func (c config) launchConfig() launch.Config {
-	return launch.Config{Harnesses: launch.Harnesses(c.Harnesses), Dirs: c.Dirs}
+	return launch.Config{
+		Harnesses: launch.Harnesses(c.Harnesses), Dirs: c.Dirs,
+		Run: c.NewRun, Place: c.NewAs, Worktree: c.NewWorktree, Then: c.NewThen,
+	}
 }
 
 // loadConfig reads the config file if there is one. $COMPASS_CONFIG overrides
@@ -129,6 +147,20 @@ func loadConfig() (c config) {
 			c.Hook = value
 		case "dir":
 			c.Dirs = append(c.Dirs, value)
+		case "new_run":
+			c.NewRun = value
+		case "new_as":
+			if p, ok := tmuxop.ParsePlace(value); ok {
+				c.NewAs = p
+			}
+		case "new_worktree":
+			c.NewWorktree = value == "true"
+		case "new_then":
+			if value == "go" || value == "stay" {
+				c.NewThen = value
+			}
+		case "jump":
+			c.Jump = value
 		case "harness":
 			if h, ok := launch.ParseHarness(value); ok {
 				c.Harnesses = append(c.Harnesses, h)
@@ -138,6 +170,45 @@ func loadConfig() (c config) {
 		}
 	}
 	return
+}
+
+// unquote reads a value: one quoted string, or the bare words up to a
+// comment. Inside "…" a \" is a quote and a \\ a backslash, as in TOML;
+// '…' is taken literally. Whatever follows the closing quote — the
+// `# a favourite for n's dir row` the README's own example carries — is
+// not the value. Trimming every quote off both ends instead kept that
+// comment in the value, and ate a quote a hook or a jump ended on.
+func unquote(v string) string {
+	if v == "" {
+		return v
+	}
+	switch v[0] {
+	case '\'':
+		if end := strings.IndexByte(v[1:], '\''); end >= 0 {
+			return v[1 : 1+end]
+		}
+	case '"':
+		var b strings.Builder
+		for i := 1; i < len(v); i++ {
+			switch c := v[i]; {
+			case c == '\\' && i+1 < len(v) && (v[i+1] == '"' || v[i+1] == '\\'):
+				b.WriteByte(v[i+1])
+				i++
+			case c == '"':
+				return b.String()
+			default:
+				b.WriteByte(c)
+			}
+		}
+	}
+	// Bare, or a quote never closed: a comment starts at a # after a space,
+	// so `dim = #9a9a9a` stays a colour.
+	for i := 1; i < len(v); i++ {
+		if v[i] == '#' && (v[i-1] == ' ' || v[i-1] == '\t') {
+			return strings.TrimSpace(v[:i])
+		}
+	}
+	return v
 }
 
 // configLine parses one `key = "value"` row; comments and blanks are nothing.
@@ -151,8 +222,7 @@ func configLine(line string) (key, value string, ok bool) {
 		return "", "", false
 	}
 	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"'`)
+	value = unquote(strings.TrimSpace(value))
 	if key == "" || value == "" {
 		return "", "", false
 	}

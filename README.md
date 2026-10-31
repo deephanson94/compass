@@ -239,6 +239,11 @@ everything else arrives filled in from the selected card.
   and to `stay` for `claude`. Space or ←/→ changes it, and a choice you make
   sticks when you change `run`.
 
+The panel's starting choices come from the config's `new_run`, `new_as`,
+`new_worktree` and `new_then` lines (below). `new_as = "pane"` on a card with
+no pane opens on `window`. `compass new` takes `new_run`, `new_as` and
+`new_worktree` as the defaults of `-with`, `-as` and `-worktree`.
+
 The prompt goes to the harness as an argument, not typed into the pane, so it
 arrives whole: quotes, `$` and all. With `then: stay` the work opens in the
 background, and the deck stays where it was. compass checks the tmux target before it makes a
@@ -332,6 +337,15 @@ harness = "opencode: opencode run {prompt}"
                         # whose placeholder is empty is dropped whole. No quoting:
                         # split on spaces. A line named claude or shell replaces
                         # the built-in, e.g. "claude: claude --model opus -n {name} {prompt}"
+new_run = "claude"      # what n's panel opens on: run (a harness's name),
+new_as = "window"       #   as (window, pane or session), worktree (true or
+new_worktree = false    #   false) and then (go or stay; left out, it is go
+new_then = "go"         #   for a shell or a harness and stay for claude)
+jump = "choose-tree -Zs"
+                        # the tmux command `t` runs once the terminal is tmux's
+                        # (this is the default). Copy what your own prefix
+                        # binding runs to get the same picker from the board;
+                        # tmux parses it, quotes and `;` included (tmux 3.2+)
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:
@@ -356,6 +370,7 @@ run and nothing else.
 | `j`/`k` | move — the trail's legs in a session (the conversation follows), the reader's lines once the keys are in it |
 | `h`/`l` | across the board's columns, or to the neighbouring session |
 | `m` | the live tmux pane beside the trail instead of the conversation; sticks until pressed again |
+| `t` | jump to any tmux session, not only the ones with a card: the terminal goes to tmux with its session tree up (`jump = "…"` in the config runs your own picker instead), and prefix + `d` returns. It is your `prefix` binding for a board that runs outside tmux, where tmux never sees the key. Off under `-readonly` |
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project. `A` again comes back where it was pressed; `Shift+Tab` or `Esc` on the archive's list is the live board |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |

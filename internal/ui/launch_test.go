@@ -422,3 +422,80 @@ func TestLaunchThenGoAttaches(t *testing.T) {
 		t.Errorf("stay handed the terminal over: %q", handed)
 	}
 }
+
+// The config's new_* lines are what the panel opens on: the harness, the
+// place, the worktree and then. A pane with no card pane to split beside
+// falls back to a window rather than opening on a launch that cannot run.
+func TestLaunchOpensOnTheConfigsDefaults(t *testing.T) {
+	m, _, _, _ := launchModel(t)
+	m.newDefaults = launch.Config{Run: "shell", Place: tmuxop.PlaceSession, Worktree: true, Then: "stay"}
+	press(m, "n")
+	f := m.launching
+	if h := m.harnesses[f.harness].Name; h != "shell" {
+		t.Errorf("run = %q, want shell", h)
+	}
+	if p := f.placeOf(); p != tmuxop.PlaceSession {
+		t.Errorf("as = %v, want session", p)
+	}
+	if !f.worktree {
+		t.Error("worktree is off")
+	}
+	if f.goThere {
+		t.Error("new_then = stay, and a shell opened on go")
+	}
+
+	m, _, _, _ = launchModel(t)
+	m.newDefaults = launch.Config{Then: "go"}
+	press(m, "n")
+	if !m.launching.goThere {
+		t.Error("new_then = go, and claude opened on stay")
+	}
+	m.launching.field = launchWith
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // shell, then back
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if !m.launching.goThere {
+		t.Error("a harness change put new_then = go back to the built-in stay")
+	}
+
+	m, _, _, _ = launchModel(t)
+	m.newDefaults = launch.Config{Run: "nonesuch", Place: tmuxop.PlacePane}
+	m.point(sessionKey("s-web")) // no pane
+	press(m, "n")
+	if h := m.harnesses[m.launching.harness].Name; h != "claude" {
+		t.Errorf("an unknown new_run opened on %q, want the first harness", h)
+	}
+	if p := m.launching.placeOf(); p != tmuxop.PlaceWindow {
+		t.Errorf("new_as = pane on a card with no pane opened on %v, want window", p)
+	}
+}
+
+// t hands the terminal to tmux with the jump command up: outside tmux an
+// attach and the command in one invocation, inside just the command. The
+// config's own command goes through whole, for tmux to parse.
+func TestTJumpsToAnyTmuxSession(t *testing.T) {
+	var handed []string
+	var inside bool
+	m, _, _, _ := launchModel(t)
+	m.spawn = func(cmd *exec.Cmd, in bool, done func(error) tea.Msg) tea.Cmd {
+		handed, inside = cmd.Args, in
+		return nil
+	}
+	press(m, "t")
+	if want := []string{"tmux", "attach-session", ";", "run-shell", "-C", "choose-tree -Zs"}; strings.Join(handed, "|") != strings.Join(want, "|") || inside {
+		t.Errorf("handed %q (inside %v), want %q", handed, inside, want)
+	}
+
+	handed = nil
+	m.inTmux, m.jump = true, `display-popup -E "tmux-jump"`
+	press(m, "t")
+	if want := []string{"tmux", "run-shell", "-C", `display-popup -E "tmux-jump"`}; strings.Join(handed, "|") != strings.Join(want, "|") || !inside {
+		t.Errorf("handed %q (inside %v), want %q", handed, inside, want)
+	}
+
+	handed = nil
+	m.readonly = true
+	press(m, "t")
+	if handed != nil || !strings.Contains(m.note, "read-only") {
+		t.Errorf("read-only handed %q, note %q", handed, m.note)
+	}
+}

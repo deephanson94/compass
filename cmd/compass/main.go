@@ -219,7 +219,7 @@ func main() {
 		// way out; a deck that is killed leaves the last save, which the
 		// next start replays forward from.
 		resume := openResume(mgr, *root)
-		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, cfg.launchConfig(), build, prs)
+		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, cfg.Jump, cfg.launchConfig(), build, prs)
 		resume.Save()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)

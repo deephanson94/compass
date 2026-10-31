@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/deephanson94/compass/internal/tmuxop"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -92,6 +94,13 @@ func TestConfigLine(t *testing.T) {
 		{`dim = "#9a9a9a"`, "dim", "#9a9a9a", true},
 		{`= "orphan"`, "", "", false},
 		{`empty = ""`, "", "", false},
+		{`jump = "display-popup -E 'tmux-jump'"`, "jump", "display-popup -E 'tmux-jump'", true},
+		{`hook = "tmux display-message \"$COMPASS_EVENT\""`, "hook", `tmux display-message "$COMPASS_EVENT"`, true},
+		{`jump = 'choose-tree -Zs'`, "jump", "choose-tree -Zs", true},
+		{`dir = "~/work/api"      # a favourite for n's dir row`, "dir", "~/work/api", true},
+		{`readonly = true   # keep hands off tmux`, "readonly", "true", true},
+		{`dim = #9a9a9a`, "dim", "#9a9a9a", true},
+		{`empty = ""  # nothing`, "", "", false},
 	}
 	for _, tc := range cases {
 		key, val, ok := configLine(tc.in)
@@ -149,5 +158,36 @@ func TestLoadConfigDirs(t *testing.T) {
 	t.Setenv("COMPASS_CONFIG", path)
 	if got := loadConfig().launchConfig().Dirs; !reflect.DeepEqual(got, []string{"~/work/api", "/srv/infra"}) {
 		t.Errorf("Dirs = %q", got)
+	}
+}
+
+// The new_* lines set what the `n` panel opens on, and jump is handed to
+// tmux whole. A value compass cannot read leaves the built-in default.
+func TestLoadConfigNewDefaultsAndJump(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `new_run = "shell"
+new_as = "session"
+new_worktree = true
+new_then = "go"
+jump = "display-popup -E 'tmux-jump ; true'"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COMPASS_CONFIG", path)
+	c := loadConfig()
+	lc := c.launchConfig()
+	if lc.Run != "shell" || lc.Place != tmuxop.PlaceSession || !lc.Worktree || lc.Then != "go" {
+		t.Errorf("launch defaults = %+v", lc)
+	}
+	if c.Jump != "display-popup -E 'tmux-jump ; true'" {
+		t.Errorf("Jump = %q", c.Jump)
+	}
+
+	if err := os.WriteFile(path, []byte("new_as = \"tab\"\nnew_then = \"maybe\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if lc := loadConfig().launchConfig(); lc.Place != tmuxop.PlaceWindow || lc.Then != "" {
+		t.Errorf("unreadable values were kept: %+v", lc)
 	}
 }
