@@ -597,7 +597,9 @@ func (t *tailState) seeAsk(ev transcript.Event) {
 		}
 		// A refused call is not the model asking: nothing you type into the
 		// pane clears a 403, and `g` skips those for the same reason.
-		t.settleAsk(!t.busy && !ev.APIError && state.EndsWithQuestion(ev.Text), ev.Timestamp)
+		v, _ := state.Verdict(ev.Text)
+		asks := v == state.VerdictNeedsYou || v == "" && state.EndsWithQuestion(ev.Text)
+		t.settleAsk(!t.busy && !ev.APIError && asks, ev.Timestamp)
 	}
 }
 

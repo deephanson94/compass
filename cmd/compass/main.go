@@ -139,6 +139,9 @@ func main() {
 	// Every reader of a session's state shares the tiers — the deck, the
 	// card, `compass status` — so they are set before any of them runs.
 	state.SetTiers(still, attn)
+	if cfg.VerdictPattern != "" {
+		_ = state.SetVerdictPattern(cfg.VerdictPattern) // the config checked it compiles
+	}
 	window, err := time.ParseDuration(*liveWithin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "compass: -live-within %q is not a duration (try 5m, 90s, 0)\n", *liveWithin)

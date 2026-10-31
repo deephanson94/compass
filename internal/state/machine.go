@@ -121,6 +121,11 @@ type Snapshot struct {
 	// Exited is an open turn whose process is gone (set by the fleet, which
 	// reads the process registry; the machine only reads the transcript).
 	Exited bool
+
+	// Verdict is how the session said its work came out, from its closing
+	// line (verdict.go): VerdictNeedsYou, with the reason as Activity, or
+	// VerdictDone. "" for a turn that ended on no verdict.
+	Verdict string
 }
 
 // askUserQuestion is the tool whose pending call means "the model is literally
@@ -360,6 +365,15 @@ func (m *Machine) Evaluate(now time.Time) Snapshot {
 				// status and key above are what a program should key on.
 				Activity: apiErrorText(firstLine(m.substantiveText)),
 			}
+		}
+		// A verdict is the session's own word on how it came out, and it
+		// outranks a question mark: "VERDICT: needs-you: keep the old API?"
+		// is the verdict's reason, not a question to the room.
+		switch v, why := Verdict(m.substantiveText); v {
+		case VerdictNeedsYou:
+			return Snapshot{State: NeedsYou, Since: since, Reason: "verdict: needs you", Activity: why, Verdict: v}
+		case VerdictDone:
+			return Snapshot{State: Idle, Since: since, Reason: "verdict: done", Activity: "idle", Verdict: v}
 		}
 		if endsWithQuestion(m.substantiveText) {
 			return Snapshot{State: NeedsYou, Since: since, Reason: "turn ended with a question", Activity: "awaiting your reply"}

@@ -152,10 +152,18 @@ A card's badge is one of six statuses, and the dim word after it says why:
 |---|---|---|
 | **working** | a turn is in flight and writing | `subagent` when the work is a subagent's |
 | **still working** | a turn silent 10m–1h (`still_after`) | what it waits on: `subagent`, `MCP`, `web`, `workflow`, `think` (the model owes a reply), `start` (the prompt has no reply yet) |
-| **needs you** | a question, or a call held for your permission | `approve` for the permission prompt |
+| **needs you** | a question, a call held for your permission, or a verdict that needs you | `approve` for the permission prompt, `verdict` for a verdict |
 | **needs attn** | silent past 1h (`attn_after`), a shell command past its timeout, a loop, or an API error | the same words, or `timeout`, `loop ×4`, `API 403` |
 | **exited** | a turn in flight whose Claude Code process is gone | `mid-turn` |
-| **idle** | the turn is over | `✓ shipped`, `cancel` (Esc), `bg job` (an agent still writing), `new` |
+| **idle** | the turn is over | `✓ shipped`, `✓ done` (a verdict that needs nothing), `cancel` (Esc), `bg job` (an agent still writing), `new` |
+
+A **verdict** is a closing line a session writes for a reader who isn't watching,
+such as a PR watcher's review: `VERDICT: needs-you: changes the public C header`
+or `VERDICT: auto-ok`. When the model's last message ends on one, needs-you is
+**needs you** with that reason on the card's ▲ row (and `g`, the hook and the
+status line count it), and auto-ok is **idle** `✓ done`. A session nothing is
+tailing that ended on needs-you stays on the board, as an unanswered question
+does. `verdict_pattern` in the config sets another form.
 
 Silence counts from the session's last line, or its subagent's. An Edit, Write or
 Read out for 90 seconds is held behind a permission prompt; a shell command is
@@ -339,6 +347,11 @@ hook = "tmux display-message \"compass: $COMPASS_SESSION $COMPASS_EVENT\""
                         # every ten minutes per session and event; agents_back fires
                         # once per set of lanes and names the empties. The first
                         # refresh is a baseline and fires nothing.
+verdict_pattern = "^VERDICT:\\s*(?:needs-you:\\s*(?P<reason>.+?)|auto-ok)\\s*$"
+                        # a session's closing line that says how it came out
+                        # (this is the default): a match whose reason group is
+                        # non-empty is needs you with that reason, any other
+                        # match is done. "off" ignores verdicts
 dim = "#9a9a9a"         # the grey the quiet rows are drawn in — ages, leg counts,
                         # the work line, the rails. compass's own default clears
                         # 4.4:1 against the darkest popular dark theme; raise it

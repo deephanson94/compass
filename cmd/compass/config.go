@@ -69,6 +69,10 @@ type config struct {
 	// `prefix j` is bound to. tmux parses it, quotes and `;` included.
 	Jump string
 
+	// VerdictPattern is the closing line a session says how it came out on
+	// (state.DefaultVerdictPattern unless set; "off" ignores verdicts).
+	VerdictPattern string
+
 	Path     string          // the file read, or the one that would be
 	Exists   bool            // whether there was a file there
 	Warnings []string        // "line 12: unknown key …", one per line not taken

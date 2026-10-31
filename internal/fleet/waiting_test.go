@@ -1007,3 +1007,30 @@ func TestTheHeldQuestionOutranksAnAgentOnEitherOrder(t *testing.T) {
 		})
 	}
 }
+
+// A verdict that needs you opens the door as a question does: a watcher's
+// review that ended "VERDICT: needs-you: …" a day ago is still on the
+// board. One that ended "VERDICT: auto-ok" is a report and does not, even
+// with a question mark somewhere before it.
+func TestAVerdictThatNeedsYouOpensTheDoor(t *testing.T) {
+	const (
+		idVerdictNeeds = "e7000014-0000-4000-8000-000000001e07"
+		idVerdictDone  = "f8000015-0000-4000-8000-000000001f08"
+	)
+	root := t.TempDir()
+	askedAt := ago(26 * time.Hour)
+	newTranscript(t, idVerdictNeeds, "/home/user/alpha", "pr130").
+		prompt(ago(27*time.Hour), "review PR 130").
+		text(askedAt, "Reviewed 14 files.\n\nVERDICT: needs-you: changes the public C header").
+		write(root, slugAlpha)
+	newTranscript(t, idVerdictDone, "/home/user/alpha", "pr131").
+		prompt(ago(27*time.Hour), "review PR 131").
+		text(ago(26*time.Hour), "Should this be split? No: it is one change.\nVERDICT: auto-ok").
+		write(root, slugAlpha)
+
+	sessions := mustRefresh(t, fleet.NewManager(root), fleetNow)
+	assertWaiting(t, pick(t, sessions, idVerdictNeeds), askedAt)
+	if s := pick(t, sessions, idVerdictDone); s.Info.Asked {
+		t.Errorf("%s: an auto-ok verdict opened the ask door", idVerdictDone)
+	}
+}

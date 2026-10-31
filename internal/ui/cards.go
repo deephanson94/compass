@@ -380,6 +380,9 @@ func (m *Model) cardState(s fleet.Session, tr journey.Trail) (word, sub string, 
 		if snap.Pending == state.PendingApprove {
 			return cardNeedsYou, "approve", colNeedsYou
 		}
+		if snap.Verdict == state.VerdictNeedsYou {
+			return cardNeedsYou, "verdict", colNeedsYou // its reason is HEAD's, where a question would be
+		}
 		return cardNeedsYou, "", colNeedsYou
 	case snap.State == state.Stuck:
 		if snap.Pending == state.PendingBash {
@@ -403,6 +406,8 @@ func (m *Model) cardState(s fleet.Session, tr journey.Trail) (word, sub string, 
 		return cardIdle, "cancel", colDim
 	case m.backgroundAgent(s, tr):
 		return cardIdle, "bg job", colDim
+	case snap.Verdict == state.VerdictDone:
+		return cardIdle, "✓ done", colDim // the session said so itself
 	case shippedLast(tr):
 		return cardIdle, "✓ shipped", colDim
 	case snap.Reason == "no activity yet":
