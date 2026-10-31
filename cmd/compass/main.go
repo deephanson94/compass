@@ -18,10 +18,6 @@ import (
 	"github.com/deephanson94/compass/internal/ui"
 )
 
-// defaultLiveWithin is the recency door's default width: a session with no
-// tmux pane still counts as live while it spoke this recently (M5 contract).
-const defaultLiveWithin = "5m"
-
 // version is the build's name. It is "dev" for a binary built from a working
 // tree; a release build stamps the tag over it with
 // -ldflags "-X main.version=v1.2.3".
@@ -43,7 +39,15 @@ func main() {
 	// new opens a window and leaves: it needs the config's harnesses and
 	// nothing of the fleet.
 	if sub == "new" {
-		os.Exit(runNew(args, loadConfig()))
+		cfg := loadConfig()
+		for _, w := range cfg.Warnings {
+			fmt.Fprintln(os.Stderr, "compass: config", w)
+		}
+		os.Exit(runNew(args, cfg))
+	}
+	// config reads the file and says what it holds; it never starts a fleet.
+	if sub == "config" {
+		os.Exit(runConfig(args, os.Stdout, os.Stderr))
 	}
 	// A word compass does not know is a mistake, not a request for the
 	// deck: a reader probing for a subcommand (a mod asking for `trail`)
@@ -60,7 +64,7 @@ func main() {
 	if cfg.Root != "" {
 		rootDefault = expandHome(cfg.Root)
 	}
-	narratorDefault := "haiku"
+	narratorDefault := defaultNarrator
 	if cfg.Narrator != "" {
 		narratorDefault = cfg.Narrator
 	}
@@ -75,7 +79,7 @@ func main() {
 	root := fs.String("root", rootDefault, "Claude home directory to observe")
 	readonly := fs.Bool("readonly", cfg.Readonly, "never write to tmux: enter no longer attaches")
 	mirror := fs.Bool("mirror", cfg.Mirror, "open the live mirror of the selected pane at Lv1 (m toggles it)")
-	boardDefault := "cards"
+	boardDefault := defaultBoard
 	if cfg.Board != "" {
 		boardDefault = cfg.Board
 	}
@@ -83,7 +87,7 @@ func main() {
 	cardTint := fs.String("card-tint", cfg.CardTint, `a card's ground on the card board, "#rrggbb" (empty = compass's own)`)
 	cardsRow := fs.Int("cards-per-row", cfg.CardsRow, "cards in a row on the card board (0 = as many as card-width allows; + and - change it live)")
 	cardWidth := fs.Int("card-width", cfg.CardWidth, "a card's least width on the card board (0 = compass's own, 84)")
-	stillDefault, attnDefault := "10m", "1h"
+	stillDefault, attnDefault := defaultStillAfter, defaultAttnAfter
 	if _, err := time.ParseDuration(cfg.StillAfter); err == nil {
 		stillDefault = cfg.StillAfter
 	}
@@ -219,7 +223,13 @@ func main() {
 		// way out; a deck that is killed leaves the last save, which the
 		// next start replays forward from.
 		resume := openResume(mgr, *root)
-		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, cfg.Jump, cfg.launchConfig(), build, prs)
+		// A config line compass could not use is said twice: on stderr, which
+		// the terminal shows again once the deck's screen is gone, and in the
+		// footer, where it is seen.
+		for _, w := range cfg.Warnings {
+			fmt.Fprintln(os.Stderr, "compass: config", w)
+		}
+		err := ui.Run(mgr, *readonly, *mirror, cfg.Replies, cfg.Hook, cfg.Jump, configWarning(cfg), cfg.launchConfig(), build, prs)
 		resume.Save()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "compass:", err)
@@ -341,6 +351,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "  compass why       each live session's state and the lines it was read from (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "  compass new       a new tmux window running claude, a shell or a harness (compass new -h)")
+		fmt.Fprintln(fs.Output(), "  compass config    every config key, what is in effect and where the file is (init writes a starter file)")
 		fmt.Fprintln(fs.Output(), "\nflags:")
 		fs.PrintDefaults()
 	}

@@ -298,7 +298,22 @@ One keypress, in your own `.tmux.conf`:
 bind C-g split-window -h -l 70 'compass'
 ```
 
-Everything is optional configuration — compass runs with none. `~/.config/compass/config.toml`:
+Everything is optional configuration — compass runs with none. The file is
+`config.toml` in your user config directory: `~/.config/compass/` on Linux,
+`~/Library/Application Support/compass/` on macOS, or wherever
+`$COMPASS_CONFIG` points. You don't have to remember the keys:
+
+- `compass config` prints where the file is, every key with the value in
+  effect (yours, or the default), what it does, and any line compass could not
+  use.
+- `compass config init` writes a starter file with every key commented out at
+  its default. It never overwrites a file that is there.
+- A line compass can't use is skipped and reported: on stderr, and once in the
+  board's footer until the first key. An unknown key comes with a guess
+  (`unknown key "new_thn" (did you mean new_then?)`), and a bad value with
+  what the key takes.
+
+Every key, with an example value:
 
 ```toml
 root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root override)
@@ -310,6 +325,7 @@ card_width = "84"       # a card's least width; lower it for more cards across
 cards_per_row = "3"     # or say how many cards a row; + and - change it live
 card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
 readonly = false        # true keeps compass's hands off tmux entirely
+mirror = false          # true opens the live tmux pane beside the trail; m toggles it
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live
                         #  whatever this says while it is running, unless it says "0")

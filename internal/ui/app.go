@@ -457,13 +457,14 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook, jump string, lc launch.Config, build func(notify func()) Narrator, prs *prstate.Tracker) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook, jump, note string, lc launch.Config, build func(notify func()) Narrator, prs *prstate.Tracker) error {
 	m := New(mgr)
 	m.harnesses, m.favDirs, m.newDefaults = lc.Harnesses, lc.Dirs, lc
 	m.prTracker = prs
 	m.readonly = readonly
 	m.showMirror = mirror
 	m.hook, m.jump = hook, jump
+	m.note = note // what the config could not use, until the first key
 	if len(replies) > 0 {
 		m.replies = replies
 	}

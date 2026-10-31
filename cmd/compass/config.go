@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/deephanson94/compass/internal/launch"
@@ -13,9 +13,10 @@ import (
 
 // config is what ~/.config/compass/config.toml may set. Every entry has a
 // flag; a flag given on the command line always wins. The file is a flat
-// `key = "value"` list — the TOML subset a hand and a text editor produce —
-// and anything unreadable is simply ignored: compass runs fine with no
-// configuration at all.
+// `key = "value"` list — the TOML subset a hand and a text editor produce.
+// The keys are the configKeys table (configkeys.go). A line compass cannot
+// use is skipped and said in Warnings: compass runs fine with no
+// configuration at all, and a typo is reported rather than silently lost.
 type config struct {
 	Root       string // root = "~/.claude"
 	Narrator   string // narrator = "haiku" | "off" | any claude model
@@ -67,6 +68,27 @@ type config struct {
 	// `jump = "choose-tree -Zs"` (the default), or whatever your own
 	// `prefix j` is bound to. tmux parses it, quotes and `;` included.
 	Jump string
+
+	Path     string          // the file read, or the one that would be
+	Exists   bool            // whether there was a file there
+	Warnings []string        // "line 12: unknown key …", one per line not taken
+	seen     map[string]bool // the keys the file set, by their table name
+}
+
+// has says whether the file set the key — false is a default, not a choice.
+func (c config) has(name string) bool { return c.seen[name] }
+
+// configPath is where the config file is: $COMPASS_CONFIG, else
+// <user config dir>/compass/config.toml. "" when neither can be worked out.
+func configPath() string {
+	if p := os.Getenv("COMPASS_CONFIG"); p != "" {
+		return p
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "compass", "config.toml")
 }
 
 // launchConfig is what the launch panel and `compass new` take from the file.
@@ -91,84 +113,40 @@ func loadConfig() (c config) {
 		}
 	}()
 
-	path := os.Getenv("COMPASS_CONFIG")
-	if path == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
-			return
-		}
-		path = filepath.Join(base, "compass", "config.toml")
+	c.Path = configPath()
+	if c.Path == "" {
+		return
 	}
-
-	f, err := os.Open(path)
+	f, err := os.Open(c.Path)
 	if err != nil {
 		return
 	}
 	defer f.Close()
+	c.Exists = true
+	c.seen = map[string]bool{}
 
 	sc := bufio.NewScanner(f)
-	for sc.Scan() {
+	for n := 1; sc.Scan(); n++ {
 		key, value, ok := configLine(sc.Text())
 		if !ok {
 			continue
 		}
-		switch key {
-		case "root":
-			c.Root = value
-		case "narrator":
-			c.Narrator = value
-		case "readonly":
-			c.Readonly = value == "true"
-		case "live_within":
-			c.LiveWithin = value
-		case "mirror":
-			c.Mirror = value == "true"
-		case "board":
-			c.Board = value
-		case "still_after":
-			c.StillAfter = value
-		case "attn_after", "hung_after": // hung_after is attn_after's old name
-			c.AttnAfter = value
-		case "card_tint":
-			c.CardTint = value
-		case "cards_per_row":
-			if n, err := strconv.Atoi(value); err == nil {
-				c.CardsRow = n
+		k, known := configKeyNamed(key)
+		if !known {
+			w := fmt.Sprintf("line %d: unknown key %q", n, key)
+			if s := suggestKey(key); s != "" {
+				w += " (did you mean " + s + "?)"
 			}
-		case "card_width":
-			if n, err := strconv.Atoi(value); err == nil {
-				c.CardWidth = n
-			}
-		case "reply":
-			if len(c.Replies) < 9 {
-				c.Replies = append(c.Replies, value)
-			}
-		case "hook":
-			c.Hook = value
-		case "dir":
-			c.Dirs = append(c.Dirs, value)
-		case "new_run":
-			c.NewRun = value
-		case "new_as":
-			if p, ok := tmuxop.ParsePlace(value); ok {
-				c.NewAs = p
-			}
-		case "new_worktree":
-			c.NewWorktree = value == "true"
-		case "new_then":
-			if value == "go" || value == "stay" {
-				c.NewThen = value
-			}
-		case "jump":
-			c.Jump = value
-		case "harness":
-			if h, ok := launch.ParseHarness(value); ok {
-				c.Harnesses = append(c.Harnesses, h)
-			}
-		case "dim":
-			c.Dim = value
+			c.Warnings = append(c.Warnings, w)
+			continue
 		}
+		if why := k.set(&c, value); why != "" {
+			c.Warnings = append(c.Warnings, fmt.Sprintf("line %d: %s = %q: %s", n, key, value, why))
+			continue
+		}
+		c.seen[k.name] = true
 	}
+	c.Warnings = append(c.Warnings, configCheck(&c)...)
 	return
 }
 

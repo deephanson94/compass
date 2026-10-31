@@ -72,10 +72,12 @@ func TestDimComesFromTheEnvironmentWithOrWithoutAFile(t *testing.T) {
 }
 
 func TestLoadConfigMissingFileIsNothing(t *testing.T) {
-	t.Setenv("COMPASS_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+	path := filepath.Join(t.TempDir(), "absent.toml")
+	t.Setenv("COMPASS_CONFIG", path)
 	t.Setenv("COMPASS_DIM", "")
-	if c := loadConfig(); !reflect.DeepEqual(c, config{}) {
-		t.Errorf("loadConfig() on a missing file = %+v, want zero", c)
+	// Nothing set, nothing to warn about; only where it looked is known.
+	if c := loadConfig(); !reflect.DeepEqual(c, config{Path: path}) {
+		t.Errorf("loadConfig() on a missing file = %+v, want only its path", c)
 	}
 }
 
