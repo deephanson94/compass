@@ -224,8 +224,11 @@ everything else arrives filled in from the selected card.
   Nothing is created if tmux refuses the launch, and a new folder can't take
   a worktree because there is no repo to branch from.
 - **name**: the window's name. It is also passed as `claude -n`, so the card is
-  called the same thing, and it is the worktree's branch. Left empty, it is the
-  prompt's first words.
+  called the same thing, and it is the worktree's branch. It opens on the tmux
+  session the work goes into and an underscore (`build_`), and follows the
+  `in tmux` row until you change the part in front of it or clear it. Left as
+  just the prefix, or empty, the prompt's first words finish it
+  (`build_fix-the-flaky-test`). A new tmux session has no prefix.
 - **worktree**: off by default; space or ←/→ turns it on. On means a new branch
   checked out in `<repo>.worktrees/<name>` beside the main checkout, off its HEAD.
   The window then opens at the same depth in that worktree as the directory you
@@ -238,6 +241,11 @@ everything else arrives filled in from the selected card.
   anything that never gets a card (a shell, a harness other than `claude`)
   and to `stay` for `claude`. Space or ←/→ changes it, and a choice you make
   sticks when you change `run`.
+
+The panel's starting choices come from the config's `new_run`, `new_as`,
+`new_worktree` and `new_then` lines (below). `new_as = "pane"` on a card with
+no pane opens on `window`. `compass new` takes `new_run`, `new_as` and
+`new_worktree` as the defaults of `-with`, `-as` and `-worktree`.
 
 The prompt goes to the harness as an argument, not typed into the pane, so it
 arrives whole: quotes, `$` and all. With `then: stay` the work opens in the
@@ -290,7 +298,22 @@ One keypress, in your own `.tmux.conf`:
 bind C-g split-window -h -l 70 'compass'
 ```
 
-Everything is optional configuration — compass runs with none. `~/.config/compass/config.toml`:
+Everything is optional configuration — compass runs with none. The file is
+`config.toml` in your user config directory: `~/.config/compass/` on Linux,
+`~/Library/Application Support/compass/` on macOS, or wherever
+`$COMPASS_CONFIG` points. You don't have to remember the keys:
+
+- `compass config` prints where the file is, every key with the value in
+  effect (yours, or the default), what it does, and any line compass could not
+  use.
+- `compass config init` writes a starter file with every key commented out at
+  its default. It never overwrites a file that is there.
+- A line compass can't use is skipped and reported: on stderr, and once in the
+  board's footer until the first key. An unknown key comes with a guess
+  (`unknown key "new_thn" (did you mean new_then?)`), and a bad value with
+  what the key takes.
+
+Every key, with an example value:
 
 ```toml
 root = "~/.claude"      # the Claude home to observe ($COMPASS_ROOT and -root override)
@@ -302,6 +325,7 @@ card_width = "84"       # a card's least width; lower it for more cards across
 cards_per_row = "3"     # or say how many cards a row; + and - change it live
 card_tint = "#1f2b30"   # a card's ground inside its border; a step off your terminal's
 readonly = false        # true keeps compass's hands off tmux entirely
+mirror = false          # true opens the live tmux pane beside the trail; m toggles it
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
                         # (a session holding an unanswered question stays live
                         #  whatever this says while it is running, unless it says "0")
@@ -332,6 +356,15 @@ harness = "opencode: opencode run {prompt}"
                         # whose placeholder is empty is dropped whole. No quoting:
                         # split on spaces. A line named claude or shell replaces
                         # the built-in, e.g. "claude: claude --model opus -n {name} {prompt}"
+new_run = "claude"      # what n's panel opens on: run (a harness's name),
+new_as = "window"       #   as (window, pane or session), worktree (true or
+new_worktree = false    #   false) and then (go or stay; left out, it is go
+new_then = "go"         #   for a shell or a harness and stay for claude)
+jump = "choose-tree -Zs"
+                        # the tmux command `t` runs once the terminal is tmux's
+                        # (this is the default). Copy what your own prefix
+                        # binding runs to get the same picker from the board;
+                        # tmux parses it, quotes and `;` included (tmux 3.2+)
 ```
 
 For the fleet summary in every tmux session, add to your own `.tmux.conf`:
@@ -356,6 +389,7 @@ run and nothing else.
 | `j`/`k` | move — the trail's legs in a session (the conversation follows), the reader's lines once the keys are in it |
 | `h`/`l` | across the board's columns, or to the neighbouring session |
 | `m` | the live tmux pane beside the trail instead of the conversation; sticks until pressed again |
+| `t` | jump to any tmux session, not only the ones with a card: the terminal goes to tmux with its session tree up (`jump = "…"` in the config runs your own picker instead), and prefix + `d` returns. It is your `prefix` binding for a board that runs outside tmux, where tmux never sees the key. Off under `-readonly` |
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project. `A` again comes back where it was pressed; `Shift+Tab` or `Esc` on the archive's list is the live board |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |

@@ -106,7 +106,7 @@ func TestLaunchIsNThePromptEnter(t *testing.T) {
 
 	got := tm.opened()
 	want := []string{"new-window", "-d", "-P", "-F", "#{pane_id} #{session_name}:#{window_index}.#{pane_index}",
-		"-t", "=dev:", "-c", api, "-n", "map-the-auth-flow", "--", "claude", "-n", "map-the-auth-flow", `map the "auth" flow`}
+		"-t", "=dev:", "-c", api, "-n", "dev_map-the-auth-flow", "--", "claude", "-n", "dev_map-the-auth-flow", `map the "auth" flow`}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("new-window\n got %q\nwant %q", got, want)
 	}
@@ -160,8 +160,8 @@ func TestLaunchChoices(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	run(m, cmd)
 	got := tm.opened()
-	if want := []string{"-t", "=ops:", "-c", web, "-n", "shell"}; strings.Join(got[5:], "|") != strings.Join(want, "|") {
-		t.Errorf("new-window %q, want a bare shell %q", got, want)
+	if want := []string{"-t", "=ops:", "-c", web, "-n", "ops_shell"}; strings.Join(got[5:], "|") != strings.Join(want, "|") {
+		t.Errorf("new-window %q, want a bare shell named after ops, the session it moved to %q", got, want)
 	}
 }
 
@@ -265,7 +265,7 @@ func TestLaunchPasteKeepsLinesOnlyInThePrompt(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	run(m, cmd)
 	got := tm.opened()
-	if want := []string{"-c", api, "-n", "twolines", "--", "claude", "-n", "twolines", "first\nsecond"}; strings.Join(got[7:], "|") != strings.Join(want, "|") {
+	if want := []string{"-c", api, "-n", "dev_twolines", "--", "claude", "-n", "dev_twolines", "first\nsecond"}; strings.Join(got[7:], "|") != strings.Join(want, "|") {
 		t.Errorf("new-window %q, want %q", got[7:], want)
 	}
 }
@@ -294,7 +294,7 @@ func TestLaunchAsPaneOrSession(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	run(m, cmd)
 	if got, want := tm.opened(), []string{"split-window", "-d", "-h", "-P", "-F", "#{pane_id} #{session_name}:#{window_index}.#{pane_index}",
-		"-t", "%2", "-c", api, "--", "claude", "-n", "split-it", "split it"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		"-t", "%2", "-c", api, "--", "claude", "-n", "dev_split-it", "split it"}; strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("split\n got %q\nwant %q", got, want)
 	}
 
@@ -420,5 +420,140 @@ func TestLaunchThenGoAttaches(t *testing.T) {
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if _, next := m.Update(cmd()); next != nil || handed != nil {
 		t.Errorf("stay handed the terminal over: %q", handed)
+	}
+}
+
+// The config's new_* lines are what the panel opens on: the harness, the
+// place, the worktree and then. A pane with no card pane to split beside
+// falls back to a window rather than opening on a launch that cannot run.
+func TestLaunchOpensOnTheConfigsDefaults(t *testing.T) {
+	m, _, _, _ := launchModel(t)
+	m.newDefaults = launch.Config{Run: "shell", Place: tmuxop.PlaceSession, Worktree: true, Then: "stay"}
+	press(m, "n")
+	f := m.launching
+	if h := m.harnesses[f.harness].Name; h != "shell" {
+		t.Errorf("run = %q, want shell", h)
+	}
+	if p := f.placeOf(); p != tmuxop.PlaceSession {
+		t.Errorf("as = %v, want session", p)
+	}
+	if !f.worktree {
+		t.Error("worktree is off")
+	}
+	if f.goThere {
+		t.Error("new_then = stay, and a shell opened on go")
+	}
+
+	m, _, _, _ = launchModel(t)
+	m.newDefaults = launch.Config{Then: "go"}
+	press(m, "n")
+	if !m.launching.goThere {
+		t.Error("new_then = go, and claude opened on stay")
+	}
+	m.launching.field = launchWith
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // shell, then back
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if !m.launching.goThere {
+		t.Error("a harness change put new_then = go back to the built-in stay")
+	}
+
+	m, _, _, _ = launchModel(t)
+	m.newDefaults = launch.Config{Run: "nonesuch", Place: tmuxop.PlacePane}
+	m.point(sessionKey("s-web")) // no pane
+	press(m, "n")
+	if h := m.harnesses[m.launching.harness].Name; h != "claude" {
+		t.Errorf("an unknown new_run opened on %q, want the first harness", h)
+	}
+	if p := m.launching.placeOf(); p != tmuxop.PlaceWindow {
+		t.Errorf("new_as = pane on a card with no pane opened on %v, want window", p)
+	}
+}
+
+// t hands the terminal to tmux with the jump command up: outside tmux an
+// attach and the command in one invocation, inside just the command. The
+// config's own command goes through whole, for tmux to parse.
+func TestTJumpsToAnyTmuxSession(t *testing.T) {
+	var handed []string
+	var inside bool
+	m, _, _, _ := launchModel(t)
+	m.spawn = func(cmd *exec.Cmd, in bool, done func(error) tea.Msg) tea.Cmd {
+		handed, inside = cmd.Args, in
+		return nil
+	}
+	press(m, "t")
+	if want := []string{"tmux", "attach-session", ";", "run-shell", "-C", "choose-tree -Zs"}; strings.Join(handed, "|") != strings.Join(want, "|") || inside {
+		t.Errorf("handed %q (inside %v), want %q", handed, inside, want)
+	}
+
+	handed = nil
+	m.inTmux, m.jump = true, `display-popup -E "tmux-jump"`
+	press(m, "t")
+	if want := []string{"tmux", "run-shell", "-C", `display-popup -E "tmux-jump"`}; strings.Join(handed, "|") != strings.Join(want, "|") || !inside {
+		t.Errorf("handed %q (inside %v), want %q", handed, inside, want)
+	}
+
+	handed = nil
+	m.readonly = true
+	press(m, "t")
+	if handed != nil || !strings.Contains(m.note, "read-only") {
+		t.Errorf("read-only handed %q, note %q", handed, m.note)
+	}
+}
+
+// The name opens on the tmux session it goes into and an underscore, and
+// follows the in-tmux row until the person makes it their own. The prefix
+// alone is finished with the prompt's words; a session of its own has none.
+func TestLaunchNameFollowsTheTmuxSession(t *testing.T) {
+	m, tm, _, _ := launchModel(t)
+	press(m, "n")
+	f := m.launching
+	if f.name != "dev_" {
+		t.Fatalf("name = %q, want dev_ (the card's tmux session)", f.name)
+	}
+	typeText(m, "fix the build")
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); !strings.Contains(panel, "dev_fix-the-build") {
+		t.Errorf("the name row does not show what the window will be called:\n%s", panel)
+	}
+	f.field = launchName
+	typeText(m, "cleanup")
+	f.field = launchSession
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // ops
+	if f.name != "ops_cleanup" {
+		t.Errorf("after → on in tmux, name = %q, want ops_cleanup", f.name)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	run(m, cmd)
+	if got := strings.Join(tm.opened(), "|"); !strings.Contains(got, "=ops:|") || !strings.Contains(got, "-n|ops_cleanup|") {
+		t.Errorf("opened %q, want ops_cleanup in ops", got)
+	}
+
+	// A name changed in front of the prefix is the person's: the session
+	// row no longer touches it.
+	m, _, _, _ = launchModel(t)
+	press(m, "n")
+	f = m.launching
+	f.field = launchName
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	typeText(m, "mine")
+	f.field = launchSession
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if f.name != "mine" {
+		t.Errorf("name = %q, want mine untouched", f.name)
+	}
+
+	// A tmux session of its own is named by the name: no prefix.
+	m, tm, _, _ = launchModel(t)
+	press(m, "n")
+	typeText(m, "own session")
+	m.launching.field = launchPlace
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // pane: still dev_
+	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // session
+	if m.launching.name != "" {
+		t.Errorf("a session of its own kept the prefix: %q", m.launching.name)
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	run(m, cmd)
+	if got := strings.Join(tm.opened(), "|"); !strings.Contains(got, "-s|own-session|") {
+		t.Errorf("opened %q, want a session named own-session", got)
 	}
 }

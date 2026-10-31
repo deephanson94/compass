@@ -34,6 +34,8 @@ type launchForm struct {
 	dir      int             // the candidate ←/→ last landed on
 	dirText  string          // the directory as it stands: a candidate, or typed
 	name     string
+	prefix   string // the "build_" name starts with: the tmux session it opens in
+	nameOwn  bool   // the person made the name their own, so the prefix stops following the session
 	worktree bool
 	goThere  bool // then: go — attach to the new pane once it opens
 	goSet    bool // …and the person chose it, so a harness change leaves it be
@@ -75,6 +77,18 @@ type launchDoneMsg struct {
 // claude, whose card the deck selects once it joins.
 func goesThere(h launch.Harness) bool { return h.Name != "claude" }
 
+// thenFor is the then row's default for a harness: the config's new_then
+// where it says one, else goesThere.
+func (m *Model) thenFor(h launch.Harness) bool {
+	switch m.newDefaults.Then {
+	case "go":
+		return true
+	case "stay":
+		return false
+	}
+	return goesThere(h)
+}
+
 // offerLaunch is `n`: the panel opens over the deck. Nothing runs until
 // enter. It is compass's third write, and like the other two it is gated
 // on a keypress and switched off by read-only.
@@ -92,9 +106,13 @@ func (m *Model) offerLaunch() {
 	}
 	f := &launchForm{sessions: tmuxop.Sessions(m.runner)}
 	f.dirs, f.favs = m.launchDirs()
-	if len(f.sessions) == 0 {
-		f.place = indexOfPlace(tmuxop.PlaceSession)
+	for i, h := range m.harnesses {
+		if h.Name == m.newDefaults.Run {
+			f.harness = i
+		}
 	}
+	f.place = indexOfPlace(m.newDefaults.Place)
+	f.worktree = m.newDefaults.Worktree
 	if pane, ok := m.selectedPane(); ok {
 		// The selected card's tmux session: a new task most often joins
 		// the work it sits beside.
@@ -103,17 +121,71 @@ func (m *Model) offerLaunch() {
 			f.session = indexOf(f.sessions, pane.Target[:i])
 		}
 	}
+	if f.placeOf() == tmuxop.PlacePane && !f.hasPane {
+		f.place = indexOfPlace(tmuxop.PlaceWindow) // nothing to split beside: the default place
+	}
+	if len(f.sessions) == 0 {
+		f.place = indexOfPlace(tmuxop.PlaceSession)
+	}
 	if len(f.dirs) > 0 {
 		f.dirText = f.dirs[0]
 	} else if wd, err := os.Getwd(); err == nil {
 		f.dirText = wd
 	}
-	f.goThere = goesThere(m.harnesses[0])
+	f.followSession()
+	f.goThere = m.thenFor(m.harnesses[f.harness])
 	f.field = launchPrompt
-	if !m.harnesses[0].TakesPrompt() {
+	if !m.harnesses[f.harness].TakesPrompt() {
 		f.field = launchDir
 	}
 	m.launching = f
+}
+
+// sessionPrefix is what a name starts with where the work opens: the tmux
+// session and an underscore — "build_" for a window in build, or for a split
+// beside a pane in it. A session of its own is named by the name, so it has
+// none.
+func (f *launchForm) sessionPrefix() string {
+	switch f.placeOf() {
+	case tmuxop.PlaceWindow:
+		if len(f.sessions) > 0 {
+			return f.sessions[f.session] + "_"
+		}
+	case tmuxop.PlacePane:
+		if f.hasPane {
+			if s := tmuxSessionName(f.pane.Target); s != "" {
+				return s + "_"
+			}
+		}
+	}
+	return ""
+}
+
+// followSession keeps the name's prefix on the session the work opens in:
+// the panel opens on "build_", and choosing ops on the in-tmux row makes it
+// "ops_", with whatever was typed after it kept. A name the person changed
+// in front of the prefix — or cleared — is theirs, and is left alone.
+func (f *launchForm) followSession() {
+	if f.nameOwn {
+		return
+	}
+	if !strings.HasPrefix(f.name, f.prefix) {
+		f.nameOwn = true
+		return
+	}
+	want := f.sessionPrefix()
+	f.name = want + strings.TrimPrefix(f.name, f.prefix)
+	f.prefix = want
+}
+
+// nameFor is the name the work will get: the name row as it stands, except
+// that the prefix alone is finished with the prompt's own words — "build_"
+// and "explore rate limits" open build_explore-rate-limits, not "build_".
+func (f *launchForm) nameFor(h launch.Harness) string {
+	if !f.nameOwn && f.prefix != "" && f.name == f.prefix {
+		return f.prefix + launch.Request{Harness: h, Prompt: f.prompt}.TaskName()
+	}
+	return f.name
 }
 
 // launchDirs is what ←/→ walks on the dir row: the selected session's
@@ -222,14 +294,16 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 		case launchWith:
 			f.harness = wrapIndex(f.harness+d, len(m.harnesses))
 			if !f.goSet {
-				f.goThere = goesThere(m.harnesses[f.harness])
+				f.goThere = m.thenFor(m.harnesses[f.harness])
 			}
 		case launchThen:
 			f.goThere, f.goSet = !f.goThere, true
 		case launchPlace:
 			f.place = wrapIndex(f.place+d, len(tmuxop.Places))
+			f.followSession()
 		case launchSession:
 			f.session = wrapIndex(f.session+d, len(f.sessions))
+			f.followSession()
 		case launchDir:
 			if len(f.dirs) > 0 {
 				if f.dirText == f.dirs[f.dir] {
@@ -325,6 +399,7 @@ func wrapIndex(i, n int) int {
 // card's pane, so without one the panel stays up and says so.
 func (m *Model) submitLaunch() tea.Cmd {
 	f := m.launching
+	f.followSession() // the prefix is the session it opens in, however the rows were set
 	place := f.placeOf()
 	target := ""
 	switch place {
@@ -345,7 +420,7 @@ func (m *Model) submitLaunch() tea.Cmd {
 		Place:    place,
 		Target:   target,
 		Dir:      strings.TrimSpace(f.dirText),
-		Name:     f.name,
+		Name:     f.nameFor(h),
 		Harness:  h,
 		Worktree: f.worktree,
 		MakeDir:  true, // the dir row has said "new · will be created" since it was typed
@@ -440,7 +515,7 @@ func (m *Model) launchPanel(inner int) []string {
 		return ""
 	}
 
-	task := launch.Request{Harness: h, Prompt: f.prompt, Name: f.name}.TaskName()
+	task := launch.Request{Harness: h, Prompt: f.prompt, Name: f.nameFor(h)}.TaskName()
 	row(launchWith, "run", choice(h.Name), "")
 	row(launchPlace, "as", choice(f.placeOf().String()), "")
 	switch f.placeOf() {
@@ -488,8 +563,8 @@ func (m *Model) launchPanel(inner int) []string {
 		rows = append(rows, readerLine{text: strings.Repeat(" ", 2+labelW) + "↳ " + warn, kind: readerSaid})
 	}
 	name := f.name + cursor(launchName)
-	if f.name == "" && f.field != launchName {
-		name = task
+	if (f.name == "" || f.nameFor(h) != f.name) && f.field != launchName {
+		name = task // what the name will be: the prompt's words, after the prefix if there is one
 	}
 	row(launchName, "name", name, "")
 	wt := "off"

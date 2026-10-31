@@ -13,7 +13,7 @@ import (
 var helpKeys = [][2]string{
 	{"1 – 9", "select a session · a digit under recent opens that finished one"},
 	{"j / k", "move down / up (↓ ↑ too) · h / l the next column, or session"},
-	{"enter", "attach to its pane, at any level (prefix d returns)"},
+	{"enter t", "attach to its pane, at any level · t, any tmux session (prefix d returns)"},
 	{"g", "grab a ▲ and attach — today's question first; a ⊘ is skipped"},
 	{"A", "browse the archive — every past session, by project"},
 	{"tab", "zoom in: board → session → reader"},
@@ -91,7 +91,7 @@ func helpOffered(key, keymap string) bool {
 		return false
 	}
 	for _, f := range map[string][]string{
-		"j / k": {"j/k"}, "enter": {"enter"}, "g": {"g grab"},
+		"j / k": {"j/k"}, "enter t": {"enter"}, "g": {"g grab"},
 		"tab": {"tab deeper", "tab session", "tab reader"}, "⇧ tab": {"⇧tab"}, "[ ]": {"[ ]"},
 		"G": {"G is the present"}, "? / q": {"? help"}, "x X A": {"x hide", "x unhide", "A fleet", "A browses"},
 		"m": {"m live pane", "m conversation"}, "r": {"r reply"}, "x": {"x hide", "x unhide"},

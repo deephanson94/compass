@@ -321,6 +321,8 @@ type Model struct {
 	launching   *launchForm          // the `n` panel, nil while it is down (launch.go)
 	harnesses   []launch.Harness     // what `n` can run, the default first
 	favDirs     []string             // the config's own directories, offered after the selected card's
+	newDefaults launch.Config        // what the `n` panel opens on: the config's new_* lines
+	jump        string               // the tmux command `t` runs once tmux has the terminal
 	landing     landing              // a launched window the deck will select once it joins
 	git         launch.Git           // the worktree's seam; nil is the git on PATH
 	sent        map[string]sentReply // the last line sent to each session, by Key()
@@ -455,13 +457,14 @@ func New(mgr *fleet.Manager) *Model {
 // build, when it is not nil, is asked for the narrator once the program exists:
 // the narrator needs a way to say "labels landed", and that way is a message
 // into this program. A nil return simply leaves the trail on its heuristics.
-func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook string, lc launch.Config, build func(notify func()) Narrator, prs *prstate.Tracker) error {
+func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook, jump, note string, lc launch.Config, build func(notify func()) Narrator, prs *prstate.Tracker) error {
 	m := New(mgr)
-	m.harnesses, m.favDirs = lc.Harnesses, lc.Dirs
+	m.harnesses, m.favDirs, m.newDefaults = lc.Harnesses, lc.Dirs, lc
 	m.prTracker = prs
 	m.readonly = readonly
 	m.showMirror = mirror
-	m.hook = hook
+	m.hook, m.jump = hook, jump
+	m.note = note // what the config could not use, until the first key
 	if len(replies) > 0 {
 		m.replies = replies
 	}
@@ -1075,6 +1078,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "a":
 		return m, m.ask()
+	case "t":
+		if m.level < levelReader {
+			return m, m.jumpTmux()
+		}
 	case "r":
 		m.offerReplies()
 		return m, nil
@@ -2934,9 +2941,32 @@ func (m *Model) attach() tea.Cmd {
 // attachPane hands the terminal to one pane: the selected session's for
 // Enter, the one `n` just opened for a launch that goes there.
 func (m *Model) attachPane(pane tmuxop.Pane) tea.Cmd {
-	cmd := tmuxop.Attach(pane.Target, pane.ID, m.inTmux)
+	return m.handOver(tmuxop.Attach(pane.Target, pane.ID, m.inTmux), pane.Target)
+}
+
+// jumpTmux is `t`: the terminal goes to tmux with the config's jump command
+// up — tmux's session tree unless the config names another — so any session
+// on the server is a keypress away, not only the ones holding a card. It is
+// the `prefix j` of a person whose deck runs outside tmux, where tmux's own
+// bindings never see the key. prefix d comes back, as from Enter.
+func (m *Model) jumpTmux() tea.Cmd {
+	if m.readonly {
+		m.note = "read-only · t is off"
+		return nil
+	}
+	if len(tmuxop.Sessions(m.runner)) == 0 {
+		m.note = "no tmux session to jump to"
+		return nil
+	}
+	return m.handOver(tmuxop.Jump(m.jump, m.inTmux), "tmux's picker")
+}
+
+// handOver runs a command that gives the terminal to tmux: outside tmux the
+// deck suspends until the person detaches; inside, the client moves and the
+// command returns at once. where is what the footer calls the destination.
+func (m *Model) handOver(cmd *exec.Cmd, where string) tea.Cmd {
 	done := func(err error) tea.Msg {
-		return attachDoneMsg{target: pane.Target, inside: m.inTmux, err: err}
+		return attachDoneMsg{target: where, inside: m.inTmux, err: err}
 	}
 	if m.spawn != nil {
 		return m.spawn(cmd, m.inTmux, done)

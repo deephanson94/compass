@@ -104,10 +104,15 @@ func Find(hs []Harness, name string) (Harness, bool) {
 }
 
 // Config is what the config file says about launching: the harnesses
-// beyond the built-ins, and the directories to offer first.
+// beyond the built-ins, the directories to offer first, and what the `n`
+// panel opens on before the person touches a row.
 type Config struct {
 	Harnesses []Harness
-	Dirs      []string // favourites, as written ("~" allowed), in order
+	Dirs      []string     // favourites, as written ("~" allowed), in order
+	Run       string       // new_run: the harness the panel opens on; "" = the first
+	Place     tmuxop.Place // new_as: window (the zero value), pane or session
+	Worktree  bool         // new_worktree: the worktree row starts on
+	Then      string       // new_then: "go" or "stay"; "" = go for what never gets a card, stay for claude
 }
 
 // Request is one launch, as a person asked for it.

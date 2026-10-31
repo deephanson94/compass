@@ -92,6 +92,32 @@ func Attach(target, paneID string, insideTmux bool) *exec.Cmd {
 	)
 }
 
+// DefaultJump is what Jump runs when the config names nothing: tmux's own
+// session tree, zoomed, every session on the server in it.
+const DefaultJump = "choose-tree -Zs"
+
+// Jump hands the terminal to tmux with a picker up, so the person goes to any
+// session on the server — a shell, an editor, anything that never gets a card —
+// the way their own `prefix` binding would take them there from inside tmux.
+// Outside tmux it attaches this terminal (to the session tmux used last) and
+// runs command in that client; inside tmux it runs command in the client
+// compass is in.
+//
+// command is a tmux command line exactly as a binding would hold it, quotes
+// and ";" included. run-shell -C hands it to tmux's own parser (tmux 3.2+)
+// rather than compass splitting it on spaces and getting the quoting wrong.
+//
+// Pure construction: it builds the command and starts nothing.
+func Jump(command string, insideTmux bool) *exec.Cmd {
+	if strings.TrimSpace(command) == "" {
+		command = DefaultJump
+	}
+	if insideTmux {
+		return exec.Command("tmux", "run-shell", "-C", command)
+	}
+	return exec.Command("tmux", "attach-session", ";", "run-shell", "-C", command)
+}
+
 // windowTarget drops the pane index from a pane target: "dev:1.0" → "dev:1".
 // A target without a pane index is already a window target.
 func windowTarget(target string) string {
