@@ -103,7 +103,7 @@ func TestCompassConfigCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "config.toml")
 	t.Setenv("COMPASS_CONFIG", path)
 	var out, errOut bytes.Buffer
-	if rc := runConfig(nil, &out, &errOut); rc != 0 || !strings.Contains(out.String(), "not there yet") || !regexp.MustCompile(`jump +\(default\) choose-tree -Zs`).MatchString(out.String()) {
+	if rc := runConfig(nil, &out, &errOut); rc != 0 || !strings.Contains(out.String(), "not there yet") || !regexp.MustCompile(`jump +\(unset\)`).MatchString(out.String()) {
 		t.Errorf("rc %d, out:\n%s", rc, out.String())
 	}
 	out.Reset()

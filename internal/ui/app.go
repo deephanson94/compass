@@ -326,7 +326,8 @@ type Model struct {
 	harnesses   []launch.Harness     // what `n` can run, the default first
 	favDirs     []string             // the config's own directories, offered after the selected card's
 	newDefaults launch.Config        // what the `n` panel opens on: the config's new_* lines
-	jump        string               // the tmux command `t` runs once tmux has the terminal
+	jump        string               // the tmux command `t` runs once tmux has the terminal; "" is the picker
+	picking     *jumpPicker          // the `t` picker, nil while it is down (picker.go)
 	landing     landing              // a launched window the deck will select once it joins
 	git         launch.Git           // the worktree's seam; nil is the git on PATH
 	sent        map[string]sentReply // the last line sent to each session, by Key()
@@ -1058,6 +1059,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.launching != nil {
 		m.note = ""
 		return m, m.launchKey(msg)
+	}
+	// And the jump picker: what is typed is its filter.
+	if m.picking != nil {
+		m.note = ""
+		return m, m.pickerKey(msg)
 	}
 
 	m.note, m.noteYields = "", false // a keypress answers the last note
@@ -2995,8 +3001,14 @@ func (m *Model) jumpTmux() tea.Cmd {
 		m.note = "read-only · t is off"
 		return nil
 	}
-	if len(tmuxop.Sessions(m.runner)) == 0 {
+	if len(tmuxop.Sessions(m.runner)) == 0 || m.jump == "" && len(m.paneList) == 0 {
 		m.note = "no tmux session to jump to"
+		return nil
+	}
+	if m.jump == "" {
+		// No command of the person's own: the deck's picker, over the
+		// panes the last listing found.
+		m.openPicker()
 		return nil
 	}
 	return m.handOver(tmuxop.Jump(m.jump, m.inTmux), "tmux's picker")
@@ -3625,6 +3637,9 @@ func (m *Model) viewOnce() string {
 		// The launch panel floats over the deck too, centred: it is about
 		// no one column, so it stands over none in particular.
 		overlayCentered(out[3:3+bodyHeight], m.launchPanel(inner), inner)
+	} else if m.picking != nil {
+		// The jump picker likewise: it is about every pane, not a column.
+		overlayCentered(out[3:3+bodyHeight], m.pickerPanel(inner, bodyHeight-1), inner)
 	} else if m.replying {
 		// The quick replies float over the deck as a small panel: a line
 		// of footer was too easy to miss, and the person pressing `r`
@@ -4997,6 +5012,8 @@ func (m *Model) keymapOnce() string {
 		keys = "type to search · enter finds · esc cancels"
 	case m.launching != nil:
 		keys = "new " + m.launching.placeOf().String() + " · tab next · ←/→ choose · enter opens · esc closes"
+	case m.picking != nil:
+		keys = "jump · type to filter · ↑/↓ move · enter goes there · esc closes"
 	case m.replying && m.replyTyping:
 		keys = "type the line · enter sends · esc back"
 	case m.replying:
