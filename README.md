@@ -211,6 +211,8 @@ compass -tea-login work              # which tea login to ask as (default: tea's
 compass status                       # one-shot fleet summary, e.g. "▲1 ●2 ○1 PR▲1 RV▲2"
 compass prs                          # diagnostic: poll Gitea now — each session's checkouts and pull requests
 compass panes                        # diagnostic: which pane holds which session
+compass perf                         # diagnostic: every stage of a launch timed on this machine, read-only —
+                                     #   screenshot it into a session to ask why compass is slow here
 compass new -C ~/work/api explore per-tenant rate limits
                                      # a new tmux window running claude with that prompt
                                      #   (-as pane|session, -with shell, -worktree, -n NAME, -t TARGET; see below)

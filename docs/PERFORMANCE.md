@@ -10,6 +10,29 @@ against a known baseline rather than guessed at.
 
 ## 1. How to measure
 
+On a real machine, start with `compass perf`. It times each stage of a launch
+on this machine's own transcripts and changes nothing: the resume cache is
+opened read-only and tmux is only listed. The output is one screen of plain
+text, meant to be screenshotted or pasted into a conversation.
+
+- **LAUNCH**: open the resume cache; scan and refresh from the cache (every
+  launch after the first); scan and refresh with no cache (the first launch).
+  "scan, from cache" counts the files the cache answered for and gives the
+  reason each other file was peeked: `new`, `grew`, `shrank`, `touched` (mtime
+  moved but size did not) or `fell quiet` (owed the wide ask walk).
+- **LIVE SESSIONS**: each live transcript replayed alone on one core, split
+  into read+parse, state machine and journey segmenter. "unread fleet" and
+  "unread board" are the bytes the saved marks leave to read; `all · no mark`
+  means that session is replayed in full at every launch.
+- **SLOWEST PEEKS**: the five most expensive head+tail peeks in the cold scan.
+- **TMUX**: listing panes, reading Claude Code's process registry, pairing
+  panes with sessions.
+- **HINTS**: what the numbers point at. A missing cache, a cache that answers
+  for under 90% of files, live sessions with no mark, and a launch from cache
+  over 0.5 s.
+
+The benchmarks below are for changing compass itself.
+
 ```sh
 # per-keypress cost: a j/k walk on a grown very-long scene, 200x50
 go test ./internal/ui -run XXX -bench Walk -benchtime 20x
