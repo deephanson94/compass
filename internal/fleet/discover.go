@@ -130,7 +130,7 @@ const titleMax = 80
 // Discover is uncached: its callers are one-shot. The Manager, which scans
 // every second, uses the same walk with a cache (see scanProjects).
 func Discover(root string) ([]SessionInfo, error) {
-	out, _, err := scanProjects(root, nil, time.Now().Add(-DefaultLiveWindow))
+	out, _, err := scanProjects(root, nil, time.Now().Add(-DefaultLiveWindow), nil)
 	return out, err
 }
 
@@ -159,7 +159,11 @@ type cachedInfo struct {
 // Only discovery is cached. A live session's fresh lines still arrive through
 // its tailer, which reads the file itself — so a stale peek can never make a
 // running session look quiet.
-func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]SessionInfo, map[string]cachedInfo, error) {
+//
+// seen, when not nil, is told about every transcript the walk keeps: whether
+// the cache answered for it and, if not, why and how long the peek took. It
+// is how `compass perf` times this walk rather than a copy of it.
+func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time, seen func(ScanFile)) ([]SessionInfo, map[string]cachedInfo, error) {
 	if root == "" {
 		return nil, nil, nil
 	}
@@ -193,9 +197,14 @@ func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]S
 			}
 			path := filepath.Join(dir, f.Name())
 			wide := fi.ModTime().Before(quiet)
-			if c, ok := prev[path]; ok && c.size == fi.Size() && c.modTime.Equal(fi.ModTime()) && (c.wide || !wide) {
+			c, ok := prev[path]
+			why := staleBecause(c, ok, fi, wide)
+			if why == "" {
 				out = append(out, c.info)
 				next[path] = c
+				if seen != nil {
+					seen(ScanFile{Path: path, Size: fi.Size(), Cached: true})
+				}
 				continue
 			}
 			info := SessionInfo{
@@ -209,7 +218,14 @@ func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]S
 			// so its ask walk gets the whole widening (round 59). The
 			// crossing is what re-opens it: a file peeked narrow while it
 			// was moving is read again, once, when it falls quiet.
+			var t0 time.Time
+			if seen != nil {
+				t0 = time.Now()
+			}
 			peek(&info, fi.Size(), wide)
+			if seen != nil {
+				seen(ScanFile{Path: path, Size: fi.Size(), Why: why, Took: time.Since(t0)})
+			}
 			out = append(out, info)
 			next[path] = cachedInfo{size: fi.Size(), modTime: fi.ModTime(), info: info, wide: wide}
 		}
@@ -222,6 +238,36 @@ func scanProjects(root string, prev map[string]cachedInfo, quiet time.Time) ([]S
 		return out[i].ID < out[j].ID
 	})
 	return out, next, nil
+}
+
+// ScanFile is one transcript as the discovery walk met it. Cached says the
+// cache answered and the file was not opened; otherwise Why says what sent
+// the walk to the file and Took is what peeking it cost.
+type ScanFile struct {
+	Path   string
+	Size   int64
+	Cached bool
+	Why    string // "new", "grew", "shrank", "touched" or "fell quiet"
+	Took   time.Duration
+}
+
+// staleBecause is why a cached peek cannot answer for a file, or "" when it
+// can: the cache has never seen it, its size or mtime moved, or it went quiet
+// since a narrow peek and is owed the wide one.
+func staleBecause(c cachedInfo, ok bool, fi os.FileInfo, wide bool) string {
+	switch {
+	case !ok:
+		return "new"
+	case fi.Size() > c.size:
+		return "grew"
+	case fi.Size() < c.size:
+		return "shrank"
+	case !c.modTime.Equal(fi.ModTime()):
+		return "touched"
+	case wide && !c.wide:
+		return "fell quiet"
+	}
+	return ""
 }
 
 // Peeking reads both ends of a transcript and nothing in between: cwd, branch
