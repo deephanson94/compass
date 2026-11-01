@@ -20,7 +20,7 @@ text, meant to be screenshotted or pasted into a conversation.
   "scan, from cache" counts the files the cache answered for and gives the
   reason each other file was peeked: `new`, `grew`, `shrank`, `touched` (mtime
   moved but size did not) or `fell quiet` (owed the wide ask walk).
-- **LIVE SESSIONS**: each live transcript replayed alone on one core, split
+- **LIVE SESSIONS**: each live transcript replayed alone from its first byte, split
   into read+parse, state machine and journey segmenter. "unread fleet" and
   "unread board" are the bytes the saved marks leave to read; `all · no mark`
   means that session is replayed in full at every launch.
@@ -308,6 +308,33 @@ A cold launch is unchanged on 4 cores (`BenchmarkStartupRefresh` 2.06 s and
 1.90 s): it already replays its live sessions one per core, so the cores were
 busy. The gain is for one large file at a time: the reader, or a launch with
 fewer live sessions than cores.
+
+### 4.4 The reader's document: clip stops at the cut
+
+With the parse fast (§4.3), building the reader's document was what was left
+of opening the reader: about 130 ms for 6,000 events on 4 cores, and it runs
+again each time a live session adds events, since the document is cached on
+the event count. Profiled, most of it was `clip` on the header row of each
+tool result. That row is the result's first line, which can be tens of
+kilobytes, and `clip` measured the whole of it, turned the whole of it into
+runes, then kept about 120 cells.
+
+- `fitsCells`: a string of `w` bytes or fewer fits, because a cell is never
+  narrower than a byte is long; a long string whose first `4w+64` bytes are
+  already wider than `w` does not fit. Otherwise it is measured whole, as
+  before.
+- The cut decodes runes only up to the first one past it, which the
+  never-cut-a-number rule needs.
+- Printable ASCII is one cell; any other rune is measured by lipgloss, as
+  before.
+
+| 60 MB transcript, 6,000 events, 4 cores | before | after |
+|---|---|---|
+| `readerDoc` | 125–140 ms | 55–65 ms |
+
+`clip` is called across the whole deck, so every frame gains a little too.
+`TestClipCutsWhereItAlwaysCut` keeps the old `clip` verbatim and requires the
+new one to give the same row for every case at every width from 0 to 130.
 
 ## 5. Rules that fall out of this
 

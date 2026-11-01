@@ -149,7 +149,7 @@ func printPerf(w io.Writer, root, cachePath string, window time.Duration, fresh 
 	// side by side; here each is timed on its own so the heavy one shows.
 	rows := perfLive(sessions, before)
 	if len(rows) > 0 {
-		fmt.Fprintln(w, "\nLIVE SESSIONS  full replay, one core · \"unread\" is what the cache leaves to read")
+		fmt.Fprintln(w, "\nLIVE SESSIONS  each replayed alone, from byte 0 · \"unread\" is what the cache leaves to read")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "  session\tsize\tevents\tread+parse\tmachine\tjourney\tunread fleet\tunread board")
 		for _, r := range rows {
@@ -287,7 +287,7 @@ func perfHints(cachePath string, files, cached int, warm time.Duration, rows []p
 		}
 	}
 	if len(bare) > 0 {
-		out = append(out, []string{fmt.Sprintf("%d live with no usable mark, replayed in full at every launch (%s on one core): %s.",
+		out = append(out, []string{fmt.Sprintf("%d live with no usable mark, replayed in full at every launch (%s, one after another): %s.",
 			len(bare), perfDur(cost), strings.Join(bare, ", ")),
 			"A mark is saved once a deck or `compass status` has read the session."})
 	}
@@ -299,7 +299,7 @@ func perfHints(cachePath string, files, cached int, warm time.Duration, rows []p
 		}
 	}
 	if replay > 200*time.Millisecond {
-		out = append(out, []string{fmt.Sprintf("%d live with no board mark: their columns replay in full when the board opens (%s on one core).", cols, perfDur(replay)),
+		out = append(out, []string{fmt.Sprintf("%d live with no board mark: their columns replay in full when the board opens (%s, one after another).", cols, perfDur(replay)),
 			"Only the deck saves board marks; `compass status` does not."})
 	}
 	if warm > 500*time.Millisecond {

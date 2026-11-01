@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deephanson94/compass/internal/fleet"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/deephanson94/compass/internal/journey"
@@ -220,11 +221,32 @@ func padLeft(s string, w int) string {
 
 // clip truncates plain text to w display runes, marking the cut with "…".
 // Content is truncated, never wrapped (SPEC §4).
+// fitsCells says whether s is at most w cells wide without measuring all of
+// it. A cell is never narrower than a byte is long, so a string of w bytes or
+// fewer fits; and a long string whose first stretch is already wider than w
+// does not, however it goes on. The reader clips the first line of every tool
+// result, which can be tens of kilobytes on one line, to a panel's width: the
+// whole of it was measured to learn that it did not fit.
+func fitsCells(s string, w int) bool {
+	if len(s) <= w {
+		return true
+	}
+	if probe := 4*w + 64; len(s) > probe {
+		for probe > 0 && !utf8.RuneStart(s[probe]) {
+			probe-- // never measure half a rune
+		}
+		if lipgloss.Width(s[:probe]) > w {
+			return false
+		}
+	}
+	return lipgloss.Width(s) <= w
+}
+
 func clip(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if lipgloss.Width(s) <= w {
+	if fitsCells(s, w) {
 		return s
 	}
 	if w == 1 {
@@ -233,16 +255,21 @@ func clip(s string, w int) string {
 	// Cells, not runes: one CJK ideograph or emoji occupies two columns, and a
 	// panel measured in runes overflows into its neighbour. Session titles,
 	// branches and tmux window names are all arbitrary user text.
-	var b strings.Builder
-	used := 0
-	runes := []rune(s)
-	kept := 0
-	for _, r := range runes {
-		cw := lipgloss.Width(string(r))
+	//
+	// Only the runes up to the cut are decoded, and the one that falls on it,
+	// which the number rule below looks at: the rest of a long line is never
+	// turned into runes at all.
+	var runes []rune
+	used, kept := 0, 0
+	for _, r := range s {
+		runes = append(runes, r)
+		cw := 1 // printable ASCII, which is nearly all of it, is one cell
+		if r < 0x20 || r >= 0x7f {
+			cw = lipgloss.Width(string(r))
+		}
 		if used+cw > w-1 {
 			break
 		}
-		b.WriteRune(r)
 		used += cw
 		kept++
 	}
