@@ -391,6 +391,8 @@ type Model struct {
 	handedAt    time.Time            // when the deck last gave tmux the terminal, by the wall clock
 	opened      map[string]bool      // sessions the person opened this run, by Key(): a look to commit on leaving
 	hiddenFile  string               // where they persist; "" = memory only
+	snoozed     map[string]time.Time // `z`: each snoozed session and the beat it stood on (snooze.go)
+	snoozedFile string
 	pins        []string             // sessions pinned to the board's front with `p`, by Key(), in pin order (cards.go)
 	pinFile     string               // where they persist; "" = memory only
 	seen        map[string]time.Time // when each session's trail or pane was last opened
@@ -487,6 +489,7 @@ func Run(mgr *fleet.Manager, readonly, mirror bool, replies []string, hook, jump
 		// means unread" to mean anything across restarts.
 		m.LoadSeen(filepath.Join(base, "compass", "seen.json"))
 		m.LoadHidden(filepath.Join(base, "compass", "hidden.json"))
+		m.LoadSnoozed(filepath.Join(base, "compass", "snoozed.json"))
 		m.LoadPins(filepath.Join(base, "compass", "pins.json"))
 	}
 	m.inTmux = os.Getenv("TMUX") != ""
@@ -894,6 +897,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// given (#342): SetSessions gives them to a harness's fleet, and
 		// nothing else ever called it, so the deck that shipped numbered no
 		// live session and `1` opened the band's first archived row.
+		m.wakeSnoozed()
 		m.assignDigits()
 		m.clampSelection()
 		m.pairPoll(msg.pairFor, msg.pairEvents)
@@ -1135,7 +1139,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "x":
+		key := m.selectedKey
 		m.toggleHidden()
+		if !m.hidden[key] {
+			m.unsnooze(key) // brought back by hand: the snooze is over too
+		}
+		return m, nil
+	case "z":
+		m.snooze()
 		return m, nil
 	case "X":
 		m.sweepWaiting()
