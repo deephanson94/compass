@@ -1017,3 +1017,44 @@ func TestARenameBeatsTheLaunchName(t *testing.T) {
 		t.Fatalf("after the rename: %v, %d sessions, name %q", err, len(got), got[0].Info.Name)
 	}
 }
+
+// A rename typed mid-session survives compass restarting. The rename line is
+// where the person typed it: past the head the scan reads (it stops at the
+// first prompt) and, once the session has gone on, before the tail it reads.
+// The tailer saw it, and the run after resumes past it, so the name has to
+// travel with the rest of the session's resume state, or the card falls
+// back to the folder's name.
+func TestARenameMidSessionSurvivesARestart(t *testing.T) {
+	root := t.TempDir()
+	const slug = "-home-user-alpha"
+	id := "ee000015-0000-4000-8000-000000000015"
+	b := newTranscript(t, id, "/home/user/alpha", "main").
+		prompt(ago(time.Hour), "debug the rag hook").
+		text(ago(59*time.Minute), "Looking.")
+	b.lines = append(b.lines, `{"type":"custom-title","customTitle":"rag","sessionId":"`+id+`"}`+"\n")
+	// The session goes on long past the rename: the tail's window no longer
+	// reaches back to it.
+	for i := 0; i < 400; i++ {
+		at := ago(58*time.Minute - time.Duration(i)*time.Second)
+		b.prompt(at, strings.Repeat("keep going ", 20)).text(at.Add(time.Millisecond), strings.Repeat("ok, still going ", 20))
+	}
+	b.write(root, slug)
+
+	cache := fleet.OpenResumeCache(filepath.Join(t.TempDir(), "resume.json"))
+	first := liveManager(root)
+	first.UseResumeCache(cache)
+	one, err := first.Refresh(fleetNow)
+	if err != nil || len(one) != 1 || one[0].Info.Name != "rag" {
+		t.Fatalf("first run, tailed from the start: %v, %d sessions, name %q", err, len(one), one[0].Info.Name)
+	}
+
+	second := liveManager(root)
+	second.UseResumeCache(cache)
+	two, err := second.Refresh(fleetNow.Add(time.Second))
+	if err != nil || len(two) != 1 {
+		t.Fatalf("second run: %v, %d sessions", err, len(two))
+	}
+	if two[0].Info.Name != "rag" {
+		t.Errorf("after a restart the name is %q, want rag", two[0].Info.Name)
+	}
+}

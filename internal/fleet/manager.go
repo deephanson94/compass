@@ -551,7 +551,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 
 // fold is the entry's own resume state (EntryFold).
 func (e *entry) fold() EntryFold {
-	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model, Dirs: e.dirs, PRs: e.prs}
+	f := EntryFold{Class: e.class, HasClass: e.hasClass, TitleRank: e.titleRank, Model: e.info.Model, Dirs: e.dirs, PRs: e.prs, Name: e.info.Name}
 	if e.outcomes != nil {
 		f.Outcomes = e.outcomes.Fold()
 	}
@@ -567,6 +567,11 @@ func (e *entry) restore(f EntryFold) {
 	e.prs = append([]string(nil), f.PRs...)
 	if e.info.Model == "" {
 		e.info.Model = f.Model
+	}
+	if f.Name != "" {
+		// What the tail had read up to the mark; a rename written since
+		// is past the mark, and the tailer reads it next.
+		e.info.Name = f.Name
 	}
 }
 
