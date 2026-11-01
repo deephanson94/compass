@@ -50,7 +50,7 @@ func printPerf(w io.Writer, root, cachePath string, window time.Duration, fresh 
 
 	quiet := now.Add(-window) // the deck's own quiet mark, which -live-within moves
 	t0 = time.Now()
-	_, warmFiles, err := fleet.ProbeScan(root, cache, quiet)
+	scanned, warmFiles, err := fleet.ProbeScan(root, cache, quiet)
 	warmScan := time.Since(t0)
 	if err != nil {
 		fmt.Fprintf(w, "root   %s: %v\n", tilde(root), err)
@@ -65,7 +65,28 @@ func printPerf(w io.Writer, root, cachePath string, window time.Duration, fresh 
 	fmt.Fprintf(w, "root   %s · %d transcripts in %d projects · %s\n", tilde(root), len(warmFiles), len(projects), perfBytes(total))
 	fmt.Fprintf(w, "cache  %s · %s\n\n", tilde(cachePath), cacheLine)
 
+	// The panes come first: a session in a pane is live whatever its clock
+	// says, and the deck tells its Manager which ones are before it judges
+	// them. A refresh timed without them would leave those sessions archived
+	// and skip the replays that make a launch cost what it costs.
+	t0 = time.Now()
+	panes, paneErr := tmuxop.ListPanes(tmuxop.RealRunner{})
+	listTook := time.Since(t0)
+	var pidsTook, pairTook time.Duration
+	paired := map[string]bool{}
+	if paneErr == nil {
+		t0 = time.Now()
+		byPID := fleet.RunningPIDs(root)
+		pidsTook = time.Since(t0)
+		t0 = time.Now()
+		for key := range tmuxop.MapSessionsBy(scanned, panes, tmuxop.RealProc{}, byPID) {
+			paired[key] = true
+		}
+		pairTook = time.Since(t0)
+	}
+
 	warm := fresh()
+	warm.MarkPaneMapped(paired)
 	warm.UseResumeCache(cache)
 	t0 = time.Now()
 	sessions, err := warm.Refresh(now)
@@ -74,21 +95,29 @@ func printPerf(w io.Writer, root, cachePath string, window time.Duration, fresh 
 		fmt.Fprintln(w, "refresh:", err)
 		return
 	}
-	live, archived := 0, 0
+	live, archived, fromFiles := 0, 0, 0
 	for _, s := range sessions {
 		if s.Live {
 			live++
 		} else {
 			archived++
 		}
+		if transcript.SchemeOf(s.Info.TranscriptPath) == "" {
+			fromFiles++
+		}
 	}
+	// Transcripts the scan read that the fleet then drops: sessions run in
+	// an excluded directory, which is chiefly the narrator's own.
+	dropped := len(warmFiles) - fromFiles
 
 	t0 = time.Now()
-	infos, coldFiles, _ := fleet.ProbeScan(root, nil, quiet)
+	_, coldFiles, _ := fleet.ProbeScan(root, nil, quiet)
 	coldScan := time.Since(t0)
 
 	t0 = time.Now()
-	_, _ = fresh().Refresh(now)
+	cold := fresh()
+	cold.MarkPaneMapped(paired)
+	_, _ = cold.Refresh(now)
 	coldRefresh := time.Since(t0)
 
 	misses := map[string]int{}
@@ -107,7 +136,11 @@ func printPerf(w io.Writer, root, cachePath string, window time.Duration, fresh 
 	}
 	stage("open resume cache", openTook, "")
 	stage("scan, from cache", warmScan, fmt.Sprintf("%d cached · %d peeked%s", cached, len(warmFiles)-cached, perfMisses(misses)))
-	stage("refresh, from cache", warmRefresh, fmt.Sprintf("the deck's launch · %d live · %d archived", live, archived))
+	note := fmt.Sprintf("the deck's launch · %d live · %d archived", live, archived)
+	if dropped > 0 {
+		note += fmt.Sprintf(" · %d excluded", dropped)
+	}
+	stage("refresh, from cache", warmRefresh, note)
 	stage("scan, cold", coldScan, fmt.Sprintf("%d peeked", len(coldFiles)))
 	stage("refresh, cold", coldRefresh, "the first launch without a cache")
 
@@ -136,19 +169,11 @@ func printPerf(w io.Writer, root, cachePath string, window time.Duration, fresh 
 	}
 
 	fmt.Fprintln(w, "\nTMUX")
-	t0 = time.Now()
-	panes, err := tmuxop.ListPanes(tmuxop.RealRunner{})
-	list := time.Since(t0)
-	if err != nil {
-		fmt.Fprintf(w, "  list panes %s · %v\n", perfDur(list), err)
+	if paneErr != nil {
+		fmt.Fprintf(w, "  list panes %s · %v\n", perfDur(listTook), paneErr)
 	} else {
-		t0 = time.Now()
-		byPID := fleet.RunningPIDs(root)
-		pids := time.Since(t0)
-		t0 = time.Now()
-		mapped := tmuxop.MapSessionsBy(infos, panes, tmuxop.RealProc{}, byPID)
 		fmt.Fprintf(w, "  list panes %s · %d panes · running registry %s · pair with sessions %s · %d paired\n",
-			perfDur(list), len(panes), perfDur(pids), perfDur(time.Since(t0)), len(mapped))
+			perfDur(listTook), len(panes), perfDur(pidsTook), perfDur(pairTook), len(paired))
 	}
 
 	hints := perfHints(cachePath, len(warmFiles), cached, warmRefresh, rows)
