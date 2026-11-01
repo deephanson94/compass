@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 // Tailer incrementally reads one transcript file. It remembers how far it has
@@ -124,37 +126,104 @@ func (t *Tailer) Poll() ([]Event, error) {
 		t.carry = nil
 	}
 
-	var events []Event
+	whole := len(buf)
+	var lines [][]byte
 	for {
 		i := bytes.IndexByte(buf, '\n')
 		if i < 0 {
 			break
 		}
-		line := buf[:i]
+		lines = append(lines, buf[:i])
 		buf = buf[i+1:]
-		if ev, ok := t.parse(line); ok {
-			events = append(events, ev)
-		}
 	}
 	if len(buf) > 0 {
 		t.carry = append([]byte(nil), buf...)
 	}
+	events, skipped := parseLines(lines, whole-len(buf))
+	t.skipped += skipped
 	return events, nil
 }
 
-// parse turns one complete line into an event, counting malformed JSON. Blank
-// lines are not malformed — they are nothing — so they are dropped uncounted.
-func (t *Tailer) parse(line []byte) (Event, bool) {
-	line = bytes.TrimRight(line, "\r")
-	if len(bytes.TrimSpace(line)) == 0 {
-		return Event{}, false
+// parallelMin is how many bytes a read must hold before its lines are decoded
+// side by side. The decode is nearly all of a replay — a 67MB transcript was
+// 617ms of it on one core of thirty-two — and every line decodes on its own.
+// An ordinary poll is a few lines, where workers would cost more than they buy.
+const parallelMin = 1 << 20
+
+// parseLines decodes lines in order and counts the malformed ones. A large
+// read is cut into contiguous blocks of about equal bytes, decoded one block
+// per worker, and joined in block order, so the events and the count are what
+// one pass would give.
+func parseLines(lines [][]byte, size int) ([]Event, int) {
+	workers := runtime.GOMAXPROCS(0)
+	if size < parallelMin || workers < 2 || len(lines) < 2*workers {
+		return parseBlock(lines)
 	}
-	ev, err := ParseLine(line)
-	if err != nil {
-		t.skipped++
-		return Event{}, false
+	// More blocks than workers, so one block of huge tool results does not
+	// leave the others idle.
+	n := 4 * workers
+	target := size/n + 1
+	var blocks [][][]byte
+	start, acc := 0, 0
+	for i, l := range lines {
+		acc += len(l) + 1
+		if acc >= target {
+			blocks = append(blocks, lines[start:i+1])
+			start, acc = i+1, 0
+		}
 	}
-	return ev, true
+	if start < len(lines) {
+		blocks = append(blocks, lines[start:])
+	}
+	parsed := make([][]Event, len(blocks))
+	bad := make([]int, len(blocks))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < min(workers, len(blocks)); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for b := range next {
+				parsed[b], bad[b] = parseBlock(blocks[b])
+			}
+		}()
+	}
+	for b := range blocks {
+		next <- b
+	}
+	close(next)
+	wg.Wait()
+
+	total, skipped := 0, 0
+	for b := range parsed {
+		total += len(parsed[b])
+		skipped += bad[b]
+	}
+	events := make([]Event, 0, total)
+	for _, p := range parsed {
+		events = append(events, p...)
+	}
+	return events, skipped
+}
+
+// parseBlock decodes lines one after another. Blank lines are not malformed —
+// they are nothing — so they are dropped uncounted.
+func parseBlock(lines [][]byte) ([]Event, int) {
+	var events []Event
+	skipped := 0
+	for _, line := range lines {
+		line = bytes.TrimRight(line, "\r")
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		ev, err := ParseLine(line)
+		if err != nil {
+			skipped++
+			continue
+		}
+		events = append(events, ev)
+	}
+	return events, skipped
 }
 
 // Skipped is the number of malformed-JSON lines dropped so far.
