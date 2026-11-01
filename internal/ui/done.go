@@ -39,16 +39,25 @@ func SetDone(after time.Duration, color string) {
 
 // done says a finished turn is still news: idle, unread, and finished
 // within doneFor.
+//
+// Finished is when the turn ended — the model's last word, the same moment
+// the card's age counts from (headSince) — not the transcript's last line.
+// A resume, a hook or an agent reporting back writes lines to a session
+// that finished days ago, and measured by those a three-day-old card read
+// done beside its own "3d".
 func (m *Model) done(s fleet.Session) bool {
 	if m.archiveView || !s.Live || s.Snap.State != state.Idle || s.Snap.Interrupted {
 		return false // an Esc is yours: you saw where it stopped
 	}
-	last := s.Info.LastEventAt
-	if last.IsZero() || m.now.Sub(last) > doneFor {
+	finished := s.Snap.Since
+	if finished.IsZero() {
+		finished = s.Info.LastEventAt
+	}
+	if finished.IsZero() || m.now.Sub(finished) > doneFor {
 		return false
 	}
 	seen, ok := m.seen[s.Info.Key()]
-	return !ok || seen.Before(last)
+	return !ok || seen.Before(finished)
 }
 
 // markSeenAt records a look at t rather than at the deck's clock. The deck
