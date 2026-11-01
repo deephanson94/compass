@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deephanson94/compass/internal/state"
@@ -120,4 +121,55 @@ func TestQuietRowsSayTheVerdictAndFallBackToTheStrip(t *testing.T) {
 	if !strings.Contains(strip, "s3") || !strings.Contains(strip, "demo") {
 		t.Errorf("the strip should name the quiet sessions, got %q\n%s", strip, frame)
 	}
+}
+
+// The arrows walk the cards and step past the quiet rows; a quiet session
+// selected by its digit is drawn as one more card at the end, so the cards
+// around it stand where they stood (the board reshuffled on every other
+// arrow when it took its place in the order).
+func TestArrowsSkipQuietRowsAndNothingMoves(t *testing.T) {
+	withCards(t)
+	withQuiet(t, []string{"w"}, 0) // s3 and demo are quiet
+	m := sceneModel(sceneCards(), 290, 80)
+	m.point(sessionKey("harness"))
+	seen := map[string]bool{}
+	for i := 0; i < 12; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		seen[selectedName(m)] = true
+	}
+	for _, q := range []string{"s3", "demo"} {
+		if seen[q] {
+			t.Errorf("→ stepped onto quiet %s", q)
+		}
+	}
+
+	m.point(sessionKey("harness"))
+	before := ansi.Strip(m.View())
+	m.point(sessionKey("s3")) // its digit
+	after := ansi.Strip(m.View())
+	for _, name := range []string{"harness", "flow", "etl", "api", "stages", "gemma"} {
+		if b, a := cardColumn(before, name), cardColumn(after, name); b != a {
+			t.Errorf("%s's card moved from %v to %v when a quiet session was selected", name, b, a)
+		}
+	}
+	if !strings.Contains(after, "▸7 ") && !strings.Contains(after, "▸6 ") {
+		t.Errorf("the selected quiet session should be a card:\n%s", after)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if got := selectedName(m); got == "s3" || got == "demo" {
+		t.Errorf("← from the quiet card went to %s, want the last card", got)
+	}
+}
+
+// cardColumn is where a card's head row stands: its line and its column.
+func cardColumn(frame, name string) [2]int {
+	for y, l := range strings.Split(frame, "\n") {
+		if y < 2 {
+			continue // the title bar names the selection, not a card
+		}
+		if x := strings.Index(l, " "+name+" "); x >= 0 && strings.ContainsAny(l, "○●▲◍↻") {
+			return [2]int{y, len([]rune(l[:x]))}
+		}
+	}
+	return [2]int{-1, -1}
 }

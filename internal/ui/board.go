@@ -202,6 +202,27 @@ func (m *Model) owedKeys() []string {
 // screen left to right rather than the fleet list's grouping.
 func (m *Model) boardMove(delta int) {
 	order := m.viewOrder()
+	if cardBoard {
+		// The arrows walk the cards: a quiet row is a digit away, and
+		// stepping onto one turned it into a card and back on the next key.
+		// A quiet session selected by its digit stands where its card is
+		// drawn: last.
+		var cards []int
+		last := -1
+		for _, i := range order {
+			s := m.sessions[i]
+			switch {
+			case !m.quietBy(s):
+				cards = append(cards, i)
+			case s.Info.Key() == m.selectedKey:
+				last = i
+			}
+		}
+		if last >= 0 {
+			cards = append(cards, last)
+		}
+		order = cards
+	}
 	if len(order) == 0 {
 		return
 	}
@@ -796,8 +817,8 @@ func bandWidth(w, k, cw int) int {
 func (m *Model) drawnCount(order []int) int {
 	drawn := 0
 	for _, i := range order {
-		if m.quiet(m.sessions[i]) {
-			continue // a row under the cards, not a card
+		if m.quietBy(m.sessions[i]) {
+			continue // a row under the cards, not a card: selected, it is one more at the end
 		}
 		if m.archiveView || m.boardRank(m.sessions[i]) <= owedRank {
 			drawn++

@@ -44,11 +44,19 @@ func SetQuiet(tmuxSessions []string, after time.Duration) {
 // neither pinned nor selected, and in a quiet tmux session or idle past
 // quietAfter.
 func (m *Model) quiet(s fleet.Session) bool {
+	return s.Info.Key() != m.selectedKey && m.quietBy(s)
+}
+
+// quietBy is quiet by the session's own terms, selected or not: where a
+// row stands, and what the arrows step past. A selected quiet session is
+// drawn as a card, but at the board's end, so the cards around it never
+// move for it.
+func (m *Model) quietBy(s fleet.Session) bool {
 	if !cardBoard || m.archiveView || (len(quietTmux) == 0 && quietAfter == 0) {
 		return false
 	}
 	key := s.Info.Key()
-	if key == m.selectedKey || m.pinned(key) || !s.Live {
+	if m.pinned(key) || !s.Live {
 		return false
 	}
 	if word, _, _ := m.cardState(s, m.trails[key]); word != cardIdle && word != cardDone {
@@ -61,19 +69,29 @@ func (m *Model) quiet(s fleet.Session) bool {
 }
 
 // splitQuiet takes the quiet sessions out of keys, in order, and says how
-// many it took.
+// many it took. A quiet session that is selected keeps its card, at the
+// end: drawn where its place in the order is, it pushed every card after
+// it along one slot, and back again the moment the selection moved on —
+// the board reshuffled on every other arrow (#252's harm, again).
 func (m *Model) splitQuiet(keys []string) ([]string, int) {
 	if !cardBoard || m.archiveView {
 		return keys, 0
 	}
 	out := make([]string, 0, len(keys))
-	n := 0
+	n, selected := 0, ""
 	for _, k := range keys {
-		if s, ok := m.session(k); ok && m.quiet(s) {
-			n++
+		if s, ok := m.session(k); ok && m.quietBy(s) {
+			if k == m.selectedKey {
+				selected = k
+			} else {
+				n++
+			}
 			continue
 		}
 		out = append(out, k)
+	}
+	if selected != "" {
+		out = append(out, selected)
 	}
 	return out, n
 }
