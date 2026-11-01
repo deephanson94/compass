@@ -262,6 +262,29 @@ parse, `encoding/json` scans each value twice (validate, then decode) and
 the polymorphic `content` subtree twice more; a hand-rolled or third-party
 decoder is the next step if the parse itself is ever the bottleneck.
 
+### 4.2 The board does not wait on the reader
+
+With the cache warm, the fleet drew in 0.1 s, yet every card said "reading
+its transcript…" for another 2 s. The second poll of a launch polls the
+board's columns and the selected session together, and returns them in one
+message. The columns resume from their journey marks. The selected session
+was asked for its events, which no fold carries, so it was replayed from the
+first byte, and every card waited on that replay.
+
+Now, when the selected session's feed does not yet keep its events, the poll
+takes its trail the way a column does (from the journey mark), marks the
+events as owed (`fleetMsg.eventsOwed`), and fires the next poll at once.
+That poll reads the conversation whatever it costs (`Model.eventsDue`), so it
+is put off only once.
+
+| warm launch, 6 live sessions, the selected one 60 MB | before | after |
+|---|---|---|
+| fleet drawn | 0.10 s | 0.10 s |
+| every card drawn | 2.1 s | 0.15 s |
+
+The selected session's reader still pays the full replay; it now does so
+after the board is drawn rather than before.
+
 ## 5. Rules that fall out of this
 
 - **A document is built once per change, not once per question.** Anything
