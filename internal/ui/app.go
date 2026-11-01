@@ -177,10 +177,11 @@ type replyChoice struct {
 type replyKind int
 
 const (
-	replyLine   replyKind = iota // typed and entered
-	replyRemedy                  // the remedy a refusal names, typed and entered
-	replyAnswer                  // the menu's own digit, then enter
-	replyStop                    // escape: the CLI interrupts its turn
+	replyLine    replyKind = iota // typed and entered
+	replyRemedy                   // the remedy a refusal names, typed and entered
+	replyAnswer                   // the menu's own digit, then enter
+	replyStop                     // escape: the CLI interrupts its turn
+	replyRestart                  // R's restart: /exit, then claude --resume, asked first
 )
 
 // DefaultReplies are the quick replies `r` offers when the config names
@@ -329,6 +330,8 @@ type Model struct {
 	newDefaults launch.Config        // what the `n` panel opens on: the config's new_* lines
 	jump        string               // the tmux command `t` runs once tmux has the terminal; "" is the picker
 	picking     *jumpPicker          // the `t` picker, nil while it is down (picker.go)
+	restarting  *restartAsk          // an `R` waiting on enter, nil otherwise (restart.go)
+	sleep       func(time.Duration)  // what a restart waits with; nil is time.Sleep
 	landing     landing              // a launched window the deck will select once it joins
 	git         launch.Git           // the worktree's seam; nil is the git on PATH
 	sent        map[string]sentReply // the last line sent to each session, by Key()
@@ -1010,6 +1013,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case restartDoneMsg:
+		m.restarted(msg)
+		return m, nil
+
 	case backFromTmuxMsg:
 		m.backFrom(msg.viewed)
 		return m, nil
@@ -1070,6 +1077,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.note = ""
 		return m, m.pickerKey(msg)
 	}
+	// A restart asks once: the next key says yes or no.
+	if m.restarting != nil {
+		m.note = ""
+		return m, m.restartKey(msg)
+	}
 
 	m.note, m.noteYields = "", false // a keypress answers the last note
 
@@ -1107,6 +1119,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "a":
 		return m, m.ask()
+	case "R":
+		m.askRestart()
+		return m, nil
 	case "t":
 		if m.level < levelReader {
 			return m, m.jumpTmux()
@@ -2844,6 +2859,8 @@ func (m *Model) replyChoices() []replyChoice {
 		if strings.Contains(s.Snap.Activity, "/login") {
 			out = append(out, replyChoice{label: "/login", text: "/login", kind: replyRemedy})
 		}
+		// A refusal a fresh process clears: the restart R does, asked first.
+		out = append(out, replyChoice{label: "restart — /exit, then claude --resume", kind: replyRestart})
 		for _, r := range m.replies {
 			if r == quotaReply {
 				out = append(out, replyChoice{label: r, text: r, kind: replyLine})
@@ -2911,6 +2928,10 @@ func (m *Model) replyKey(msg tea.KeyMsg) tea.Cmd {
 		i := int(key[0] - '1')
 		choices := m.replyChoices()
 		if i < len(choices) {
+			if choices[i].kind == replyRestart {
+				m.askRestart() // it asks, as R does: the panel's digit is not the yes
+				return nil
+			}
 			return m.send(choices[i])
 		}
 		m.note = fmt.Sprintf("no reply %d", i+1)
@@ -3955,10 +3976,11 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	// over the box described the dangerous one and not the other.
 	choices := m.replyChoices()
 	heads := map[replyKind]string{
-		replyAnswer: "answers · sent as the menu's own digit",
-		replyRemedy: "remedy · typed into the pane and entered · log in again",
-		replyLine:   "lines · typed into the prompt and entered",
-		replyStop:   "stop · escape, which interrupts the turn",
+		replyAnswer:  "answers · sent as the menu's own digit",
+		replyRemedy:  "remedy · typed into the pane and entered · log in again",
+		replyLine:    "lines · typed into the prompt and entered",
+		replyStop:    "stop · escape, which interrupts the turn",
+		replyRestart: "restart · a fresh claude on this conversation, in this pane",
 	}
 	if ok && s.Snap.APIError {
 		// A dead session: a stock line starts a turn into the refusal,
@@ -3972,6 +3994,7 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 		heads[replyRemedy] = "remedy · log in again"
 		heads[replyLine] = "lines · typed and entered"
 		heads[replyStop] = "stop · escape"
+		heads[replyRestart] = "restart · a fresh claude"
 		if ok && s.Snap.APIError {
 			heads[replyLine] = "lines · only once the quota is back"
 		}
@@ -3983,7 +4006,11 @@ func (m *Model) replyPanelN(inner, avail int) []string {
 	}
 	lastKind := replyKind(-1)
 	for i, c := range choices {
-		if c.kind != lastKind {
+		// The restart is a remedy too, and a dead session's panel is kept
+		// short (it stands over other alarms): under /login it takes the
+		// remedy's group rather than a head of its own.
+		sameGroup := c.kind == replyRestart && lastKind == replyRemedy
+		if c.kind != lastKind && !sameGroup {
 			if i > 0 {
 				rows = append(rows, readerLine{kind: readerBlank})
 			}
@@ -5034,6 +5061,8 @@ func (m *Model) keymapOnce() string {
 		keys = "new " + m.launching.placeOf().String() + " · tab next · ←/→ choose · enter opens · esc closes"
 	case m.picking != nil:
 		keys = "jump · type to filter · ↑/↓ move · enter goes there · esc closes"
+	case m.restarting != nil:
+		keys = m.restartKeys()
 	case m.replying && m.replyTyping:
 		keys = "type the line · enter sends · esc back"
 	case m.replying:
