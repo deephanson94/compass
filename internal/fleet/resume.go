@@ -43,6 +43,12 @@ type EntryFold struct {
 	Outcomes  journey.OutcomesFold `json:"outcomes,omitzero"`
 	Dirs      []string             `json:"dirs,omitempty"` // where its tool calls worked
 	PRs       []string             `json:"prs,omitempty"`  // the pull requests it was pointed at
+	// Name is the session's name (/rename, claude -n) as the tail had it.
+	// The rename line is wherever the person typed it, and a process that
+	// resumes past it never reads it again: neither the head scan, which
+	// stops at the first prompt, nor the tail's few kilobytes see a rename
+	// made mid-session, and the card fell back to the folder's name.
+	Name string `json:"name,omitempty"`
 }
 
 // JourneyPoint is one transcript's saved reading position and folded journey:
