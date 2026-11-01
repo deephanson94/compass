@@ -73,7 +73,8 @@ type ResumeCache struct {
 	points   map[string]ResumePoint
 	journeys map[string]JourneyPoint
 	peeked   map[string]cachedInfo
-	saved    time.Time // when Save last ran, for SaveEvery
+	saved    time.Time       // when Save last ran, for SaveEvery
+	dropped  map[string]bool // sessions retain let go: a save does not take them back from the file
 }
 
 // PeekedInfo is one transcript's discovery result and the (size, mtime) it was
@@ -135,13 +136,22 @@ func (c *ResumeCache) Save() {
 	for path, p := range c.peeked {
 		f.Peeked[path] = PeekedInfo{Size: p.size, ModTime: p.modTime, Info: p.info, Wide: p.wide}
 	}
-	raw, err := json.Marshal(f)
+	dropped := make(map[string]bool, len(c.dropped))
+	for k := range c.dropped {
+		dropped[k] = true
+	}
 	c.saved = time.Now()
 	c.mu.Unlock()
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
+	// Merged with what is on disk, under the lock (resume_merge.go): another
+	// compass of the same person may have saved since this one read it.
+	unlock := lockCache(c.path)
+	defer unlock()
+	onDisk, _ := os.ReadFile(c.path)
+	raw, err := mergeCache(onDisk, f, dropped)
+	if err != nil {
 		return
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(c.path), ".resume-*")
@@ -261,14 +271,19 @@ func (c *ResumeCache) retain(keep map[string]bool) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.dropped == nil {
+		c.dropped = map[string]bool{}
+	}
 	for key := range c.points {
 		if !keep[key] {
 			delete(c.points, key)
+			c.dropped[key] = true
 		}
 	}
 	for key := range c.journeys {
 		if !keep[key] {
 			delete(c.journeys, key)
+			c.dropped[key] = true
 		}
 	}
 }
