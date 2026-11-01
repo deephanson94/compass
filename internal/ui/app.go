@@ -70,6 +70,11 @@ type fleetMsg struct {
 	trailFor string                          // the session the payload belongs to; "" if none was polled
 	agents   map[string]map[string]agentLive // what the subagents' own files say, per session, per call
 
+	// eventsOwed says the selected session's trail came without its
+	// conversation: reading that is a replay from the first byte, and the
+	// board does not wait on it. The next poll goes at once and brings it.
+	eventsOwed bool
+
 	// pairFor is the session the reader's pair follows, and pairEvents its
 	// conversation; "" when no pair was open at the poll (#398).
 	pairFor    string
@@ -403,6 +408,10 @@ type Model struct {
 	settled     bool                 // the fleet-of-one rule was decided, or the person took the keys
 	boardShapes map[string]string    // each column's trail shape its labels were read for
 	refreshing  bool                 // a refresh is in flight; the tick does not launch another
+	// eventsDue is the selected session whose conversation a poll put off
+	// so the board would not wait on it (fleetMsg.eventsOwed): the next poll
+	// reads it whatever it costs, so putting it off happens once.
+	eventsDue string
 
 	// showMirror opens the live mirror of the selected pane in the middle of
 	// the deck at Lv1. Off by default (decision #15): the CLI it mirrors is
@@ -668,6 +677,7 @@ func (m *Model) refresh() tea.Cmd {
 	m.refreshing = true
 	selected, root := m.selectedKey, mgr.Root()
 	paired := m.paired
+	due := selected != "" && m.eventsDue == selected
 	// The todo file on disk is named after the session id, not the key: the id
 	// is what claude itself writes under. Two sessions sharing an id share that
 	// plan, which is the truth on disk — not something compass may invent.
@@ -736,7 +746,16 @@ func (m *Model) refresh() tea.Cmd {
 		if feeds != nil {
 			feeds.retain(sessions)
 			if selected != "" && path != "" {
-				msg.trail, msg.events = feeds.poll(selected, path, true)
+				if due || feeds.hasEvents(selected, path) {
+					msg.trail, msg.events = feeds.poll(selected, path, true)
+				} else {
+					// A conversation nobody has read yet is the whole file,
+					// and every card on the board would wait on it. The trail
+					// resumes from its journey mark like any column's; the
+					// events come by the poll this one fires.
+					msg.trail, _ = feeds.poll(selected, path, false)
+					msg.eventsOwed = true
+				}
 				msg.hasTrail = true
 				pollAgents(selected, msg.trail)
 			}
@@ -929,7 +948,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items := msg.todos
 			if msg.hasTrail {
 				m.trail = msg.trail
-				m.SetEvents(msg.events)
+				if msg.eventsOwed {
+					m.eventsDue = msg.trailFor
+					cmds = append(cmds, m.refresh())
+				} else {
+					m.eventsDue = ""
+					m.SetEvents(msg.events)
+				}
 				m.requestNarration()
 				// The plan comes from the transcript when the session kept one
 				// there; the todo file is the fallback for a Claude Code that

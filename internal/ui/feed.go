@@ -110,6 +110,19 @@ func (fs *feedStore) poll(key, path string, wantEvents bool) (journey.Trail, []t
 	return f.trail, f.events
 }
 
+// hasEvents says whether the feed for key already keeps the conversation, so
+// asking it for events reads only what was appended. When it does not, the
+// ask is a replay from the first byte: nothing folds events.
+func (fs *feedStore) hasEvents(key, path string) bool {
+	if fs == nil {
+		return false
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	f := fs.feeds[key]
+	return f != nil && f.keepsEvents && f.tailer.Path() == path
+}
+
 // pollEach polls one feed per target, side by side up to one per core, and
 // returns each trail in the targets' order. At launch every column replays
 // its whole transcript, and eight columns on one core took eight times as
