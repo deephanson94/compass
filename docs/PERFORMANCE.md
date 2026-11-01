@@ -285,6 +285,30 @@ is put off only once.
 The selected session's reader still pays the full replay; it now does so
 after the board is drawn rather than before.
 
+### 4.3 One large transcript is decoded on every core
+
+Opening the reader on a large session replays its transcript from the first
+byte, because the reader's events have no saved form. `compass perf` on a
+real machine put that at 617 ms for a 67 MB transcript (5,275 events), on one
+core of 32; the state machine and the journey together took under 10 ms.
+Rendering the reader's document from the events is about 0.13 s.
+
+Each JSONL line decodes on its own, so `Tailer.Poll` cuts a read of 1 MB or
+more into contiguous blocks of about equal bytes (four per core) and decodes
+them side by side, joining them in block order. The events, their order and
+the count of malformed lines are what one pass gives (tested on a fixture
+with malformed, blank and CRLF lines). An ordinary poll of a few lines takes
+the old path.
+
+| 60 MB transcript, 4 cores | before | after |
+|---|---|---|
+| read+parse | 1.15 s | 0.35 s |
+
+A cold launch is unchanged on 4 cores (`BenchmarkStartupRefresh` 2.06 s and
+1.90 s): it already replays its live sessions one per core, so the cores were
+busy. The gain is for one large file at a time: the reader, or a launch with
+fewer live sessions than cores.
+
 ## 5. Rules that fall out of this
 
 - **A document is built once per change, not once per question.** Anything
