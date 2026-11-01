@@ -73,3 +73,34 @@ func TestPerfTimesTheLaunchAndWritesNothing(t *testing.T) {
 		t.Error("perf rewrote the resume cache")
 	}
 }
+
+// A transcript the scan reads but the fleet drops — the narrator's own
+// headless sessions — is counted, so a scan of thousands beside a fleet of
+// hundreds says where the rest went.
+func TestPerfCountsTheTranscriptsTheFleetExcludes(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	write := func(slug, id, cwd string) {
+		dir := filepath.Join(root, "projects", slug)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		line := `{"type":"user","sessionId":"` + id + `","cwd":"` + cwd + `","timestamp":"` + now.Add(-48*time.Hour).Format(time.RFC3339Nano) + `","message":{"role":"user","content":"label this leg"}}` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	narrator := filepath.Join(t.TempDir(), "narrator")
+	write("-home-user-alpha", "aaaaaaaa-0000-4000-8000-000000000001", "/home/user/alpha")
+	write("-narrator", "bbbbbbbb-0000-4000-8000-000000000001", narrator)
+	fresh := func() *fleet.Manager {
+		m := fleet.NewManager(root)
+		m.ExcludeCWD(narrator)
+		return m
+	}
+	var out bytes.Buffer
+	printPerf(&out, root, filepath.Join(t.TempDir(), "resume.json"), fleet.DefaultLiveWindow, fresh, now)
+	if got := out.String(); !strings.Contains(got, "0 live · 1 archived · 1 excluded") {
+		t.Errorf("perf does not count the excluded transcript:\n%s", got)
+	}
+}
