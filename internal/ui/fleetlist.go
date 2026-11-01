@@ -125,7 +125,22 @@ func (m *Model) hiddenDoorKey() string {
 }
 
 func (m *Model) hiddenClause(n int) string {
-	return fmt.Sprintf("%s hidden%s", m.hiddenDoorCount(n), m.hiddenDoorKey())
+	word := "hidden"
+	if n > 0 && m.snoozedCount() == n {
+		word = "snoozed" // every one of them comes back by itself, which hidden does not say
+	}
+	return fmt.Sprintf("%s %s%s", m.hiddenDoorCount(n), word, m.hiddenDoorKey())
+}
+
+// snoozedCount is how many live sessions are off the board on a snooze.
+func (m *Model) snoozedCount() int {
+	n := 0
+	for _, s := range m.sessions {
+		if _, ok := m.snoozed[s.Info.Key()]; ok && s.Live && !m.onBoard(s) {
+			n++
+		}
+	}
+	return n
 }
 
 // hiddenDoorCount is the strip's hidden count: the whole, or what the
@@ -663,6 +678,13 @@ func (m *Model) orderLiveGroup(idx []int) []int {
 const hiddenGroup = "hidden · x one back, X all"
 const hiddenGroupWord = "hidden"
 
+// snoozedGroup is the hidden group's neighbour: live sessions `z` put off
+// the board until their next prompt (snooze.go). Under "hidden" they read
+// as put down for good, which is the one thing a snooze is not; `x` still
+// brings one back by hand.
+const snoozedGroup = "snoozed · back on next prompt"
+const snoozedGroupWord = "snoozed"
+
 // groupLabel is the name a group header draws. Only the hidden group's
 // name carries a key, and it wears it on the same terms as every other
 // door on this screen: while a search query, the quick replies or the
@@ -681,6 +703,9 @@ func (m *Model) groupLabel(name string) string {
 	if name == hiddenGroup && m.typing() {
 		return hiddenGroupWord
 	}
+	if name == snoozedGroup && m.typing() {
+		return snoozedGroupWord
+	}
 	return name
 }
 
@@ -697,6 +722,9 @@ func (m *Model) archiveGroups() []fleetGroup {
 		name := projectOf(s.Info)
 		if s.Live {
 			name = hiddenGroup // what `x` took off the board, first
+			if _, ok := m.snoozed[s.Info.Key()]; ok {
+				name = snoozedGroup // what `z` did, next: it comes back by itself
+			}
 		}
 		if _, ok := members[name]; !ok {
 			names = append(names, name)
@@ -731,9 +759,16 @@ func (m *Model) archiveGroups() []fleetGroup {
 	// (footerStuckCost). With that counted, this ordering costs no key
 	// that acts (round 61).
 	sort.SliceStable(names, func(a, b int) bool { return newest(members[names[a]]) > newest(members[names[b]]) })
-	sort.SliceStable(names, func(a, b int) bool {
-		return names[a] == hiddenGroup && names[b] != hiddenGroup
-	})
+	first := func(name string) int {
+		switch name {
+		case hiddenGroup:
+			return 0
+		case snoozedGroup:
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(names, func(a, b int) bool { return first(names[a]) < first(names[b]) })
 
 	groups := make([]fleetGroup, 0, len(names))
 	for _, name := range names {

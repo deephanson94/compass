@@ -96,3 +96,31 @@ func TestSnoozeRefusesAndXEndsIt(t *testing.T) {
 		t.Error("x brought it back but the snooze stayed")
 	}
 }
+
+// A snoozed session reads as snoozed, not hidden: on the board's own count,
+// and in the archive under a group of its own beside the hidden one.
+func TestSnoozedReadsAsSnoozed(t *testing.T) {
+	withCards(t)
+	withQuiet(t, []string{"w"}, 0) // the quiet band carries the count
+	m := sceneModel(sceneCards(), 290, 80)
+	m.point(sessionKey("flow"))
+	m.point(sessionKey("s3"))
+	press(m, "z")
+	if frame := ansi.Strip(m.View()); !strings.Contains(frame, "1 snoozed") || strings.Contains(frame, "1 hidden") {
+		t.Errorf("the board's count should say snoozed:\n%s", lastLines(frame, 6))
+	}
+
+	m.point(sessionKey("demo"))
+	press(m, "x") // one hidden for good beside it
+	press(m, "A")
+	frame := ansi.Strip(m.View())
+	hidden, snoozed := strings.Index(frame, "hidden · x one back"), strings.Index(frame, "snoozed · back on next prompt")
+	if hidden < 0 || snoozed < 0 || snoozed < hidden {
+		t.Errorf("the archive should list hidden, then snoozed (at %d, %d):\n%s", hidden, snoozed, frame)
+	}
+}
+
+func lastLines(s string, n int) string {
+	l := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	return strings.Join(l[max(0, len(l)-n):], "\n")
+}
