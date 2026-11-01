@@ -53,7 +53,7 @@ func main() {
 	// deck: a reader probing for a subcommand (a mod asking for `trail`)
 	// must get an error back, never a full-screen deck with no terminal.
 	switch sub {
-	case "", "status", "panes", "prs", "why", "help":
+	case "", "status", "panes", "prs", "why", "perf", "help":
 	default:
 		fmt.Fprintf(os.Stderr, "compass: unknown command %q (try compass help)\n", sub)
 		os.Exit(2)
@@ -148,17 +148,30 @@ func main() {
 		os.Exit(2)
 	}
 
-	mgr := fleet.NewManager(*root)
-	mgr.SetLiveWindow(window)
+	var store *opencode.Store
 	if *opencodeDB != "" {
 		// OpenCode's sessions sit in the fleet beside Claude's when its
 		// store is on this machine; a store that will not open is left
 		// out without a word, since most machines have none.
-		if store, err := opencode.Open(*opencodeDB); err == nil {
-			store.Attach(mgr)
+		if s, err := opencode.Open(*opencodeDB); err == nil {
+			store = s
 		}
 	}
-	build := buildNarrator(mgr, *root, *model)
+	// newManager is the fleet as every command sees it. `perf` builds
+	// several, so the launch it times is the deck's own.
+	newManager := func() *fleet.Manager {
+		m := fleet.NewManager(*root)
+		m.SetLiveWindow(window)
+		if store != nil {
+			store.Attach(m)
+		}
+		if *model != "off" {
+			m.ExcludeCWD(narratorDir(*root))
+		}
+		return m
+	}
+	mgr := newManager()
+	build := buildNarrator(*root, *model)
 	prs := openPRs(*root, *teaLogin, *prInterval)
 
 	switch sub {
@@ -209,6 +222,8 @@ func main() {
 		}
 		printPRs(os.Stdout, sessions, prs, now)
 		resume.Save()
+	case "perf":
+		printPerf(os.Stdout, *root, resumePath(*root), window, newManager, time.Now())
 	case "help":
 		fs.Usage()
 	default:
@@ -249,18 +264,12 @@ func main() {
 // mode, working out of a compass-private dir the fleet is told to ignore, and
 // a label cache beside it. "off", or an unusable cache path, leaves the trail
 // on its heuristic labels — narration is polish, never a requirement.
-func buildNarrator(mgr *fleet.Manager, root, model string) func(notify func()) ui.Narrator {
+func buildNarrator(root, model string) func(notify func()) ui.Narrator {
 	if model == "off" {
 		return nil
 	}
-	base, err := os.UserCacheDir()
-	if err != nil {
-		base = root
-	}
-	dir := filepath.Join(base, "compass", "narrator")
-	mgr.ExcludeCWD(dir)
-
-	cache, err := narrator.OpenCache(filepath.Join(base, "compass", "labels.jsonl"))
+	dir := narratorDir(root)
+	cache, err := narrator.OpenCache(filepath.Join(filepath.Dir(dir), "labels.jsonl"))
 	if err != nil {
 		return nil
 	}
@@ -268,6 +277,16 @@ func buildNarrator(mgr *fleet.Manager, root, model string) func(notify func()) u
 	return func(notify func()) ui.Narrator {
 		return narrator.New(runner, cache, notify)
 	}
+}
+
+// narratorDir is where the narrator's headless claude works. The fleet is told
+// to ignore sessions there: they are compass's own, not the person's.
+func narratorDir(root string) string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = root
+	}
+	return filepath.Join(base, "compass", "narrator")
 }
 
 // teaTimeout is how long one tea call may take before it is given up on.
@@ -315,13 +334,18 @@ func livePRs(sessions []fleet.Session, states map[string][]prstate.Status) map[s
 // hands it back for saving once the work is done. A cache path that cannot be
 // worked out is simply no cache: the run replays, which is what it did before.
 func openResume(mgr *fleet.Manager, root string) *fleet.ResumeCache {
+	c := fleet.OpenResumeCache(resumePath(root))
+	mgr.UseResumeCache(c)
+	return c
+}
+
+// resumePath is where the resume cache lives, beside the narrator's.
+func resumePath(root string) string {
 	base, err := os.UserCacheDir()
 	if err != nil {
 		base = root
 	}
-	c := fleet.OpenResumeCache(filepath.Join(base, "compass", "resume.json"))
-	mgr.UseResumeCache(c)
-	return c
+	return filepath.Join(base, "compass", "resume.json")
 }
 
 // expandHome turns a leading ~/ into the user's home directory.
@@ -355,6 +379,7 @@ func usage(fs *flag.FlagSet) func() {
 		fmt.Fprintln(fs.Output(), "  compass status    one-shot fleet summary (▲1 ◍1 ●3)")
 		fmt.Fprintln(fs.Output(), "  compass panes     which tmux pane holds which session (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass prs       poll Gitea now: each session's checkouts and pull requests (diagnostic)")
+		fmt.Fprintln(fs.Output(), "  compass perf      time every stage of a launch on this machine, read-only (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass why       each live session's state and the lines it was read from (diagnostic)")
 		fmt.Fprintln(fs.Output(), "  compass trail     one session's journey as JSON (-session ID [-follow])")
 		fmt.Fprintln(fs.Output(), "  compass new       a new tmux window running claude, a shell or a harness (compass new -h)")

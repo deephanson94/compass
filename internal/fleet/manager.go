@@ -413,7 +413,7 @@ func (m *Manager) Refresh(now time.Time) ([]Session, error) {
 	// The scan reads the whole tail of a file that has gone quiet, looking
 	// for the question that would keep it live; a file still moving gets one
 	// window, since the recency door already has it (#344, round 59).
-	infos, cache, err := scanProjects(m.root, m.cache, now.Add(-m.liveWindow))
+	infos, cache, err := scanProjects(m.root, m.cache, now.Add(-m.liveWindow), nil)
 	// Which sessions still have a process. Read once per refresh, because
 	// the ask door asks it of every row (#374).
 	m.running = readRunning(m.root)
