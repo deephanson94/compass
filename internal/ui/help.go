@@ -806,3 +806,49 @@ func dropKeyRow(lines []string, key string) []string {
 	}
 	return lines
 }
+
+// helpMoreKeys is the help's second page: the keys the first page has no
+// row left for. The first page fits an 80x24 terminal to the cell and every
+// row of it is pinned; a key added since lives here, named whole, and the
+// first page's footer says the page is here (→ more keys).
+var helpMoreKeys = []struct{ group, key, what string }{
+	{"go to", "t", "jump to any tmux pane: a picker, type to filter, enter goes there (a jump line in the config runs your own instead)"},
+	{"go to", "10 – 99", "a card past nine: its two digits within 0.7s — 12 is 1 then 2"},
+	{"act on a card", "R", "restart its claude in its own pane: /exit, then claude --resume — it asks first"},
+	{"act on a card", "z", "snooze: off the board until its next prompt · x in the archive wakes it early"},
+	{"act on a card", "r", "dead on the API: the reply panel offers the same restart beside /login"},
+	{"settings", "config", "compass config lists every setting and the value in effect · compass config init writes a starter file"},
+}
+
+// helpMoreLines draws the second page into w×h: a heading, then the keys by
+// group, each sentence wrapped under itself rather than cut. A body too
+// short for all of it loses rows from the end.
+func helpMoreLines(w, h int) []string {
+	lines := []string{textStyle.Render("more keys"), ""}
+	keyW := 0
+	for _, k := range helpMoreKeys {
+		keyW = max(keyW, len([]rune(k.key)))
+	}
+	indent := 2 + keyW + 2
+	group := ""
+	for _, k := range helpMoreKeys {
+		if k.group != group {
+			if group != "" {
+				lines = append(lines, "")
+			}
+			group = k.group
+			lines = append(lines, dimStyle.Render(group))
+		}
+		for i, line := range wrapPrefix(k.what, "", "", max(10, w-indent)) {
+			lead := strings.Repeat(" ", indent)
+			if i == 0 {
+				lead = pad("  "+k.key, indent)
+			}
+			lines = append(lines, dimStyle.Render(lead)+textStyle.Render(line))
+		}
+	}
+	if h > 0 && len(lines) > h {
+		lines = lines[:h]
+	}
+	return lines
+}
