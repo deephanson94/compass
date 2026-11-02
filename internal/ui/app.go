@@ -324,6 +324,7 @@ type Model struct {
 	drawnBand []recentRow
 
 	showHelp    bool
+	helpPage    int // 0 the keys, 1 the more keys (help.go)
 	searching   bool
 	replying    bool                 // the reply panel is up; a digit picks a line
 	replyTyping bool                 // …and a line is being typed into it
@@ -1077,6 +1078,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "?", "esc", "q", "enter", " ":
 			m.showHelp = false
 			return m, nil
+		case "right", "l", "j", "down", "tab":
+			m.helpPage = 1 // the more keys
+		case "left", "h", "k", "up", "shift+tab":
+			m.helpPage = 0
 		}
 		return m, nil
 	}
@@ -1118,7 +1123,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "?":
-		m.showHelp = true
+		m.showHelp, m.helpPage = true, 0
 		return m, nil
 	case "tab":
 		m.zoomIn()
@@ -3688,6 +3693,8 @@ func (m *Model) viewOnce() string {
 		m.replyRows = panel
 	}
 	switch {
+	case m.showHelp && m.helpPage == 1:
+		body = fit(helpMoreLines(inner, bodyHeight), bodyHeight)
 	case m.showHelp:
 		// A fleet of one at any width has no board (#31): the help that
 		// taught "board → trail" beside a ⇧tab that refuses it was
@@ -5087,8 +5094,10 @@ func (m *Model) keymapOnce() string {
 		keys = "j/k move · " + m.enterKeymap() + " · tab deeper · [ ] chapters · r reply · a ask · / search · x unhide · A fleet · ? help · q quit"
 	}
 	switch {
+	case m.showHelp && m.helpPage == 1:
+		keys = "← the keys · ? or esc closes help"
 	case m.showHelp:
-		keys = "? or esc closes help"
+		keys = "→ more keys · ? or esc closes help"
 	case m.searching && m.searchFleet:
 		keys = "/" + m.draft + "▏ · enter keeps it · esc cancels"
 	case m.searching:
