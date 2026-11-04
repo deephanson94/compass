@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/deephanson94/compass/internal/journey"
 	"github.com/deephanson94/compass/internal/state"
 )
 
@@ -172,4 +173,37 @@ func cardColumn(frame, name string) [2]int {
 		}
 	}
 	return [2]int{-1, -1}
+}
+
+// compact_bg: a finished turn whose agent still works in the background is
+// a row, its bg job in working's colour; the same session without the
+// agent, or with compact_bg off, keeps its card.
+func TestBackgroundJobIsQuiet(t *testing.T) {
+	withCards(t)
+	SetQuietBG(true)
+	t.Cleanup(func() { SetQuietBG(false) })
+	m := sceneModel(sceneCards(), 290, 80)
+	m.point(sessionKey("harness"))
+	key := sessionKey("s3")
+	tr := m.trails[key]
+	tr.Branches = append(tr.Branches, journey.Branch{ToolUseID: "toolu_bg", Label: "indexer"})
+	m.trails[key] = tr
+	if m.agents == nil {
+		m.agents = map[string]map[string]agentLive{}
+	}
+	m.agents[key] = map[string]agentLive{"toolu_bg": {Wrote: m.now.Add(-time.Minute)}}
+
+	frame := boardText(m)
+	row := lineWith(frame, " ○ s3 · ")
+	if !strings.Contains(frame, "quiet · 1") || !strings.Contains(row, "bg job") {
+		t.Fatalf("s3, its agent out in the background, should be a quiet bg job row, got %q:\n%s", row, frame)
+	}
+	if lineWith(frame, " ○ demo · ") != "" {
+		t.Errorf("demo has no agent out and lost its card:\n%s", frame)
+	}
+
+	SetQuietBG(false)
+	if strings.Contains(boardText(m), "quiet · ") {
+		t.Error("compact_bg off, and the bg job is still a row")
+	}
 }

@@ -79,6 +79,7 @@ type config struct {
 	// and any idle this long ("0" or unset: never).
 	CompactSessions []string
 	IdleCompact     string
+	CompactBG       bool // compact_bg: a finished turn with an agent out in the background is a row too
 
 	// VerdictPattern is the closing line a session says how it came out on
 	// (state.DefaultVerdictPattern unless set; "off" ignores verdicts).

@@ -143,6 +143,10 @@ var configKeys = []configKey{
 		help: `how long any session stays idle before it gives up its card for a row, like compact_sessions; "0" = never`,
 		set:  durationInto(func(c *config) *string { return &c.IdleCompact }),
 		get:  func(c config) []string { return one(c.IdleCompact) }},
+	{name: "compact_bg", section: "board", def: "false",
+		help: "true: a session whose turn is over but whose agent still works in the background gives up its card for a row, like compact_sessions",
+		set:  boolInto(func(c *config) *bool { return &c.CompactBG }),
+		get:  func(c config) []string { return oneBool(c.CompactBG, c.has("compact_bg")) }},
 	{name: "reply", section: "board", repeat: true, example: "please continue",
 		help: "a stock line r offers, one line each, up to nine; any replace compass's own",
 		set: func(c *config, v string) string {

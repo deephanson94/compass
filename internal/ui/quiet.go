@@ -19,12 +19,15 @@ import (
 //
 // Quiet is the person's call, set in the config: the tmux sessions whose
 // sessions are quiet when idle (`compact_sessions = "pr"`), and how long
-// any idle session waits before it is (`idle_compact = "1d"`). Neither set,
-// nothing is quiet and the board is as it was.
+// any idle session waits before it is (`idle_compact = "1d"`), and whether
+// a finished turn with an agent still out in the background is
+// (`compact_bg = true`). None set, nothing is quiet and the board is as it
+// was.
 
 var (
 	quietTmux  map[string]bool // tmux sessions whose idle sessions are quiet
 	quietAfter time.Duration   // idle this long and any session is quiet; 0 = never
+	quietBG    bool            // a finished turn whose agent works on in the background is quiet
 )
 
 // SetQuiet sets which sessions give up their card when idle: those in the
@@ -39,6 +42,12 @@ func SetQuiet(tmuxSessions []string, after time.Duration) {
 	quietAfter = max(0, after)
 }
 
+// SetQuietBG sets whether a session whose turn is over, with an agent still
+// working in the background, gives up its card. Its row says bg job, in
+// working's colour; the agent's report starts a turn, and the turn takes the
+// card back.
+func SetQuietBG(on bool) { quietBG = on }
+
 // quiet says whether a session draws as a row instead of a card: idle on
 // the card's own terms (not asking, not hung, not looping, not exited),
 // neither pinned nor selected, and in a quiet tmux session or idle past
@@ -52,15 +61,19 @@ func (m *Model) quiet(s fleet.Session) bool {
 // drawn as a card, but at the board's end, so the cards around it never
 // move for it.
 func (m *Model) quietBy(s fleet.Session) bool {
-	if !cardBoard || m.archiveView || (len(quietTmux) == 0 && quietAfter == 0) {
+	if !cardBoard || m.archiveView || (len(quietTmux) == 0 && quietAfter == 0 && !quietBG) {
 		return false
 	}
 	key := s.Info.Key()
 	if m.pinned(key) || !s.Live {
 		return false
 	}
-	if word, _, _ := m.cardState(s, m.trails[key]); word != cardIdle && word != cardDone {
+	word, sub, _ := m.cardState(s, m.trails[key])
+	if word != cardIdle && word != cardDone {
 		return false // done stays quiet: its row says done, in done's colour
+	}
+	if quietBG && sub == cardBG {
+		return true
 	}
 	if p, ok := m.panes[key]; ok && quietTmux[tmuxSessionName(p.Target)] {
 		return true
@@ -193,6 +206,13 @@ func (m *Model) quietRow(s fleet.Session, rowOf map[string]fleetRow, w int) stri
 	room := w - lipgloss.Width(age) - 1
 	line := shedClauses(left+" · "+strings.Join(clauses, " · "), room)
 	pad := max(1, w-lipgloss.Width(line)-lipgloss.Width(age))
+	if sub == cardBG && word != cardDone {
+		// Still at work, in working's colour, among rows that are not.
+		if head, rest, ok := strings.Cut(line, " · "+cardBG); ok {
+			return dimStyle.Render(head+" · ") + lipgloss.NewStyle().Foreground(colWorking).Render(cardBG) +
+				dimStyle.Render(rest+strings.Repeat(" ", pad)+age)
+		}
+	}
 	if word == cardDone {
 		if head, rest, ok := strings.Cut(line, " · "+cardDone); ok {
 			return dimStyle.Render(head+" · ") + lipgloss.NewStyle().Foreground(colDone).Render(cardDone) +

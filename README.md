@@ -178,7 +178,8 @@ judged by its own timeout. Test results are the trail's to show, not the card's.
 
 **Quiet cards.** A board that a PR watcher fills can hold ten finished reviews
 beside the three sessions you're working in. Set `compact_sessions = "pr"` (the
-tmux sessions whose idle sessions are quiet) and/or `idle_compact = "1d"`, and a
+tmux sessions whose idle sessions are quiet) and/or `idle_compact = "1d"` and/or
+`compact_bg = true` (a finished turn whose agent still works in the background), and a
 quiet session draws as one row under the cards instead of a card:
 
 ```
@@ -364,6 +365,7 @@ done_color = "#2dd4bf"  # done's colour; unset is compass's teal
 compact_sessions = "pr" # tmux sessions whose idle sessions give up their card for one
                         #   row under the cards (comma-separated names)
 idle_compact = "1d"     # any session idle this long does the same; "0" (the default) never
+compact_bg = false      # true: a finished turn with an agent still out in the background does too
 readonly = false        # true keeps compass's hands off tmux entirely
 mirror = false          # true opens the live tmux pane beside the trail; m toggles it
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
