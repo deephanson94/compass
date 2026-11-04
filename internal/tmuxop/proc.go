@@ -142,6 +142,22 @@ func (RealProc) Cmdline(pid int) string {
 	return strings.TrimSpace(strings.ReplaceAll(string(raw), "\x00", " "))
 }
 
+// Environ is the process's environment as KEY=value, nil if unreadable.
+// Not in Proc: only a restart wants it, and it asks for it by assertion.
+func (RealProc) Environ(pid int) []string {
+	raw, err := os.ReadFile(procPath(pid, "environ"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, kv := range strings.Split(string(raw), "\x00") {
+		if strings.Contains(kv, "=") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // StartTime reads field 22 of /proc/<pid>/stat — the process's start, in clock
 // ticks since boot — and anchors it to the boot time in /proc/stat.
 //

@@ -415,7 +415,8 @@ const (
 	cardNeedsAttn    = "needs attn"
 	cardExited       = "exited"
 	cardIdle         = "idle"
-	cardDone         = "done" // idle, and news: finished, unread, within done_for (done.go)
+	cardDone         = "done"       // idle, and news: finished, unread, within done_for (done.go)
+	cardRestarting   = "restarting" // an `R` under way: /exit sent, the resume not yet run (restart.go)
 )
 
 // cardState is the card's main status, its sub-status and its colour. The
@@ -427,6 +428,10 @@ func (m *Model) cardState(s fleet.Session, tr journey.Trail) (word, sub string, 
 	snap := s.Snap
 	_, runs, loop := circling(tr)
 	switch {
+	case m.restarts[s.Info.Key()]:
+		// Between /exit and the resume the transcript reads exited or idle,
+		// and a restart waiting on a slow exit hook read as one that failed.
+		return cardRestarting, "", colWorking
 	case snap.Exited:
 		return cardExited, "mid-turn", colDim
 	case snap.APIError:

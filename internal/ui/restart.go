@@ -21,12 +21,13 @@ type restartAsk struct {
 	pane      tmuxop.Pane
 	resume    string // the line typed once the shell is back
 	working   bool   // a turn is in flight: restarting stops it
+	plan      tmuxop.RestartPlan
 }
 
 // restartDoneMsg says how a restart went.
 type restartDoneMsg struct {
-	name string
-	err  error
+	key, name string
+	err       error
 }
 
 // askRestart is `R`: the confirmation, with the resume line worked out
@@ -46,16 +47,29 @@ func (m *Model) askRestart() {
 		m.note = "restart needs a pane"
 		return
 	}
-	cmdline := ""
-	if m.proc != nil {
-		if _, pid, ok := tmuxop.ClaudeIn(m.proc, pane.PID); ok {
-			cmdline = m.proc.Cmdline(pid)
+	cmdline, dir, direct := "", s.Info.CWD, false
+	var exited func() bool
+	var env []string
+	if proc := m.proc; proc != nil {
+		if cwd, pid, ok := tmuxop.ClaudeIn(proc, pane.PID); ok {
+			cmdline, dir = proc.Cmdline(pid), cwd
+			direct = pid == pane.PID // the pane runs claude itself: `n` opened it so
+			if e, ok := proc.(interface{ Environ(int) []string }); ok && direct {
+				env = e.Environ(pid)
+			}
 		}
+		// Gone is no claude left under the pane, by the process table: the
+		// pane's foreground command changes as soon as an exit hook starts,
+		// long before the CLI has finished going.
+		panePID := pane.PID
+		exited = func() bool { _, _, ok := tmuxop.ClaudeIn(proc, panePID); return !ok }
 	}
+	resume := tmuxop.ResumeCommand(cmdline, s.Info.ID)
 	m.restarting = &restartAsk{
 		key: s.Info.Key(), name: sessionName(s.Info), pane: pane,
-		resume:  tmuxop.ResumeCommand(cmdline, s.Info.ID),
+		resume:  resume,
 		working: s.Snap.State == state.Working,
+		plan:    tmuxop.RestartPlan{PaneID: pane.ID, Resume: resume, Dir: dir, Direct: direct, Env: env, Exited: exited},
 	}
 }
 
@@ -73,8 +87,12 @@ func (m *Model) restartKey(msg tea.KeyMsg) tea.Cmd {
 		sleep = time.Sleep
 	}
 	m.note = "↻ restarting " + ask.name + "…"
+	if m.restarts == nil {
+		m.restarts = map[string]bool{}
+	}
+	m.restarts[ask.key] = true
 	return func() tea.Msg {
-		return restartDoneMsg{name: ask.name, err: tmuxop.Restart(runner, ask.pane.ID, ask.resume, sleep)}
+		return restartDoneMsg{key: ask.key, name: ask.name, err: tmuxop.Restart(runner, ask.plan, sleep)}
 	}
 }
 
@@ -91,6 +109,7 @@ func (m *Model) restartKeys() string {
 
 // restarted is how the restart went, in the footer.
 func (m *Model) restarted(msg restartDoneMsg) {
+	delete(m.restarts, msg.key)
 	if msg.err != nil {
 		m.note = "restart " + msg.name + ": " + firstLine(msg.err.Error())
 		return
