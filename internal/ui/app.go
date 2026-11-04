@@ -337,6 +337,7 @@ type Model struct {
 	jump        string               // the tmux command `t` runs once tmux has the terminal; "" is the picker
 	picking     *jumpPicker          // the `t` picker, nil while it is down (picker.go)
 	restarting  *restartAsk          // an `R` waiting on enter, nil otherwise (restart.go)
+	restarts    map[string]bool      // sessions whose restart is under way: their card says so (restart.go)
 	sleep       func(time.Duration)  // what a restart waits with; nil is time.Sleep
 	landing     landing              // a launched window the deck will select once it joins
 	git         launch.Git           // the worktree's seam; nil is the git on PATH

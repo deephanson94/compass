@@ -72,39 +72,98 @@ func PaneCommand(r Runner, paneID string) (string, error) {
 }
 
 // RestartWait is how long Restart waits for the CLI to exit, and how often
-// it looks.
+// it looks. A minute: Claude Code runs its SessionEnd hooks on the way out,
+// and a person's hooks (an indexer, a notifier) took longer than the fifteen
+// seconds this once was, so the resume line was never typed.
 const (
-	RestartWait = 15 * time.Second
+	RestartWait = 60 * time.Second
 	restartPoll = 500 * time.Millisecond
 )
 
-// Restart exits the CLI in a pane and types resume where its shell comes
-// back. Escape first, so a turn in flight or a dialog is closed and /exit
-// lands on the prompt; then /exit, which saves and quits as the person's own
-// would; then, once the pane is running something else — its shell — the
-// resume line. If the CLI has not exited after RestartWait nothing more is
-// typed and the error says so. sleep is time.Sleep outside tests.
-func Restart(r Runner, paneID, resume string, sleep func(time.Duration)) error {
-	before, err := PaneCommand(r, paneID)
+// RestartPlan is how one pane is restarted.
+type RestartPlan struct {
+	PaneID string
+	Resume string // the shell line that resumes the session
+	Dir    string // its working directory, for a pane with no shell of its own
+	// Direct says the pane runs the CLI itself, not a shell that runs it
+	// (tmux new-window -- claude …, as `n` opens it): /exit ends the pane's
+	// own process, and without remain-on-exit the pane — and a window of
+	// one — closes with it, leaving nowhere to type the resume line.
+	Direct bool
+	// Env is the old CLI's environment, for a direct pane's respawn: what
+	// `compass new -e` gave the pane's process is not tmux's to give again.
+	Env []string
+	// Exited says the CLI is gone from the pane: no claude anywhere under
+	// it, by the process table. nil falls back to the pane's foreground
+	// command changing, which a hook starting on the way out also does.
+	Exited func() bool
+}
+
+// Restart exits the CLI in a pane and starts it again on the same
+// conversation, in the same pane. Escape first, so a turn in flight or a
+// dialog is closed and /exit lands on the prompt; then /exit, which saves
+// and quits as the person's own would; then, once the CLI has gone — seen
+// gone on two looks running, so a hook between two of its processes is
+// not taken for the end — the resume line: typed into the shell that came
+// back, or, in a pane with no shell, run in the pane kept open for it. If
+// the CLI has not gone after RestartWait nothing more is done and the
+// error says so. sleep is time.Sleep outside tests.
+func Restart(r Runner, plan RestartPlan, sleep func(time.Duration)) error {
+	before, err := PaneCommand(r, plan.PaneID)
 	if err != nil {
 		return err
 	}
-	if err := SendKey(r, paneID, "Escape"); err != nil {
+	exited := plan.Exited
+	if plan.Direct {
+		// The pane outlives its process for the respawn below.
+		if _, err := r.Output("set-option", "-p", "-t", plan.PaneID, "remain-on-exit", "on"); err != nil {
+			return err
+		}
+		defer r.Output("set-option", "-p", "-u", "-t", plan.PaneID, "remain-on-exit")
+		exited = func() bool { return paneDead(r, plan.PaneID) }
+	}
+	if exited == nil {
+		exited = func() bool {
+			now, err := PaneCommand(r, plan.PaneID)
+			return err == nil && now != "" && now != before
+		}
+	}
+	if err := SendKey(r, plan.PaneID, "Escape"); err != nil {
 		return err
 	}
 	sleep(300 * time.Millisecond)
-	if err := SendKeys(r, paneID, "/exit"); err != nil {
+	if err := SendKeys(r, plan.PaneID, "/exit"); err != nil {
 		return err
 	}
+	seen := 0
 	for waited := time.Duration(0); waited < RestartWait; waited += restartPoll {
 		sleep(restartPoll)
-		now, err := PaneCommand(r, paneID)
-		if err != nil {
+		if !exited() {
+			seen = 0
+			continue
+		}
+		if seen++; seen < 2 {
+			continue
+		}
+		if plan.Direct {
+			args := []string{"respawn-pane", "-t", plan.PaneID}
+			if plan.Dir != "" {
+				args = append(args, "-c", plan.Dir)
+			}
+			for _, kv := range plan.Env {
+				args = append(args, "-e", kv)
+			}
+			_, err := r.Output(append(args, plan.Resume)...) // one string: tmux runs it through sh -c
 			return err
 		}
-		if now != before && now != "" {
-			return SendKeys(r, paneID, resume)
-		}
+		sleep(300 * time.Millisecond) // the shell's prompt, before its first keystroke
+		return SendKeys(r, plan.PaneID, plan.Resume)
 	}
 	return fmt.Errorf("%s did not exit within %s · nothing typed after /exit", before, RestartWait)
+}
+
+// paneDead says the pane's own process has ended (remain-on-exit keeps it).
+func paneDead(r Runner, paneID string) bool {
+	out, err := r.Output("display-message", "-p", "-t", paneID, "#{pane_dead}")
+	return err == nil && strings.TrimSpace(string(out)) == "1"
 }

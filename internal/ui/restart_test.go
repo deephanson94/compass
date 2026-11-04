@@ -59,12 +59,19 @@ func TestRAsksThenRestartsInThePane(t *testing.T) {
 		t.Fatalf("R typed before the enter: %q", tm.typed)
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	s, _ := m.session(sessionKey("s3"))
+	if word, _, _ := m.cardState(s, m.trails[s.Info.Key()]); word != cardRestarting {
+		t.Errorf("under way, the card reads %q, want %q", word, cardRestarting)
+	}
 	m.Update(cmd())
 	if got := strings.Join(tm.typed, "|"); got != "Escape|/exit|Enter|claude --resume s3|Enter" {
 		t.Errorf("typed %q", got)
 	}
 	if m.note != "↻ restarted s3" {
 		t.Errorf("note %q", m.note)
+	}
+	if word, _, _ := m.cardState(s, m.trails[s.Info.Key()]); word == cardRestarting {
+		t.Error("the card still reads restarting once the restart is done")
 	}
 }
 
