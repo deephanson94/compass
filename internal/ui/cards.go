@@ -415,6 +415,7 @@ const (
 	cardNeedsAttn    = "needs attn"
 	cardExited       = "exited"
 	cardIdle         = "idle"
+	cardBG           = "bg job"     // a sub-status: the turn is over, an agent works on (backgroundAgent)
 	cardDone         = "done"       // idle, and news: finished, unread, within done_for (done.go)
 	cardRestarting   = "restarting" // an `R` under way: /exit sent, the resume not yet run (restart.go)
 )
@@ -476,7 +477,7 @@ func (m *Model) cardState(s fleet.Session, tr journey.Trail) (word, sub string, 
 	case snap.Interrupted:
 		return cardIdle, "cancel", colDim
 	case m.backgroundAgent(s, tr):
-		return word, "bg job", col
+		return word, cardBG, col
 	case snap.Verdict == state.VerdictDone:
 		return word, "✓ ok", col // the session said so itself
 	case shippedLast(tr):
