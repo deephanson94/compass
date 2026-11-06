@@ -207,3 +207,29 @@ func TestBackgroundJobIsQuiet(t *testing.T) {
 		t.Error("compact_bg off, and the bg job is still a row")
 	}
 }
+
+// compact_nopane: an idle session with no tmux pane is a row — compact_sessions
+// goes by the pane's tmux session and can never reach it; an idle one with a
+// pane keeps its card, and compact_nopane off, so does the pane-less one.
+func TestNoPaneIsQuiet(t *testing.T) {
+	withCards(t)
+	SetQuietNoPane(true)
+	t.Cleanup(func() { SetQuietNoPane(false) })
+	m := sceneModel(sceneCards(), 290, 80)
+	m.point(sessionKey("harness"))
+	delete(m.panes, sessionKey("s3"))
+
+	frame := boardText(m)
+	row := lineWith(frame, " ○ s3 · ")
+	if !strings.Contains(frame, "quiet · 1") || !strings.Contains(row, "no pane") {
+		t.Fatalf("s3, idle with no pane, should be a quiet row saying so, got %q:\n%s", row, frame)
+	}
+	if lineWith(frame, " ○ demo · ") != "" {
+		t.Errorf("demo has a pane and lost its card:\n%s", frame)
+	}
+
+	SetQuietNoPane(false)
+	if strings.Contains(boardText(m), "quiet · ") {
+		t.Error("compact_nopane off, and the pane-less session is still a row")
+	}
+}

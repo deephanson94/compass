@@ -21,13 +21,15 @@ import (
 // sessions are quiet when idle (`compact_sessions = "pr"`), and how long
 // any idle session waits before it is (`idle_compact = "1d"`), and whether
 // a finished turn with an agent still out in the background is
-// (`compact_bg = true`). None set, nothing is quiet and the board is as it
+// (`compact_bg = true`), and whether one with no tmux pane is
+// (`compact_nopane = true`). None set, nothing is quiet and the board is as it
 // was.
 
 var (
 	quietTmux  map[string]bool // tmux sessions whose idle sessions are quiet
 	quietAfter time.Duration   // idle this long and any session is quiet; 0 = never
 	quietBG    bool            // a finished turn whose agent works on in the background is quiet
+	quietBare  bool            // an idle session with no tmux pane is quiet
 )
 
 // SetQuiet sets which sessions give up their card when idle: those in the
@@ -48,6 +50,12 @@ func SetQuiet(tmuxSessions []string, after time.Duration) {
 // card back.
 func SetQuietBG(on bool) { quietBG = on }
 
+// SetQuietNoPane sets whether an idle session with no tmux pane — a headless
+// run, one in another tmux server — gives up its card. There is no pane to
+// jump into, and compact_sessions, which goes by the pane's tmux session,
+// can never reach it.
+func SetQuietNoPane(on bool) { quietBare = on }
+
 // quiet says whether a session draws as a row instead of a card: idle on
 // the card's own terms (not asking, not hung, not looping, not exited),
 // neither pinned nor selected, and in a quiet tmux session or idle past
@@ -61,7 +69,7 @@ func (m *Model) quiet(s fleet.Session) bool {
 // drawn as a card, but at the board's end, so the cards around it never
 // move for it.
 func (m *Model) quietBy(s fleet.Session) bool {
-	if !cardBoard || m.archiveView || (len(quietTmux) == 0 && quietAfter == 0 && !quietBG) {
+	if !cardBoard || m.archiveView || (len(quietTmux) == 0 && quietAfter == 0 && !quietBG && !quietBare) {
 		return false
 	}
 	key := s.Info.Key()
@@ -75,7 +83,11 @@ func (m *Model) quietBy(s fleet.Session) bool {
 	if quietBG && sub == cardBG {
 		return true
 	}
-	if p, ok := m.panes[key]; ok && quietTmux[tmuxSessionName(p.Target)] {
+	p, hasPane := m.panes[key]
+	if hasPane && quietTmux[tmuxSessionName(p.Target)] {
+		return true
+	}
+	if quietBare && !hasPane {
 		return true
 	}
 	return quietAfter > 0 && !s.Info.LastEventAt.IsZero() && m.now.Sub(s.Info.LastEventAt) >= quietAfter

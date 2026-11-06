@@ -237,6 +237,7 @@ func main() {
 		idleCompact, _ := time.ParseDuration(cfg.IdleCompact) // the config checked it; unset is 0, never
 		ui.SetQuiet(cfg.CompactSessions, idleCompact)
 		ui.SetQuietBG(cfg.CompactBG)
+		ui.SetQuietNoPane(cfg.CompactNoPane)
 		doneFor, _ := time.ParseDuration(cfg.DoneFor) // the config checked it; unset keeps 4h
 		ui.SetDone(doneFor, cfg.DoneColor)
 		// The deck resumes where the last process — a deck or a status
