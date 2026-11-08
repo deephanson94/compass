@@ -233,3 +233,40 @@ func TestNoPaneIsQuiet(t *testing.T) {
 		t.Error("compact_nopane off, and the pane-less session is still a row")
 	}
 }
+
+// compact_working: a working session in a quiet tmux session is a row that
+// says working and what it is at; the stuck and the asking keep their cards,
+// a pinned one is a card, and off, working is a card again.
+func TestWorkingInAQuietTmuxSessionIsARow(t *testing.T) {
+	withCards(t)
+	withQuiet(t, []string{"w"}, 0)
+	SetQuietWorking(true)
+	t.Cleanup(func() { SetQuietWorking(false) })
+	m := sceneModel(sceneCards(), 290, 80)
+	m.point(sessionKey("harness"))
+
+	frame := boardText(m)
+	for _, name := range []string{"stages", "gemma"} {
+		row := lineWith(frame, " "+name+" · ")
+		if !strings.Contains(row, " · working · build") {
+			t.Errorf("%s, working in w, should be a row saying working · build, got %q\n%s", name, row, frame)
+		}
+	}
+	for _, name := range []string{"harness", "flow"} {
+		if s, _ := m.session(sessionKey(name)); m.quietBy(s) {
+			t.Errorf("%s owes something and lost its card:\n%s", name, frame)
+		}
+	}
+
+	m.point(sessionKey("gemma"))
+	press(m, "p")
+	m.point(sessionKey("harness"))
+	if row := lineWith(boardText(m), " gemma · working"); row != "" {
+		t.Errorf("gemma, pinned, should be a card, got row %q", row)
+	}
+
+	SetQuietWorking(false)
+	if row := lineWith(boardText(m), " stages · working"); row != "" {
+		t.Errorf("compact_working off, and stages is still a row: %q", row)
+	}
+}

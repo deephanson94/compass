@@ -151,6 +151,10 @@ var configKeys = []configKey{
 		help: "true: an idle session with no tmux pane (a headless run, another tmux server) gives up its card for a row, like compact_sessions",
 		set:  boolInto(func(c *config) *bool { return &c.CompactNoPane }),
 		get:  func(c config) []string { return oneBool(c.CompactNoPane, c.has("compact_nopane")) }},
+	{name: "compact_working", section: "board", def: "false",
+		help: "true: a working session in one of compact_sessions' tmux sessions is a row too, saying working; one that needs you keeps its card, p pins one",
+		set:  boolInto(func(c *config) *bool { return &c.CompactWorking }),
+		get:  func(c config) []string { return oneBool(c.CompactWorking, c.has("compact_working")) }},
 	{name: "reply", section: "board", repeat: true, example: "please continue",
 		help: "a stock line r offers, one line each, up to nine; any replace compass's own",
 		set: func(c *config, v string) string {
