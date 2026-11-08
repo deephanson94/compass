@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/deephanson94/compass/internal/fleet"
+	"github.com/deephanson94/compass/internal/journey"
 )
 
 // Quiet cards. A board that a PR watcher fills holds ten review sessions
@@ -30,6 +31,7 @@ var (
 	quietAfter time.Duration   // idle this long and any session is quiet; 0 = never
 	quietBG    bool            // a finished turn whose agent works on in the background is quiet
 	quietBare  bool            // an idle session with no tmux pane is quiet
+	quietWork  bool            // a working session in a quiet tmux session is quiet too
 )
 
 // SetQuiet sets which sessions give up their card when idle: those in the
@@ -56,6 +58,12 @@ func SetQuietBG(on bool) { quietBG = on }
 // can never reach it.
 func SetQuietNoPane(on bool) { quietBare = on }
 
+// SetQuietWorking sets whether a working session in one of compact_sessions'
+// tmux sessions is a row too: sessions a PR watcher runs work without you,
+// and a row that says working, in working's colour, is all the board owes
+// them. Anything that needs you still takes the card back.
+func SetQuietWorking(on bool) { quietWork = on }
+
 // quiet says whether a session draws as a row instead of a card: idle on
 // the card's own terms (not asking, not hung, not looping, not exited),
 // neither pinned nor selected, and in a quiet tmux session or idle past
@@ -77,14 +85,18 @@ func (m *Model) quietBy(s fleet.Session) bool {
 		return false
 	}
 	word, sub, _ := m.cardState(s, m.trails[key])
+	p, hasPane := m.panes[key]
+	inQuietTmux := hasPane && quietTmux[tmuxSessionName(p.Target)]
+	if quietWork && inQuietTmux && (word == cardWorking || word == cardStillWorking) {
+		return true // compact_working: at work without you, said on its row
+	}
 	if word != cardIdle && word != cardDone {
 		return false // done stays quiet: its row says done, in done's colour
 	}
 	if quietBG && sub == cardBG {
 		return true
 	}
-	p, hasPane := m.panes[key]
-	if hasPane && quietTmux[tmuxSessionName(p.Target)] {
+	if inQuietTmux {
 		return true
 	}
 	if quietBare && !hasPane {
@@ -198,7 +210,20 @@ func (m *Model) quietRow(s fleet.Session, rowOf map[string]fleetRow, w int) stri
 	left := num + m.rowGlyph(s) + " " + sessionName(s.Info)
 	word, sub, _ := m.cardState(s, m.trails[key])
 	var clauses []string
+	working := word == cardWorking || word == cardStillWorking
 	switch {
+	case working:
+		// The word, then what it is at — the open leg's class, as the
+		// card's trail heads it — or what it waits on.
+		clauses = append(clauses, word)
+		if leg := openLegClass(m.trails[key]); leg != "" {
+			clauses = append(clauses, leg)
+		} else if s.HasClass {
+			clauses = append(clauses, s.Class.String()) // the fleet's own: no trail read yet
+		}
+		if sub != "" {
+			clauses = append(clauses, sub)
+		}
 	case word == cardDone:
 		// News, in done's colour, so a finished review is found among the
 		// rows the way its card would be found among the cards.
@@ -218,6 +243,12 @@ func (m *Model) quietRow(s fleet.Session, rowOf map[string]fleetRow, w int) stri
 	room := w - lipgloss.Width(age) - 1
 	line := shedClauses(left+" · "+strings.Join(clauses, " · "), room)
 	pad := max(1, w-lipgloss.Width(line)-lipgloss.Width(age))
+	if working {
+		if head, rest, ok := strings.Cut(line, " · "+word); ok {
+			return dimStyle.Render(head+" · ") + lipgloss.NewStyle().Foreground(colWorking).Render(word) +
+				dimStyle.Render(rest+strings.Repeat(" ", pad)+age)
+		}
+	}
 	if sub == cardBG && word != cardDone {
 		// Still at work, in working's colour, among rows that are not.
 		if head, rest, ok := strings.Cut(line, " · "+cardBG); ok {
@@ -232,4 +263,13 @@ func (m *Model) quietRow(s fleet.Session, rowOf map[string]fleetRow, w int) stri
 		}
 	}
 	return dimStyle.Render(line + strings.Repeat(" ", pad) + age)
+}
+
+// openLegClass is the class of the trail's open leg (scout, build, …), ""
+// when no leg is open.
+func openLegClass(tr journey.Trail) string {
+	if n := len(tr.Legs); n > 0 && tr.Legs[n-1].Current {
+		return tr.Legs[n-1].Class.String()
+	}
+	return ""
 }

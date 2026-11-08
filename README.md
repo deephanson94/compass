@@ -194,6 +194,11 @@ owes you: a ▲ question or verdict, a hang, a loop, work starting. A pinned
 session is never quiet. Where the screen is too short for the rows, the strip
 names them as it names any session without a card.
 
+With `compact_working = true`, work starting no longer takes the card back for a
+session in one of `compact_sessions`' tmux sessions: its row says
+`working · scout`, in working's colour, until it finishes or needs you. `p`
+pins one you want to watch as a card.
+
 Below 110 columns there is no board: the deck is the fleet list beside one trail, `Tab` puts a cursor on it, and a third `Tab` gives the reader the whole width.
 
 ## Using it
@@ -368,6 +373,7 @@ compact_sessions = "pr" # tmux sessions whose idle sessions give up their card f
 idle_compact = "1d"     # any session idle this long does the same; "0" (the default) never
 compact_bg = false      # true: a finished turn with an agent still out in the background does too
 compact_nopane = false  # true: an idle session with no tmux pane (a headless run) does too
+compact_working = false # true: a working session in compact_sessions is a row too, saying working
 readonly = false        # true keeps compass's hands off tmux entirely
 mirror = false          # true opens the live tmux pane beside the trail; m toggles it
 live_within = "5m"      # a paneless session counts as live this long; "0" = tmux only
