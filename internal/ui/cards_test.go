@@ -945,3 +945,38 @@ func TestCardFoldsRepeatsIntoOneRow(t *testing.T) {
 		}
 	}
 }
+
+// P pins a card first: an unpinned one goes ahead of the pins, a pinned one
+// moves to their front, and P on the first card moves nothing.
+func TestPinFirstPutsTheCardAtTheFront(t *testing.T) {
+	withCards(t)
+	sc := sceneCards()
+	m := sceneModel(sc, 290, 80)
+	first := func() string { return sessionName(m.sessions[m.viewOrder()[0]].Info) }
+
+	m.point(sessionKey("s3"))
+	pressKey(m, "p")
+	m.point(sessionKey("etl"))
+	pressKey(m, "p")
+	if got := strings.Join(m.pins, ","); got != sessionKey("s3")+","+sessionKey("etl") {
+		t.Fatalf("p pins at the back: %q", got)
+	}
+
+	pressKey(m, "P") // etl, pinned second, to the front
+	poll(m, sc)
+	if first() != "etl" || m.pinRank(sessionKey("s3")) != 1 || !strings.Contains(m.note, "first card now") {
+		t.Fatalf("P on the second pin: first %s, pins %q, note %q", first(), m.pins, m.note)
+	}
+
+	m.point(sessionKey("demo"))
+	pressKey(m, "P") // unpinned: pinned, and first
+	poll(m, sc)
+	if first() != "demo" || len(m.pins) != 3 || !strings.Contains(m.note, "pinned demo first") {
+		t.Fatalf("P on an unpinned card: first %s, pins %q, note %q", first(), m.pins, m.note)
+	}
+
+	pressKey(m, "P")
+	if len(m.pins) != 3 || m.pinRank(sessionKey("demo")) != 0 || !strings.Contains(m.note, "already the first") {
+		t.Fatalf("P on the first card: pins %q, note %q", m.pins, m.note)
+	}
+}

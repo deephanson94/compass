@@ -814,6 +814,7 @@ func dropKeyRow(lines []string, key string) []string {
 var helpMoreKeys = []struct{ group, key, what string }{
 	{"go to", "t", "jump to any tmux pane: a picker, type to filter, enter goes there (a jump line in the config runs your own instead)"},
 	{"go to", "10 – 99", "a card past nine: its two digits within 0.7s — 12 is 1 then 2"},
+	{"act on a card", "P", "pin it first: the board's leftmost card, ahead of the other pins · p unpins"},
 	{"act on a card", "R", "restart its claude in its own pane: /exit, then claude --resume — it asks first"},
 	{"act on a card", "z", "snooze: off the board until its next prompt · x in the archive wakes it early"},
 	{"act on a card", "r", "dead on the API: the reply panel offers the same restart beside /login"},

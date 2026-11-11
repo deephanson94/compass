@@ -1187,6 +1187,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.togglePin()
 			return m, nil
 		}
+	case "P":
+		if cardBoard {
+			m.pinFront()
+			return m, nil
+		}
 	case "+", "=":
 		if cardBoard && m.level == levelBoard {
 			m.stepCardsPerRow(1)
