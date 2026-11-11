@@ -142,8 +142,9 @@ fleet row; a coloured badge with a short reason beside it (below), the session's
 goal (one line the narrator writes once a turn is over, the first prompt until
 then) and what it is doing now; today's tally; and
 today's work newest first, grouped by turn, so the breathing HEAD row is right
-under the goal. `p` pins a card to the board's front; the pin goes when the
-session leaves the live fleet. `board = "columns"` (or `-board columns`) is the
+under the goal. `p` pins a card to the board's front, behind the cards pinned
+before it; `P` pins it first, or moves a pinned card to the front of the pins.
+The pin goes when the session leaves the live fleet. `board = "columns"` (or `-board columns`) is the
 board as it was: every session's whole trail side by side, oldest first.
 
 A card's badge is one of seven statuses, and the dim word after it says why:
@@ -446,7 +447,7 @@ run and nothing else.
 | `h`/`l` | across the board's columns, or to the neighbouring session |
 | `m` | the live tmux pane beside the trail instead of the conversation; sticks until pressed again |
 | `t` | jump to any tmux pane, not only the ones with a card: a picker over the board lists every pane as `session:window name`, with the card's glyph and state where a session has one and `—` for a shell. Type to filter (a card's name works too), ↑/↓ to move, Enter goes there, Esc stays on the board; prefix + `d` returns. `jump = "…"` in the config runs a tmux command of your own instead, such as your prefix binding's popup or `choose-tree -Zs`. Off under `-readonly` |
-| `R` | restart the selected session's claude in its own pane, for an API error only a fresh process clears or a Claude Code update: compass types `/exit`, waits for your shell to come back (up to 15s), then types `claude --resume <its id>`, keeping the old process's `--model`, `--settings`, `--permission-mode`, `--add-dir` and `--dangerously-skip-permissions`. It always asks first: the footer names the session and the exact line, and only Enter goes ahead. A working session's question says the turn will stop. The pane, its shell and its card stay. Dead on the API, `r` offers the same restart beside `/login`. Off under `-readonly` |
+| `R` | restart the selected session's claude in its own pane, for an API error only a fresh process clears or a Claude Code update: compass types `/exit`, waits for that claude to be gone (its exit hooks included, up to a minute), then types `claude --resume <its id>` (in a pane `n` opened, with no shell, the pane is kept and the resume runs in it), keeping the old process's `--model`, `--settings`, `--permission-mode`, `--add-dir` and `--dangerously-skip-permissions`. It always asks first: the footer names the session and the exact line, and only Enter goes ahead. A working session's question says the turn will stop. The pane, its shell and its card stay. Dead on the API, `r` offers the same restart beside `/login`. Off under `-readonly` |
 | `g` | grab the session that has waited on you longest, and go to it |
 | `A` | browse the archive: every past session, grouped by project. `A` again comes back where it was pressed; `Shift+Tab` or `Esc` on the archive's list is the live board |
 | `a` | ask the trail: a historian `claude` takes the terminal, briefed on this session's transcript; exit returns |

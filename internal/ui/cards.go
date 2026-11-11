@@ -996,6 +996,35 @@ func (m *Model) togglePin() {
 	m.savePins()
 }
 
+// pinFront is `P`: the selected session to the front of the pins — the
+// board's first card — pinning it if it was not. `p` adds a pin at the back
+// and the pins kept their order, so the only way to move a card forward was
+// to unpin everything ahead of it and pin it all again.
+func (m *Model) pinFront() {
+	s, ok := m.selected()
+	if !ok || m.archiveView || !s.Live {
+		m.note = "only a live session can be pinned"
+		return
+	}
+	key, name := s.Info.Key(), sessionName(s.Info)
+	i := m.pinRank(key)
+	if i == 0 {
+		m.note = name + " is already the first card"
+		return
+	}
+	if i > 0 {
+		m.pins = append(m.pins[:i:i], m.pins[i+1:]...)
+	}
+	m.pins = append([]string{key}, m.pins...)
+	if i > 0 {
+		m.note = name + " is the first card now"
+	} else {
+		m.note = "pinned " + name + " first · it leaves when the session does"
+	}
+	m.retireTrailMemo()
+	m.savePins()
+}
+
 // prunePins drops the pins of sessions that are no longer live. A poll
 // with no fleet in it says nothing about the pins and keeps them.
 func (m *Model) prunePins() {
