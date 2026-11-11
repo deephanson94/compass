@@ -33,6 +33,7 @@ type launchForm struct {
 	favs     map[string]bool // which of dirs the config names
 	dir      int             // the candidate ←/→ last landed on
 	dirText  string          // the directory as it stands: a candidate, or typed
+	browse   *dirBrowser     // ctrl+o's folder browser, nil while it is down (dirbrowse.go)
 	name     string
 	prefix   string // the "build_" name starts with: the tmux session it opens in
 	nameOwn  bool   // the person made the name their own, so the prefix stops following the session
@@ -274,9 +275,16 @@ func indexOf(list []string, s string) int {
 // the window, esc puts the panel away.
 func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 	f := m.launching
+	if f.browse != nil {
+		return m.browseKey(msg)
+	}
 	switch key := msg.String(); key {
 	case "ctrl+c":
 		return tea.Quit
+	case "ctrl+o":
+		if f.field == launchDir {
+			m.openBrowser()
+		}
 	case "esc":
 		m.launching = nil
 	case "enter":
@@ -485,6 +493,9 @@ func (m *Model) land() {
 // launchPanel is the `n` panel as a boxed form.
 func (m *Model) launchPanel(inner int) []string {
 	f := m.launching
+	if f.browse != nil {
+		return m.dirBrowserPanel(inner)
+	}
 	h := m.harnesses[f.harness]
 	body := replyPanelMax
 	if max := inner - 8; body > max {
@@ -590,8 +601,11 @@ func (m *Model) launchPanel(inner int) []string {
 	} else {
 		rows = append(rows, readerLine{text: h.Name + " takes no prompt", kind: readerBody})
 	}
-	rows = append(rows, readerLine{kind: readerBlank},
-		readerLine{text: "tab next · ←/→ choose · enter opens · esc closes", kind: readerBody})
+	keys := "tab next · ←/→ choose · enter opens · esc closes"
+	if f.field == launchDir {
+		keys = "tab next · ←/→ choose · ctrl+o browse · enter opens · esc closes"
+	}
+	rows = append(rows, readerLine{kind: readerBlank}, readerLine{text: keys, kind: readerBody})
 
 	title := " new " + f.placeOf().String() + " "
 	box := func(s string, style lipgloss.Style) string {
