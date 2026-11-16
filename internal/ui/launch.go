@@ -24,6 +24,8 @@ import (
 type launchForm struct {
 	field    int
 	harness  int      // into Model.harnesses
+	models   []string // the model row's choices: "" (claude's own default), then the config's model lines
+	model    int      // into models
 	place    int      // into tmuxop.Places
 	sessions []string // the tmux sessions, the selected card's first
 	session  int
@@ -46,6 +48,7 @@ type launchForm struct {
 // The panel's rows, top to bottom; tab walks them in this order.
 const (
 	launchWith = iota
+	launchModelRow
 	launchPlace
 	launchSession
 	launchDir
@@ -112,6 +115,8 @@ func (m *Model) offerLaunch() {
 			f.harness = i
 		}
 	}
+	f.models = launchModels(m.newDefaults)
+	f.model = indexOf(f.models, m.newDefaults.Model)
 	f.place = indexOfPlace(m.newDefaults.Place)
 	f.worktree = m.newDefaults.Worktree
 	if pane, ok := m.selectedPane(); ok {
@@ -241,6 +246,29 @@ func (m *Model) launchDirs() ([]string, map[string]bool) {
 	return out, favs
 }
 
+// launchModels is what the model row walks: claude's own default first,
+// then the config's model lines, then new_model if no line names it. Only
+// the default, with no line and no new_model: the row is not drawn.
+func launchModels(c launch.Config) []string {
+	out := []string{""}
+	seen := map[string]bool{"": true}
+	for _, mdl := range append(append([]string(nil), c.Models...), c.Model) {
+		if mdl = strings.TrimSpace(mdl); !seen[mdl] {
+			seen[mdl] = true
+			out = append(out, mdl)
+		}
+	}
+	return out
+}
+
+// modelLabel is how the model row names a choice.
+func modelLabel(mdl string) string {
+	if mdl == "" {
+		return "default"
+	}
+	return mdl
+}
+
 // sessionDir is where a session works: where it is now, else where it began.
 func sessionDir(cwd, origin string) string {
 	if cwd != "" {
@@ -306,6 +334,8 @@ func (m *Model) launchKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case launchThen:
 			f.goThere, f.goSet = !f.goThere, true
+		case launchModelRow:
+			f.model = wrapIndex(f.model+d, len(f.models))
 		case launchPlace:
 			f.place = wrapIndex(f.place+d, len(tmuxop.Places))
 			f.followSession()
@@ -376,6 +406,8 @@ func (m *Model) launchRowOpen(field int) bool {
 	switch field {
 	case launchPrompt:
 		return m.harnesses[f.harness].TakesPrompt()
+	case launchModelRow:
+		return m.harnesses[f.harness].TakesModel() && len(f.models) > 1
 	case launchSession:
 		return f.placeOf() == tmuxop.PlaceWindow && len(f.sessions) > 1
 	}
@@ -435,6 +467,9 @@ func (m *Model) submitLaunch() tea.Cmd {
 	}
 	if h.TakesPrompt() {
 		req.Prompt = f.prompt
+	}
+	if h.TakesModel() && f.model < len(f.models) {
+		req.Model = f.models[f.model]
 	}
 	runner, git, goThere := m.runner, m.git, f.goThere
 	if git == nil {
@@ -528,6 +563,13 @@ func (m *Model) launchPanel(inner int) []string {
 
 	task := launch.Request{Harness: h, Prompt: f.prompt, Name: f.nameFor(h)}.TaskName()
 	row(launchWith, "run", choice(h.Name), "")
+	if m.launchRowOpen(launchModelRow) {
+		hint := ""
+		if f.models[f.model] == "" {
+			hint = "no --model: claude picks, as in your shell"
+		}
+		row(launchModelRow, "model", choice(modelLabel(f.models[f.model])), hint)
+	}
 	row(launchPlace, "as", choice(f.placeOf().String()), "")
 	switch f.placeOf() {
 	case tmuxop.PlaceWindow:

@@ -405,13 +405,19 @@ dim = "#9a9a9a"         # the grey the quiet rows are drawn in — ages, leg cou
 dir = "~/work/api"      # a favourite for n's dir row, one line each, offered in
 dir = "~/scratch"       #   this order after the selected card's directory (★);
                         #   one that doesn't exist yet is offered as a new folder
+model = "opus"          # a model for n's model row, one line each, after claude's
+model = "sonnet"        #   own default: an alias, or the full id your provider
+                        #   takes (Bedrock, Vertex, a gateway), passed to
+                        #   claude --model as written
+new_model = "opus"      # the model the row starts on; unset = claude's own default
 harness = "opencode: opencode run {prompt}"
                         # what `n` and `compass new` can run besides claude and a
                         # shell, one line each: a name, a colon, the command.
-                        # {prompt} and {name} are put in their places; a word
+                        # {prompt}, {name} and {model} (--model and the chosen
+                        # model, or nothing) are put in their places; a word
                         # whose placeholder is empty is dropped whole. No quoting:
                         # split on spaces. A line named claude or shell replaces
-                        # the built-in, e.g. "claude: claude --model opus -n {name} {prompt}"
+                        # the built-in, e.g. "claude: claude {model} --settings ~/s.json -n {name} {prompt}"
 new_run = "claude"      # what n's panel opens on: run (a harness's name),
 new_as = "window"       #   as (window, pane or session), worktree (true or
 new_worktree = false    #   false) and then (go or stay; left out, it is go
@@ -454,7 +460,7 @@ run and nothing else.
 | `ctrl+d`/`ctrl+u` | half a page: the trail, or the reader once the keys are in it |
 | `G` | back to the present — the newest row, at any level |
 | `[` / `]` | previous / next prompt — the chapters of a trail (your prompts; a teammate's relayed report is drawn but is no chapter); in the counts, the previous / next group; in the reader, your turns, marked and named as it lands on them |
-| `n` | new work: a panel to open `claude` with a prompt, a shell, or a configured harness as a new window in one of your tmux sessions (the default), a split beside the selected card's pane, or a new tmux session, optionally in a fresh git worktree. Defaults come from the selected card; `enter` opens, `esc` closes. On the dir row, `←`/`→` walk the selected card's directory, your `dir` lines and where the fleet has worked; `ctrl+o` browses folders from the typed path (type to filter, `→` in, `←` up, `enter` picks) |
+| `n` | new work: a panel to open `claude` with a prompt, a shell, or a configured harness as a new window in one of your tmux sessions (the default), a split beside the selected card's pane, or a new tmux session, optionally in a fresh git worktree. Defaults come from the selected card; `enter` opens, `esc` closes. On the dir row, `←`/`→` walk the selected card's directory, your `dir` lines and where the fleet has worked; `ctrl+o` browses folders from the typed path (type to filter, `→` in, `←` up, `enter` picks). With `model` lines in the config, a model row picks what claude opens on (`claude --model`, the name as written; `default` passes none). `compass new -model` does the same |
 | `z` | snooze the selected session: off the board like `x`, until its next prompt. A session a weekly cron prompts stays out of the way all week and comes back the moment the cron's prompt lands (working, then done). A new prompt or reply wakes it; a line of bookkeeping (a resume, a hook) doesn't. `x` in the archive ends a snooze by hand. Refused for a working session, and for whatever `x` refuses |
 | `x` | take the selected session off the board (a test, a `/resume` you are done with). The archive lists it under its own header, name and pane kept; `x` there brings it back. A session that is asking, needs attn, circling or dead on the API stays, and the footer says so |
 | `Space` `/` `n`/`N` | reader: unfold a result · search · walk the matches |
