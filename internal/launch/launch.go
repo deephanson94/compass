@@ -31,7 +31,7 @@ type Harness struct {
 // Builtin are the harnesses compass knows without being told: Claude Code,
 // named after the window so the fleet calls it that too, and a shell.
 var Builtin = []Harness{
-	{Name: "claude", Command: []string{"claude", "-n", "{name}", "{prompt}"}},
+	{Name: "claude", Command: []string{"claude", "{model}", "-n", "{name}", "{prompt}"}},
 	{Name: "shell"},
 }
 
@@ -46,10 +46,35 @@ func (h Harness) TakesPrompt() bool {
 	return false
 }
 
-// Argv is the command with name and prompt in their places.
-func (h Harness) Argv(name, prompt string) []string {
+// TakesModel says whether the harness has a place for a model: a {model}
+// token, which becomes --model and the model's name, or nothing when no
+// model is chosen.
+func (h Harness) TakesModel() bool {
+	for _, tok := range h.Command {
+		if tok == "{model}" {
+			return true
+		}
+	}
+	return false
+}
+
+// Argv is the command with name and prompt in their places, and no model
+// chosen.
+func (h Harness) Argv(name, prompt string) []string { return h.ArgvModel(name, prompt, "") }
+
+// ArgvModel is the command with name, prompt and model in their places.
+// The model is whatever the person's claude takes — an alias like opus, or
+// the full id their provider (Bedrock, Vertex, a gateway) wants — so compass
+// passes it as written; "" leaves claude on its own default.
+func (h Harness) ArgvModel(name, prompt, model string) []string {
 	var out []string
 	for _, tok := range h.Command {
+		if tok == "{model}" {
+			if model != "" {
+				out = append(out, "--model", model)
+			}
+			continue
+		}
 		if (strings.Contains(tok, "{name}") && name == "") || (strings.Contains(tok, "{prompt}") && prompt == "") {
 			continue
 		}
@@ -113,6 +138,8 @@ type Config struct {
 	Place     tmuxop.Place // new_as: window (the zero value), pane or session
 	Worktree  bool         // new_worktree: the worktree row starts on
 	Then      string       // new_then: "go" or "stay"; "" = go for what never gets a card, stay for claude
+	Models    []string     // model lines: what the model row offers after claude's own default, in order
+	Model     string       // new_model: the model the row starts on; "" = claude's own default
 }
 
 // Request is one launch, as a person asked for it.
@@ -123,6 +150,7 @@ type Request struct {
 	Name     string       // the window's, a new session's and the worktree branch's name; "" = from the prompt
 	Harness  Harness
 	Prompt   string
+	Model    string   // --model for a harness with a {model} place; "" = its own default
 	Worktree bool     // give the work a git worktree of its own, off Dir's HEAD
 	MakeDir  bool     // create Dir, empty, when it is not there
 	Env      []string // "KEY=value" set in the new pane's process (tmux -e)
@@ -186,7 +214,7 @@ func Launch(t tmuxop.Runner, g Git, r Request) (Result, error) {
 			return Result{}, err
 		}
 	}
-	pane, err := tmuxop.OpenWith(t, r.Place, r.Target, dir, name, r.Env, r.Harness.Argv(name, strings.TrimSpace(r.Prompt)))
+	pane, err := tmuxop.OpenWith(t, r.Place, r.Target, dir, name, r.Env, r.Harness.ArgvModel(name, strings.TrimSpace(r.Prompt), strings.TrimSpace(r.Model)))
 	if err != nil {
 		return Result{}, err
 	}

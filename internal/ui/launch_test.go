@@ -559,3 +559,56 @@ func TestLaunchNameFollowsTheTmuxSession(t *testing.T) {
 		t.Errorf("opened %q, want a session named own-session", got)
 	}
 }
+
+// The model row: drawn once the config names a model, starting on
+// new_model; ←/→ walks claude's own default and the model lines; enter
+// runs claude --model with the choice as written, or no flag on default.
+func TestLaunchModelRow(t *testing.T) {
+	m, tm, _, _ := launchModel(t)
+	press(m, "n")
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); strings.Contains(panel, "model") {
+		t.Fatalf("no model line in the config, and the panel draws a model row:\n%s", panel)
+	}
+	press(m, "esc")
+
+	bedrock := "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+	m.newDefaults = launch.Config{Models: []string{"opus", bedrock}, Model: "opus"}
+	press(m, "n")
+	f := m.launching
+	if got := strings.Join(f.models, "|"); got != "|opus|"+bedrock || f.models[f.model] != "opus" {
+		t.Fatalf("models %q, starting on %q; want default, opus, the id — on opus", f.models, f.models[f.model])
+	}
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); !strings.Contains(panel, "model     ‹ opus ›") {
+		t.Errorf("the panel does not show the model row on opus:\n%s", panel)
+	}
+	typeText(m, "port it")
+	f.field = launchModelRow
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if f.models[f.model] != bedrock {
+		t.Fatalf("→ landed on %q", f.models[f.model])
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	run(m, cmd)
+	got := strings.Join(tm.opened(), " ")
+	if !strings.HasSuffix(got, "-- claude --model "+bedrock+" -n dev_port-it port it") {
+		t.Errorf("opened %q, want claude --model %s", got, bedrock)
+	}
+
+	// Back to claude's own default: no --model at all.
+	tm.calls = nil
+	press(m, "n")
+	m.launching.field = launchModelRow
+	for m.launching.models[m.launching.model] != "" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	}
+	if panel := ansi.Strip(strings.Join(m.launchPanel(120), "\n")); !strings.Contains(panel, "‹ default ›") {
+		t.Errorf("the default is not named:\n%s", panel)
+	}
+	m.launching.field = launchPrompt
+	typeText(m, "plain")
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	run(m, cmd)
+	if got := strings.Join(tm.opened(), " "); strings.Contains(got, "--model") {
+		t.Errorf("default should pass no --model: %q", got)
+	}
+}

@@ -62,7 +62,7 @@ func TestHarnessesOverride(t *testing.T) {
 	if got[0].Command[1] != "--model" {
 		t.Errorf("claude was not replaced: %q", got[0].Command)
 	}
-	if Builtin[0].Command[1] != "-n" {
+	if Builtin[0].Command[1] != "{model}" {
 		t.Error("the built-ins themselves changed")
 	}
 }
@@ -281,5 +281,26 @@ func TestLaunchMakesADirectoryOnlyWhenAsked(t *testing.T) {
 	}
 	if _, err := Launch(tm, RealGit{}, Request{Target: "dev", Dir: "  ", Harness: Builtin[1], MakeDir: true}); err == nil {
 		t.Error("no directory: want an error")
+	}
+}
+
+// {model} becomes --model and the name as written — an alias or a
+// provider's full id — and nothing at all when no model is chosen.
+func TestArgvModel(t *testing.T) {
+	claude := Builtin[0]
+	if !claude.TakesModel() || Builtin[1].TakesModel() {
+		t.Fatal("claude takes a model, a shell does not")
+	}
+	for _, c := range []struct{ model, want string }{
+		{"", "claude -n fix fix the build"},
+		{"opus", "claude --model opus -n fix fix the build"},
+		{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude --model us.anthropic.claude-sonnet-4-5-20250929-v1:0 -n fix fix the build"},
+	} {
+		if got := strings.Join(claude.ArgvModel("fix", "fix the build", c.model), " "); got != c.want {
+			t.Errorf("model %q: %q, want %q", c.model, got, c.want)
+		}
+	}
+	if got := strings.Join(claude.Argv("fix", ""), " "); got != "claude -n fix" {
+		t.Errorf("Argv with no model: %q", got)
 	}
 }

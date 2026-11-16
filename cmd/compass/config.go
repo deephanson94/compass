@@ -64,6 +64,13 @@ type config struct {
 	NewWorktree bool
 	NewThen     string
 
+	// Models are what n's model row offers after claude's own default, one
+	// `model = "opus"` line each — an alias or the full id your provider
+	// takes, passed to claude --model as written. NewModel is the one the
+	// row starts on ("" = claude's own default).
+	Models   []string
+	NewModel string
+
 	// Jump is the tmux command `t` runs once the terminal is tmux's:
 	// `jump = "choose-tree -Zs"` (the default), or whatever your own
 	// `prefix j` is bound to. tmux parses it, quotes and `;` included.
@@ -114,6 +121,7 @@ func (c config) launchConfig() launch.Config {
 	return launch.Config{
 		Harnesses: launch.Harnesses(c.Harnesses), Dirs: c.Dirs,
 		Run: c.NewRun, Place: c.NewAs, Worktree: c.NewWorktree, Then: c.NewThen,
+		Models: c.Models, Model: c.NewModel,
 	}
 }
 
